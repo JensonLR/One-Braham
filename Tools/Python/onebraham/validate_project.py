@@ -90,6 +90,13 @@ WHAT IT CHECKS, AND WHY EACH ONE HAS BITTEN SOMEONE
                                                         have is a character who
                                                         says nothing, silently,
                                                         forever.
+    26. Input actions                                 - the generated actions, the
+                                                        fields of the input
+                                                        config, the keys the ini
+                                                        binds and the fields the
+                                                        controller reads, as one
+                                                        pipeline rather than four
+                                                        lists that disagree.
 
     It writes Saved/Validation/ob_validation_<timestamp>.md and exits non-zero on
     any FAIL. Warnings do not fail the build; failures do.
@@ -1475,6 +1482,34 @@ def check_building_layout(v, _config_only):
         v.fail("building layout", message)
 
 
+def check_input_actions(v, _config_only):
+    """The input pipeline is one pipeline.
+
+    IA_Map, IA_ToggleHUD and IA_VoiceLineMenu were generated as assets, bound in
+    DefaultInput.ini and documented in Docs/08 - with no field in the config to
+    point at them and no handler in C++. Three keys that did nothing. Then the
+    handlers were written against field names that did not exist, which is the
+    same defect from the other end and at least fails loudly.
+
+    Four sides are compared: the generation table, the struct fields, the ini
+    bindings and prompts, and every `InputConfig->Field` read in the source.
+    """
+    try:
+        from onebraham import check_input_actions
+    except Exception as exc:  # noqa: BLE001
+        v.warn("input actions", u"checker unavailable: {0}".format(exc))
+        return
+
+    checked, problems = check_input_actions.run()
+
+    if not problems:
+        v.pass_("input actions", u"{0} config reads, every action bound and every field declared".format(checked))
+        return
+
+    for message, kind in problems:
+        v.fail("input actions", u"[{0}] {1}".format(kind, message))
+
+
 def check_voice_lines(v, _config_only):
     """Every voice line the code asks for exists, and every line is in the brief.
 
@@ -1572,6 +1607,7 @@ def build_all(config_only=False):
         ("gameplay tags", check_gameplay_tags),
         ("building layout", check_building_layout),
         ("voice lines", check_voice_lines),
+        ("input actions", check_input_actions),
     ]
 
     for label, fn in checks:

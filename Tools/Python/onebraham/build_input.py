@@ -157,6 +157,7 @@ INPUT_CONFIG_FIELD_ORDER = [
     "PushToTalk", "VoiceChannelCycle", "VoiceMuteSelf",
     "Scoreboard", "PauseMenu", "Ping", "SpectateNextPlayer", "SpectatePrevPlayer",
     "SpectateToggleFreeCam", "ClipMarker",
+    "ToggleHUD", "Map", "VoiceLineMenu",
 ]
 
 
@@ -298,9 +299,11 @@ def build_input_config(report, actions):
             report.failed(field, u"could not assign: {0}".format(exc))
             missing.append(field)
 
-    # The action assets that exist but are not bound to a config field (map, HUD
-    # toggle, voice wheel, voice channel extras) are still valid assets: the HUD
-    # binds them through its own input component.
+    # Every generated action has a field and every field has an action. There is
+    # no such thing as an action that is "bound elsewhere": a generated asset with
+    # no field pointing at it is a key that does nothing, which is what IA_Map,
+    # IA_ToggleHUD and IA_VoiceLineMenu were for as long as this list left them
+    # out. check_input_actions.py enforces the pairing in both directions.
     unreal.EditorAssetLibrary.save_asset(path)
 
     C.log(u"  DA_InputConfig: {0}/{1} fields assigned".format(

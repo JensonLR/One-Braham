@@ -212,6 +212,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "UI") TObjectPtr<UInputAction> SpectateToggleFreeCam;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "UI") TObjectPtr<UInputAction> ClipMarker;
 
+	// --- Overlays ---------------------------------------------------------
+	// The three the player asks for rather than the HUD drawing unasked. They
+	// were generated as assets by the content pipeline for a while with no field
+	// here to point at them and no handler anywhere: three keys that did nothing.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Overlays") TObjectPtr<UInputAction> ToggleHUD;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Overlays") TObjectPtr<UInputAction> Map;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Overlays") TObjectPtr<UInputAction> VoiceLineMenu;
+
 	/** Throws a clear log line when any action is missing - called by the controller on possess. */
 	UFUNCTION(BlueprintCallable, Category = "Input")
 	bool ValidateAllActionsSet(TArray<FName>& OutMissing) const;

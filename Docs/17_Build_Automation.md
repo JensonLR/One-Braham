@@ -34,6 +34,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `check_calls.py` | call sites whose argument count cannot match the project's own declaration (defaults honoured, qualified calls skipped) | **no** | yes |
 | `check_gameplay_tags.py` | every tag the code requests, declared natively or in `DefaultGame.ini`; also resolves `Printf`-assembled tags from local string tables | **no** | yes |
 | `check_building_layout.py` | the floor/area table the map is built from against the floor table the game describes (`DA_BuildingLayout` / its compiled-in default) | **no** | yes |
+| `check_input_actions.py` | every generated `IA_` action against the `UOneBrahamInputConfig` field that points at it, every field against its action, every `DefaultInput.ini` binding and prompt against a real action, and every `InputConfig->Field` read against the fields that exist | **no** | yes |
 | `check_voice_lines.py` | every `V_` line id the code asks for against the script table, every scripted line against the recording brief in `Docs/14`, and the sixty-six archetype variant rows against the six voices they claim | **no** | yes |
 | `validate_project.py` | the health check and a markdown report | either | yes |
 | `run_all.py` | all of the above, in dependency order, with a report | either | yes |
@@ -59,7 +60,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 
 ```
 # ONE BRAHAM - content build report
-**19 steps succeeded, 0 failed.**
+**20 steps succeeded, 0 failed.**
 
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
@@ -71,6 +72,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | tags | OK | 0.2 | 6 resolvable tag requests, all declared |
 | layout | OK | 0.0 | 16 floors, map and layout agree |
 | voice_lines | OK | 0.0 | 34 line references, all declared and documented |
+| input_actions | OK | 0.0 | 41 actions, 41 fields, 92 reads |
 | materials | OK | 3.1 | 5 masters, 15 physicals, 28 instances |
 ...
 ```
@@ -90,6 +92,7 @@ calls                     text only; a call that cannot compile: wrong argument 
 tags                      text only; a tag that silently matches nothing
 layout                    text only; a floor plan that names the wrong floor
 voice_lines               text only; a character who says nothing, silently
+input_actions             text only; a key that does nothing, and a field that is not there
       ↓
 materials                 everything references MI_* and PM_OB_*
       ↓
@@ -148,12 +151,12 @@ a header gets noticed before it becomes a runtime null reference.
 # because the project's pipeline runs on a self-hosted UE5 runner.
 stages:
   - lint      : python -m py_compile on every tool
-  - cpp       : PYTHONPATH=Tools/Python python3 run_all.py --only cpp_symbols,uht_contracts,soft_paths,calls,tags,layout,voice_lines
+  - cpp       : PYTHONPATH=Tools/Python python3 run_all.py --only cpp_symbols,uht_contracts,soft_paths,calls,tags,layout,voice_lines,input_actions
                 (declared-but-undefined members, UE reflection contracts, the
                  naming contract for name-loaded assets, call arity, gameplay
-                 tags, the building layout, the voice script, and the checks that
-                 need no engine install at all - so they run before a runner is
-                 ever allocated)
+                 tags, the building layout, the voice script, the input pipeline,
+                 and the checks that need no engine install at all - so they run
+                 before a runner is ever allocated)
   - config    : PYTHONPATH=Tools/Python python3 run_all.py --text-only
   - build     : UBT build of the Editor, Game, Server and Client targets
   - content   : UnrealEditor-Cmd -run=pythonscript run_all.py
