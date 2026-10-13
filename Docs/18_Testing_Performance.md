@@ -19,46 +19,84 @@ that gets disabled after a month.
 
 ## 2. Automation tests
 
-Run with `Scripts/RunTests.bat` (all of `OneBraham.*`) or
-`Scripts/RunTests.bat <category>`.
+```bat
+Scripts\RunTests.bat                    all OneBraham.* tests
+Scripts\RunTests.bat OneBraham.Weapons   one category
+Scripts\RunTests.bat smoke               the smoke category on a dedicated server
+```
 
-| Category | What it asserts |
-| --- | --- |
-| `OneBraham.Core` | Game instance, game state and player state lifecycle; match phase transitions; squad assignment with 12 players and 3 squads |
-| `OneBraham.Weapons` | Every weapon definition is valid; RPM to minimum fire interval matches; magazines, reserves and reload times are inside sane bounds; no sidearm out-damages a rifle; the registry validates |
-| `OneBraham.Damage` | 100 HP + 50 armour; hit-zone multipliers; falloff at exactly the documented ranges; armour absorption and break; downed at 0 HP rather than dead; bleed-out timing |
-| `OneBraham.Access` | Zone tier gating; the 12 s solo override and the 3 s paired override; override cancellation; breaching a wall opens it permanently; escalation opens the right zones |
-| `OneBraham.Lockdown` | Stage timing (90 s stages, 15 s warning); floors below `HighestOccupiedFloor-1` seal; the purge damages floors ≤ 13 and never the Skydeck; no kill attribution on purge death |
-| `OneBraham.Extraction` | Broadcast → Arriving → Holding → Complete/Failed; the 30 s hold; contested hold freezes; loiter expiry; refusal when the mode is not ASCENT, when a squad is dead, or below Z 5600 |
-| `OneBraham.Input` | `ValidateAllActionsSet` returns true; every binding in the ini resolves to an action asset by name |
-| `OneBraham.Voice` | Codec round-trip at 16 kHz; frame budget (≤ 1024 bytes); channel routing (proximity / squad / team); mute list enforcement |
-| `OneBraham.Multiplayer` | A dedicated server + 3 clients perform a full ASCENT match in headless mode; the match completes with an extraction result |
-| `OneBraham.Performance` | Actor, light, decal and particle counts stay inside the budgets in section 4 on the shipping map |
-| `OneBraham.Validation` | Wraps `validate_project.py`: the build fails if the validator fails |
-| `OneBraham.StaticChecks` | Runs the engine-free checks (declared-but-undefined members, UE reflection contracts, project includes that do not exist, brace balance, log categories, VFX reachability, surface coverage, the naming contract for assets loaded by path, call arity, undeclared gameplay tags, the building layout's agreement with the map, voice lines that do not exist, input keys that bind nothing, and a build report whose own numbers have gone stale) in-process, so a CI stage without an engine install still catches the class of error that only a linker, a missing `DOREPLIFETIME`, a null soft load, a compiler, a silently invalid tag or a floor named wrongly would otherwise reveal |
+The suites are in `Source/OneBraham/Tests/`, one file per category, entirely inside
+`#if WITH_AUTOMATION_TESTS` so a shipping build compiles them out. They live in the
+game module rather than in a plugin: `RunTests.bat` then finds them with no extra
+configuration, and the engine-free checks run inside the same command.
 
-The functional tests drive real matches through the game mode rather than calling
-functions directly, because the bugs that matter live in the spaces between
-systems: an unlock that works but does not replicate, an extraction that
-completes but does not end the match, a kill that is credited to the wrong squad.
+### 2.1 The suites
+
+| Category | Tests | What they assert |
+| --- | --- | --- |
+| `OneBraham.Core` | `AscentRules`, `FireDrillRules`, `Constants`, `BuildingLayout` | ASCENT is 3 squads of 4 = 12 with a 30 s hold, a 45 s winch flight, 90 s lockdown stages, a purge ceiling below the Skydeck and a 12 s / 3 s override; FIRE DRILL is 2 even teams of 6–8 with respawns, no extraction and control points inside the building; the compiled-in constants agree with each other and with the documentation (400 cm storeys, 220 cm reach, 16 kHz voice); the building's sixteen floor rows are complete, ascending, area-tagged, four-breachable, three-endgame, and their extraction gate is at 5600 cm |
+| `OneBraham.Brand` | `Palette` | the seven brand colours match the published values in both the class defaults and `Config/DefaultEngine.ini`, `UOneBrahamUIStyle` reads them from the settings rather than from literals, and alarm red is distinguishable from warning yellow |
+| `OneBraham.Weapons` | `FireRate`, `Falloff`, `Recoil`, `LootGating` | RPM to fire interval; damage never rises with range, never exceeds the base value and never goes negative out to 200 m; one-pull shotgun totals; recoil steps are finite, upward, non-constant, and a negative shot index reads nothing off the end of the pattern; floor gating (a floor 6 marksman rifle never spawns on the ground floor) and the registry's own validator |
+| `OneBraham.Damage` | `HealthModel`, `Armour`, `Zone` | 100 health + 50 armour, armour absorbing 60 % of each hit until it breaks (the worked example in `Docs/04`: 30 damage → 12 health and 18 armour), four shots to break the plate and a fifth to kill, head/neck/torso/limb multipliers in the right order, and the shots-to-kill a carbine and a marksman rifle need through a full plate |
+| `OneBraham.Voice` | `CodecShape`, `LineSet`, `Wheel` | 16 kHz mono 20 ms frames inside a 1024-byte transport ceiling and under 64 kB/s worst case; the line set fills itself from the compiled-in table (97 core + 66 variants), idempotently, with no duplicate ids, no empty subtitles, and no line that can never be said; the comms wheel's eight segments are unique, labelled, and every one resolves against the script; out-of-range segments return nothing |
+| `OneBraham.Input` | `AllActionsBound`, `MappingContexts` | `ValidateAllActionsSet` reports every one of the 41 reflected action fields on an empty config, reports nothing on a fully assigned one, names the three overlay actions explicitly, and the mapping contexts are soft references of the right type |
+| `OneBraham.Multiplayer` | `ReplicationContract`, `Smoke` | every server and client RPC is reliable, every `ReplicatedUsing` property names a function that exists on its own class, there are zero `WithValidation` RPCs, and the network surface has the shape a server-authoritative game should; then the match-boot composition check: the classes the config names load and derive from the right bases, ASCENT is the default mode, and the building and mode data agree on a twelve-player match |
+| `OneBraham.StaticChecks` | `EngineFreeChecks` | runs the nine engine-free checkers in `Tools/Python/onebraham` as child processes and fails on any non-zero exit, so `RunTests.bat` covers the static shape of the project as well as the parts that need an engine |
+
+The suites never call `ApplyDamage` or drive a match: that path is authority-gated
+by design (a client that calls it is a bug or a cheat, and it refuses), so it needs
+a spawned, authoritative actor in a real world. What is asserted is the arithmetic
+and the data those calls are measured against.
+
+### 2.2 What is not automated yet, and what covers it
+
+Four categories that an earlier draft of this document promised are **not** in the
+suite, because each needs something that does not exist in a fresh clone. They are
+listed here rather than quietly dropped, with what does cover them today:
+
+| Category | Why it cannot be a unit test | Covered by |
+| --- | --- | --- |
+| `OneBraham.Access` | zone tiers, doors and terminals are actors on the built map; their state lives on the game state and moves in a world with players | the data they run on is asserted (`Core.AscentRules`, `Core.BuildingLayout`), the layout table is checked against the map builder by `check_building_layout.py`, and the behaviour is exercised by the Q2 checklist row "unlock every route" in `Docs/20` |
+| `OneBraham.Lockdown` | the seal decision depends on the highest occupied floor, i.e. on live player positions | `Core.AscentRules` asserts the stage timing, the warning and the purge ceiling; the escalation itself is watched in the Q2 "lockdown escalation" checklist row |
+| `OneBraham.Extraction` | the winch advances on a timer with players on the pad, and its refusals depend on match state | `Core.AscentRules` asserts the hold, the flight, the radius and the override times; the state machine is driven by the smoke run in section 3 |
+| `OneBraham.Performance` | the budgets in section 4 are counts of the actual level: actors, lights, decals, particles | `Scripts\Package.bat` plus the `stat` pass in section 4, recorded per milestone; `Multiplayer.Smoke` asserts the match composition the budget has to hold for |
+| `OneBraham.Validation` | `validate_project.py`'s packaging checks need UnrealBuildTool and UnrealPak | `StaticChecks.EngineFreeChecks` runs the nine checks that need no engine inside the test run; the full validator runs in `Scripts\RunAll.bat`, where a missing toolchain is loud |
+
+The functional half of a real project's suite - a match that starts, escalates and
+extracts - is worth writing, and it is worth writing once there is a level to run
+it on. Until then, a test with a mocked match would assert the mock.
 
 ---
 
-## 3. The 12-player smoke test
+## 3. The 12-player smoke run
 
-`Scripts/RunTests.bat smoke` is the test that gates a release. It:
+`Scripts\RunTests.bat smoke` runs the `OneBraham.Multiplayer` category on a
+dedicated server process. The automatic part is the composition check: the classes
+the config names exist, the mode's squad maths gives twelve players, and the
+building table backs it.
 
-1. Boots a dedicated server (`-server -NullRHI`).
-2. Connects three simulated squads of four.
-3. Plays a scripted ASCENT run: loot a Staff card, open the lift lobby, take the
-   stairwell on floor 3, override the server door with two panels, hold the
-   Skydeck pad for 30 seconds, extract.
-4. Asserts a `MatchResult` naming the winning squad, with four players counted
-   as `Extracted`.
-5. Repeats with the losing path: all three squads eliminated → `NoSurvivors`.
+The release gate is the bot-driven run below, which needs the packaged server and
+the built map. It replaces four players' worth of decision-making with eleven bots
+and a human, which is enough to catch everything that only appears with twelve
+people in the building:
 
-It runs in about four minutes. If it fails, nothing else in the release checklist
-matters.
+```bat
+Build\WindowsServer\OneBrahamServer.exe OneBrahamServer-L_Persistent_OneBraham?Mode=Ascent?Bots=11 ^
+    -server -log -MaxPlayers=16 -NullRHI
+```
+
+1. Bots spawn, loot and push up; the log prints squad assignments for three squads.
+2. Watch for a squad reaching the Skydeck: `LogOneBrahamExtraction` prints
+   broadcast, arrival and hold progress.
+3. The run passes when a `MatchResult` names a winning squad after a completed
+   hold, or - the other path worth running - when all three squads are eliminated
+   and it prints `NoSurvivors`.
+4. A failed run is never "flaky": a squad that cannot find the Skydeck, a door that
+   does not open and an extraction that does not end are all bugs in the level,
+   the navmesh or the access chain.
+
+It takes a few minutes with `-NullRHI` and about as long again with rendering on,
+which is the version to run before a build goes to Steam.
 
 ---
 
@@ -89,7 +127,12 @@ a firefight on the server floor — the worst case in the game.
 | Audio | 96 MB |
 | Total process | ≤ 4.5 GB |
 
-### Content caps (enforced by `OneBraham.Performance`)
+### Content caps (checked when the level is built, not by a unit test)
+
+These are counts of the shipping level, so they are read off the built map - by
+`Scripts\\Package.bat`'s cook warnings and by an audit pass at each milestone -
+rather than asserted in `Tests/`. Section 2.2 records why that half of the suite
+is not automated yet and what stands in for it.
 
 | Item | Cap |
 | --- | --- |
@@ -155,7 +198,7 @@ should be at 4 Hz.
 | `ob.Audio.Dump` | the whole mix state in one line per bus |
 | `ob.NetDebug 1` | per-actor replication cost overlay |
 | `OBBench.Skydeck` | the scripted benchmark flythrough on the release map |
-| `Automation RunTests OneBraham.Performance` | the automated budget check |
+| `Automation RunTests OneBraham.Multiplayer.Smoke` | the match composition the budget has to hold for |
 
 Test hardware is recorded with every benchmark run. A budget measured on a
 developer's overclocked machine is not a budget.

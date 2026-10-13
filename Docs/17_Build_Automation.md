@@ -44,6 +44,18 @@ Every script is runnable on its own. Every script imports cleanly **outside** th
 editor (the `unreal` import is guarded), which is what lets `--text-only` steps
 and the config checks run in CI with nothing but Python 3.
 
+`common.py` holds the parts that must not exist twice: the class-body parser, the
+naming contract every builder writes against, and the comment stripper the
+checkers share. The stripper replaced six copies of a four-regex version that
+removed block comments before line comments - so a `/*` inside a `//` comment or
+inside a string literal (the repository's own scripts are described as
+`Scripts/*.bat`) opened a block comment that deleted real code from the analysis,
+and the first check to notice was the one counting braces. It is one pass, left to
+right, in two flavours: `strip_comments` for the checkers that read string
+literals, `strip_comments_and_strings` for the checkers that read code structure.
+Giving the second flavour to a checker in the first group makes it inspect
+nothing, so both are named for what they do and neither is the default.
+
 ---
 
 ## 2. Running it
@@ -72,7 +84,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | calls | OK | 0.1 | 848 call sites, all arities plausible |
 | tags | OK | 0.2 | 6 resolvable tag requests, all declared |
 | layout | OK | 0.0 | 16 floors, map and layout agree |
-| voice_lines | OK | 0.0 | 34 line references, all declared and documented |
+| voice_lines | OK | 0.0 | 41 line references, all declared and documented |
 | input_actions | OK | 0.0 | 41 actions, 41 fields, 92 reads |
 | doc_numbers | OK | 0.0 | 12 documented numbers, all current |
 | materials | OK | 3.1 | 5 masters, 15 physicals, 28 instances |

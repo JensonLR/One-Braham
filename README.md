@@ -58,8 +58,11 @@ Scripts\RunClient.bat 127.0.0.1                one client
 Scripts\RunClient.bat 127.0.0.1 -Squad 2       a client on a specific squad
 ```
 
-`RunTests.bat smoke` boots a server, connects three squads and plays a complete
-ASCENT run through to a `MatchResult`. It is the test that gates a release.
+`RunTests.bat` runs the automation suites in `Source/OneBraham/Tests/`: the match
+rules, weapons, damage, voice, input and replication contracts, and the
+engine-free static checks. `RunTests.bat smoke` runs the same suites on a
+dedicated server, and the bot-driven twelve-player run in `Docs/18` §3 is what
+gates a release.
 
 ---
 

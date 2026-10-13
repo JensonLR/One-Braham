@@ -56,7 +56,7 @@ A dedicated server needs 7777/udp for game traffic and 7778/udp for voice.
 | --- | --- |
 | `RunTests.bat` | All `OneBraham.*` automation tests, headless with `-NullRHI`. |
 | `RunTests.bat OneBraham.Weapons` | One category. Categories are listed in `Docs/18_Testing_Performance.md`. |
-| `RunTests.bat smoke` | The 12-player dedicated smoke test: boots a server, connects three squads of bots, plays a match to extraction, and fails if the match does not complete. |
+| `RunTests.bat smoke` | The smoke category on a dedicated server: the match-boot composition check. The bot-driven twelve-player run is in `Docs/18_Testing_Performance.md` §3. |
 
 ## Release
 

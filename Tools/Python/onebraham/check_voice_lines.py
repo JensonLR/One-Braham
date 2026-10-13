@@ -156,7 +156,10 @@ def referenced_lines(source_root=None):
             # line struct's own documentation was the first thing this check
             # reported, and it is not a line anybody asks for. Blank them out
             # first, preserving line count so the numbers still mean something.
-            raw = re.sub(r'/\*.*?\*/', lambda m: "\n" * m.group(0).count("\n"), raw, flags=re.DOTALL)
+            # The stripper is shared, and it is a single pass: stripping block
+            # comments first meant a `/*` inside a line comment could delete the
+            # code that followed it.
+            raw = C.strip_comments(raw)
 
             rel = os.path.relpath(path, root)
 

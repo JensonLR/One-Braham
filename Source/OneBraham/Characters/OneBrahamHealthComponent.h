@@ -65,9 +65,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Health")
 	float MaxArmour = 50.f;
 
-	/** Armour soaks this fraction of incoming damage while it lasts. */
+	/**
+	 * Armour soaks this fraction of incoming damage while it lasts.
+	 *
+	 * 60%, and the documentation's worked example depends on it: a 30 damage shot
+	 * against full armour takes 12 health and 18 armour (Docs/04). The code said
+	 * 0.55 for a while, which made that example wrong by a point of damage and
+	 * changed nothing anybody would have noticed by playing.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Health")
-	float ArmourAbsorption = 0.55f;
+	float ArmourAbsorption = 0.60f;
 
 	/** Damage multiplier per hit zone. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Health")

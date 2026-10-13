@@ -93,7 +93,8 @@ namespace OneBrahamConstants
 	static constexpr int32 FloorOffices = 3;      // 3..8 are open-plan/meeting
 	static constexpr int32 FloorServer = 9;
 	static constexpr int32 FloorExecutive = 12;
-	static constexpr int32 FloorCanteen = 15;
+	/** The canteen block starts here: 13 is the servery, 14 is the seating. */
+	static constexpr int32 FloorCanteen = 13;
 	static constexpr int32 FloorSkydeck = 15;
 
 	/** Extraction hold time, seconds (ASCENT). */

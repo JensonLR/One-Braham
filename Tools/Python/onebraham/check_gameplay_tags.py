@@ -157,8 +157,11 @@ def assembled_tags(text):
 
 
 def strip_comments(text):
-    text = re.sub(r'/\*.*?\*/', lambda m: "\n" * m.group(0).count("\n"), text, flags=re.DOTALL)
-    return re.sub(r'//[^\n]*', "", text)
+    """Comments and string literals removed. The implementation is shared:
+    stripping block comments before line comments meant a `/*` inside a `//`
+    comment or inside a string literal could swallow real code. See
+    common.strip_comments_and_strings."""
+    return C.strip_comments(text)
 
 
 def native_tags():

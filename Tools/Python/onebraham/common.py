@@ -198,6 +198,125 @@ MACRO_START = re.compile(r"^([A-Z][A-Z0-9_]*)\s*\(")
 ACCESS_SPECIFIER = re.compile(r"^\s*(?:public|protected|private)\s*:\s*")
 
 
+def strip_comments(text):
+    """Comments removed, string literals left alone, line count preserved.
+
+    Two contracts live here because two kinds of check need them. The scanners
+    that read code structure (declarations, calls, brace balance) want strings
+    gone. The scanners that read string literals - the gameplay tags, the voice
+    line ids, the input action names - want them kept, and removing them turns
+    those checks into checks that inspect nothing and therefore pass.
+    """
+    return _strip(text, blank_strings=False)
+
+
+def strip_comments_and_strings(text):
+    """Comments and string literals removed, line count preserved.
+
+    ONE PASS, LEFT TO RIGHT, like a compiler - because the version this replaces
+    was four regexes in the wrong order, and it could delete real code from the
+    analysis while reporting that everything was fine:
+
+        text = re.sub(r'/\\*.*?\\*/', ..., text, flags=re.DOTALL)
+        text = re.sub(r'//[^\\n]*', "", text)
+
+    A `/*` inside a line comment - or inside a string literal, which is how the
+    project's own scripts are described ("Scripts/*.bat") - opened a block
+    comment that ran until the next `*/` anywhere in the file. Every brace,
+    declaration and call between those two points was removed before any check
+    looked at it. The file's delimiters then did not balance, and the check that
+    noticed was the cheapest one in the suite.
+
+    Contract: braces, parentheses and brackets outside comments and strings are
+    unchanged; every newline is preserved so line numbers still mean something;
+    string and character literals are replaced by their empty forms.
+    """
+
+    return _strip(text, blank_strings=True)
+
+
+def _strip(text, blank_strings):
+    """One pass, left to right. `blank_strings` replaces literals with ""."""
+    out = []
+    index = 0
+    length = len(text)
+
+    while index < length:
+        char = text[index]
+
+        # Line comment: to the end of the line, newline kept.
+        if char == "/" and index + 1 < length and text[index + 1] == "/":
+            while index < length and text[index] != "\n":
+                index += 1
+
+        # Block comment: newlines kept so line numbers survive.
+        elif char == "/" and index + 1 < length and text[index + 1] == "*":
+            index += 2
+            while index < length and not (text[index] == "*" and index + 1 < length
+                                          and text[index + 1] == "/"):
+                if text[index] == "\n":
+                    out.append("\n")
+                index += 1
+            index += 2
+
+        # String literal, including an escaped quote inside it.
+        elif char == '"':
+            if blank_strings:
+                out.append('""')
+            else:
+                out.append('"')
+
+            index += 1
+            while index < length:
+                if text[index] == "\\" and index + 1 < length:
+                    if not blank_strings:
+                        out.append(text[index:index + 2])
+                    index += 2
+                    continue
+                if text[index] == '"':
+                    if not blank_strings:
+                        out.append('"')
+                    index += 1
+                    break
+                if text[index] == "\n":
+                    out.append("\n")
+                elif not blank_strings:
+                    out.append(text[index])
+                index += 1
+
+        # Character literal, e.g. '\n' or 'A'. Also matches the apostrophe in a
+        # C++14 digit separator, which is harmless: neither carries a brace.
+        elif char == "'":
+            if blank_strings:
+                out.append("''")
+            else:
+                out.append("'")
+
+            index += 1
+            while index < length:
+                if text[index] == "\\" and index + 1 < length:
+                    if not blank_strings:
+                        out.append(text[index:index + 2])
+                    index += 2
+                    continue
+                if text[index] == "'":
+                    if not blank_strings:
+                        out.append("'")
+                    index += 1
+                    break
+                if text[index] == "\n":
+                    out.append("\n")
+                elif not blank_strings:
+                    out.append(text[index])
+                index += 1
+
+        else:
+            out.append(char)
+            index += 1
+
+    return "".join(out)
+
+
 def class_bodies(text):
     """Yields (class_name, body, is_interface) for every class or struct.
 

@@ -68,11 +68,13 @@ IGNORED_NAMES = {
 
 
 def strip_comments_and_strings(text):
-    """Removes comments and string literals, preserving line count."""
-    text = re.sub(r'/\*.*?\*/', lambda m: "\n" * m.group(0).count("\n"), text, flags=re.DOTALL)
-    text = re.sub(r'//[^\n]*', "", text)
-    text = re.sub(r'"(?:\\.|[^"\\])*"', '""', text)
-    return text
+    """Removes comments and string literals, preserving line count.
+
+    The implementation lives in common.py: it used to be four regexes here, in
+    five other checkers, and the order of those regexes could delete real code
+    from the analysis. See common.strip_comments_and_strings.
+    """
+    return C.strip_comments_and_strings(text)
 
 
 def class_bodies(text):

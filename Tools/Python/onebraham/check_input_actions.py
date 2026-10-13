@@ -150,9 +150,10 @@ def config_fields():
 
     body = text[match.end():index]
 
-    # Comments in this struct carry field names as prose.
-    body = re.sub(r'/\*.*?\*/', "", body, flags=re.DOTALL)
-    body = re.sub(r'//[^\n]*', "", body)
+    # Comments in this struct carry field names as prose, so they are removed
+    # with the shared one-pass stripper rather than by two regexes in an order
+    # that lets a `/*` inside a comment start a phantom block comment.
+    body = C.strip_comments(body)
 
     return re.findall(r'TObjectPtr<UInputAction>\s+([A-Za-z_][A-Za-z0-9_]*)\s*;', body)
 

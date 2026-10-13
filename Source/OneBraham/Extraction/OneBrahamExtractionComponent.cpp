@@ -268,7 +268,11 @@ bool UOneBrahamExtractionComponent::ServerCallExtraction(int32 SquadId, AOneBrah
 	if (CallingPlayer != nullptr)
 	{
 		const APawn* Pawn = CallingPlayer->GetPawn();
-		const float SkydeckMinZ = static_cast<float>(OneBrahamConstants::FloorSkydeck - 1) * 400.f;
+		// One storey below the Skydeck, from the building's own storey height
+		// rather than a literal 400: this was the second place the number was
+		// written down, and the constant exists so there is only one.
+		const float SkydeckMinZ = static_cast<float>(OneBrahamConstants::FloorSkydeck - 1)
+			* OneBrahamConstants::FloorHeightCm;
 		if (Pawn == nullptr || Pawn->GetActorLocation().Z < SkydeckMinZ)
 		{
 			OutRefusal = NSLOCTEXT("OneBraham", "Extraction_TooLow", "Winch terminals are on the Skydeck, fifteenth floor.");
@@ -535,8 +539,9 @@ void UOneBrahamExtractionComponent::CountPlayersInZone(int32& OutClaimants, int3
 			continue;
 		}
 
-		// Vertical check: the deck below the pad does not count.
-		if (FMath::Abs(Delta.Z) > 400.f)
+		// Vertical check: the deck below the pad does not count. One storey, from
+		// the building's storey height.
+		if (FMath::Abs(Delta.Z) > OneBrahamConstants::FloorHeightCm)
 		{
 			continue;
 		}

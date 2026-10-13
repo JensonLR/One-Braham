@@ -48,12 +48,14 @@ completes with a `MatchResult` on both the winning and losing paths.
 
 ## 5. Automation
 
-- [ ] `Scripts\RunTests.bat` → all `OneBraham.*` categories pass.
-- [ ] `Scripts\RunTests.bat smoke` → a full 12-player ASCENT run completes with a
-      `MatchResult`.
-- [ ] Smoke run, losing path: all squads eliminated → `NoSurvivors` is reported
-      and the results screen names the building.
-- [ ] `OneBraham.Performance` passes the caps in `Docs/18_Testing_Performance.md` §4.
+- [ ] `Scripts\RunTests.bat` → all `OneBraham.*` categories pass, including
+      `OneBraham.StaticChecks`, which runs the engine-free checks in-process.
+- [ ] `Scripts\RunTests.bat smoke` → the composition check passes on a dedicated
+      server (see §2 of `Docs/18` for what that does and does not cover).
+- [ ] The bot-driven 12-player run in `Docs/18` §3 completes with a `MatchResult`
+      naming a winning squad, and the losing path reports `NoSurvivors`.
+- [ ] The content caps in `Docs/18` §4 are inside budget on the release map
+      (measured with `stat`, recorded with the hardware).
 
 ## 6. Multiplayer
 
