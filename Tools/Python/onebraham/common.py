@@ -40,6 +40,10 @@ MATERIALS = GAME_ROOT + "/Materials"
 MATERIALS_INSTANCES = MATERIALS + "/Instances"
 PROPS = GAME_ROOT + "/Props"
 CHARACTERS = GAME_ROOT + "/Characters"
+# Interaction and shared animation montages. Loaded by name at runtime from
+# UOneBrahamInteractComponent::PlayInteractionMontage, so this constant and that
+# string have to agree - check_soft_paths.py verifies exactly that.
+CHARACTER_ANIMS = CHARACTERS + "/Shared/Anims"
 WEAPONS = GAME_ROOT + "/Weapons"
 VFX = GAME_ROOT + "/VFX"
 AUDIO = GAME_ROOT + "/Audio"
@@ -67,14 +71,21 @@ MAP_BENCHMARK = "L_Benchmark_Skydeck"
 # ---------------------------------------------------------------------------
 #  Naming conventions
 # ---------------------------------------------------------------------------
-# Prefix -> what it is. Enforced by validate_project.py so a stray asset cannot
-# slip into the content folder with a name nobody can search for.
+# Prefix -> what it is. This table is the naming contract: the asset builders
+# name assets with it, check_soft_paths.py verifies that every /Game/ path in the
+# C++ starts with one of these prefixes and lives under a directory the builders
+# write to, and a stray asset named without a prefix cannot be searched for.
+#
+# Rows are added when a new asset type appears, which is why MusicQue, AmbienceBed,
+# PhysicalMaterial, DataTable and Level are here: the C++ was loading MUS_* music
+# cues and L_* levels by name long before the contract mentioned them.
 PREFIXES = {
     "StaticMesh": "SM_",
     "SkeletalMesh": "SK_",
     "Material": "M_",
     "MaterialInstanceConstant": "MI_",
     "MaterialParameterCollection": "MPC_",
+    "PhysicalMaterial": "PM_",
     "Texture2D": "T_",
     "NiagaraSystem": "NS_",
     "NiagaraEmitter": "NE_",
@@ -84,12 +95,17 @@ PREFIXES = {
     "SoundMix": "SM_",
     "SoundAttenuation": "SA_",
     "SoundSubmix": "SS_",
+    "MusicQue": "MUS_",
+    "AmbienceBed": "AMB_",
     "Blueprint": "BP_",
     "WidgetBlueprint": "WBP_",
     "AnimBlueprint": "ABP_",
     "AnimSequence": "AS_",
+    "AnimMontage": "AM_",
     "DataAsset": "DA_",
+    "DataTable": "DT_",
     "LevelSequence": "LS_",
+    "Level": "L_",
     "Font": "F_",
     "InputAction": "IA_",
     "InputMappingContext": "IMC_",

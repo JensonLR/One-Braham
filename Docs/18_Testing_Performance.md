@@ -35,7 +35,7 @@ Run with `Scripts/RunTests.bat` (all of `OneBraham.*`) or
 | `OneBraham.Multiplayer` | A dedicated server + 3 clients perform a full ASCENT match in headless mode; the match completes with an extraction result |
 | `OneBraham.Performance` | Actor, light, decal and particle counts stay inside the budgets in section 4 on the shipping map |
 | `OneBraham.Validation` | Wraps `validate_project.py`: the build fails if the validator fails |
-| `OneBraham.StaticChecks` | Runs the engine-free checks (declared-but-undefined members, UE reflection contracts, project includes that do not exist, brace balance, log categories, VFX reachability, surface coverage) in-process, so a CI stage without an engine install still catches the class of error that only a linker or a missing `DOREPLIFETIME` would otherwise reveal |
+| `OneBraham.StaticChecks` | Runs the engine-free checks (declared-but-undefined members, UE reflection contracts, project includes that do not exist, brace balance, log categories, VFX reachability, surface coverage, and the naming contract for assets loaded by path) in-process, so a CI stage without an engine install still catches the class of error that only a linker, a missing `DOREPLIFETIME` or a null soft load would otherwise reveal |
 
 The functional tests drive real matches through the game mode rather than calling
 functions directly, because the bugs that matter live in the spaces between

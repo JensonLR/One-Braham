@@ -420,17 +420,24 @@ void UOneBrahamInteractComponent::PlayInteractionMontage(FGameplayTag Interactio
 		return;
 	}
 
-	// The montage table lives on the character data asset: each
-	// OB.Interaction.* tag maps to a start/end montage pair, played on the
-	// upper-body slot so the player keeps their lower-body locomotion.
-	// Names here are the contract the animation team ships against:
-	//   Door      -> AM_OB_Interact_Door_Start / _End
-	//   Terminal  -> AM_OB_Interact_Terminal_Loop / _End
-	//   Lift      -> AM_OB_Interact_LiftPanel
-	//   Revive    -> AM_OB_Interact_Revive_Loop / _Release
-	//   Keycard   -> AM_OB_Interact_Keycard_Swipe
-	//   Body      -> AM_OB_Interact_Loot_Crouch
-	//   Extraction-> AM_OB_Interact_Extraction_Radio
+	// Seven montages, one per interaction family, loaded by name from
+	// /Game/OneBraham/Characters/Shared/Anims. They are played on the upper body
+	// so the player keeps their lower-body locomotion, and the same montage is
+	// played on the first-person arms mesh so the hands visibly reach for the
+	// button.
+	//
+	// THE CONTRACT (also written down in Docs/13, table 4)
+	//   Door       -> AM_OB_Interact_Door
+	//   Terminal   -> AM_OB_Interact_Terminal
+	//   Lift       -> AM_OB_Interact_LiftPanel
+	//   Revive     -> AM_OB_Interact_Revive
+	//   Keycard    -> AM_OB_Interact_Keycard
+	//   Body       -> AM_OB_Interact_Loot
+	//   Extraction -> AM_OB_Interact_Radio
+	//
+	// A missing montage is not an error: the interaction still happens, because
+	// the animation is the presentation and the state change is the gameplay.
+	// The content build creates the folder; the animation team fills it.
 	const FString TagString = InteractionTag.IsValid() ? InteractionTag.ToString() : TEXT("OB.Interaction.Door");
 
 	FString MontageName;

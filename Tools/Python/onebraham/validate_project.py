@@ -61,6 +61,11 @@ WHAT IT CHECKS, AND WHY EACH ONE HAS BITTEN SOMEONE
                                                         one: a replicated property
                                                         with no DOREPLIFETIME, which
                                                         never reaches a client.
+    21. Soft-load naming contract                     - a /Game/ path the C++
+                                                        loads by name that the
+                                                        pipeline never writes is
+                                                        a silent null at runtime
+                                                        and nothing else.
 
     It writes Saved/Validation/ob_validation_<timestamp>.md and exits non-zero on
     any FAIL. Warnings do not fail the build; failures do.
@@ -1312,6 +1317,40 @@ def check_uht_contracts(v, _config_only):
         v.fail("uht contracts", u"{0}: {1} - {2}".format(rel, class_name, message))
 
 
+def check_soft_paths(v, _config_only):
+    """Every asset path the C++ loads by name must be one the pipeline writes.
+
+    The C++ in this project loads its registries, its HUD widget, its sound
+    classes, its camera shakes and its interaction montages by string, because a
+    hard reference from code to a Blueprint breaks the cook. A string that is
+    wrong produces no error: the load returns null, the caller takes its fallback
+    branch, and the game carries on with a silent component missing.
+
+    This check compares every `/Game/OneBraham/...` literal in the source against
+    two things the content pipeline guarantees - the directories its scripts name
+    and the asset-name prefixes its naming table defines - so a path that points
+    at a folder nothing creates is caught on a machine with no engine on it.
+    """
+    try:
+        from onebraham import check_soft_paths
+    except Exception as exc:  # noqa: BLE001
+        v.warn("soft paths", u"checker unavailable: {0}".format(exc))
+        return
+
+    checked, problems = check_soft_paths.run(source_root=SOURCE_DIR)
+
+    if checked == 0:
+        v.warn("soft paths", u"no /Game/ paths found in the source - is Source/OneBraham missing?")
+        return
+
+    if not problems:
+        v.pass_("soft paths", u"all {0} name-loaded asset paths match the pipeline's contract".format(checked))
+        return
+
+    for rel, literal, message in problems:
+        v.fail("soft paths", u"{0}: {1} - {2}".format(rel, literal, message))
+
+
 # ---------------------------------------------------------------------------
 #  Report
 # ---------------------------------------------------------------------------
@@ -1372,6 +1411,7 @@ def build_all(config_only=False):
         ("vfx reachability", check_vfx_reachability),
         ("surface coverage", check_surface_coverage),
         ("uht contracts", check_uht_contracts),
+        ("soft paths", check_soft_paths),
     ]
 
     for label, fn in checks:

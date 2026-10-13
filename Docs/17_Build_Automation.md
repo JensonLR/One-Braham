@@ -30,6 +30,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `import_font.py` | font faces from `Content/UI/Fonts` | yes | yes |
 | `check_cpp_symbols.py` | reads `Source/OneBraham` and reports every member function declared with no definition | **no** | yes |
 | `check_uht_contracts.py` | UE reflection contracts: RPC bodies, RepNotify callbacks, replicated properties named in a `DOREPLIFETIME` | **no** | yes |
+| `check_soft_paths.py` | every `/Game/` path the C++ loads by name, against the directories and name prefixes the pipeline writes | **no** | yes |
 | `validate_project.py` | the health check and a markdown report | either | yes |
 | `run_all.py` | all of the above, in dependency order, with a report | either | yes |
 
@@ -54,13 +55,14 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 
 ```
 # ONE BRAHAM - content build report
-**14 steps succeeded, 0 failed.**
+**15 steps succeeded, 0 failed.**
 
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
 | input_ini | OK | 0.0 | wrote 41 actions (40 with a default key) |
 | cpp_symbols | OK | 0.1 | 495 declarations, all defined |
 | uht_contracts | OK | 0.5 | 600 UE reflection contracts, all satisfied |
+| soft_paths | OK | 0.0 | 42 name-loaded asset paths, all conventional |
 | materials | OK | 3.1 | 5 masters, 15 physicals, 28 instances |
 ...
 ```
@@ -75,6 +77,7 @@ Exit code 0 only if every step passed. CI reads the exit code, not the log.
 generate_input_ini        text only; can fail before the editor opens
 cpp_symbols               text only; a link error found in 0.1 s, not 4 minutes
 uht_contracts             text only; a property that silently never replicates
+soft_paths                text only; an asset path that silently loads nothing
       ↓
 materials                 everything references MI_* and PM_OB_*
       ↓
@@ -133,10 +136,11 @@ a header gets noticed before it becomes a runtime null reference.
 # because the project's pipeline runs on a self-hosted UE5 runner.
 stages:
   - lint      : python -m py_compile on every tool
-  - cpp       : PYTHONPATH=Tools/Python python3 run_all.py --only cpp_symbols,uht_contracts
-                (declared-but-undefined members, UE reflection contracts, and the
-                 checks that need no engine install at all - so they run before a
-                 runner is ever allocated)
+  - cpp       : PYTHONPATH=Tools/Python python3 run_all.py --only cpp_symbols,uht_contracts,soft_paths
+                (declared-but-undefined members, UE reflection contracts, the
+                 naming contract for name-loaded assets, and the checks that need
+                 no engine install at all - so they run before a runner is ever
+                 allocated)
   - config    : PYTHONPATH=Tools/Python python3 run_all.py --text-only
   - build     : UBT build of the Editor, Game, Server and Client targets
   - content   : UnrealEditor-Cmd -run=pythonscript run_all.py

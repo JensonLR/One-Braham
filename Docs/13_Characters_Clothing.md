@@ -151,7 +151,46 @@ running towards you is a person rather than a pattern.
 
 ---
 
-## 7. Anti-cheat and appearance
+## 7. Interaction montages
+
+Seven montages, loaded by name at runtime by
+`UOneBrahamInteractComponent::PlayInteractionMontage`. They live in
+`/Game/OneBraham/Characters/Shared/Anims` (created by `build_characters.py`, named
+by `common.CHARACTER_ANIMS`), they are played on the upper-body slot so the
+player keeps their lower-body locomotion, and each one is also played on the
+first-person arms mesh so the hands visibly reach for the button.
+
+**Table 4 — the interaction montage contract**
+
+| Asset | Used for | Length | Notes |
+| --- | --- | --- | --- |
+| `AM_OB_Interact_Door` | every `OB.Interaction.Door.*` tag: opening, closing, breaching | 1.1 s | starts at the handle, ends with the arm back at the weapon. The most-played montage in the game; it is worth the extra polish. |
+| `AM_OB_Interact_Terminal` | override terminals, the extraction console, keycard readers with a screen | 12 s | loops while the hold runs, so it must loop cleanly. The 12 s figure is the solo override time; the paired 3 s override plays the first second and blends out. |
+| `AM_OB_Interact_LiftPanel` | lift call panels only | 0.9 s | the only montage with a real button press: a deliberate, single, index-finger stab, because calling a lift is the one interaction nobody rushes. |
+| `AM_OB_Interact_Revive` | reviving a downed squadmate | 4.5 s | loops for the revive duration (see `OneBrahamConstants::ReviveSeconds`). Needs a clear "pulling them up" read from first person, because the player is blind to their own surroundings while it plays. |
+| `AM_OB_Interact_Keycard` | badge readers, the turnstiles, the Skydeck gate | 0.8 s | a swipe, not a press. Left hand, so the weapon hand never leaves the grip. |
+| `AM_OB_Interact_Loot` | searchable bodies and dropped bags | 2.2 s | a crouch-and-reach: the interaction takes a full second longer than any other, and the animation is where the player feels that cost. |
+| `AM_OB_Interact_Radio` | the extraction beacon, the winch control | 1.4 s | the hand comes off the weapon to key a radio. Deliberately the most exposed pose in the game. |
+
+**A missing montage is not an error.** The interaction still happens — the
+animation is presentation, the state change is the gameplay — and the load
+failure is silent by design, because a red error in a shipping build tells the
+player something they cannot act on. What catches a missing montage is the
+content checklist in `Docs/20_Release_Checklists.md`, not the runtime.
+
+**Rules for the animation team**
+
+1. Every montage starts and ends at the same pose as the idle so the blend does
+   not pop. The blend-out is 0.25 s, hard-coded in the interact component.
+2. The upper-body slot only: legs are owned by locomotion and by the lean system.
+3. No montage may move the root. Position comes from the capsule, always.
+4. Left hand wherever possible. A montage that takes the right hand off the
+   weapon reads as a player who has stopped fighting, and in a PvP game that
+   reads as an invitation.
+
+---
+
+## 8. Anti-cheat and appearance
 
 Cosmetic state is server-authoritative. A client cannot grant itself a cosmetic,
 and a modified client that renders a cosmetic it does not own sees only its own

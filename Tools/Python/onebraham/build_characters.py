@@ -197,7 +197,7 @@ VOICE_SETS = [
 
 def _ensure_dirs():
     for path in (C.CHARACTERS, C.CHARACTERS + "/Meshes", C.CHARACTERS + "/Cosmetics",
-                 C.CHARACTERS + "/Materials", C.VOICE, C.DATA):
+                 C.CHARACTERS + "/Materials", C.CHARACTER_ANIMS, C.VOICE, C.DATA):
         if not unreal.EditorAssetLibrary.does_directory_exist(path):
             unreal.EditorAssetLibrary.make_directory(path)
 
