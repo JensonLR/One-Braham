@@ -54,16 +54,51 @@ VOICE_DOC = os.path.join(python_root, "Docs", "14_Voice_Script.md")
 #: A line declared in the table: Line(TEXT("V_ID"), ...)
 DECLARED = re.compile(r'\bLine\(\s*TEXT\("(V_[A-Z0-9_]+)"\)')
 
+#: An archetype variant row: LineFor(TEXT("V_ID"), OneBrahamTags::Character_Archetype_X, ...)
+VARIANT = re.compile(
+    r'\bLineFor\(\s*TEXT\("(V_[A-Z0-9_]+)"\)\s*,\s*'
+    r'OneBrahamTags::(Character_Archetype_[A-Za-z0-9_]+)\s*,')
+
+#: The six archetype tags the character system declares. A filter naming anything
+#: else never matches, so the variant silently falls back to the generic
+#: recording - the same failure as an invented line id, one level down.
+ARCHETYPE_TAGS = {
+    "Character_Archetype_BusinessAnalyst",
+    "Character_Archetype_Graduate",
+    "Character_Archetype_FinanceBroker",
+    "Character_Archetype_ITOperations",
+    "Character_Archetype_FacilitiesSecurity",
+    "Character_Archetype_Consultant",
+}
+
+#: How many variant rows the recording brief promises.
+DOCUMENTED_VARIANTS = 66
+
 #: Any line id anywhere: TEXT("V_ID") or "V_ID" inside a comparison.
 REFERENCED = re.compile(r'"(V_[A-Z0-9_]+)"')
 
 
-def declared_lines():
+def line_table_path(source_root=None):
+    """The line table, inside whatever tree the caller pointed at.
+
+    Every reader here goes through this. Twice during development a reader used
+    the module's own path instead, so a sabotage test copied the tree, broke a
+    line id and the check reported nothing - a test that passes because it is
+    looking at the wrong file is worse than no test.
+    """
+    root = source_root or SOURCE_ROOT
+
+    return os.path.join(root, "Voice", "OneBrahamVoiceLineSet.cpp")
+
+
+def declared_lines(source_root=None):
     """id -> number of declarations, from the table."""
-    if not os.path.isfile(LINE_TABLE):
+    path = line_table_path(source_root)
+
+    if not os.path.isfile(path):
         return {}
 
-    text = io.open(LINE_TABLE, encoding="utf-8", errors="ignore").read()
+    text = io.open(path, encoding="utf-8", errors="ignore").read()
     text = re.sub(r'//[^\n]*', "", text)
 
     counted = {}
@@ -72,6 +107,19 @@ def declared_lines():
         counted[line_id] = counted.get(line_id, 0) + 1
 
     return counted
+
+
+def variant_rows(source_root=None):
+    """[(line id, archetype constant)] for every archetype variant row."""
+    path = line_table_path(source_root)
+
+    if not os.path.isfile(path):
+        return []
+
+    text = io.open(path, encoding="utf-8", errors="ignore").read()
+    text = re.sub(r'//[^\n]*', "", text)
+
+    return VARIANT.findall(text)
 
 
 def referenced_lines(source_root=None):
@@ -91,7 +139,7 @@ def referenced_lines(source_root=None):
             path = os.path.join(dirpath, name)
 
             # The table is where lines are declared; every other file is asking.
-            if os.path.normpath(path) == os.path.normpath(LINE_TABLE):
+            if os.path.normpath(path) == os.path.normpath(line_table_path(source_root)):
                 continue
 
             raw = io.open(path, encoding="utf-8", errors="ignore").read()
@@ -131,7 +179,7 @@ def run(source_root=None):
     what the caller passed, and a sabotage test that had no effect is a sabotage
     test that proves nothing.
     """
-    declared = declared_lines()
+    declared = declared_lines(source_root)
 
     if not declared:
         return 0, [(u"no voice lines were parsed out of OneBrahamVoiceLineSet.cpp - the "
@@ -154,6 +202,39 @@ def run(source_root=None):
         if count > 1:
             problems.append((u"'{0}' is declared {1} times in the line table".format(line_id, count),
                              u"duplicate line"))
+
+    # --- Archetype variants -------------------------------------------------
+    # Eleven lines are recorded six times each, and each of those is a row in the
+    # table with an archetype filter. A filter naming a tag that does not exist
+    # never matches, so the variant falls back to the generic recording and
+    # nobody notices that a paid-for performance is unreachable.
+    variants = variant_rows(source_root)
+    seen_pairs = {}
+
+    for line_id, archetype in variants:
+        if archetype not in ARCHETYPE_TAGS:
+            problems.append((
+                u"'{0}' has a variant recorded for '{1}', which is not one of the six archetype "
+                u"tags - the filter can never match and the variant will never play".format(
+                    line_id, archetype),
+                u"unknown archetype"))
+            continue
+
+        seen_pairs.setdefault(line_id, set()).add(archetype)
+
+    for line_id, archetypes in sorted(seen_pairs.items()):
+        if len(archetypes) != len(ARCHETYPE_TAGS):
+            missing = sorted(ARCHETYPE_TAGS - archetypes)
+            problems.append((
+                u"'{0}' has {1} of 6 archetype variants (missing {2}) - those voices fall back to "
+                u"the generic recording".format(line_id, len(archetypes), ", ".join(missing)),
+                u"incomplete variants"))
+
+    if len(variants) != DOCUMENTED_VARIANTS:
+        problems.append((
+            u"the table has {0} archetype variant rows; Docs/14 section 4 promises {1}".format(
+                len(variants), DOCUMENTED_VARIANTS),
+            u"variant count"))
 
     # Documentation coverage: the script is the recording brief.
     documented = documented_lines()

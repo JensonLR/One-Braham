@@ -3,6 +3,7 @@
 #include "Voice/OneBrahamVoiceTypes.h"
 
 #include "OneBraham.h"
+#include "Core/OneBrahamGameplayTags.h"
 #include "Sound/SoundBase.h"
 
 namespace
@@ -16,6 +17,27 @@ namespace
 		Result.Priority = Priority;
 		Result.CooldownSeconds = CooldownSeconds;
 		Result.Chance = Chance;
+		return Result;
+	}
+
+	/**
+	 * A line recorded for one archetype.
+	 *
+	 * Same words as the generic row - an archetype variant is a performance, not
+	 * a rewrite - but its own row, its own Sound and a filter naming the voice it
+	 * was recorded in. Eleven lines are recorded six times each (Docs/14, section
+	 * 4); these rows are where those recordings live, and PickLine prefers them
+	 * over the generic one so the money that was spent on them is audible.
+	 *
+	 * The filter is a gameplay tag constant rather than a string: a typo here
+	 * would mean the variant silently never plays, which is the same class of
+	 * failure as an invented line id.
+	 */
+	FOneBrahamVoiceLine LineFor(FName Id, const FGameplayTag& Archetype, const TCHAR* Subtitle,
+		EOneBrahamVoicePriority Priority, float CooldownSeconds = 8.f, float Chance = 1.f)
+	{
+		FOneBrahamVoiceLine Result = Line(Id, Subtitle, Priority, CooldownSeconds, Chance);
+		Result.ArchetypeFilter.Add(Archetype);
 		return Result;
 	}
 }
@@ -158,22 +180,168 @@ void UOneBrahamVoiceLineSet::EnsureCoreLines()
 		Line(TEXT("V_STEP_GLASS"),					TEXT("Glass. Go round it."), EOneBrahamVoicePriority::Ambient, 30.f, 0.3f)
 	};
 
+
+	// ===================================================================
+	//  ARCHETYPE VARIANT RECORDINGS (66)
+	//
+	//  Eleven lines, six performances each. Same words as the core row - an
+	//  archetype variant is a performance, not a rewrite - but a separate row,
+	//  so the recorded asset is per archetype and PickLine prefers it over the
+	//  generic recording for that voice.
+	//
+	//  The delivery notes for each of these are the table in Docs/14, section 4.
+	//  If you are looking for the recording sheet, that is it: this block is the
+	//  machine-readable half and that table is the brief the actor reads.
+	// ===================================================================
+	static const FOneBrahamVoiceLine Variants[] =
+	{
+		// --- V_DOWNED --------------------------------------------------
+		LineFor(TEXT("V_DOWNED"), OneBrahamTags::Character_Archetype_BusinessAnalyst, TEXT("I'm down. I'm down."), EOneBrahamVoicePriority::Critical, 2.f),
+		LineFor(TEXT("V_DOWNED"), OneBrahamTags::Character_Archetype_Graduate, TEXT("I'm down. I'm down."), EOneBrahamVoicePriority::Critical, 2.f),
+		LineFor(TEXT("V_DOWNED"), OneBrahamTags::Character_Archetype_FinanceBroker, TEXT("I'm down. I'm down."), EOneBrahamVoicePriority::Critical, 2.f),
+		LineFor(TEXT("V_DOWNED"), OneBrahamTags::Character_Archetype_ITOperations, TEXT("I'm down. I'm down."), EOneBrahamVoicePriority::Critical, 2.f),
+		LineFor(TEXT("V_DOWNED"), OneBrahamTags::Character_Archetype_FacilitiesSecurity, TEXT("I'm down. I'm down."), EOneBrahamVoicePriority::Critical, 2.f),
+		LineFor(TEXT("V_DOWNED"), OneBrahamTags::Character_Archetype_Consultant, TEXT("I'm down. I'm down."), EOneBrahamVoicePriority::Critical, 2.f),
+
+		// --- V_CONTACT_ENEMY --------------------------------------------------
+		LineFor(TEXT("V_CONTACT_ENEMY"), OneBrahamTags::Character_Archetype_BusinessAnalyst, TEXT("Contact. One."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_CONTACT_ENEMY"), OneBrahamTags::Character_Archetype_Graduate, TEXT("Contact. One."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_CONTACT_ENEMY"), OneBrahamTags::Character_Archetype_FinanceBroker, TEXT("Contact. One."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_CONTACT_ENEMY"), OneBrahamTags::Character_Archetype_ITOperations, TEXT("Contact. One."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_CONTACT_ENEMY"), OneBrahamTags::Character_Archetype_FacilitiesSecurity, TEXT("Contact. One."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_CONTACT_ENEMY"), OneBrahamTags::Character_Archetype_Consultant, TEXT("Contact. One."), EOneBrahamVoicePriority::Critical, 3.f),
+
+		// --- V_RELOADING --------------------------------------------------
+		LineFor(TEXT("V_RELOADING"), OneBrahamTags::Character_Archetype_BusinessAnalyst, TEXT("Reloading - cover me."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_RELOADING"), OneBrahamTags::Character_Archetype_Graduate, TEXT("Reloading - cover me."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_RELOADING"), OneBrahamTags::Character_Archetype_FinanceBroker, TEXT("Reloading - cover me."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_RELOADING"), OneBrahamTags::Character_Archetype_ITOperations, TEXT("Reloading - cover me."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_RELOADING"), OneBrahamTags::Character_Archetype_FacilitiesSecurity, TEXT("Reloading - cover me."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_RELOADING"), OneBrahamTags::Character_Archetype_Consultant, TEXT("Reloading - cover me."), EOneBrahamVoicePriority::Critical, 3.f),
+
+		// --- V_CONTACT_MULTIPLE --------------------------------------------------
+		LineFor(TEXT("V_CONTACT_MULTIPLE"), OneBrahamTags::Character_Archetype_BusinessAnalyst, TEXT("Contact, two or more. Left of the lift."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_CONTACT_MULTIPLE"), OneBrahamTags::Character_Archetype_Graduate, TEXT("Contact, two or more. Left of the lift."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_CONTACT_MULTIPLE"), OneBrahamTags::Character_Archetype_FinanceBroker, TEXT("Contact, two or more. Left of the lift."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_CONTACT_MULTIPLE"), OneBrahamTags::Character_Archetype_ITOperations, TEXT("Contact, two or more. Left of the lift."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_CONTACT_MULTIPLE"), OneBrahamTags::Character_Archetype_FacilitiesSecurity, TEXT("Contact, two or more. Left of the lift."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_CONTACT_MULTIPLE"), OneBrahamTags::Character_Archetype_Consultant, TEXT("Contact, two or more. Left of the lift."), EOneBrahamVoicePriority::Critical, 3.f),
+
+		// --- V_LAST_MAG --------------------------------------------------
+		LineFor(TEXT("V_LAST_MAG"), OneBrahamTags::Character_Archetype_BusinessAnalyst, TEXT("Last magazine here."), EOneBrahamVoicePriority::Critical, 4.f),
+		LineFor(TEXT("V_LAST_MAG"), OneBrahamTags::Character_Archetype_Graduate, TEXT("Last magazine here."), EOneBrahamVoicePriority::Critical, 4.f),
+		LineFor(TEXT("V_LAST_MAG"), OneBrahamTags::Character_Archetype_FinanceBroker, TEXT("Last magazine here."), EOneBrahamVoicePriority::Critical, 4.f),
+		LineFor(TEXT("V_LAST_MAG"), OneBrahamTags::Character_Archetype_ITOperations, TEXT("Last magazine here."), EOneBrahamVoicePriority::Critical, 4.f),
+		LineFor(TEXT("V_LAST_MAG"), OneBrahamTags::Character_Archetype_FacilitiesSecurity, TEXT("Last magazine here."), EOneBrahamVoicePriority::Critical, 4.f),
+		LineFor(TEXT("V_LAST_MAG"), OneBrahamTags::Character_Archetype_Consultant, TEXT("Last magazine here."), EOneBrahamVoicePriority::Critical, 4.f),
+
+		// --- V_KEYCARD_FOUND --------------------------------------------------
+		LineFor(TEXT("V_KEYCARD_FOUND"), OneBrahamTags::Character_Archetype_BusinessAnalyst, TEXT("Got a card. Floor nine, looking at the colour."), EOneBrahamVoicePriority::Tactical, 5.f),
+		LineFor(TEXT("V_KEYCARD_FOUND"), OneBrahamTags::Character_Archetype_Graduate, TEXT("Got a card. Floor nine, looking at the colour."), EOneBrahamVoicePriority::Tactical, 5.f),
+		LineFor(TEXT("V_KEYCARD_FOUND"), OneBrahamTags::Character_Archetype_FinanceBroker, TEXT("Got a card. Floor nine, looking at the colour."), EOneBrahamVoicePriority::Tactical, 5.f),
+		LineFor(TEXT("V_KEYCARD_FOUND"), OneBrahamTags::Character_Archetype_ITOperations, TEXT("Got a card. Floor nine, looking at the colour."), EOneBrahamVoicePriority::Tactical, 5.f),
+		LineFor(TEXT("V_KEYCARD_FOUND"), OneBrahamTags::Character_Archetype_FacilitiesSecurity, TEXT("Got a card. Floor nine, looking at the colour."), EOneBrahamVoicePriority::Tactical, 5.f),
+		LineFor(TEXT("V_KEYCARD_FOUND"), OneBrahamTags::Character_Archetype_Consultant, TEXT("Got a card. Floor nine, looking at the colour."), EOneBrahamVoicePriority::Tactical, 5.f),
+
+		// --- V_OVERRIDE_COMPLETE --------------------------------------------------
+		LineFor(TEXT("V_OVERRIDE_COMPLETE"), OneBrahamTags::Character_Archetype_BusinessAnalyst, TEXT("Override's done. Floors opening up."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_OVERRIDE_COMPLETE"), OneBrahamTags::Character_Archetype_Graduate, TEXT("Override's done. Floors opening up."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_OVERRIDE_COMPLETE"), OneBrahamTags::Character_Archetype_FinanceBroker, TEXT("Override's done. Floors opening up."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_OVERRIDE_COMPLETE"), OneBrahamTags::Character_Archetype_ITOperations, TEXT("Override's done. Floors opening up."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_OVERRIDE_COMPLETE"), OneBrahamTags::Character_Archetype_FacilitiesSecurity, TEXT("Override's done. Floors opening up."), EOneBrahamVoicePriority::Critical, 3.f),
+		LineFor(TEXT("V_OVERRIDE_COMPLETE"), OneBrahamTags::Character_Archetype_Consultant, TEXT("Override's done. Floors opening up."), EOneBrahamVoicePriority::Critical, 3.f),
+
+		// --- V_EXTRACTION_CALLED --------------------------------------------------
+		LineFor(TEXT("V_EXTRACTION_CALLED"), OneBrahamTags::Character_Archetype_BusinessAnalyst, TEXT("Helicopter's inbound on the roof - winch is live."), EOneBrahamVoicePriority::Critical, 4.f),
+		LineFor(TEXT("V_EXTRACTION_CALLED"), OneBrahamTags::Character_Archetype_Graduate, TEXT("Helicopter's inbound on the roof - winch is live."), EOneBrahamVoicePriority::Critical, 4.f),
+		LineFor(TEXT("V_EXTRACTION_CALLED"), OneBrahamTags::Character_Archetype_FinanceBroker, TEXT("Helicopter's inbound on the roof - winch is live."), EOneBrahamVoicePriority::Critical, 4.f),
+		LineFor(TEXT("V_EXTRACTION_CALLED"), OneBrahamTags::Character_Archetype_ITOperations, TEXT("Helicopter's inbound on the roof - winch is live."), EOneBrahamVoicePriority::Critical, 4.f),
+		LineFor(TEXT("V_EXTRACTION_CALLED"), OneBrahamTags::Character_Archetype_FacilitiesSecurity, TEXT("Helicopter's inbound on the roof - winch is live."), EOneBrahamVoicePriority::Critical, 4.f),
+		LineFor(TEXT("V_EXTRACTION_CALLED"), OneBrahamTags::Character_Archetype_Consultant, TEXT("Helicopter's inbound on the roof - winch is live."), EOneBrahamVoicePriority::Critical, 4.f),
+
+		// --- V_LOCKDOWN_START --------------------------------------------------
+		LineFor(TEXT("V_LOCKDOWN_START"), OneBrahamTags::Character_Archetype_BusinessAnalyst, TEXT("That's the alarms - they're shutting the floors down."), EOneBrahamVoicePriority::Critical, 4.f),
+		LineFor(TEXT("V_LOCKDOWN_START"), OneBrahamTags::Character_Archetype_Graduate, TEXT("That's the alarms - they're shutting the floors down."), EOneBrahamVoicePriority::Critical, 4.f),
+		LineFor(TEXT("V_LOCKDOWN_START"), OneBrahamTags::Character_Archetype_FinanceBroker, TEXT("That's the alarms - they're shutting the floors down."), EOneBrahamVoicePriority::Critical, 4.f),
+		LineFor(TEXT("V_LOCKDOWN_START"), OneBrahamTags::Character_Archetype_ITOperations, TEXT("That's the alarms - they're shutting the floors down."), EOneBrahamVoicePriority::Critical, 4.f),
+		LineFor(TEXT("V_LOCKDOWN_START"), OneBrahamTags::Character_Archetype_FacilitiesSecurity, TEXT("That's the alarms - they're shutting the floors down."), EOneBrahamVoicePriority::Critical, 4.f),
+		LineFor(TEXT("V_LOCKDOWN_START"), OneBrahamTags::Character_Archetype_Consultant, TEXT("That's the alarms - they're shutting the floors down."), EOneBrahamVoicePriority::Critical, 4.f),
+
+		// --- V_VICTORY --------------------------------------------------
+		LineFor(TEXT("V_VICTORY"), OneBrahamTags::Character_Archetype_BusinessAnalyst, TEXT("That's us on the deck. Somebody's going to have to explain this in the morning."), EOneBrahamVoicePriority::Tactical, 5.f),
+		LineFor(TEXT("V_VICTORY"), OneBrahamTags::Character_Archetype_Graduate, TEXT("That's us on the deck. Somebody's going to have to explain this in the morning."), EOneBrahamVoicePriority::Tactical, 5.f),
+		LineFor(TEXT("V_VICTORY"), OneBrahamTags::Character_Archetype_FinanceBroker, TEXT("That's us on the deck. Somebody's going to have to explain this in the morning."), EOneBrahamVoicePriority::Tactical, 5.f),
+		LineFor(TEXT("V_VICTORY"), OneBrahamTags::Character_Archetype_ITOperations, TEXT("That's us on the deck. Somebody's going to have to explain this in the morning."), EOneBrahamVoicePriority::Tactical, 5.f),
+		LineFor(TEXT("V_VICTORY"), OneBrahamTags::Character_Archetype_FacilitiesSecurity, TEXT("That's us on the deck. Somebody's going to have to explain this in the morning."), EOneBrahamVoicePriority::Tactical, 5.f),
+		LineFor(TEXT("V_VICTORY"), OneBrahamTags::Character_Archetype_Consultant, TEXT("That's us on the deck. Somebody's going to have to explain this in the morning."), EOneBrahamVoicePriority::Tactical, 5.f),
+
+		// --- V_AMBIENT_SKYDECK --------------------------------------------------
+		LineFor(TEXT("V_AMBIENT_SKYDECK"), OneBrahamTags::Character_Archetype_BusinessAnalyst, TEXT("You can see the whole of the City from up here. Shame about the company."), EOneBrahamVoicePriority::Ambient, 60.f, 0.2f),
+		LineFor(TEXT("V_AMBIENT_SKYDECK"), OneBrahamTags::Character_Archetype_Graduate, TEXT("You can see the whole of the City from up here. Shame about the company."), EOneBrahamVoicePriority::Ambient, 60.f, 0.2f),
+		LineFor(TEXT("V_AMBIENT_SKYDECK"), OneBrahamTags::Character_Archetype_FinanceBroker, TEXT("You can see the whole of the City from up here. Shame about the company."), EOneBrahamVoicePriority::Ambient, 60.f, 0.2f),
+		LineFor(TEXT("V_AMBIENT_SKYDECK"), OneBrahamTags::Character_Archetype_ITOperations, TEXT("You can see the whole of the City from up here. Shame about the company."), EOneBrahamVoicePriority::Ambient, 60.f, 0.2f),
+		LineFor(TEXT("V_AMBIENT_SKYDECK"), OneBrahamTags::Character_Archetype_FacilitiesSecurity, TEXT("You can see the whole of the City from up here. Shame about the company."), EOneBrahamVoicePriority::Ambient, 60.f, 0.2f),
+		LineFor(TEXT("V_AMBIENT_SKYDECK"), OneBrahamTags::Character_Archetype_Consultant, TEXT("You can see the whole of the City from up here. Shame about the company."), EOneBrahamVoicePriority::Ambient, 60.f, 0.2f),
+	};
+
+	// De-duplication is on the id AND the archetype filter, not the id alone. An
+	// archetype variant shares its id with the core line by design, so keying on
+	// the id would have dropped all 66 of them on the floor - and the failure
+	// would have been invisible, because the generic recording plays instead.
+	auto AlreadyPresent = [this](const FOneBrahamVoiceLine& Candidate)
+	{
+		return Lines.ContainsByPredicate([&Candidate](const FOneBrahamVoiceLine& Existing)
+		{
+			if (Existing.LineId != Candidate.LineId)
+			{
+				return false;
+			}
+
+			// Same id: the two rows are the same line only if they are recorded
+			// for the same voices.
+			if (Existing.ArchetypeFilter.Num() != Candidate.ArchetypeFilter.Num())
+			{
+				return false;
+			}
+
+			for (const FGameplayTag& Tag : Candidate.ArchetypeFilter)
+			{
+				if (!Existing.ArchetypeFilter.Contains(Tag))
+				{
+					return false;
+				}
+			}
+
+			return true;
+		});
+	};
+
 	int32 Added = 0;
+
 	for (const FOneBrahamVoiceLine& LineEntry : Core)
 	{
-		const bool bExists = Lines.ContainsByPredicate([&LineEntry](const FOneBrahamVoiceLine& Existing)
-		{
-			return Existing.LineId == LineEntry.LineId;
-		});
-
-		if (!bExists)
+		if (!AlreadyPresent(LineEntry))
 		{
 			Lines.Add(LineEntry);
 			++Added;
 		}
 	}
 
-	UE_LOG(LogOneBrahamVoice, Log, TEXT("[OB.VOICE] Core line set ensured: %d added, %d total."), Added, Lines.Num());
+	int32 VariantsAdded = 0;
+
+	for (const FOneBrahamVoiceLine& VariantEntry : Variants)
+	{
+		if (!AlreadyPresent(VariantEntry))
+		{
+			Lines.Add(VariantEntry);
+			++VariantsAdded;
+		}
+	}
+
+	UE_LOG(LogOneBrahamVoice, Log,
+		TEXT("[OB.VOICE] Core line set ensured: %d core and %d variant rows added, %d total. "
+			 "%d lines are recorded six times each."),
+		Added, VariantsAdded, Lines.Num(), UE_ARRAY_COUNT(Variants) / 6);
 }
 
 void UOneBrahamVoiceLineSet::FindLines(FName LineId, TArray<const FOneBrahamVoiceLine*>& OutLines) const
@@ -200,26 +368,48 @@ const FOneBrahamVoiceLine* UOneBrahamVoiceLineSet::PickLine(FName LineId, FGamep
 		return nullptr;
 	}
 
-	// Archetype filter first: a Facilities & Security character and a Graduate
-	// intern do not deliver the same line the same way, and some lines are
-	// written for one voice only.
-	TArray<const FOneBrahamVoiceLine*> Filtered;
-	Filtered.Reserve(Candidates.Num());
+	// Two tiers, in this order, and the order is the whole point:
+	//
+	//   1. lines recorded for this archetype, if any exist;
+	//   2. otherwise the generic line, whose recording is used unpitched.
+	//
+	// The obvious implementation - one pool of everything that is not filtered
+	// away - is wrong in a way that is invisible until somebody counts the
+	// recordings. Eleven lines are recorded six times each (Docs/14, section 4),
+	// so with a single pool a Business Analyst speaking V_DOWNED would have seven
+	// candidates: their own recording and the six-times-generic one, picked at
+	// random. The archetype-specific performance - the reason those 66 recordings
+	// exist and cost money - would play one time in seven.
+	TArray<const FOneBrahamVoiceLine*> ArchetypeLines;
+	ArchetypeLines.Reserve(Candidates.Num());
+
+	TArray<const FOneBrahamVoiceLine*> GenericLines;
+	GenericLines.Reserve(Candidates.Num());
 
 	for (const FOneBrahamVoiceLine* Candidate : Candidates)
 	{
-		if (Candidate->ArchetypeFilter.Num() == 0 || Candidate->ArchetypeFilter.Contains(Archetype))
+		if (Candidate->ArchetypeFilter.Num() == 0)
 		{
-			Filtered.Add(Candidate);
+			GenericLines.Add(Candidate);
+		}
+		else if (Archetype.IsValid() && Candidate->ArchetypeFilter.Contains(Archetype))
+		{
+			ArchetypeLines.Add(Candidate);
 		}
 	}
 
-	if (Filtered.Num() == 0)
+	// A line written for one voice only leaves every other archetype silent
+	// rather than falling back to a recording that does not exist: that is what
+	// the filter is for.
+	if (GenericLines.Num() == 0 && ArchetypeLines.Num() == 0)
 	{
 		return nullptr;
 	}
 
-	return Filtered[Stream.RandRange(0, Filtered.Num() - 1)];
+	const TArray<const FOneBrahamVoiceLine*>& Pool =
+		ArchetypeLines.Num() > 0 ? ArchetypeLines : GenericLines;
+
+	return Pool[Stream.RandRange(0, Pool.Num() - 1)];
 }
 
 bool FOneBrahamVoiceBudget::TryConsume(float Now, int32 FrameBytes, int32 MaxFramesPerSecond, int32 MaxBytesPerSecond)

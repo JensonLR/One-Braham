@@ -34,7 +34,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `check_calls.py` | call sites whose argument count cannot match the project's own declaration (defaults honoured, qualified calls skipped) | **no** | yes |
 | `check_gameplay_tags.py` | every tag the code requests, declared natively or in `DefaultGame.ini`; also resolves `Printf`-assembled tags from local string tables | **no** | yes |
 | `check_building_layout.py` | the floor/area table the map is built from against the floor table the game describes (`DA_BuildingLayout` / its compiled-in default) | **no** | yes |
-| `check_voice_lines.py` | every `V_` line id the code asks for against the script table, plus every scripted line against the recording brief in `Docs/14` | **no** | yes |
+| `check_voice_lines.py` | every `V_` line id the code asks for against the script table, every scripted line against the recording brief in `Docs/14`, and the sixty-six archetype variant rows against the six voices they claim | **no** | yes |
 | `validate_project.py` | the health check and a markdown report | either | yes |
 | `run_all.py` | all of the above, in dependency order, with a report | either | yes |
 

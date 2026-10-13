@@ -229,6 +229,21 @@ because the wheel exposed two genuine holes.
 
 Eleven lines, six times each. These are the lines a player hears most, and the reason two squads sound like two squads. Read the intent column, then say it the way your archetype would - not the way the row above says it.
 
+**How the variants are wired.** Each of these eleven lines is eleven rows in the
+table, not one: the core row every archetype can use, plus six rows carrying the
+same words with an `ArchetypeFilter` naming the voice they were recorded in -
+sixty-six rows in `OneBrahamVoiceLineSet.cpp` under `ARCHETYPE VARIANT
+RECORDINGS`. `PickLine` resolves them in two tiers: lines recorded for the
+speaker's archetype if any exist, otherwise the generic recording. The obvious
+implementation - one pool of everything that is not filtered away - would have
+given a Business Analyst speaking `V_DOWNED` seven candidates and played their
+own performance one time in seven, which is a slow way to waste sixty-six
+recordings.
+
+`check_voice_lines.py` fails the build if a variant names an archetype tag that
+does not exist, if any of the eleven lines is missing a voice, or if the row
+count stops matching the number this document promises.
+
 | Line id | Intent |
 | --- | --- |
 | `V_DOWNED` | the down line, said as news rather than panic |
@@ -239,8 +254,6 @@ Eleven lines, six times each. These are the lines a player hears most, and the r
 | `V_KEYCARD_FOUND` | picked up a card. This is the line that changes the match |
 | `V_OVERRIDE_COMPLETE` | the override finished. Relief, immediately suppressed |
 | `V_EXTRACTION_CALLED` | the winch is called - the loudest thing anyone says all match |
-| `V_LOCKDOWN_WARNING` | **the building, not a person.** This is a fire-drill announcement read by whoever records the PA at Pinewood: pleasant, unhurried, mid-Atlantic corporate, entirely without irony. It should sound exactly like the lift. That is the joke, and it is also the threat |
-| `V_MAN_DOWN` | a bystander, not the downed player, and the tone is practical rather than distressed: somebody has a problem and somebody else is nearest. It is the only line on the comms wheel that is a request for a specific person to do a specific thing |
 | `V_LOCKDOWN_START` | shutters coming down. Understated: the building did it, not them |
 | `V_VICTORY` | on the deck. No celebration, just breathing and one line |
 | `V_AMBIENT_SKYDECK` | the idle line on the roof: ground level to 15th floor, done |
