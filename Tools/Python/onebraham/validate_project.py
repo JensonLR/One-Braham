@@ -97,6 +97,13 @@ WHAT IT CHECKS, AND WHY EACH ONE HAS BITTEN SOMEONE
                                                         controller reads, as one
                                                         pipeline rather than four
                                                         lists that disagree.
+    27. Documented numbers                            - every count written down
+                                                        in the build report and
+                                                        the README, against the
+                                                        count the tooling
+                                                        produces: a stale number
+                                                        in a document reads as
+                                                        verification.
 
     It writes Saved/Validation/ob_validation_<timestamp>.md and exits non-zero on
     any FAIL. Warnings do not fail the build; failures do.
@@ -1482,6 +1489,32 @@ def check_building_layout(v, _config_only):
         v.fail("building layout", message)
 
 
+def check_doc_numbers(v, _config_only):
+    """The numbers in the documentation are the numbers the tooling produces.
+
+    Docs/17's summary table and the README's rule 4 quote counts - declarations
+    checked, call sites checked, references checked - as the evidence that the
+    pipeline is real. Three of them had gone stale (495 declarations when there
+    were 525, 42 asset paths when there were 45, 823 call sites when there were
+    848) and each was fixed by hand, which is a promise to remember. This is the
+    check instead: the counts are re-derived by running the checkers.
+    """
+    try:
+        from onebraham import check_doc_numbers
+    except Exception as exc:  # noqa: BLE001
+        v.warn("documented numbers", u"checker unavailable: {0}".format(exc))
+        return
+
+    checked, problems = check_doc_numbers.run()
+
+    if not problems:
+        v.pass_("documented numbers", u"{0} documented numbers agree with the tooling".format(checked))
+        return
+
+    for message, kind in problems:
+        v.fail("documented numbers", u"[{0}] {1}".format(kind, message))
+
+
 def check_input_actions(v, _config_only):
     """The input pipeline is one pipeline.
 
@@ -1608,6 +1641,7 @@ def build_all(config_only=False):
         ("building layout", check_building_layout),
         ("voice lines", check_voice_lines),
         ("input actions", check_input_actions),
+        ("documented numbers", check_doc_numbers),
     ]
 
     for label, fn in checks:

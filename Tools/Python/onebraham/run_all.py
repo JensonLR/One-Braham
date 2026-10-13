@@ -28,8 +28,8 @@ USAGE
     Outside the editor, for the text-only steps:
         PYTHONPATH=Tools/Python python3 Tools/Python/onebraham/run_all.py --text-only
         (input_ini, cpp_symbols, uht_contracts, soft_paths, calls, tags, layout,
-         voice_lines and input_actions: none needs a running editor, so all nine
-         work on a fresh checkout and in CI)
+         voice_lines, input_actions and doc_numbers: none needs a running editor,
+         so all ten work on a fresh checkout and in CI)
 
     Useful switches:
         --only materials,weapons      run just these steps
@@ -75,6 +75,9 @@ STEPS = [
     ("input_actions", "onebraham.check_input_actions", False,
      "every generated input action against the field that binds it, and the field "
      "against the code that reads it"),
+    ("doc_numbers", "onebraham.check_doc_numbers", False,
+     "every count in the build report and the README against the count the tooling "
+     "actually produces"),
     ("materials", "onebraham.build_materials", True,
      "master materials, physical materials, surface and brand instances"),
     ("environment", "onebraham.build_environment", True,

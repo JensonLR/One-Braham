@@ -35,6 +35,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `check_gameplay_tags.py` | every tag the code requests, declared natively or in `DefaultGame.ini`; also resolves `Printf`-assembled tags from local string tables | **no** | yes |
 | `check_building_layout.py` | the floor/area table the map is built from against the floor table the game describes (`DA_BuildingLayout` / its compiled-in default) | **no** | yes |
 | `check_input_actions.py` | every generated `IA_` action against the `UOneBrahamInputConfig` field that points at it, every field against its action, every `DefaultInput.ini` binding and prompt against a real action, and every `InputConfig->Field` read against the fields that exist | **no** | yes |
+| `check_doc_numbers.py` | every count quoted in this document's build report and in the README against the count the tooling produces | **no** | yes |
 | `check_voice_lines.py` | every `V_` line id the code asks for against the script table, every scripted line against the recording brief in `Docs/14`, and the sixty-six archetype variant rows against the six voices they claim | **no** | yes |
 | `validate_project.py` | the health check and a markdown report | either | yes |
 | `run_all.py` | all of the above, in dependency order, with a report | either | yes |
@@ -60,19 +61,20 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 
 ```
 # ONE BRAHAM - content build report
-**20 steps succeeded, 0 failed.**
+**21 steps succeeded, 0 failed.**
 
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
 | input_ini | OK | 0.0 | wrote 41 actions (40 with a default key) |
-| cpp_symbols | OK | 0.1 | 495 declarations, all defined |
+| cpp_symbols | OK | 0.1 | 525 declarations, all defined |
 | uht_contracts | OK | 0.5 | 773 UE reflection contracts, all satisfied |
-| soft_paths | OK | 0.0 | 42 name-loaded asset paths, all conventional |
-| calls | OK | 0.1 | 823 call sites, all arities plausible |
+| soft_paths | OK | 0.0 | 45 name-loaded asset paths, all conventional |
+| calls | OK | 0.1 | 848 call sites, all arities plausible |
 | tags | OK | 0.2 | 6 resolvable tag requests, all declared |
 | layout | OK | 0.0 | 16 floors, map and layout agree |
 | voice_lines | OK | 0.0 | 34 line references, all declared and documented |
 | input_actions | OK | 0.0 | 41 actions, 41 fields, 92 reads |
+| doc_numbers | OK | 0.0 | 12 documented numbers, all current |
 | materials | OK | 3.1 | 5 masters, 15 physicals, 28 instances |
 ...
 ```
@@ -93,6 +95,7 @@ tags                      text only; a tag that silently matches nothing
 layout                    text only; a floor plan that names the wrong floor
 voice_lines               text only; a character who says nothing, silently
 input_actions             text only; a key that does nothing, and a field that is not there
+doc_numbers               text only; a count that reads as verification and is wrong
       ↓
 materials                 everything references MI_* and PM_OB_*
       ↓
@@ -151,12 +154,12 @@ a header gets noticed before it becomes a runtime null reference.
 # because the project's pipeline runs on a self-hosted UE5 runner.
 stages:
   - lint      : python -m py_compile on every tool
-  - cpp       : PYTHONPATH=Tools/Python python3 run_all.py --only cpp_symbols,uht_contracts,soft_paths,calls,tags,layout,voice_lines,input_actions
+  - cpp       : PYTHONPATH=Tools/Python python3 run_all.py --only cpp_symbols,uht_contracts,soft_paths,calls,tags,layout,voice_lines,input_actions,doc_numbers
                 (declared-but-undefined members, UE reflection contracts, the
                  naming contract for name-loaded assets, call arity, gameplay
                  tags, the building layout, the voice script, the input pipeline,
-                 and the checks that need no engine install at all - so they run
-                 before a runner is ever allocated)
+                 the documented numbers, and the checks that need no engine
+                 install at all - so they run before a runner is ever allocated)
   - config    : PYTHONPATH=Tools/Python python3 run_all.py --text-only
   - build     : UBT build of the Editor, Game, Server and Client targets
   - content   : UnrealEditor-Cmd -run=pythonscript run_all.py
