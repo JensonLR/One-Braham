@@ -27,6 +27,8 @@ USAGE
 
     Outside the editor, for the text-only steps:
         PYTHONPATH=Tools/Python python3 Tools/Python/onebraham/run_all.py --text-only
+        (input_ini + cpp_symbols: neither needs a running editor, so both work on
+         a fresh checkout and in CI)
 
     Useful switches:
         --only materials,weapons      run just these steps
@@ -55,6 +57,8 @@ REPORT_DIR = os.path.join(REPO_ROOT, "Saved", "Build")
 STEPS = [
     ("input_ini", "onebraham.generate_input_ini", False,
      "write the default key bindings into Config/DefaultInput.ini"),
+    ("cpp_symbols", "onebraham.check_cpp_symbols", False,
+     "declared-but-undefined member functions (the link errors grep misses)"),
     ("materials", "onebraham.build_materials", True,
      "master materials, physical materials, surface and brand instances"),
     ("environment", "onebraham.build_environment", True,

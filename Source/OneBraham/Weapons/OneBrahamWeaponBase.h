@@ -258,7 +258,26 @@ protected:
 	TObjectPtr<UStaticMeshComponent> PickupMesh = nullptr;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "One Braham|Components")
-	TObjectPtr<UNiagaraComponent> MuzzleFlashComponent = nullptr;
+		/**
+	 * Conventional generated FX, used when the weapon definition does not name its
+	 * own. Resolved once, at InitialiseFromDefinition.
+	 *
+	 * WHY THESE LIVE ON THE ACTOR
+	 *     The definition is a data asset, and the content build creates weapon
+	 *     definitions before it creates Niagara systems - so a fresh checkout has
+	 *     ten weapons with no muzzle flash, no shell ejection and no tracer, and
+	 *     the only symptom is "the guns do not look like they are firing". The
+	 *     actor caches the generated system instead of writing to the asset, so a
+	 *     designer's authored system always wins and the fallback never mutates
+	 *     content.
+	 */
+	void ResolveFxFallbacks();
+
+	UPROPERTY(Transient) TObjectPtr<UNiagaraSystem> CachedMuzzleFlash = nullptr;
+	UPROPERTY(Transient) TObjectPtr<UNiagaraSystem> CachedShellEject = nullptr;
+	UPROPERTY(Transient) TObjectPtr<UNiagaraSystem> CachedTracer = nullptr;
+
+TObjectPtr<UNiagaraComponent> MuzzleFlashComponent = nullptr;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "One Braham|Components")
 	TObjectPtr<USpotLightComponent> MuzzleLight = nullptr;
@@ -300,6 +319,25 @@ protected:
 	/** Cached component references on the owning character. */
 	UPROPERTY()
 	TWeakObjectPtr<class UOneBrahamWeaponComponent> OwningWeaponComponent;
+
+	/**
+	 * Seconds remaining in a transitional state (Drawing, Holstering, Meleeing).
+	 *
+	 * WHY THIS EXISTS AT ALL
+	 *     A weapon that reaches for its state to decide whether it can fire, and
+	 *     whose only transitions are "hit something" and "be reloaded by
+	 *     something", never becomes Ready after it is drawn - and a weapon that is
+	 *     never Ready can never fire. That is a whole-class-of-nothing-works bug,
+	 *     and it is why every transitional state in this project is on a timer
+	 *     owned by the thing that entered it.
+	 */
+	float StateSecondsRemaining = 0.f;
+
+	/** Finishes a timed state and moves to the state that follows it. */
+	void AdvanceStateTimer(float DeltaSeconds);
+
+	/** Ready, or Empty when the magazine is dry. The state a settled weapon is in. */
+	EOneBrahamWeaponState SettledState() const;
 
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Weapon")
 	bool bSuppressorFitted = false;

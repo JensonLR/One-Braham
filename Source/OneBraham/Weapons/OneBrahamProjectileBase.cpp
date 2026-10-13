@@ -152,6 +152,11 @@ void AOneBrahamProjectileBase::InitialiseUtility(FName InUtilityId, const FVecto
 
 	FuseRemaining = FuseSeconds;
 
+	// The utility type is known from here on, and it is what decides which
+	// detonation effect this actor plays. Resolved on every machine, because the
+	// visual is client-side and the Blueprint may have assigned nothing.
+	ResolveDetonationFX();
+
 	// --- Server fuse ------------------------------------------------------
 	if (HasAuthority())
 	{
@@ -269,6 +274,46 @@ void AOneBrahamProjectileBase::OnProjectileBounce(const FHitResult& ImpactResult
 			// ricochet kills because they are unreadable in a tactical shooter.
 			UE_UNUSED(Character);
 		}
+	}
+}
+
+EOneBrahamVFXEffect AOneBrahamProjectileBase::GetDetonationEffect() const
+{
+	switch (UtilityType)
+	{
+	case EOneBrahamUtilityType::Flashbang:		return EOneBrahamVFXEffect::FlashbangBurst;
+	case EOneBrahamUtilityType::Smoke:			return EOneBrahamVFXEffect::SmokeCloud;
+	case EOneBrahamUtilityType::BreachCharge:	return EOneBrahamVFXEffect::BreachExplosion;
+	case EOneBrahamUtilityType::Frag:
+	default:									return EOneBrahamVFXEffect::FragExplosion;
+	}
+}
+
+void AOneBrahamProjectileBase::ResolveDetonationFX()
+{
+	if (DetonationFX == nullptr)
+	{
+		return;
+	}
+
+	// Already pointed somewhere by the Blueprint: leave the artist's work alone.
+	if (DetonationFX->GetAsset() != nullptr)
+	{
+		return;
+	}
+
+#if WITH_EDITOR
+	// Reached the fallback, which in the editor means somebody opened this
+	// Blueprint and did not pick a system. Loud once, then it just works.
+	UE_LOG(LogOneBraham, Warning,
+		TEXT("[OB.VFX] '%s' has no detonation FX assigned; using the generated "
+			 "NS_OB_* fallback. Assign the authored system in the Blueprint to remove this."),
+		*GetClass()->GetName());
+#endif
+
+	if (UNiagaraSystem* Fallback = UOneBrahamVFXStatics::LoadEffectSystem(GetDetonationEffect()))
+	{
+		DetonationFX->SetAsset(Fallback);
 	}
 }
 

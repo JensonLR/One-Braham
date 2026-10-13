@@ -35,6 +35,26 @@ WHAT IT CHECKS, AND WHY EACH ONE HAS BITTEN SOMEONE
     13. Breachable walls                              - all four walls are the
                                                         real actor, not blockout
                                                         geometry wearing a tag.
+    14. Declared-but-undefined member functions       - a method declared in a
+                                                        header with no definition
+                                                        anywhere is a link error.
+    15. Project includes                              - an include naming a file
+                                                        that does not exist.
+    16. Log categories                                - a category the C++ logs
+                                                        to that the ini never
+                                                        mentions defaults to All.
+    17. Brace balance                                 - a file with one brace too
+                                                        few is a bad edit that
+                                                        reads as 400 errors.
+    18. VFX reachability                              - an effect that exists as
+                                                        an enum value and an
+                                                        asset, and is spawned by
+                                                        nothing, is an asset the
+                                                        player never sees.
+    19. Surface coverage                              - a physical material with
+                                                        no geometry using it means
+                                                        the room sounds and reacts
+                                                        like whatever is left over.
 
     It writes Saved/Validation/ob_validation_<timestamp>.md and exits non-zero on
     any FAIL. Warnings do not fail the build; failures do.
@@ -843,6 +863,415 @@ def check_config(v, _config_only):
             v.warn("config", u"{0} not found ({1})".format(needle, why))
 
 
+def check_cpp_symbols(v, _config_only):
+    """Every member function declared in a class body must be defined somewhere.
+
+    The compiler finds this and the linker finds this, but both find it minutes
+    into a build that a machine has to be able to run. This finds it in 0.3 s on
+    any machine, which means it is the check that actually gets run.
+    """
+    try:
+        from onebraham import check_cpp_symbols
+    except Exception as exc:  # noqa: BLE001
+        v.warn("cpp symbols", u"checker unavailable: {0}".format(exc))
+        return
+
+    checked, missing = check_cpp_symbols.run()
+
+    if checked == 0:
+        v.warn("cpp symbols", u"no source parsed - is Source/OneBraham missing?")
+        return
+
+    if not missing:
+        v.pass_("cpp symbols", u"all {0} declared member functions have definitions".format(checked))
+        return
+
+    # A missing definition is a certain link error, so this is a failure, not a
+    # warning: it cannot be argued with at runtime.
+    for rel, class_name, name in missing:
+        v.fail("cpp symbols", u"{0}: {1}::{2} is declared but never defined".format(
+            rel, class_name, name))
+
+
+def check_cpp_includes(v, _config_only):
+    """Every project header an included name refers to must exist on disk.
+
+    A file that writes `#include "Core/OneBrahamTypse.h"` is a compile error on
+    the line that includes it, and the compiler's message names the include, not
+    the typo. This distinguishes project includes from engine includes by name:
+    an include is "ours" when it resolves inside Source/OneBraham, or when it
+    starts with one of our own subdirectory names, or when its file name is one
+    of our headers. Everything else is an engine header and is left alone.
+    """
+    if not os.path.isdir(SOURCE_DIR):
+        v.warn("cpp includes", u"no Source/OneBraham directory; skipped")
+        return
+
+    # The project's own header names and top-level package names.
+    header_names = set()
+    packages = set()
+
+    for dirpath, _dirs, files in os.walk(SOURCE_DIR):
+        rel_dir = os.path.relpath(dirpath, SOURCE_DIR)
+
+        if rel_dir != ".":
+            packages.add(rel_dir.split(os.sep)[0])
+
+        for name in files:
+            if name.endswith(".h"):
+                header_names.add(name)
+
+    checked = 0
+    missing = []
+
+    for dirpath, _dirs, files in os.walk(SOURCE_DIR):
+        for name in files:
+            if not name.endswith((".cpp", ".h")):
+                continue
+
+            path = os.path.join(dirpath, name)
+
+            with io.open(path, encoding="utf-8", errors="ignore") as handle:
+                text = handle.read()
+
+            for match in re.finditer(r'^\s*#include\s+"([^"]+)"', text, re.MULTILINE):
+                target = match.group(1)
+
+                if target.endswith(".generated.h"):
+                    continue
+
+                base = os.path.basename(target)
+                first = target.split("/")[0]
+
+                # Ours only if it is one of our headers, or under one of our dirs.
+                if base not in header_names and first not in packages and "/" not in target:
+                    continue
+                if base not in header_names and first not in packages:
+                    continue
+
+                checked += 1
+
+                # Quoted includes resolve against the including file's own
+                # directory first, then the include paths - so "OneBrahamTypes.h"
+                # written inside Core/ is correct and must not be reported.
+                if os.path.isfile(os.path.join(SOURCE_DIR, target)):
+                    continue
+                if os.path.isfile(os.path.join(os.path.dirname(path), target)):
+                    continue
+
+                missing.append((os.path.relpath(path, SOURCE_DIR), target))
+
+    if not missing:
+        v.pass_("cpp includes", u"all {0} project includes resolve".format(checked))
+        return
+
+    for rel, target in missing:
+        v.fail("cpp includes", u"{0} includes '{1}', which does not exist".format(rel, target))
+
+
+def check_log_categories(v, _config_only):
+    """Every LogOneBraham* category declared in C++ must have a verbosity entry.
+
+    Unreal's own default for an undeclared category is the compile-time default
+    in DECLARE_LOG_CATEGORY_EXTERN, which for this project is All - so a missing
+    entry is not "no logs", it is "every log, forever, including in Shipping".
+    That is the failure this check exists to prevent.
+    """
+    header = os.path.join(SOURCE_DIR, "OneBraham.h")
+    engine_ini_path = os.path.join(CONFIG_DIR, "DefaultEngine.ini")
+
+    if not os.path.isfile(header) or not os.path.isfile(engine_ini_path):
+        v.warn("log categories", u"OneBraham.h or DefaultEngine.ini missing; skipped")
+        return
+
+    with io.open(header, encoding="utf-8", errors="ignore") as handle:
+        header_text = handle.read()
+
+    declared = sorted(set(re.findall(r'DECLARE_LOG_CATEGORY_EXTERN\((LogOneBraham[A-Za-z0-9_]*),',
+                                     header_text)))
+
+    with io.open(engine_ini_path, encoding="utf-8", errors="ignore") as handle:
+        ini_text = handle.read()
+
+    section = re.search(r'^\[Core\.Log\](.*?)(?=^\[|\Z)', ini_text, re.MULTILINE | re.DOTALL)
+    table = {}
+    if section is not None:
+        for line in section.group(1).splitlines():
+            line = line.strip()
+            if not line or line.startswith(";") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            table[key.strip()] = value.strip()
+
+    if not declared:
+        v.fail("log categories", u"no LogOneBraham* categories declared in OneBraham.h")
+        return
+
+    missing = [name for name in declared if name not in table]
+
+    if missing:
+        for name in missing:
+            v.fail("log categories", u"{0} is declared in C++ with no [Core.Log] entry "
+                                    u"(it will run at its compile-time default)".format(name))
+        return
+
+    v.pass_("log categories", u"all {0} project categories have a verbosity in DefaultEngine.ini".format(
+        len(declared)))
+
+    # The audit category is the one that must never be quietened; it is quoted in
+    # the moderation docs and in the anti-cheat section of Docs/18.
+    if table.get("LogOneBrahamAudit", "All").lower() not in ("all", "verbose", "veryverbose"):
+        v.warn("log categories", u"LogOneBrahamAudit is set to {0}; Docs/18 promises a full audit "
+                                 u"trail (All is expected)".format(table["LogOneBrahamAudit"]))
+
+
+def check_delimiters(v, _config_only):
+    """Every source file's braces, parentheses and brackets must balance.
+
+    This is the cheapest possible check and it catches the most expensive class
+    of editing mistake: a deleted closing brace. Unreal will report four hundred
+    unrelated errors from a parser that lost its place, and the one line that is
+    actually wrong is nowhere in the output. Comments and string literals are
+    stripped first, so a brace inside a TEXT() or a comment does not count.
+    """
+    try:
+        from onebraham import check_cpp_symbols as symbols
+    except Exception as exc:  # noqa: BLE001
+        v.warn("delimiters", u"checker unavailable: {0}".format(exc))
+        return
+
+    if not os.path.isdir(SOURCE_DIR):
+        v.warn("delimiters", u"no Source/OneBraham directory; skipped")
+        return
+
+    files = 0
+    bad = []
+
+    for dirpath, _dirs, names in os.walk(SOURCE_DIR):
+        for name in names:
+            if not name.endswith((".cpp", ".h")):
+                continue
+
+            path = os.path.join(dirpath, name)
+            files += 1
+
+            with io.open(path, encoding="utf-8", errors="ignore") as handle:
+                text = symbols.strip_comments_and_strings(handle.read())
+
+            for opener, closer, label in (("{", "}", "braces"), ("(", ")", "parentheses"),
+                                          ("[", "]", "brackets")):
+                opened = text.count(opener)
+                closed = text.count(closer)
+
+                if opened != closed:
+                    bad.append((os.path.relpath(path, SOURCE_DIR), label, opened, closed))
+
+    if not bad:
+        v.pass_("delimiters", u"all {0} source files balance their braces, parentheses and brackets".format(files))
+        return
+
+    for rel, label, opened, closed in bad:
+        v.fail("delimiters", u"{0}: {1} do not balance ({2} open, {3} close)".format(
+            rel, label, opened, closed))
+
+
+def check_vfx_reachability(v, _config_only):
+    """Every VFX effect must be spawned by something, directly or through a helper.
+
+    An effect can be declared in the enum, authored as a Niagara system by the
+    content build, culled correctly, budgeted correctly - and never spawned,
+    because nobody wrote the one line that asks for it. Nothing else catches
+    that: the asset validates, the enum validates, and the player simply never
+    sees a shell casing.
+
+    "Spawned" here means one of two things:
+      * named literally by gameplay code, or
+      * returned by a function in OneBrahamVFXStatics.cpp that gameplay code can
+        actually reach - followed through the internal calls, so that a surface
+        mapping used by SpawnImpact counts and a helper nobody calls does not.
+
+    The dispatch switch that names all seventeen effects is deliberately not
+    counted: it would make the check pass by construction.
+    """
+    statics_h = os.path.join(SOURCE_DIR, "VFX", "OneBrahamVFXStatics.h")
+    statics_cpp = os.path.join(SOURCE_DIR, "VFX", "OneBrahamVFXStatics.cpp")
+
+    if not os.path.isfile(statics_h) or not os.path.isfile(statics_cpp):
+        v.warn("vfx reachability", u"the VFX library is missing; skipped")
+        return
+
+    with io.open(statics_h, encoding="utf-8", errors="ignore") as handle:
+        header = handle.read()
+
+    enum_body = re.search(r'enum class EOneBrahamVFXEffect[^{]*\{(.*?)\}', header, re.DOTALL)
+    if enum_body is None:
+        v.fail("vfx reachability", u"EOneBrahamVFXEffect not found in VFXStatics.h")
+        return
+
+    effects = [name.strip() for name in re.split(r'[,\n]', enum_body.group(1)) if name.strip()]
+
+    if not effects:
+        v.fail("vfx reachability", u"EOneBrahamVFXEffect is empty")
+        return
+
+    # --- 1. What gameplay code names outright -----------------------------
+    referenced = set()
+    external_text = []
+
+    for dirpath, _dirs, names in os.walk(SOURCE_DIR):
+        for name in names:
+            if not name.endswith(".cpp"):
+                continue
+
+            path = os.path.join(dirpath, name)
+            if os.path.normpath(path) == os.path.normpath(statics_cpp):
+                continue
+
+            with io.open(path, encoding="utf-8", errors="ignore") as handle:
+                text = handle.read()
+
+            external_text.append(text)
+
+            for match in re.finditer(r'EOneBrahamVFXEffect::([A-Za-z0-9_]+)', text):
+                referenced.add(match.group(1))
+
+    joined_external = "\n".join(external_text)
+
+    # --- 2. The VFX library's own call graph ------------------------------
+    with io.open(statics_cpp, encoding="utf-8", errors="ignore") as handle:
+        library = handle.read()
+
+    functions = {}
+    for match in re.finditer(r'^(?:[A-Za-z_:<>*&\s]+?)\sUOneBrahamVFXStatics::([A-Za-z0-9_]+)\s*\(', library, re.MULTILINE):
+        fn_name = match.group(1)
+        open_index = library.index("{", match.end() - 1)
+
+        depth = 0
+        index = open_index
+        while index < len(library):
+            if library[index] == "{":
+                depth += 1
+            elif library[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            index += 1
+
+        body = library[open_index:index + 1]
+        functions[fn_name] = body
+
+    # Which library functions are callable from outside, and which call which.
+    entry_points = set()
+    for fn_name in functions:
+        if re.search(r'\b' + re.escape(fn_name) + r'\s*\(', joined_external):
+            entry_points.add(fn_name)
+
+    reachable_functions = set()
+    frontier = list(entry_points)
+
+    while frontier:
+        current = frontier.pop()
+        if current in reachable_functions:
+            continue
+        reachable_functions.add(current)
+
+        body = functions.get(current, "")
+        for candidate in functions:
+            if candidate in reachable_functions:
+                continue
+            if re.search(r'\bUOneBrahamVFXStatics::' + re.escape(candidate) + r'\s*\(', body) or \
+               re.search(r'\b' + re.escape(candidate) + r'\s*\(', body):
+                frontier.append(candidate)
+
+    for fn_name in reachable_functions:
+        for match in re.finditer(r'EOneBrahamVFXEffect::([A-Za-z0-9_]+)', functions.get(fn_name, "")):
+            referenced.add(match.group(1))
+
+    unreachable = [name for name in effects if name not in referenced]
+
+    if not unreachable:
+        v.pass_("vfx reachability", u"all {0} VFX effects are spawned from reachable gameplay code".format(
+            len(effects)))
+        return
+
+    for name in unreachable:
+        v.fail("vfx reachability",
+               u"EOneBrahamVFXEffect::{0} is authored and budgeted but nothing ever spawns it".format(name))
+
+
+def check_surface_coverage(v, config_only):
+    """Every authored surface must be on the map, and every room must have a finish.
+
+    Fifteen physical materials are authored by build_materials.py. Nothing
+    forced the map to use more than one of them until this check existed, and a
+    surface that appears nowhere in the level is invisible in every other
+    validation: the asset exists, the enum exists, the footsteps simply always
+    sound like carpet.
+    """
+    manifest = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                             "..", "onebraham_build_manifest.json"))
+
+    if not os.path.isfile(manifest):
+        if config_only:
+            v.warn("surface coverage", u"no manifest yet - run Scripts/BuildContent.bat --editor "
+                                      u"to prove the map uses every surface")
+        else:
+            v.warn("surface coverage", u"no build manifest; the map has not been built")
+        return
+
+    try:
+        import json
+        with io.open(manifest, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except Exception as exc:  # noqa: BLE001
+        v.fail("surface coverage", u"the build manifest is unreadable: {0}".format(exc))
+        return
+
+    surfaces = data.get("surfaces") or []
+    usage = data.get("surface_usage") or {}
+    finishes = data.get("floor_finishes") or []
+
+    if not surfaces:
+        v.fail("surface coverage", u"the manifest lists no surfaces at all")
+        return
+
+    # Flesh is a gameplay surface: it is what a character hit resolves to, and
+    # there is deliberately no flesh geometry in the building.
+    gameplay_only = {"Flesh"}
+
+    missing = [name for name in surfaces if name not in gameplay_only and not usage.get(name)]
+
+    if missing:
+        for name in missing:
+            v.fail("surface coverage", u"surface '{0}' is authored but used by no geometry; "
+                                       u"footsteps and impacts will fall back".format(name))
+    else:
+        used = len([n for n in surfaces if usage.get(n)])
+        v.pass_("surface coverage", u"{0} of {1} surfaces are placed in the building".format(
+            used, len(surfaces)))
+
+    # Rooms without a finish: the manifest is the only place this is visible,
+    # because a room with no finish simply keeps the area slab.
+    rooms = data.get("rooms") or []
+
+    if rooms and not finishes:
+        # A manifest with rooms and no finishes at all means the finish pass did
+        # not run: every room is standing on the area slab and the whole floor
+        # sounds the same.
+        v.fail("surface coverage", u"{0} rooms recorded but no floor finishes at all - "
+                                   u"the finish pass did not run".format(len(rooms)))
+    elif rooms and finishes:
+        finished = set((entry.get("area"), entry.get("room")) for entry in finishes)
+        unfinished = [r for r in rooms if (r.get("area"), r.get("name")) not in finished]
+
+        if unfinished:
+            for room in unfinished[:8]:
+                v.warn("surface coverage", u"room {0}/{1} has no floor finish recorded".format(
+                    room.get("area"), room.get("name")))
+        else:
+            v.pass_("surface coverage", u"all {0} rooms record a floor finish".format(len(rooms)))
+
+
 # ---------------------------------------------------------------------------
 #  Report
 # ---------------------------------------------------------------------------
@@ -896,6 +1325,12 @@ def build_all(config_only=False):
         ("cosmetics", check_cosmetics),
         ("performance", check_performance),
         ("config", check_config),
+        ("cpp symbols", check_cpp_symbols),
+        ("cpp includes", check_cpp_includes),
+        ("log categories", check_log_categories),
+        ("delimiters", check_delimiters),
+        ("vfx reachability", check_vfx_reachability),
+        ("surface coverage", check_surface_coverage),
     ]
 
     for label, fn in checks:

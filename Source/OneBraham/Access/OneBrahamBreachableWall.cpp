@@ -6,7 +6,6 @@
 #include "Access/OneBrahamAccessZoneComponent.h"
 #include "Audio/OneBrahamAudioManagerComponent.h"
 #include "Characters/OneBrahamCharacter.h"
-#include "Core/OneBrahamGameSettings.h"
 #include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamGameplayTags.h"
 #include "Core/OneBrahamPlayerController.h"
@@ -20,7 +19,6 @@
 #include "Materials/MaterialInterface.h"
 #include "NavigationSystem.h"
 #include "Net/UnrealNetwork.h"
-#include "TimerManager.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -329,9 +327,19 @@ void AOneBrahamBreachableWall::MulticastPlayBreachEffects_Implementation(const F
 	UOneBrahamVFXStatics::SpawnEffect(this, EOneBrahamVFXEffect::BreachExplosion, Origin);
 	UOneBrahamVFXStatics::SpawnEffect(this, EOneBrahamVFXEffect::BreachDebris, Origin, FRotator::ZeroRotator, FVector(1.6f));
 
+	// A multicast can arrive while the world is being torn down - the extraction
+	// completes, the server starts travelling, and a charge that was already in
+	// the air detonates into a dying world. GetPlayerControllerIterator() derefs
+	// the world, so the guard is load-bearing rather than defensive.
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
 	// Audio through the local player's manager so the mix, the duck and the
 	// occlusion all apply exactly as they do for a door being breached.
-	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
 		AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(It->Get());
 		if (PC == nullptr || !PC->IsLocalController())

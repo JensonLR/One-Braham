@@ -337,6 +337,27 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Character")
 	TObjectPtr<UOneBrahamCharacterDataAsset> CharacterData;
 
+	/** True once the "no registry found" warning has been logged, so it logs once. */
+	bool bLoggedMissingCharacterData = false;
+
+	/**
+	 * Returns the character registry, loading it on first use.
+	 *
+	 * ORDER OF RESOLUTION
+	 *     1. The asset assigned on this Blueprint (the normal shipping path).
+	 *     2. Project Settings -> One Braham -> Content -> CharacterRegistry.
+	 *     3. The well-known path /Game/OneBraham/Characters/DA_CharacterRegistry.
+	 *
+	 * WHY IT IS A FUNCTION AND NOT A CONSTRUCTOR ASSIGNMENT
+	 *     A character spawned from C++ (a test, a bot, a command-line smoke test)
+	 *     has no Blueprint to assign the asset on. Without a fallback the
+	 *     archetype lookup returns early, cosmetics return early, and the whole
+	 *     character system silently does nothing while looking correct. The
+	 *     weapon component already resolves its registry this way; this is the
+	 *     same pattern in the other half of the game.
+	 */
+	UOneBrahamCharacterDataAsset* ResolveCharacterData();
+
 	// --- Input state ------------------------------------------------------
 	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Character")
 	bool bSprintRequested = false;

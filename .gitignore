@@ -53,3 +53,17 @@ ServerSecrets/
 # --- Local packaged output --------------------------------------------------
 Dist/
 DistLocal/
+
+# --- Python -----------------------------------------------------------------
+# The content pipeline is Python, and Python writes bytecode next to its
+# sources. Bytecode is an artefact of whatever interpreter a machine happened to
+# run: committing it produces a diff every time anybody touches a tool, and it
+# can even be loaded in preference to a corrected .py.
+__pycache__/
+*.py[cod]
+*.pyd
+
+# The content build's manifest is an output of build_environment.py, not a
+# source file. It is written on the machine that runs the build, and every
+# machine that has run one has its own.
+Tools/Python/onebraham_build_manifest.json

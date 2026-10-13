@@ -133,6 +133,14 @@ void AOneBrahamCharacter::BeginPlay()
 		HealthComponent->OnDeath.AddDynamic(this, &AOneBrahamCharacter::HandleDeath);
 	}
 
+	// Resolve the registry on the server once, at spawn, so the archetype is
+	// applied on the same frame the player state arrives rather than on whichever
+	// call happens to touch appearance first.
+	if (HasAuthority())
+	{
+		ResolveCharacterData();
+	}
+
 	// Seed the floor from the spawn Z so the HUD is correct on frame one.
 	CurrentFloorIndex = 1;
 	UpdateFloorIndex(0.f);
@@ -535,6 +543,34 @@ void AOneBrahamCharacter::SetCurrentFloorIndex(int32 NewFloor)
 // ==========================================================================
 //  Appearance
 // ==========================================================================
+UOneBrahamCharacterDataAsset* AOneBrahamCharacter::ResolveCharacterData()
+{
+	if (CharacterData != nullptr)
+	{
+		return CharacterData;
+	}
+
+	// The config-declared registry, so a project can move its content without a
+	// code change.
+	CharacterData = UOneBrahamGameSettings::Get().CharacterRegistry.LoadSynchronous();
+
+	if (CharacterData == nullptr)
+	{
+		// The last resort: the path the content build always writes.
+		CharacterData = LoadObject<UOneBrahamCharacterDataAsset>(
+			nullptr, TEXT("/Game/OneBraham/Characters/DA_CharacterRegistry.DA_CharacterRegistry"));
+	}
+
+	if (CharacterData == nullptr && !bLoggedMissingCharacterData)
+	{
+		bLoggedMissingCharacterData = true;
+		OB_WARN("No character registry: '%s' will use its Blueprint's meshes only. "
+			"Run Scripts/BuildContent.bat to create DA_CharacterRegistry.", *GetName());
+	}
+
+	return CharacterData;
+}
+
 void AOneBrahamCharacter::ApplyArchetype(FGameplayTag ArchetypeTag)
 {
 	if (!ArchetypeTag.IsValid())
@@ -544,17 +580,18 @@ void AOneBrahamCharacter::ApplyArchetype(FGameplayTag ArchetypeTag)
 
 	Appearance.ArchetypeTag = ArchetypeTag;
 
-	if (CharacterData == nullptr)
+	UOneBrahamCharacterDataAsset* Registry = ResolveCharacterData();
+	if (Registry == nullptr)
 	{
 		return;
 	}
 
 	// The data asset maps an archetype to: body mesh variant, face, hair, voice
 	// set, and animation personality blend weights. See Docs/13.
-	const FOneBrahamArchetypeDefinition* Definition = CharacterData->FindArchetype(ArchetypeTag);
+	const FOneBrahamArchetypeDefinition* Definition = Registry->FindArchetype(ArchetypeTag);
 	if (Definition == nullptr)
 	{
-		OB_WARN("No archetype definition for '%s' in '%s'.", *ArchetypeTag.ToString(), *CharacterData->GetName());
+		OB_WARN("No archetype definition for '%s' in '%s'.", *ArchetypeTag.ToString(), *Registry->GetName());
 		return;
 	}
 
@@ -599,14 +636,16 @@ void AOneBrahamCharacter::ApplyCosmetics(const TMap<FName, FName>& InCosmetics)
 	// (jacket, fleece, hi-vis, lanyard, badge, backpack). They are looked up from
 	// the character data asset and applied as leader-pose components; see
 	// Docs/13_Characters_Clothing.md for the full slot -> asset table.
-	if (CharacterData == nullptr || GetMesh() == nullptr)
+	UOneBrahamCharacterDataAsset* Registry = ResolveCharacterData();
+
+	if (Registry == nullptr || GetMesh() == nullptr)
 	{
 		return;
 	}
 
 	for (const TPair<FName, FName>& Pair : InCosmetics)
 	{
-		const FOneBrahamCosmeticSlot* Slot = CharacterData->FindCosmeticSlot(Pair.Key);
+		const FOneBrahamCosmeticSlot* Slot = Registry->FindCosmeticSlot(Pair.Key);
 		if (Slot == nullptr)
 		{
 			continue;
@@ -616,7 +655,7 @@ void AOneBrahamCharacter::ApplyCosmetics(const TMap<FName, FName>& InCosmetics)
 		{
 			if (USkeletalMesh* CosmeticMesh = MeshPtr->LoadSynchronous())
 			{
-				CharacterData->ApplyCosmeticToMesh(GetMesh(), Slot, CosmeticMesh);
+				Registry->ApplyCosmeticToMesh(GetMesh(), Slot, CosmeticMesh);
 			}
 		}
 	}

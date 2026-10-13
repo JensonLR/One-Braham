@@ -17,6 +17,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Core/OneBrahamTypes.h"
+#include "VFX/OneBrahamVFXStatics.h"
 #include "OneBrahamProjectileBase.generated.h"
 
 class UStaticMeshComponent;
@@ -179,6 +180,34 @@ protected:
 	/** Server: increments the grenade bounce count and starts the fuse early after bounces. */
 	UFUNCTION()
 	void OnProjectileStop(const FHitResult& ImpactResult);
+	/**
+	 * The Niagara effect this utility detonates with.
+	 *
+	 * Frag -> FragExplosion, Flashbang -> FlashbangBurst, Smoke -> SmokeCloud,
+	 * Breach charge -> BreachExplosion. Kept as a mapping in C++ rather than as
+	 * four Blueprint defaults because the fallback below has to be able to name
+	 * the system it wants before any Blueprint has been authored.
+	 */
+	EOneBrahamVFXEffect GetDetonationEffect() const;
+
+	/**
+	 * Points DetonationFX at a system.
+	 *
+	 * RESOLUTION ORDER
+	 *     1. The system already assigned (the Blueprint's own, hand-authored FX).
+	 *     2. UOneBrahamVFXStatics::LoadEffectSystem(GetDetonationEffect()) - the
+	 *        conventional /Game/OneBraham/VFX/NS_OB_* asset that the content build
+	 *        generates.
+	 *
+	 * Without step 2, a frag thrown on a fresh checkout detonates with the audio,
+	 * the damage and the camera shake, and no visual whatsoever: every one of the
+	 * utility effects would be reachable only from a Blueprint that a human had
+	 * to remember to configure. This is the same fallback the HUD uses for its
+	 * widget class and the weapon component uses for its registry.
+	 */
+	void ResolveDetonationFX();
+
+
 
 	TWeakObjectPtr<class AOneBrahamCharacter> Thrower;
 

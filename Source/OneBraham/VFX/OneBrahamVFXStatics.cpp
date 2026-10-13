@@ -80,6 +80,20 @@ namespace
 		}
 	}
 
+	/** True for surfaces that are electrically live: a hit there throws sparks. */
+	bool SurfaceSparks(EOneBrahamFootstepSurface Surface)
+	{
+		switch (Surface)
+		{
+		case EOneBrahamFootstepSurface::ServerRack:
+		case EOneBrahamFootstepSurface::Grating:
+			return true;
+
+		default:
+			return false;
+		}
+	}
+
 	/** Cache: effect -> loaded system (or null once we know it is missing). */
 	TMap<EOneBrahamVFXEffect, TWeakObjectPtr<UNiagaraSystem>> GEffectCache;
 	TSet<EOneBrahamVFXEffect> GMissingEffects;
@@ -353,6 +367,16 @@ void UOneBrahamVFXStatics::SpawnImpact(UObject* WorldContextObject, const FOneBr
 			// Nothing else to do: the actor manages its own lifetime.
 			(void)Fallback;
 		}
+	}
+
+	// --- Sparks on live equipment -----------------------------------------
+	// A server rack, a riser cupboard and a lift motor all have 400 V in them.
+	// The impact family stays metal (that is what the hole looks like) and the
+	// sparks are a second, short-lived burst on top, because a rack that sparks
+	// when shot is the single cheapest way to make floors 9-11 feel dangerous.
+	if (!bCharacterHit && Intensity > 0.45f && SurfaceSparks(Impact.Surface))
+	{
+		SpawnEffect(WorldContextObject, EOneBrahamVFXEffect::SparkShower, Location, Rotation, FVector(1.f));
 	}
 
 	// --- Blood mist on a character hit ------------------------------------

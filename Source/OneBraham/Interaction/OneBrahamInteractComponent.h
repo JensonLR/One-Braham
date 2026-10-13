@@ -108,9 +108,6 @@ protected:
 	/** Server: ticks hold progress and completes when the duration is met. */
 	void TickHoldProgress(float DeltaTime);
 
-	/** Server: fires the tap interaction on end-of-press. */
-	void CompleteTapInteraction();
-
 	/** Plays the correct first-person + third-person montage for the interaction. */
 	void PlayInteractionMontage(FGameplayTag InteractionTag, bool bStart);
 

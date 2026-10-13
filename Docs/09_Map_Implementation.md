@@ -209,7 +209,114 @@ Built into the generator, not bolted on afterwards:
 
 ---
 
-## 5. Rebuilding and changing the map
+## 5. What the map is responsible for
+
+The map is not scenery. Three systems read the building itself, and each of them
+reads a different property of the geometry the generator places. This section is
+the contract between the level and those systems, and two of the three are
+enforced by `validate_project.py`.
+
+### 5.1 Floor finishes: fifteen surfaces, not one
+
+Every floor is built as a slab in its area's material, and then every room gets a
+finish laid on top of it — 4 mm proud, inset by the partition thickness, labelled
+`F<floor>_<Room>_Finish`.
+
+The finish is what the player's footsteps resolve from, what the bullet impact
+family resolves from, and what the impact decal is chosen from. Without it the
+whole tower is carpet, which sounds wrong, reacts wrong and is the single
+cheapest way to make a game built inside one building feel like one room.
+
+| Surface | Where it is, in the building |
+| --- | --- |
+| Marble | lobby slab, reception island, turnstile banks, lift lobby |
+| Carpet | desk farms, meeting rooms, corner offices, waiting seating, breakout |
+| Concrete | plaza slab, loading bay, under-stair stores, core, stairwell landings |
+| Metal | lift doors, handrails, riser cupboards |
+| Glass / BallisticGlass | the perimeter glazing bands on floors 2–15 |
+| Wood | the boardroom, the exec bar pavilion, the Skydeck bar |
+| Puddle | kitchen floor, bike store — deliberately wet, deliberately loud |
+| Grating | plant rooms, power rooms, comms cupboards, the Skydeck plant deck |
+| Fabric | the acoustic meeting pods on the mezzanine and in open plan |
+| ServerRack | the raised floor of the cold aisle, both server rows and the NOC |
+| Plasterboard | every partition, every ceiling, all four breachable walls |
+| Lino | canteen hall, servery, break-out kitchen, print alcove, security desk |
+| Decking | the Skydeck, the helipad, the edge rails, the canteen terrace |
+| Flesh | gameplay only — a character hit resolves to it; no geometry uses it |
+
+Two of these have gameplay attached, which is why the table matters:
+**ServerRack** and **Grating** are the surfaces that throw sparks when shot, so
+the server floors have to be rack floor rather than carpet for the sparks to
+happen at all, and **Puddle** is the only surface that produces water spray.
+
+The generator records where every surface ended up in the build manifest, and the
+validator fails if an authored surface is used by nothing.
+
+### 5.2 Effects the map triggers
+
+The building is what makes the effects happen: a partition gives dust, a rack
+gives sparks, a fall gives a body landing. `Docs/11` carries the full
+seventeen-effect table with its call sites; the map's half of it is:
+
+| The map provides | The effect that follows |
+| --- | --- |
+| Four breachable plasterboard partitions | `BreachExplosion`, `BreachDebris`, `DustPuff`, wall collapse audio |
+| Rack floor and grating | `SparkShower` on every hit |
+| Kitchen and bike-store floors | `WaterSpray` |
+| Ballistic glazing on every floor edge | `GlassImpact`, glass decals, shatter audio |
+| Fire shutters on floors 0–13 | `DustPuff` on the closing edge, 2.75 s of mechanism audio |
+| Stairwell drops of one to three storeys | `CorpseImpact` when the body lands |
+| The Skydeck pad in the open | smoke, flashes and the extraction fight happening in view of the helicopter |
+
+### 5.3 Lighting, grade and audio, per floor
+
+Each streaming floor level is created by `build_floor_level`, which places four
+things besides the geometry, so a new floor gets all of them without anyone
+remembering to add them — which is the point of generating the map rather than
+placing it.
+
+**Ceiling light grid.** `RectLight` panels on a 600 cm grid across the whole
+floor plate, 4000 K, 2600 cd, 700 cm attenuation, static mobility. The count is
+derived from the floor's own footprint, so the plaza gets a grid appropriate to
+9000 cm² and a meeting pod does not get one of its own. This is the game's
+central visual contrast: fourteen floors of flat, faintly green office light, one
+floor of London weather.
+
+**One unbound `PostProcessVolume` per floor**, carrying that area's grade:
+manual exposure range, bloom, film grain and vignette, from `AREA_GRADE`. The
+ranges are wide on purpose — clamped exposure is what stops a player walking out
+of the plant room into the glazing and being flash-blinded for a second and a
+half.
+
+| Area | Exposure range | Bloom | Grain | Vignette |
+| --- | --- | --- | --- | --- |
+| Ground Plaza | 0.35 – 2.4 | 0.85 | 0.030 | 0.42 |
+| Lobby | 0.40 – 2.2 | 0.75 | 0.028 | 0.38 |
+| Mezzanine | 0.45 – 2.1 | 0.70 | 0.026 | 0.36 |
+| Open Plan | 0.60 – 1.9 | 0.55 | 0.022 | 0.30 |
+| Server & Comms | 0.22 – 1.6 | 0.40 | 0.034 | 0.46 |
+| Executive | 0.65 – 2.0 | 0.60 | 0.020 | 0.32 |
+| Canteen | 0.70 – 2.3 | 0.65 | 0.022 | 0.30 |
+| Skydeck | 0.55 – 3.6 | 1.15 | 0.024 | 0.44 |
+
+**No reflection captures, deliberately.** The project runs Lumen, which builds
+its own reflection scene from the same geometry and lights. A per-floor capture
+actor would be a capture that is never sampled and a second source of truth for
+reflections — the kind of thing that produces a bug where one room reflects a
+layout that was deleted three months ago.
+
+**One `AudioVolume` per floor**, scaled to the plate, enabled at priority 1. The
+volume is the map telling the audio director where the room boundaries are; the
+ambience bed itself is chosen from the zone id in the audio bank (`AMB_*`), so
+the level and the mix cannot disagree about where the server room starts.
+
+**One `NavMeshBoundsVolume` per floor**, sized to the plate. Combined with the
+`AddDirtyArea` calls the doors and shutters make when they change state, this is
+what stops the AI believing in a wall that was breached ten seconds ago.
+
+---
+
+## 6. Rebuilding and changing the map
 
 ```
 Scripts\BuildContent.bat --only environment     rebuild the map

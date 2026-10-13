@@ -272,3 +272,59 @@ something at 2 a.m. — the game does this:
 This is a development convenience. `validate_project.py` fails the build if any
 of the 17 systems is missing from the content, because "it works without VFX" is
 a statement about development builds only.
+
+---
+
+## 8. What spawns each effect, and the two ways a system goes unused
+
+An effect can be perfect and never appear: declared in the enum, authored,
+budgeted, culled correctly, and spawned by nothing. That failure is invisible to
+every asset check because there is nothing wrong with the asset. There are
+exactly two ways it happens, and this project closes both.
+
+**1. The effect is only reachable from a Blueprint.** A weapon's muzzle flash
+comes from `UOneBrahamWeaponDefinition::MuzzleFlash`, which is a soft pointer a
+designer fills in. The content build creates weapon definitions before it creates
+Niagara systems, so on a fresh checkout that pointer is empty and the gun fires
+with no flash, no brass and no tracer — while looking perfectly correct in the
+editor. The fix is a fallback in C++: `AOneBrahamWeaponBase::ResolveFxFallbacks`
+loads the conventional `NS_OB_*` system when the definition does not name one,
+caches it on the actor, and never writes to the data asset. Authored content
+always wins; generated content always works.
+
+**2. The effect is reached through a helper that nobody calls.** An impact effect
+is chosen by `ImpactEffectForSurface`, and a utility detonation by
+`GetDetonationEffect`; both are only as alive as their callers. The same fallback
+pattern applies — `AOneBrahamProjectileBase::ResolveDetonationFX` points the
+detonation component at `NS_OB_Explosion_Frag`, `NS_OB_Flashbang` or
+`NS_OB_Smoke` when the Blueprint assigned nothing — and the check in
+`validate_project.py` follows the call graph from gameplay code through the VFX
+library to prove that nothing is orphaned.
+
+### The table the build enforces
+
+| Effect | Spawned by | Triggered by, in the building |
+| --- | --- | --- |
+| `BulletImpact` | `SpawnImpact` | any hard surface not otherwise mapped |
+| `MetalImpact` | `SpawnImpact` → `ImpactEffectForSurface` | lift doors, handrails, riser cupboards, decking |
+| `GlassImpact` | `SpawnImpact` → `ImpactEffectForSurface` | the perimeter glazing, screens, glass partitions |
+| `FleshImpact` | `SpawnImpact` (character hit) | any shot that lands on a player |
+| `WaterSpray` | `SpawnImpact` → `ImpactEffectForSurface` | the kitchen floor, the bike store, the terrace after rain |
+| `DustPuff` | `SpawnImpact`, `SpawnExplosion`, `AOneBrahamFireShutter`, `AOneBrahamAccessZone` | plasterboard partitions, a shutter coming down, a breached door |
+| `SparkShower` | `SpawnImpact` → `SurfaceSparks`, `SpawnExplosion` | server racks and grating on floors 3–11; every explosion |
+| `BloodMist` | `SpawnImpact` | a lethal hit on a player, above half intensity |
+| `MuzzleFlash` | `AOneBrahamWeaponBase::MulticastPlayFireFX` | draw-and-fire on every weapon except the suppressed P99-S |
+| `ShellEject` | `AOneBrahamWeaponBase::MulticastPlayFireFX` | every shot, including suppressed ones |
+| `Tracer` | `PlayTracerLocal` | every third or fourth round of the carbines and the marksman rifle |
+| `FragExplosion` | `SpawnExplosion`, `AOneBrahamProjectileBase` | a frag detonating; a breached access zone |
+| `BreachExplosion` | `SpawnExplosion`, `AOneBrahamBreachableWall` | a breaching charge, a breached partition |
+| `BreachDebris` | `SpawnBreachDebris` | all four breachable walls and both breached-door cases |
+| `FlashbangBurst` | `SpawnFlashbang`, `AOneBrahamProjectileBase` | a flashbang, anywhere in the server room or the lift lobby |
+| `SmokeCloud` | `SpawnSmokeCloud`, `AOneBrahamProjectileBase` | smoke on the Skydeck pad, in the canteen, on the mezzanine bridge |
+| `CorpseImpact` | `UOneBrahamRagdollComponent::TickCorpseLanding` | a body landing after a fall of more than a storey |
+
+**The rule this table encodes.** If a system is authored in this project, some
+line of C++ outside `OneBrahamVFXStatics.cpp` must be able to reach it, and
+`validate_project.py`'s *vfx reachability* check follows the call graph to prove
+it. Adding an eighteenth effect means adding its enum value, its `EffectStem`
+case, its system in `build_vfx.py` — and a caller.

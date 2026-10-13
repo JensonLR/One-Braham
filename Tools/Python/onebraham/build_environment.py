@@ -93,6 +93,93 @@ SURFACE_ORDER = [
 ]
 
 # ---------------------------------------------------------------------------
+#  Room floor finishes
+#
+#  WHY THIS TABLE EXISTS
+#      Fifteen physical materials are authored, and the map has to actually use
+#      them. A surface that exists as an asset and appears nowhere in the level
+#      is fifteen materials and one gameplay surface (carpet), which shows up as
+#      "every room sounds the same" and "shooting a server rack does nothing".
+#      The finish is what the player's footsteps, bullet impacts and the impact
+#      VFX family resolve from, so each room gets the finish a real building
+#      would have.
+#
+#  Keys are room names as they appear in ROOM_PROGRAMMES. Anything not listed
+#  falls back to its area's default finish below, so adding a room never means
+#  adding a material by hand.
+# ---------------------------------------------------------------------------
+ROOM_FLOOR_FINISH = {
+    # Ground Plaza: a reception floor, a wet bike store, a loading bay.
+    ("Ground_Plaza", "Reception_Island"): "Marble",
+    ("Ground_Plaza", "Security_Desk"):    "Lino",
+    ("Ground_Plaza", "Bike_Store"):       "Puddle",
+    ("Ground_Plaza", "Loading_Bay"):      "Concrete",
+    ("Ground_Plaza", "Turnstile_Bank_1"): "Marble",
+    ("Ground_Plaza", "Turnstile_Bank_2"): "Marble",
+
+    # Lobby: the polished arrival floor, then carpet in the lounge.
+    ("Lobby", "Reception_Desk"):  "Marble",
+    ("Lobby", "Lift_Lobby"):      "Marble",
+    ("Lobby", "Waiting_Seating"): "Carpet",
+    ("Lobby", "Coffee_Point"):    "Lino",
+    ("Lobby", "Under_Stair_Store"): "Concrete",
+
+    # Mezzanine: the bridge over the lobby is stone, the breakout carpet.
+    ("Mezzanine", "Breakout_Area"):   "Carpet",
+    ("Mezzanine", "Bridge_To_Core"):  "Lino",
+    ("Mezzanine", "Vending_Alcove"):  "Lino",
+
+    # Open plan: desk farms on carpet tile, acoustic pods, plant on grating.
+    ("OpenPlan", "Desk_Farm_A"):      "Carpet",
+    ("OpenPlan", "Desk_Farm_B"):      "Carpet",
+    ("OpenPlan", "Meeting_Pod_1"):    "Fabric",
+    ("OpenPlan", "Meeting_Pod_2"):    "Fabric",
+    ("OpenPlan", "Break_Out_Kitchen"): "Lino",
+    ("OpenPlan", "Print_Alcove"):     "Lino",
+
+    # Server and comms: a raised perforated rack floor, not carpet. This is the
+    # finish that makes a firefight on floor 9 throw sparks.
+    ("ServerComms", "Server_Row_1"):   "ServerRack",
+    ("ServerComms", "Server_Row_2"):   "ServerRack",
+    ("ServerComms", "Cold_Aisle"):     "ServerRack",
+    ("ServerComms", "NOC"):            "ServerRack",
+    ("ServerComms", "Power_Room"):     "Grating",
+    ("ServerComms", "Comms_Cupboard"): "Grating",
+
+    # Executive: boardroom and bar in dark wood, offices on carpet.
+    ("Executive", "Boardroom"):     "Wood",
+    ("Executive", "Corner_Office"): "Carpet",
+    ("Executive", "Exec_PA_Desk"):  "Carpet",
+    ("Executive", "West_Lounge"):   "Carpet",
+
+    # Canteen: lino throughout, and a kitchen floor that is always wet.
+    ("Canteen", "Canteen_Hall"): "Lino",
+    ("Canteen", "Servery"):      "Lino",
+    ("Canteen", "Kitchen"):      "Puddle",
+    ("Canteen", "Terrace"):      "Decking",
+
+    # Skydeck: plant deck, the pad, the rails, and a lino control room.
+    ("Skydeck", "Helipad"):         "Decking",
+    ("Skydeck", "Edge_Rail_North"): "Decking",
+    ("Skydeck", "Edge_Rail_South"): "Decking",
+    ("Skydeck", "Winch_Control"):   "Lino",
+    ("Skydeck", "Plant_Room"):      "Grating",
+    ("Skydeck", "Bar_Pavilion"):    "Wood",
+}
+
+# The finish a room gets when it is not named above: the area's own floor.
+AREA_DEFAULT_FINISH = {
+    "Ground_Plaza":  "Concrete",
+    "Lobby":         "Marble",
+    "Mezzanine":     "Carpet",
+    "OpenPlan":      "Carpet",
+    "ServerComms":   "ServerRack",
+    "Executive":     "Carpet",
+    "Canteen":       "Lino",
+    "Skydeck":       "Decking",
+}
+
+# ---------------------------------------------------------------------------
 #  Room programmes per area
 # ---------------------------------------------------------------------------
 # Each room is (name, x, y, size_x, size_y) in cm, in the area's local frame.
@@ -398,6 +485,51 @@ def build_materials(report):
 #  Floor shell
 # ===========================================================================
 
+# Where each surface ended up, keyed by surface name. Filled while the building
+# is generated and written into the manifest, so validate_project can prove that
+# every authored physical material is actually on the map rather than sitting
+# unused in Content/OneBraham/Materials.
+_SURFACE_USAGE = {}
+
+
+def _note_surface(surface_name, place):
+    """Records one place a surface is used. Called by the builders."""
+    if not surface_name:
+        return
+    _SURFACE_USAGE.setdefault(surface_name, [])
+    if place not in _SURFACE_USAGE[surface_name]:
+        _SURFACE_USAGE[surface_name].append(place)
+
+
+# ---------------------------------------------------------------------------
+#  Per-area grade
+#
+#  One unbound post-process volume per floor. This is the difference between
+#  fourteen floors of identical exposure and a building that reads as a place:
+#  the plaza is lit by a grey London sky and the server room is lit by racks, so
+#  they cannot share an exposure range without one of them looking wrong.
+#
+#  Reflections are deliberately absent. This project runs Lumen, which builds
+#  its own reflection scene; a legacy reflection capture per floor would be a
+#  capture that is never read, and a second source of truth for the same thing.
+#
+#  Exposure is quoted in Unreal's brightness units (EV100-relative). The numbers
+#  are wide on purpose: clamping exposure is what stops a player walking from the
+#  plant room into the glazing and being flash-blinded for a second and a half.
+# ---------------------------------------------------------------------------
+AREA_GRADE = {
+    # area,            min brightness, max brightness, bloom, grain, vignette
+    "Ground_Plaza":  (0.35, 2.4, 0.85, 0.030, 0.42),
+    "Lobby":         (0.40, 2.2, 0.75, 0.028, 0.38),
+    "Mezzanine":     (0.45, 2.1, 0.70, 0.026, 0.36),
+    "OpenPlan":      (0.60, 1.9, 0.55, 0.022, 0.30),
+    "ServerComms":   (0.22, 1.6, 0.40, 0.034, 0.46),
+    "Executive":     (0.65, 2.0, 0.60, 0.020, 0.32),
+    "Canteen":       (0.70, 2.3, 0.65, 0.022, 0.30),
+    "Skydeck":       (0.55, 3.6, 1.15, 0.024, 0.44),
+}
+
+
 def build_floor_shell(report, floor_index, materials):
     """Builds one floor: slab, ceiling, perimeter glazing, core, rooms, circulation.
 
@@ -436,10 +568,15 @@ def build_floor_shell(report, floor_index, materials):
     # that misses a stairwell rail has something to stop in.
     _box((origin_x, origin_y, z - 10.0), (size_x, size_y, 20.0), slab_material, prefix + "_Slab")
     created.append((prefix + "_Slab", (origin_x, origin_y, z - 10.0)))
+    _note_surface("Marble" if area_name == "Lobby" else
+                  ("Concrete" if area_name == "Ground_Plaza" else
+                   ("Decking" if area_name == "Skydeck" else "Carpet")),
+                  prefix + "_Slab")
 
     # --- Ceiling ----------------------------------------------------------
     _box((origin_x, origin_y, z + C.CEILING_HEIGHT_CM + 10.0),
          (size_x, size_y, 20.0), plaster, prefix + "_Ceiling")
+    _note_surface("Plasterboard", prefix + "_Ceiling")
 
     # --- Perimeter glazing (the thing that makes the tower feel like a tower) --
     # Windows are placed as a bank rather than individually: the banded look of a
@@ -451,6 +588,8 @@ def build_floor_shell(report, floor_index, materials):
              (size_x - 200.0, 12.0, window_h), glass, prefix + "_Glazing_South")
         _box((origin_x, origin_y + half_y, z + window_h / 2.0 + 60.0),
              (size_x - 200.0, 12.0, window_h), glass, prefix + "_Glazing_North")
+        _note_surface("BallisticGlass" if materials.get("BallisticGlass") is not None else "Glass",
+                      prefix + "_Glazing")
 
     # --- Core walls (the lift core is a hole in the middle of every floor) ---
     core = C.LIFT_CORE_SIZE_CM
@@ -490,6 +629,38 @@ def build_floor_shell(report, floor_index, materials):
         # distance and, more importantly, blocks line of sight over it.
         _box((cx, cy - rsy / 2.0, z + wall_h - 25.0), (door_gap, wall_t, 50.0), plaster, prefix + "_" + room_name + "_Head")
 
+    # --- Room floor finishes ---------------------------------------------
+    # The slab is one material for a whole area. The finish is the layer a room
+    # actually has: it is what the footstep system reads, what the bullet impact
+    # family reads (a server rack throwing sparks is this line, not a special
+    # case in code), and what the impact decals are chosen from. It is placed
+    # 4 mm proud of the slab so it never z-fights with it.
+    for room_name, rx, ry, rsx, rsy in rooms:
+        finish_name = ROOM_FLOOR_FINISH.get((area_name, room_name),
+                                            AREA_DEFAULT_FINISH.get(area_name))
+        finish_material = materials.get(finish_name) if materials else None
+
+        if finish_material is None:
+            # Not an error: the room keeps the area slab, which is walkable and
+            # correct-looking. It is worth a note because a missing instance means
+            # build_materials did not finish, and the whole map will be grey.
+            report.skipped_asset(
+                u"{0}/{1} floor finish".format(area_name, room_name),
+                u"no MI_{0} instance; room keeps the area slab".format(finish_name))
+            continue
+
+        fx = origin_x + rx
+        fy = origin_y + ry
+
+        # Inset by the partition thickness so a finish never pokes through a wall.
+        finish_size_x = max(60.0, rsx - 30.0)
+        finish_size_y = max(60.0, rsy - 30.0)
+
+        _box((fx, fy, z - 0.6), (finish_size_x, finish_size_y, 2.0),
+             finish_material, "{0}_{1}_Finish".format(prefix, room_name))
+        created.append(("{0}_{1}_Finish".format(prefix, room_name), (fx, fy, z - 0.6)))
+        _note_surface(finish_name, "{0}/{1}".format(prefix, room_name))
+
     # --- Circulation: stairwells and the lift doors -----------------------
     stair_x = -1300.0
     stair_y = 0.0
@@ -503,6 +674,9 @@ def build_floor_shell(report, floor_index, materials):
     for i, offset in enumerate((-260.0, 260.0)):
         _box((origin_x + offset, origin_y + core / 2.0, z + 110.0),
              (C.DOOR_WIDTH_CM, 20.0, 220.0), metal, "{0}_Lift_Door_{1}".format(prefix, i + 1))
+    _note_surface("Metal", prefix + "_Lift_Door")
+    _note_surface("Concrete", prefix + "_Stair_Landing")
+    _note_surface("Plasterboard", prefix + "_Partitions")
 
     return created
 
@@ -983,6 +1157,59 @@ def build_lighting(report, floor_index):
     C.log(u"  floor {0:02d} ({1}): {2} ceiling lights".format(floor_index, area_name, spawn_count))
 
 
+def build_post_process(report, floor_index):
+    """Adds the unbound post-process volume that grades this floor.
+
+    Created per floor rather than once in the persistent level because the
+    Skydeck and the server room cannot share an exposure range, and a single
+    global volume is how a game ends up with one floor that looks like a
+    photograph and another that looks like a screenshot of a spreadsheet.
+
+    Every property is set inside the same try/except the rest of this file uses:
+    post-process property names have moved between engine minor versions, and a
+    volume that exists with default settings is still better than a build that
+    failed because one property was renamed.
+    """
+    area_name, origin_x, origin_y, size_x, size_y = _area_for_floor(floor_index)
+    if area_name is None:
+        return
+
+    z = _floor_z(floor_index) + C.CEILING_HEIGHT_CM / 2.0
+
+    volume = _spawn(unreal.PostProcessVolume, unreal.Vector(origin_x, origin_y, z))
+    if volume is None:
+        return
+
+    _label(volume, "PostProcess_{0}_F{1:02d}".format(area_name, floor_index))
+
+    min_brightness, max_brightness, bloom, grain, vignette = AREA_GRADE.get(
+        area_name, (0.5, 2.0, 0.6, 0.025, 0.35))
+
+    try:
+        volume.set_editor_property("bUnbound", True)
+        volume.set_editor_property("BlendWeight", 1.0)
+        volume.set_editor_property("Priority", 0.0)
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        settings = volume.settings
+
+        # Exposure: manual range, so a dark plant room does not auto-brighten the
+        # whole floor and a bright one does not auto-dim it.
+        settings.set_editor_property("AutoExposureMethod", unreal.AutoExposureMethod.AEM_Manual)
+        settings.set_editor_property("AutoExposureMinBrightness", float(min_brightness))
+        settings.set_editor_property("AutoExposureMaxBrightness", float(max_brightness))
+
+        # Grade: restrained. One Braham is a corporate building, not a film.
+        settings.set_editor_property("BloomIntensity", float(bloom))
+        settings.set_editor_property("FilmGrainIntensity", float(grain))
+        settings.set_editor_property("VignetteIntensity", float(vignette))
+        settings.set_editor_property("MotionBlurAmount", 0.28)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def build_audio_zone(report, floor_index):
     """Adds the audio volume that tells the audio director which room you are in.
 
@@ -1128,6 +1355,7 @@ def build_floor_level(report, floor_index, materials):
 
     build_floor_shell(report, floor_index, materials)
     build_lighting(report, floor_index)
+    build_post_process(report, floor_index)
     build_audio_zone(report, floor_index)
     build_nav(report, floor_index)
 
@@ -1215,6 +1443,8 @@ def build_all(write_manifest=True):
     materials = C.guard(report, "materials", build_materials, report) or {}
 
     C.step(2, 6, "gameplay anchors")
+    _SURFACE_USAGE.clear()
+
     manifest = {
         "generated_by": "Tools/Python/onebraham/build_environment.py",
         "floor_height_cm": C.FLOOR_HEIGHT_CM,
@@ -1234,6 +1464,12 @@ def build_all(write_manifest=True):
         for area, rooms in sorted(ROOM_PROGRAMMES.items()) for room in rooms
     ]
     manifest["surfaces"] = [name for name, _colour, _roughness in SURFACES]
+    manifest["floor_finishes"] = [
+        {"area": area, "room": room[0],
+         "surface": ROOM_FLOOR_FINISH.get((area, room[0]), AREA_DEFAULT_FINISH.get(area))}
+        for area, rooms in sorted(ROOM_PROGRAMMES.items()) for room in rooms
+    ]
+    manifest["surface_usage"] = {name: sorted(places) for name, places in _SURFACE_USAGE.items()}
     if len(manifest["rooms"]) < 30:
         report.failed("rooms", u"only {0} rooms programmed; the map needs 40".format(
             len(manifest["rooms"])))
@@ -1248,11 +1484,13 @@ def build_all(write_manifest=True):
                         build_floor_level, report, floor_index, materials)
         if level:
             area_name = _area_for_floor(floor_index)[0]
+            grade = AREA_GRADE.get(area_name)
             floors.append({
                 "index": floor_index,
                 "level": level,
                 "area": area_name,
                 "z_cm": _floor_z(floor_index),
+                "exposure": [grade[0], grade[1]] if grade else None,
             })
     manifest["floors"] = floors
     if len(floors) != C.FLOOR_COUNT + 1:

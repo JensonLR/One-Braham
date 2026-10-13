@@ -70,6 +70,15 @@ public:
 	// ======================================================================
 	//  Widget commands
 	// ======================================================================
+	/**
+	 * Re-reads the user's HUD settings and pushes the parts that are not per-frame
+	 * data (HUD scale, opacity). Called when the HUD is created and by the player
+	 * controller whenever the settings change, so an options menu change is
+	 * visible immediately rather than after the next level load.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|HUD")
+	void ApplyAccessibilitySettings();
+
 	UFUNCTION(BlueprintCallable, Category = "One Braham|HUD")
 	void SetScoreboardVisible(bool bVisible);
 
@@ -132,9 +141,6 @@ protected:
 	/** Pulls continuous state from the pawn's components and the game state. */
 	void GatherHUDData();
 
-	/** Reads the visibility switches from the user's settings. */
-	void ApplyAccessibilitySettings();
-
 	// --- delegate handlers -------------------------------------------------
 	UFUNCTION() void HandleHealthChanged(float NewHealth, float MaxHealthValue, float Delta);
 	UFUNCTION() void HandleArmourChanged(float NewArmour, float MaxArmourValue);
@@ -181,6 +187,9 @@ protected:
 
 	/** Cached user settings switches. */
 	void ReadUserSettings();
+
+	/** The HUD scale currently applied to the widget, so it is only pushed on change. */
+	float CachedHUDScale = 1.f;
 
 	/** Set to false on a dedicated server: no widget, no gathering. */
 	bool bHUDEnabled = true;

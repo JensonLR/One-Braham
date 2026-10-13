@@ -23,6 +23,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Core/OneBrahamTypes.h"
+#include "VFX/OneBrahamVFXStatics.h"
 #include "OneBrahamRagdollComponent.generated.h"
 
 class USkeletalMeshComponent;
@@ -147,6 +148,28 @@ protected:
 
 	/** Decides the death pose from the geometry the body landed on. */
 	EOneBrahamDeathPose DetermineDeathPose(const FVector& ImpulseDirection) const;
+
+	/**
+	 * Watches the ragdoll's pelvis until it stops, and plays the corpse's impact
+	 * on the way down.
+	 *
+	 * WHY THIS IS NOT JUST A THUD SOUND
+	 *     A body that lands silently reads as a bug, and a body that lands with a
+	 *     wet slap reads as a different genre. The impact is dust and a dull
+	 *     weight: NS_OB_CorpseImpact is authored for exactly that. It fires once,
+	 *     at the moment the body's downward speed crosses the threshold, which is
+	 *     the frame a viewer reads as "it hit the floor".
+	 */
+	void TickCorpseLanding(float DeltaTime);
+
+	/** Set while the corpse is falling; cleared when the impact has been played. */
+	bool bCorpseFalling = false;
+
+	/** Downward speed of the previous frame, for the landing detection. */
+	float LastCorpseFallSpeed = 0.f;
+
+	/** Seconds since the ragdoll started, so a body that never lands is bounded. */
+	float CorpseAirTime = 0.f;
 
 	/** Finds the skeletal mesh to ragdoll (3P body). */
 	USkeletalMeshComponent* GetTargetMesh() const;

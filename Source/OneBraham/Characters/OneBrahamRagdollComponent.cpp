@@ -89,6 +89,11 @@ void UOneBrahamRagdollComponent::EnterRagdoll(FName HitBone, const FVector& Shot
 	bRagdolling = true;
 	OnRep_Ragdolling();
 
+	// Arm the landing detection: a corpse that lands in silence reads as a bug.
+	bCorpseFalling = true;
+	LastCorpseFallSpeed = 0.f;
+	CorpseAirTime = 0.f;
+
 	// --- Server also ragdolls so physics matches --------------------------
 	Mesh->SetAllBodiesSimulatePhysics(true);
 	Mesh->SetSimulatePhysics(true);
@@ -382,6 +387,50 @@ void UOneBrahamRagdollComponent::BeginFadeOut()
 	}
 }
 
+void UOneBrahamRagdollComponent::TickCorpseLanding(float DeltaTime)
+{
+	USkeletalMeshComponent* Mesh = GetTargetMesh();
+	if (Mesh == nullptr || !bCorpseFalling)
+	{
+		return;
+	}
+
+	CorpseAirTime += DeltaTime;
+
+	// The pelvis is the body's centre of mass; a head or a hand can be resting on
+	// a desk while the body is still travelling.
+	const float FallSpeed = -Mesh->GetPhysicsLinearVelocity(TEXT("pelvis")).Z;
+
+	// Landing: the body was moving down meaningfully and has stopped. The
+	// threshold is 120 cm/s because a body settling onto a carpet moves less than
+	// that, and a body arriving from waist height moves far more.
+	const float ImpactThreshold = 120.f;
+	const bool bLanded = LastCorpseFallSpeed > ImpactThreshold && FallSpeed < ImpactThreshold * 0.5f;
+
+	// Bound the wait: a corpse caught on a railing can hang for the rest of the
+	// match, and a body that never lands still needs the effect's cue to be spent
+	// rather than pending forever.
+	const bool bTimedOut = CorpseAirTime > 4.f;
+
+	if (bLanded || bTimedOut)
+	{
+		bCorpseFalling = false;
+
+		if (bLanded && LastCorpseFallSpeed > 260.f)
+		{
+			const FVector ImpactLocation = Mesh->GetBoneLocation(TEXT("pelvis"));
+
+			// The generated effect is spawned directly rather than through a
+			// component: this is a one-shot at a bone, and there is no per-character
+			// corpse FX component to hold it.
+			UOneBrahamVFXStatics::SpawnEffect(this, EOneBrahamVFXEffect::CorpseImpact,
+				ImpactLocation, FRotator::ZeroRotator, FVector(1.f));
+		}
+	}
+
+	LastCorpseFallSpeed = FallSpeed;
+}
+
 void UOneBrahamRagdollComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -423,4 +472,7 @@ void UOneBrahamRagdollComponent::TickComponent(float DeltaTime, ELevelTick TickT
 			Character->SetLifeSpan(0.1f);
 		}
 	}
+
+	// --- Landing ----------------------------------------------------------
+	TickCorpseLanding(DeltaTime);
 }

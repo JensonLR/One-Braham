@@ -759,6 +759,66 @@ void UOneBrahamWeaponComponent::ServerRequestFire_Implementation(FVector_NetQuan
 	UE_UNUSED(bFired);
 }
 
+void UOneBrahamWeaponComponent::GetLocalAim(FVector& OutOrigin, FVector& OutDirection) const
+{
+	// One definition of "where this player is aiming", used by the fire path, the
+	// throw path and the placement path, so a change to the shot origin cannot
+	// apply to a bullet and not to a grenade.
+	const AOneBrahamCharacter* Character = CachedCharacter.Get();
+
+	if (Character == nullptr)
+	{
+		OutOrigin = GetOwner() != nullptr ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
+		OutDirection = GetOwner() != nullptr ? GetOwner()->GetActorForwardVector() : FVector::ForwardVector;
+		return;
+	}
+
+	OutOrigin = Character->GetWeaponTraceOrigin();
+	OutDirection = Character->GetWeaponTraceDirection();
+}
+
+void UOneBrahamWeaponComponent::OnWeaponReady()
+{
+	// The weapon has finished being raised. Everything that is true about a settled
+	// weapon is reset here rather than in six places that each remember to.
+	ResetRecoilAndSpread();
+	ServerBurstRemaining = 0;
+	LastLocalFireTime = -1000.f;
+	LastServerFireTime = -1000.f;
+
+	SpreadStream.Reset();
+
+	// Re-announce the magazine: a weapon drawn mid-swap has a different capacity
+	// from the one it replaced, and the HUD counter is driven by this delegate.
+	// OnWeaponAmmoChanged resolves the reserve from the per-weapon map, so the
+	// counter cannot show the previous gun's reserve for one frame.
+	if (CurrentWeapon != nullptr)
+	{
+		OnWeaponAmmoChanged(CurrentWeapon->GetAmmoInMagazine());
+	}
+
+	// Hold-through-the-swap: a player who keeps the trigger down while a weapon is
+	// being raised expects it to open fire the instant it is ready. Automatic and
+	// burst fire are handled by TickComponent the moment the state becomes Ready;
+	// single-shot weapons fire on the press, so the press is re-delivered here.
+	if (!bTriggerHeld || CurrentWeapon == nullptr || bIsReloading)
+	{
+		return;
+	}
+
+	const bool bSingleShot = CurrentFireMode == EOneBrahamFireMode::Single ||
+							 CurrentFireMode == EOneBrahamFireMode::Pump ||
+							 CurrentFireMode == EOneBrahamFireMode::Bolt;
+
+	if (bSingleShot)
+	{
+		// SetTriggerHeld clears the flag first, so the re-delivery is a genuine
+		// press rather than a duplicate of an already-counted one.
+		bTriggerHeld = false;
+		SetTriggerHeld(true);
+	}
+}
+
 bool UOneBrahamWeaponComponent::FireOnce(const FVector& AimOrigin, const FVector& AimDirection)
 {
 	if (CurrentWeapon == nullptr)

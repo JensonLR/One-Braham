@@ -104,6 +104,10 @@ void UOneBrahamHUDComponent::CreateHUD(AOneBrahamPlayerController* InOwningContr
 
 	HUDWidget->AddToPlayerScreen(0);
 
+	// Apply the player's HUD scale and element switches before the first frame is
+	// drawn, so the HUD is never seen at the wrong size and then resized.
+	ApplyAccessibilitySettings();
+
 	// The widget pulls its first snapshot immediately, so there is never a frame
 	// of default values on screen after a respawn or a level load.
 	HUDWidget->ApplyHUDData(Data);
@@ -336,6 +340,38 @@ void UOneBrahamHUDComponent::ReadUserSettings()
 	Data.bShowInteractionPrompt = Settings->bShowInteractionPrompts;
 	Data.bShowVoiceIndicator = Settings->bShowVoiceIndicators;
 	Data.HUDOpacity = Settings->HUDOpacity;
+}
+
+void UOneBrahamHUDComponent::ApplyAccessibilitySettings()
+{
+	UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
+
+	// Visibility switches are re-read continuously (ReadUserSettings is called
+	// from the tick), because a player toggles them while looking at the thing
+	// they are toggling. Scale is different: it forces a layout pass, so it is
+	// pushed only when the settings actually change.
+	ReadUserSettings();
+
+	if (Settings == nullptr || HUDWidget == nullptr)
+	{
+		return;
+	}
+
+	const float Scale = FMath::Clamp(Settings->HUDScale, 0.75f, 1.5f);
+
+	// A render-scale change invalidates the layout of every child, so it is only
+	// pushed when the number has actually moved. This function is called from the
+	// options menu's apply path, and "apply" is a button people press repeatedly.
+	if (!FMath::IsNearlyEqual(CachedHUDScale, Scale, 0.001f))
+	{
+		// Scaling about the centre keeps the crosshair under the player's eye line;
+		// scaling about the default top-left origin walks the whole HUD off-screen
+		// at 1.5x, which is the classic broken "HUD scaling" implementation.
+		HUDWidget->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
+		HUDWidget->SetRenderScale(FVector2D(Scale, Scale));
+
+		CachedHUDScale = Scale;
+	}
 }
 
 void UOneBrahamHUDComponent::GatherHUDData()

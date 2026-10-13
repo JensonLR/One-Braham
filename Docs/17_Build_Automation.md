@@ -28,6 +28,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `build_ui.py` | 10 widgets, the HUD string table, the font slot, the palette check | yes | yes |
 | `build_vfx.py` | 17 Niagara systems, 3 camera shakes, 6 decal materials, the authoring sheet | yes | yes |
 | `import_font.py` | font faces from `Content/UI/Fonts` | yes | yes |
+| `check_cpp_symbols.py` | reads `Source/OneBraham` and reports every member function declared with no definition | **no** | yes |
 | `validate_project.py` | the health check and a markdown report | either | yes |
 | `run_all.py` | all of the above, in dependency order, with a report | either | yes |
 
@@ -52,11 +53,12 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 
 ```
 # ONE BRAHAM - content build report
-**12 steps succeeded, 0 failed.**
+**13 steps succeeded, 0 failed.**
 
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
 | input_ini | OK | 0.0 | wrote 41 actions (40 with a default key) |
+| cpp_symbols | OK | 0.1 | 503 declarations, all defined |
 | materials | OK | 3.1 | 5 masters, 15 physicals, 28 instances |
 ...
 ```
@@ -69,6 +71,7 @@ Exit code 0 only if every step passed. CI reads the exit code, not the log.
 
 ```
 generate_input_ini        text only; can fail before the editor opens
+cpp_symbols               text only; a link error found in 0.1 s, not 4 minutes
       ↓
 materials                 everything references MI_* and PM_OB_*
       ↓
@@ -126,7 +129,11 @@ a header gets noticed before it becomes a runtime null reference.
 # .github/workflows/build.yml equivalents, described rather than templated,
 # because the project's pipeline runs on a self-hosted UE5 runner.
 stages:
-  - lint      : python -m py_compile on every tool; the C++ is linted by the build
+  - lint      : python -m py_compile on every tool
+  - cpp       : PYTHONPATH=Tools/Python python3 run_all.py --only cpp_symbols
+                (declared-but-undefined members, includes that do not exist, and
+                 brace balance - three checks that need no engine install, so
+                 they run before a runner is ever allocated)
   - config    : PYTHONPATH=Tools/Python python3 run_all.py --text-only
   - build     : UBT build of the Editor, Game, Server and Client targets
   - content   : UnrealEditor-Cmd -run=pythonscript run_all.py

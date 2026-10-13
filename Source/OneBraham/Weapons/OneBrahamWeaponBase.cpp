@@ -111,6 +111,33 @@ void AOneBrahamWeaponBase::BeginPlay()
 	}
 }
 
+void AOneBrahamWeaponBase::ResolveFxFallbacks()
+{
+	// Muzzle flash: the component only gets an asset if the definition names one,
+	// so the conventional system is loaded when it does not.
+	if (MuzzleFlashComponent != nullptr && MuzzleFlashComponent->GetAsset() == nullptr)
+	{
+		CachedMuzzleFlash = UOneBrahamVFXStatics::LoadEffectSystem(EOneBrahamVFXEffect::MuzzleFlash);
+
+		if (CachedMuzzleFlash != nullptr)
+		{
+			MuzzleFlashComponent->SetAsset(CachedMuzzleFlash);
+		}
+	}
+
+	// Shell ejection and tracer are spawned ad hoc rather than from a component,
+	// so they are cached and read directly at fire time.
+	if (Definition == nullptr || !Definition->ShellEject.IsValid())
+	{
+		CachedShellEject = UOneBrahamVFXStatics::LoadEffectSystem(EOneBrahamVFXEffect::ShellEject);
+	}
+
+	if (Definition == nullptr || !Definition->Tracer.IsValid())
+	{
+		CachedTracer = UOneBrahamVFXStatics::LoadEffectSystem(EOneBrahamVFXEffect::Tracer);
+	}
+}
+
 void AOneBrahamWeaponBase::InitialiseFromDefinition(UOneBrahamWeaponDefinition* InDefinition)
 {
 	if (InDefinition == nullptr)
@@ -156,6 +183,8 @@ void AOneBrahamWeaponBase::InitialiseFromDefinition(UOneBrahamWeaponDefinition* 
 		}
 	}
 
+	ResolveFxFallbacks();
+
 	RefreshMaterialParameters();
 
 	OB_WEAPON_LOG("Weapon '%s' initialised (%d rounds, %s).",
@@ -165,6 +194,8 @@ void AOneBrahamWeaponBase::InitialiseFromDefinition(UOneBrahamWeaponDefinition* 
 void AOneBrahamWeaponBase::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+
+	AdvanceStateTimer(DeltaSeconds);
 
 	// Muzzle light decay: a one-frame flash reads as a strobe; a short decay reads
 	// as an actual muzzle flash.
@@ -179,10 +210,71 @@ void AOneBrahamWeaponBase::Tick(float DeltaSeconds)
 	}
 }
 
+EOneBrahamWeaponState AOneBrahamWeaponBase::SettledState() const
+{
+	// Reloading is never a settled state: the reload owns its own completion and
+	// sets the state when it finishes, which is what makes a reload interruptible
+	// by death or by a weapon swap without leaving the gun stuck.
+	return AmmoInMagazine > 0 ? EOneBrahamWeaponState::Ready : EOneBrahamWeaponState::Empty;
+}
+
+void AOneBrahamWeaponBase::AdvanceStateTimer(float DeltaSeconds)
+{
+	if (StateSecondsRemaining <= 0.f)
+	{
+		return;
+	}
+
+	StateSecondsRemaining -= DeltaSeconds;
+
+	if (StateSecondsRemaining > 0.f)
+	{
+		return;
+	}
+
+	StateSecondsRemaining = 0.f;
+
+	switch (WeaponState)
+	{
+	case EOneBrahamWeaponState::Drawing:
+	{
+		SetWeaponState(SettledState());
+
+		// Tell the owner's component, which is what resets the shot tracking and
+		// lets a held trigger resume firing. This is the call the weapon component
+		// has always documented and never received.
+		if (OwningWeaponComponent.IsValid())
+		{
+			OwningWeaponComponent->OnWeaponReady();
+		}
+		break;
+	}
+
+	case EOneBrahamWeaponState::Holstering:
+		// Nothing to do: the component decides what to draw next, and it will.
+		SetWeaponState(EOneBrahamWeaponState::Idle);
+		break;
+
+	case EOneBrahamWeaponState::Meleeing:
+		SetWeaponState(SettledState());
+		break;
+
+	default:
+		break;
+	}
+
+	OB_WEAPON_LOG("Weapon '%s' settled into %s.", *GetName(),
+		*UEnum::GetValueAsString(WeaponState));
+}
+
 void AOneBrahamWeaponBase::OnEquippedBy(AOneBrahamCharacter* NewOwnerCharacter)
 {
 	OwningCharacter = NewOwnerCharacter;
 	bIsGroundPickup = false;
+
+	// The draw owns a timer from the moment it starts. See AdvanceStateTimer for
+	// what happens when it is missing.
+	StateSecondsRemaining = Definition != nullptr ? FMath::Max(0.05f, Definition->DrawTime) : 0.3f;
 	SetWeaponState(EOneBrahamWeaponState::Drawing);
 
 	if (PickupMesh != nullptr)
@@ -226,6 +318,7 @@ void AOneBrahamWeaponBase::OnUnequipped()
 	}
 
 	OwningCharacter = nullptr;
+	StateSecondsRemaining = Definition != nullptr ? FMath::Max(0.05f, Definition->HolsterTime) : 0.25f;
 	SetWeaponState(EOneBrahamWeaponState::Holstering);
 }
 
@@ -1087,9 +1180,14 @@ void AOneBrahamWeaponBase::MulticastPlayFireFX_Implementation(const FVector_NetQ
 	}
 
 	// --- Shell ejection ---------------------------------------------------
-	if (Definition != nullptr && Definition->ShellEject.IsValid())
+	// Authored system first, generated fallback second. A suppressed weapon still
+	// ejects brass; it just does not throw a flash.
 	{
-		if (UNiagaraSystem* System = Definition->ShellEject.LoadSynchronous())
+		UNiagaraSystem* System = (Definition != nullptr && Definition->ShellEject.IsValid())
+			? Definition->ShellEject.LoadSynchronous()
+			: CachedShellEject.Get();
+
+		if (System != nullptr)
 		{
 			UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, System, GetShellEjectTransform().GetLocation(),
 				GetShellEjectTransform().Rotator(), FVector(1.f), /*bAutoDestroy*/ true);
@@ -1199,12 +1297,12 @@ void AOneBrahamWeaponBase::PlayTracerLocal(const FVector& Start, const FVector& 
 		return;
 	}
 
-	if (!Definition->Tracer.IsValid())
-	{
-		return;
-	}
+	// Authored tracer, else the generated one. Suppressed weapons returned above.
+	UNiagaraSystem* System = Definition->Tracer.IsValid()
+		? Definition->Tracer.LoadSynchronous()
+		: CachedTracer.Get();
 
-	if (UNiagaraSystem* System = Definition->Tracer.LoadSynchronous())
+	if (System != nullptr)
 	{
 		UNiagaraComponent* TracerComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, System, Start,
 			(End - Start).Rotation(), FVector(1.f), /*bAutoDestroy*/ true, /*bAutoActivate*/ true);

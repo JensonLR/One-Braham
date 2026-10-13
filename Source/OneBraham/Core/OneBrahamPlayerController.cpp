@@ -1012,6 +1012,14 @@ void AOneBrahamPlayerController::HandleSettingsChanged()
 	{
 		PlayerCameraManager->SetFOV(Settings->FOV);
 	}
+
+	// The HUD owns its own view of the settings (element visibility, opacity and
+	// scale), so it has to be told. Without this, changing "HUD Scale" in the
+	// options menu does nothing until the next level load.
+	if (HUDComponent != nullptr)
+	{
+		HUDComponent->ApplyAccessibilitySettings();
+	}
 }
 
 // ==========================================================================
