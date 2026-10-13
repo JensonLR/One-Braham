@@ -56,7 +56,14 @@ void UOneBrahamWeaponComponent::BeginPlay()
 	CachedCharacter = Cast<AOneBrahamCharacter>(GetOwner());
 
 	// Fall back to the project-wide registry if the Blueprint did not set one, so
-	// a code-only checkout still has working weapons.
+	// a code-only checkout still has working weapons. Project Settings ->
+	// One Braham -> Content wins when it is set: that is the field a designer
+	// edits, and a field nobody reads is worse than no field at all.
+	if (WeaponRegistry == nullptr)
+	{
+		WeaponRegistry = UOneBrahamGameSettings::Get().WeaponRegistry.LoadSynchronous();
+	}
+
 	if (WeaponRegistry == nullptr)
 	{
 		WeaponRegistry = LoadObject<UOneBrahamWeaponDataAsset>(nullptr,

@@ -5,6 +5,7 @@
 #include "OneBraham.h"
 #include "Audio/OneBrahamAudioManagerComponent.h"
 #include "Characters/OneBrahamCharacter.h"
+#include "Core/OneBrahamGameSettings.h"
 #include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamPlayerController.h"
 #include "Core/OneBrahamPlayerState.h"
@@ -40,12 +41,18 @@ void UOneBrahamVoiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	Random.Initialize(static_cast<int32>(FPlatformTime::Cycles()));
 
 	// --- Line set ---------------------------------------------------------
-	if (UOneBrahamVoiceLineSet* Authored = LoadObject<UOneBrahamVoiceLineSet>(nullptr,
-		TEXT("/Game/OneBraham/Voice/DA_VoiceLines.DA_VoiceLines")))
+	// Three ways to get one, in the order a designer expects: the asset named in
+	// Project Settings -> One Braham -> Content, then the conventional path, then
+	// the compiled-in table.
+	LineSet = UOneBrahamGameSettings::Get().VoiceLineRegistry.LoadSynchronous();
+
+	if (LineSet == nullptr)
 	{
-		LineSet = Authored;
+		LineSet = LoadObject<UOneBrahamVoiceLineSet>(nullptr,
+			TEXT("/Game/OneBraham/Voice/DA_VoiceLines.DA_VoiceLines"));
 	}
-	else
+
+	if (LineSet == nullptr)
 	{
 		// Code-only fallback. Same ids, same priorities, no recorded audio: the
 		// game still subtitles every line, so no mechanic is ever silent.

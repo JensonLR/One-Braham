@@ -18,7 +18,7 @@ class UInputAction;
 class UOneBrahamWeaponDataAsset;
 class UOneBrahamCharacterDataAsset;
 class UOneBrahamMatchSettingsAsset;
-class UOneBrahamVoiceLineDataAsset;
+class UOneBrahamVoiceLineSet;
 class USoundBase;
 
 // ==========================================================================
@@ -141,8 +141,10 @@ public:
 	UPROPERTY(config, EditAnywhere, Category = "Content")
 	TSoftObjectPtr<UOneBrahamCharacterDataAsset> CharacterRegistry;
 
+	/** The authored line set. Empty falls back to the path below and then to the
+	 *  compiled-in table, so the field is an override rather than a requirement. */
 	UPROPERTY(config, EditAnywhere, Category = "Content")
-	TSoftObjectPtr<UOneBrahamVoiceLineDataAsset> VoiceLineRegistry;
+	TSoftObjectPtr<UOneBrahamVoiceLineSet> VoiceLineRegistry;
 
 	UPROPERTY(config, EditAnywhere, Category = "Content")
 	TSoftObjectPtr<UInputMappingContext> DefaultMappingContext;

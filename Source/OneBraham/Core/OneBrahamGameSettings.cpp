@@ -55,7 +55,28 @@ bool UOneBrahamInputConfig::ValidateAllActionsSet(TArray<FName>& OutMissing) con
 		{ TEXT("PauseMenu"), PauseMenu },
 		{ TEXT("SpectateNextPlayer"), SpectateNextPlayer },
 		{ TEXT("SpectatePrevPlayer"), SpectatePrevPlayer },
-		{ TEXT("ClipMarker"), ClipMarker }
+		// Eight rows were missing here for a while: DropWeapon, Ping,
+		// SpectateToggleFreeCam, ToggleLaser, VoiceMuteSelf, WeaponCycleNext,
+		// WeaponCyclePrev and WeaponSlotMelee. The comment above claimed the
+		// automation test would catch that. It did not, because the table was the
+		// only list of its kind and nothing compared it to the fields -
+		// check_input_actions.py does now.
+		{ TEXT("WeaponSlotMelee"), WeaponSlotMelee },
+		{ TEXT("WeaponCycleNext"), WeaponCycleNext },
+		{ TEXT("WeaponCyclePrev"), WeaponCyclePrev },
+		{ TEXT("DropWeapon"), DropWeapon },
+		{ TEXT("ToggleLaser"), ToggleLaser },
+		{ TEXT("VoiceMuteSelf"), VoiceMuteSelf },
+		{ TEXT("Ping"), Ping },
+		{ TEXT("SpectateToggleFreeCam"), SpectateToggleFreeCam },
+		{ TEXT("ClipMarker"), ClipMarker },
+
+		// The three overlays. They belong in this table for the same reason as
+		// everything else: this is the list the control schema automation test
+		// reads, and a field that is not in it is a field nobody checks.
+		{ TEXT("ToggleHUD"), ToggleHUD },
+		{ TEXT("Map"), Map },
+		{ TEXT("VoiceLineMenu"), VoiceLineMenu }
 	};
 
 	for (const TPair<FName, const UInputAction*>& Pair : Required)

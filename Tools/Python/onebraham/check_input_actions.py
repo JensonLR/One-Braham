@@ -37,6 +37,11 @@ WHAT IT CHECKS
        not at all.
     4. Every `InputConfig->Field` read in `Source/OneBraham` names a field the
        struct actually declares.
+    5. The `Required` table inside `UOneBrahamInputConfig::ValidateAllActionsSet`
+       names exactly those fields. That table is the fifth list of the same
+       actions - it is what `ValidateAllActionsSet` checks at possession time and
+       what the control-schema automation test reads - and it had drifted by
+       eight rows while a comment above it claimed a test would catch that.
 
     The ACTIONS table is read with `ast`, not by importing `build_input.py`: that
     module imports `unreal`, so importing it would tie a static check to a running
@@ -61,6 +66,7 @@ python_root = os.path.normpath(os.path.join(
 
 BUILD_INPUT = os.path.join(python_root, "Tools", "Python", "onebraham", "build_input.py")
 SETTINGS_HEADER = os.path.join(python_root, "Source", "OneBraham", "Core", "OneBrahamGameSettings.h")
+SETTINGS_SOURCE = os.path.join(python_root, "Source", "OneBraham", "Core", "OneBrahamGameSettings.cpp")
 SOURCE_ROOT = os.path.join(python_root, "Source", "OneBraham")
 INPUT_INI = os.path.join(python_root, "Config", "DefaultInput.ini")
 
@@ -80,6 +86,9 @@ INI_BINDING = re.compile(r'^\+[A-Za-z]*Binding\s*=\s*(IA_[A-Za-z0-9_]+)\s*,', re
 
 #: `+ActionPrompt=IA_Map=Floor plan overlay`.
 INI_PROMPT = re.compile(r'^\+ActionPrompt\s*=\s*(IA_[A-Za-z0-9_]+)\s*=', re.MULTILINE)
+
+#: `{ TEXT("Map"), Map }` in ValidateAllActionsSet's Required table.
+VALIDATED_FIELD = re.compile(r'\{\s*TEXT\("([A-Za-z0-9_]+)"\)\s*,\s*([A-Za-z0-9_]+)\s*\}')
 
 
 def _literal_assignment(path, name):
@@ -160,6 +169,34 @@ def ini_actions():
     return found
 
 
+def validated_fields():
+    """(field names, mismatched rows) from ValidateAllActionsSet's Required table.
+
+    Returns two lists so the caller can report a row whose id and field disagree
+    as its own kind of problem - a copy-paste in that table is how a field stops
+    being checked without anybody noticing.
+    """
+    if not os.path.isfile(SETTINGS_SOURCE):
+        return [], []
+
+    text = io.open(SETTINGS_SOURCE, encoding="utf-8", errors="ignore").read()
+    marker = "const TMap<FName, const UInputAction*> Required"
+
+    if marker not in text:
+        return [], []
+
+    block = text[text.index(marker):]
+    block = block[:block.index("\n\t};")]
+
+    fenced = []
+
+    for name, field in VALIDATED_FIELD.findall(block):
+        if name != field:
+            fenced.append((name, field))
+
+    return [field for _name, field in VALIDATED_FIELD.findall(block)], fenced
+
+
 def config_reads(source_root=None):
     """(file, line, field) for every InputConfig-> field read in C++."""
     root = source_root or SOURCE_ROOT
@@ -233,7 +270,31 @@ def run(source_root=None):
                 u"action - the binding refers to nothing".format(kind, name),
                 u"unknown binding"))
 
-    # 4. Every field the code reads exists on the struct.
+    # 4. The validation table names exactly the same fields.
+    validated, mismatched_rows = validated_fields()
+
+    if validated:
+        for name, field in mismatched_rows:
+            problems.append((
+                u"ValidateAllActionsSet has a row whose id and field disagree: "
+                u"TEXT(\"{0}\") read into {1}".format(name, field),
+                u"mismatched row"))
+
+        for field in field_set:
+            if field not in validated:
+                problems.append((
+                    u"UOneBrahamInputConfig::{0} is not in the Required table in "
+                    u"ValidateAllActionsSet, so nothing checks that it is assigned".format(field),
+                    u"unvalidated field"))
+
+        for field in validated:
+            if field not in field_set:
+                problems.append((
+                    u"the Required table checks a field called {0}, which "
+                    u"UOneBrahamInputConfig does not declare".format(field),
+                    u"unknown validated field"))
+
+    # 5. Every field the code reads exists on the struct.
     reads = config_reads(source_root)
 
     for rel, number, field, called in reads:

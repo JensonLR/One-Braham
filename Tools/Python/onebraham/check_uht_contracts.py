@@ -46,7 +46,19 @@ WHY THIS EXISTS
          A class that assigns TickFrequency is exempt: that is the deliberate way
          to ask for a tick, and the check is about doing it on purpose.
 
-      8. **A replicated property with no DOREPLIFETIME.** This is the expensive
+      8. **Two declarations of one type name.** UHT stops at the second one, and
+         the second one is always invisible until it does.
+
+      9. **A `TSoftObjectPtr<UOneBrahamX>` where `UOneBrahamX` exists nowhere in
+         the module.** Nothing outside `Source/OneBraham` declares a
+         OneBraham-named type, so the question is decidable, and the answer was
+         `VoiceLineRegistry` - a settings field pointing at a phantom registry
+         that the voice subsystem never read because it could not be loaded.
+
+      10. **A settings field that nothing reads.** Set it, save, play: nothing
+         happens. Three of them in this project.
+
+      11. **A replicated property with no DOREPLIFETIME.** This is the expensive
          one. It compiles, it validates, it does not warn, and the property
          simply never reaches a client - so a team score, a lockdown stage or a
          squad id is correct on the listen server and permanently zero
@@ -212,8 +224,100 @@ def run(source_root=None):
                 if name:
                     ufunction_names.add(name)
 
+    # --- two names, one type ------------------------------------------------
+    # UHT rejects a second UCLASS/USTRUCT/UENUM with a name that is already
+    # declared anywhere in the module, and it does it before anything compiles.
+    # The project had FOneBrahamVoiceLine twice - the live one in
+    # Voice/OneBrahamVoiceTypes.h and a dead copy in Core/OneBrahamTypes.h that
+    # nothing referenced and that no compiler and no check had ever looked at,
+    # because it never got that far.
+    type_declarations = {}
+
+    for path in sorted(headers):
+        clean = strip_comments_and_strings(io.open(path, encoding="utf-8", errors="ignore").read())
+        rel = os.path.relpath(path, root)
+
+        for class_name, _body, _is_interface in class_bodies(clean):
+            type_declarations.setdefault(class_name, []).append(rel)
+
+    # --- registry pointers that point at nothing ----------------------------
+    # TSoftObjectPtr<UOneBrahamVoiceLineDataAsset> compiled, validated, and
+    # referred to a class that was never declared in this module - so the field
+    # could only ever be null. The project's type prefixes make this decidable
+    # without knowing anything about other modules: nothing outside Source/
+    # OneBraham declares a OneBraham-named type.
+    dangling = []
+
+    for path in sorted(headers):
+        clean = strip_comments_and_strings(io.open(path, encoding="utf-8", errors="ignore").read())
+        rel = os.path.relpath(path, root)
+
+        for target in re.findall(r'TSoftObjectPtr\s*<\s*([A-Za-z_][A-Za-z0-9_]*)', clean):
+            if not re.match(r'^[UAF]OneBraham', target):
+                continue
+
+            # A forward declaration does not count as the type existing: the
+            # first version of this rule exempted a `class X;` in the same file,
+            # which is precisely the shape a field pointing at nothing takes.
+            if target in type_declarations:
+                continue
+
+            dangling.append((rel, target))
+
     checked = 0
     problems = []
+
+    # --- settings fields that no code reads ---------------------------------
+    # A `config` property is a promise: a designer can set it in Project
+    # Settings and the game will use it. Three of the five content registries in
+    # UOneBrahamGameSettings had no reader anywhere - WeaponRegistry,
+    # VoiceLineRegistry and both mapping contexts - so Project Settings offered a
+    # control that did nothing, and the code loaded its content from a hard-coded
+    # path instead.
+    #
+    # This is a name match rather than data-flow analysis, which is enough here:
+    # the names are long, prefixed and unique, and the failure it is catching is
+    # "nobody ever typed this identifier outside the header".
+    settings_header = os.path.join(root, "Core", "OneBrahamGameSettings.h")
+    unread_settings = []
+
+    if os.path.isfile(settings_header):
+        clean_settings = strip_comments_and_strings(
+            io.open(settings_header, encoding="utf-8", errors="ignore").read())
+
+        for field_name in re.findall(r'TSoftObjectPtr\s*<[^>]+>\s+([A-Za-z_][A-Za-z0-9_]*)\s*;',
+                                     clean_settings):
+            readers = [p for p in sources
+                       if os.path.basename(p) != "OneBrahamGameSettings.cpp"
+                       and re.search(r'\b' + re.escape(field_name) + r'\b',
+                                     strip_comments_and_strings(
+                                         io.open(p, encoding="utf-8", errors="ignore").read()))]
+
+            if not readers:
+                unread_settings.append(field_name)
+
+    for field_name in unread_settings:
+        checked += 1
+        problems.append((os.path.relpath(settings_header, root), "UOneBrahamGameSettings",
+                         u"{0} is a config property and no source file reads it, so setting it in "
+                         u"Project Settings does nothing".format(field_name)))
+
+    for type_name in sorted(type_declarations):
+        places = type_declarations[type_name]
+
+        checked += 1
+
+        if len(places) > 1:
+            problems.append((places[0], type_name,
+                             u"{0} is declared in {1} places ({2}). UHT rejects the second "
+                             u"declaration before anything else happens".format(
+                                 type_name, len(places), ", ".join(places))))
+
+    for rel, target in dangling:
+        checked += 1
+        problems.append((rel, target,
+                         u"TSoftObjectPtr<{0}> names a OneBraham type that is declared nowhere in "
+                         u"this module, so the field can only ever be null".format(target)))
 
     for path in sorted(headers):
         clean = strip_comments_and_strings(io.open(path, encoding="utf-8", errors="ignore").read())

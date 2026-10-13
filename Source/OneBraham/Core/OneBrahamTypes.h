@@ -679,40 +679,6 @@ enum class EOneBrahamVoiceChatMode : uint8
 	Muted = 3
 };
 
-/** A single authored voice line. See UOneBrahamVoiceLineDataAsset for the registry. */
-USTRUCT(BlueprintType)
-struct FOneBrahamVoiceLine
-{
-	GENERATED_BODY()
-
-	/** Unique id referenced from code/Blueprints, e.g. "V_BA_CONTACT_ENEMY_02". */
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Voice")
-	FName LineId = NAME_None;
-
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Voice", meta = (MultiLine = true))
-	FText Script;
-
-	/** OB.Voice.Category.* */
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Voice", meta = (Categories = "OB.Voice"))
-	FGameplayTag Category;
-
-	/** Sound wave / cue. */
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Voice")
-	TSoftObjectPtr<USoundBase> Sound;
-
-	/** Minimum seconds before this line can repeat on the same character. */
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Voice")
-	float CooldownSeconds = 20.f;
-
-	/** Higher priority interrupts lower priority lines. */
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Voice")
-	int32 Priority = 0;
-
-	/** Optional subtitle override (defaults to Script). */
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Voice")
-	bool bSubtitlesEnabled = true;
-};
-
 // ==========================================================================
 //  Delegates - shared across health, weapons, match, UI
 // ==========================================================================

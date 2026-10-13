@@ -107,6 +107,18 @@ void AOneBrahamPlayerController::BeginPlay()
 			"Open BP_OneBrahamPlayerController and set InputConfig = DA_OneBrahamInputConfig.");
 	}
 
+	// The mapping contexts may be set on the Blueprint, or named in Project
+	// Settings. Blueprint first: it is the more specific statement of intent.
+	if (CommonMappingContext == nullptr)
+	{
+		CommonMappingContext = UOneBrahamGameSettings::Get().CommonMappingContext.LoadSynchronous();
+	}
+
+	if (GameplayMappingContext == nullptr)
+	{
+		GameplayMappingContext = UOneBrahamGameSettings::Get().DefaultMappingContext.LoadSynchronous();
+	}
+
 	// Install the local mapping contexts.
 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
 	{

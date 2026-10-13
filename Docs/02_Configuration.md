@@ -106,6 +106,31 @@ worse as a partitioned level than as a plain one).
 
 ---
 
+## 1b. Project Settings -> One Braham
+
+`UOneBrahamGameSettings` is a `UDeveloperSettings` class, so everything in it is
+editable in Project Settings and stored in `DefaultGame.ini` under
+`[/Script/OneBraham.OneBrahamGameSettings]`. It carries the brand colours, the
+match and security tuning, and the content registries.
+
+**The content registries resolve in three steps.** Every one of them, in this
+order:
+
+| Step | Source | When it is right |
+| --- | --- | --- |
+| 1 | the settings field (`WeaponRegistry`, `VoiceLineRegistry`, `CharacterRegistry`, `CommonMappingContext`, `DefaultMappingContext`, `DefaultMatchSettings`) | you are pointing the game at content somewhere else, or testing one asset |
+| 2 | the conventional path (`/Game/OneBraham/Data/DA_WeaponRegistry`, `/Game/OneBraham/Voice/DA_VoiceLines`, `DA_MatchSettings_<Mode>`) | the normal case: the pipeline writes there |
+| 3 | a compiled-in or runtime default with a warning in the log | a code-only checkout with no content built yet |
+
+Step 3 is why the game is playable before anybody runs the content pipeline; step
+1 is why a designer never has to touch C++ to move an asset. Both existed here,
+and four of the six fields were read by nobody: `WeaponRegistry`,
+`VoiceLineRegistry`, `DefaultMatchSettings` and both mapping contexts were
+editable and inert, and the code loaded its content from the hard-coded path
+instead. `check_uht_contracts.py` now fails the build on a settings field that no
+source file reads, which is the only way to keep that from happening again: a
+setting that does nothing looks exactly like a setting that works.
+
 ## 2. `DefaultGame.ini`
 
 | Block | Contents |

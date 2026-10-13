@@ -29,7 +29,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `build_vfx.py` | 17 Niagara systems, 3 camera shakes, 6 decal materials, the authoring sheet | yes | yes |
 | `import_font.py` | font faces from `Content/UI/Fonts` | yes | yes |
 | `check_cpp_symbols.py` | reads `Source/OneBraham` and reports every member function declared with no definition | **no** | yes |
-| `check_uht_contracts.py` | UE reflection contracts: RPC bodies, RepNotify callbacks, replicated properties named in a `DOREPLIFETIME`, and widgets that animate in a `NativeTick` the engine never calls | **no** | yes |
+| `check_uht_contracts.py` | UE reflection contracts: RPC bodies, RepNotify callbacks, replicated properties named in a `DOREPLIFETIME`, widgets that animate in a `NativeTick` the engine never calls, duplicate type names, `TSoftObjectPtr`s that name a type existing nowhere in the module, and settings fields that no code reads | **no** | yes |
 | `check_soft_paths.py` | every `/Game/` path the C++ loads by name, against the directories and name prefixes the pipeline writes | **no** | yes |
 | `check_calls.py` | call sites whose argument count cannot match the project's own declaration (defaults honoured, qualified calls skipped) | **no** | yes |
 | `check_gameplay_tags.py` | every tag the code requests, declared natively or in `DefaultGame.ini`; also resolves `Printf`-assembled tags from local string tables | **no** | yes |
@@ -66,7 +66,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | --- | --- | --- | --- |
 | input_ini | OK | 0.0 | wrote 41 actions (40 with a default key) |
 | cpp_symbols | OK | 0.1 | 495 declarations, all defined |
-| uht_contracts | OK | 0.5 | 636 UE reflection contracts, all satisfied |
+| uht_contracts | OK | 0.5 | 773 UE reflection contracts, all satisfied |
 | soft_paths | OK | 0.0 | 42 name-loaded asset paths, all conventional |
 | calls | OK | 0.1 | 823 call sites, all arities plausible |
 | tags | OK | 0.2 | 6 resolvable tag requests, all declared |

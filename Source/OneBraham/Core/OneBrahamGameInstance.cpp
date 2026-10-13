@@ -213,6 +213,19 @@ UOneBrahamMatchSettingsAsset* UOneBrahamGameInstance::GetMatchSettings(EOneBraha
 		}
 	}
 
+	// Project Settings -> One Braham -> DefaultMatchSettings is an override for
+	// whichever mode it names: somebody tuning one mode does not have to keep the
+	// asset at the conventional path, and the field is not decoration.
+	if (UOneBrahamMatchSettingsAsset* Configured = UOneBrahamGameSettings::Get().DefaultMatchSettings.LoadSynchronous())
+	{
+		if (Configured->Mode == Mode)
+		{
+			CachedMatchSettings.Add(Mode, Configured);
+
+			return Configured;
+		}
+	}
+
 	// Path convention: /Game/OneBraham/Data/DA_MatchSettings_<Mode>
 	const TCHAR* ModeName = TEXT("Ascent");
 	switch (Mode)

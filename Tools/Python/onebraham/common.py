@@ -211,8 +211,16 @@ def class_bodies(text):
     # blind spot - every USTRUCT in this project was invisible to both the UHT
     # contract check and the call-arity check, and a struct is exactly where a
     # replicated property hides.
-    for match in re.finditer(r"\b(?:class|struct)\s+(?:ONEBRAHAM_API\s+)?([AUIEF][A-Za-z0-9_]+)[^;{]*\{",
-                            text):
+    # `[^;{()*&=]` rather than `[^;{]`, and the difference is a real class of
+    # bug: `void SetOwningWeaponComponent(class UOneBrahamWeaponComponent* In) {...}`
+    # is an elaborated type specifier in a parameter list, and with the loose
+    # version the parser read it as a second declaration of
+    # UOneBrahamWeaponComponent - which every downstream check then believed.
+    # A class head has no parenthesis, asterisk, ampersand or equals sign in it;
+    # base lists are made of names, commas and colons, so they still match.
+    for match in re.finditer(
+            r"\b(?:class|struct)\s+(?:ONEBRAHAM_API\s+)?([AUIEF][A-Za-z0-9_]+)[^;{()*&=]*\{",
+            text):
         open_index = text.index("{", match.end() - 1)
 
         depth = 0
