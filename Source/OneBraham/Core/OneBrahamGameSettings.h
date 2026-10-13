@@ -90,6 +90,18 @@ public:
 	float MaxMovementSpeedTolerance = 1.35f;
 
 	UPROPERTY(config, EditAnywhere, Category = "Security")
+	/**
+	 * Server-side slack on the interaction distance, in centimetres.
+	 *
+	 * NOT the player's reach - that is OneBrahamConstants::InteractRangeCm. This
+	 * is what the server adds before it refuses a request, because the client's
+	 * position when it asked is not the position the server has: a player who
+	 * pressed interact at 210 cm while backing away at 400 cm/s is 220 cm away
+	 * by the time the RPC lands, and refusing that interaction reads as lag.
+	 *
+	 * Wide enough to cover a bad connection, narrow enough that it is not a
+	 * teleport-to-open: 220 cm is half a second of sprinting.
+	 */
 	float MaxInteractDistanceTolerance = 220.f;
 
 	UPROPERTY(config, EditAnywhere, Category = "Security")

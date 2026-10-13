@@ -63,7 +63,7 @@ Three layers, each with one job:
 
 | Class | Stores | Persisted by |
 | --- | --- | --- |
-| `UOneBrahamGameSettings` | developer-tunable defaults: the seven UI colours, interaction distance 210 cm, default mode, default tick rates | read from `DefaultGame.ini` `[OneBrahamGameSettings]` at startup |
+| `UOneBrahamGameSettings` | developer-tunable defaults: the seven UI colours, the interaction-distance tolerance, the voice occlusion, the default mode and tick rates | read from `DefaultGame.ini` `[OneBrahamGameSettings]` at startup |
 | `UOneBrahamGameUserSettings` | player video/audio/gameplay/accessibility settings | `GameUserSettings.ini` (engine) |
 | `UOneBrahamSaveSettings` | keybinds (per device), sensitivity, HUD scale, last-used loadout | `Saved/SaveGames/OneBrahamSettings.sav` |
 
@@ -74,6 +74,19 @@ can assert none is null at startup rather than crashing on the first keypress.
 The palette lives in the ini rather than in code so a designer can retune the
 brand without a compile, and so `build_ui.py` can verify the code and the ini
 agree on every content build.
+
+---
+
+### The three interaction distances
+
+They are three because they answer three different questions, and confusing them
+is how a game ends up with prompts the server refuses:
+
+| Number | Value | Where | The question it answers |
+| --- | --- | --- | --- |
+| `OneBrahamConstants::InteractRangeCm` | 220 cm | `OneBraham.h` | How far can the player reach? The client traces this far, the server validates against it, and an interactable that declares no range of its own gets it as a default. |
+| `UOneBrahamGameSettings::MaxInteractDistanceTolerance` | 220 cm | project settings | How much slack does the server allow for latency? A player who pressed interact at 210 cm while backing away is further than that by the time the RPC lands. |
+| `AOneBrahamCharacter::GetInteractRange()` | the constant | character | The single accessor the trace and the HUD prompt use, so the two cannot disagree. |
 
 ---
 

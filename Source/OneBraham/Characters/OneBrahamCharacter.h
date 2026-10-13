@@ -21,6 +21,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "OneBraham.h"
 #include "GameFramework/Character.h"
 #include "Core/OneBrahamTypes.h"
 #include "OneBrahamCharacter.generated.h"
@@ -123,7 +124,7 @@ public:
 
 	/** Interaction reach: 220 cm (arms-length) as standard. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Character")
-	float GetInteractRange() const { return 220.f; }
+	float GetInteractRange() const { return OneBrahamConstants::InteractRangeCm; }
 
 	UFUNCTION(BlueprintPure, Category = "One Braham|Character")
 	bool IsAimingDownSights() const;

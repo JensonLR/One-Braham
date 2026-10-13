@@ -55,6 +55,12 @@ WHAT IT CHECKS, AND WHY EACH ONE HAS BITTEN SOMEONE
                                                         no geometry using it means
                                                         the room sounds and reacts
                                                         like whatever is left over.
+    20. UnrealHeaderTool contracts                    - an RPC with no body, a
+                                                        RepNotify that does not
+                                                        exist, and the expensive
+                                                        one: a replicated property
+                                                        with no DOREPLIFETIME, which
+                                                        never reaches a client.
 
     It writes Saved/Validation/ob_validation_<timestamp>.md and exits non-zero on
     any FAIL. Warnings do not fail the build; failures do.
@@ -1272,6 +1278,40 @@ def check_surface_coverage(v, config_only):
             v.pass_("surface coverage", u"all {0} rooms record a floor finish".format(len(rooms)))
 
 
+def check_uht_contracts(v, _config_only):
+    """The contracts UnrealHeaderTool enforces, checked without running it.
+
+    Six things are verified: RPCs have their `_Implementation`, RPCs do not
+    return values, BlueprintNativeEvents have a C++ default body,
+    BlueprintImplementableEvents have no C++ body, RepNotify callbacks exist and
+    are UFUNCTIONs, and every replicated property is named in a DOREPLIFETIME.
+
+    That last one is the reason this check exists. A replicated property with no
+    DOREPLIFETIME compiles, validates and silently never replicates, so it looks
+    correct on a listen server and is permanently zero on every client - the
+    classic "works on my machine" multiplayer bug, and the hardest one to notice
+    when testing alone.
+    """
+    try:
+        from onebraham import check_uht_contracts
+    except Exception as exc:  # noqa: BLE001
+        v.warn("uht contracts", u"checker unavailable: {0}".format(exc))
+        return
+
+    checked, problems = check_uht_contracts.run(source_root=SOURCE_DIR)
+
+    if checked == 0:
+        v.warn("uht contracts", u"no headers parsed - is Source/OneBraham missing?")
+        return
+
+    if not problems:
+        v.pass_("uht contracts", u"all {0} UE reflection contracts are satisfied".format(checked))
+        return
+
+    for rel, class_name, message in problems:
+        v.fail("uht contracts", u"{0}: {1} - {2}".format(rel, class_name, message))
+
+
 # ---------------------------------------------------------------------------
 #  Report
 # ---------------------------------------------------------------------------
@@ -1331,6 +1371,7 @@ def build_all(config_only=False):
         ("delimiters", check_delimiters),
         ("vfx reachability", check_vfx_reachability),
         ("surface coverage", check_surface_coverage),
+        ("uht contracts", check_uht_contracts),
     ]
 
     for label, fn in checks:

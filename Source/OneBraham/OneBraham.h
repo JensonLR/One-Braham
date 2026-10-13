@@ -121,6 +121,22 @@ namespace OneBrahamConstants
 	static constexpr float BreachFuseSeconds = 3.f;
 
 	/**
+	 * Player reach for interactions, in centimetres.
+	 *
+	 * ONE NUMBER, THREE PLACES, and they have to agree or the game lies to the
+	 * player: the client traces this far to find what you are looking at, the
+	 * server refuses an interaction beyond this distance plus the tolerance, and
+	 * an interactable that does not declare its own range gets this as its
+	 * default. A prompt the player can see but the server rejects is the worst
+	 * bug in an interaction system because it looks like lag.
+	 *
+	 * 220 cm is roughly "arm's length plus a step": it is short enough that you
+	 * have to commit to walking up to a terminal in a room someone is holding,
+	 * and long enough that a door does not demand pixel-perfect positioning.
+	 */
+	static constexpr float InteractRangeCm = 220.f;
+
+	/**
 	 * Storey height of the building, in centimetres.
 	 *
 	 * ONE NUMBER, FOUR SYSTEMS. The map builder lays floors out on this pitch, the
