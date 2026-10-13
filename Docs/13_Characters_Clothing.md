@@ -89,6 +89,14 @@ they came in with.
 | Watch | 3 | and a tan line for the one without a watch |
 | Bag tag | 3 | company travel tag |
 
+These twelve slots and 51 options are `COSMETIC_SLOTS` and `COSMETIC_OPTIONS`
+in `Tools/Python/onebraham/build_characters.py`; the registry asset is generated
+from them, the compiled-in default in `UOneBrahamCharacterDataAsset` carries the
+same geometry, and `check_cosmetic_ids.py` compares all of it against this table
+on every run. The starter outfit a new profile unlocks is drawn from these
+options too — it once was not, and a fresh player owned seven cosmetics the
+wardrobe has never contained.
+
 Unlock rules: eleven slots are unlocked by playing (level, challenges, mode
 completions). Nothing is purchasable that is not also earnable, and the wardrobe
 says so on screen:

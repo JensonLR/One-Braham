@@ -52,7 +52,8 @@ namespace
 		{ TEXT("check_test_names"),    TEXT("every automation test the documentation lists exists, and every test that exists is listed") },
 		{ TEXT("check_doc_files"),     TEXT("every script and tool the documentation tells the reader to run exists on disk") },
 		{ TEXT("check_doc_types"),     TEXT("every type name the documentation uses is a type this project declares") },
-		{ TEXT("check_weapon_ids"),    TEXT("the armoury table, the loot spawn table, the default loadout and Docs/05 are one list") }
+		{ TEXT("check_weapon_ids"),    TEXT("the armoury table, the loot spawn table, the default loadout and Docs/05 are one list") },
+		{ TEXT("check_cosmetic_ids"),  TEXT("the wardrobe, the compiled-in slots, the starter outfit and Docs/13 are one wardrobe") }
 
 		// Deliberately absent: validate_project.py, and check_soft_paths.py in its
 		// full (non-config) form. Both shell out to UnrealBuildTool or UnrealPak,

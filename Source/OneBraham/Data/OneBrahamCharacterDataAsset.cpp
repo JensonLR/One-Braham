@@ -343,28 +343,69 @@ void UOneBrahamCharacterDataAsset::PostEditChangeProperty(FPropertyChangedEvent&
 		DefaultArchetypeTag = Archetypes[0].ArchetypeTag;
 	}
 
-	// Two slots that are always needed for the game's own systems: the lanyard
-	// (identity) and the badge (access tier read at a glance in the lobby).
-	// Everything else is content the wardrobe can grow into.
+	// The twelve slots of the wardrobe, with the geometry the character builder
+	// writes into the registry asset (COSMETIC_SLOTS in build_characters.py).
+	// This default used to carry five of them, which is worse than carrying none:
+	// a fresh clone applied seven of the twelve slots' cosmetics to nothing, and
+	// ApplyCosmetics drops a pair whose slot it cannot find, so a player's lanyard
+	// and badge appeared and their jacket, trousers, shoes, fleece, hi-vis, bag
+	// tag, gloves and watch did not. check_cosmetic_ids.py compares this table
+	// against the builder: names, parent bones and offsets.
 	if (CosmeticSlots.Num() == 0)
 	{
 		FOneBrahamCosmeticSlot Jacket;
 		Jacket.SlotName = TEXT("Jacket");
 		Jacket.DisplayName = NSLOCTEXT("OneBraham", "Slot_Jacket", "Jacket");
 		Jacket.ParentBone = TEXT("spine_03");
+		Jacket.RelativeOffset = FVector(0f, 0f, 0f);
+		Jacket.bHiddenWhenArmed = false;
 		CosmeticSlots.Add(Jacket);
+
+		FOneBrahamCosmeticSlot Fleece;
+		Fleece.SlotName = TEXT("Fleece");
+		Fleece.DisplayName = NSLOCTEXT("OneBraham", "Slot_Fleece", "Fleece");
+		Fleece.ParentBone = TEXT("spine_03");
+		Fleece.RelativeOffset = FVector(0f, 0f, 0f);
+		Fleece.bHiddenWhenArmed = false;
+		CosmeticSlots.Add(Fleece);
+
+		FOneBrahamCosmeticSlot HiVis;
+		HiVis.SlotName = TEXT("HiVis");
+		HiVis.DisplayName = NSLOCTEXT("OneBraham", "Slot_HiVis", "Hi-Vis Vest");
+		HiVis.ParentBone = TEXT("spine_03");
+		HiVis.RelativeOffset = FVector(0f, 0f, 2f);
+		HiVis.bHiddenWhenArmed = false;
+		CosmeticSlots.Add(HiVis);
+
+		FOneBrahamCosmeticSlot Trousers;
+		Trousers.SlotName = TEXT("Trousers");
+		Trousers.DisplayName = NSLOCTEXT("OneBraham", "Slot_Trousers", "Trousers");
+		Trousers.ParentBone = TEXT("pelvis");
+		Trousers.RelativeOffset = FVector(0f, 0f, 0f);
+		Trousers.bHiddenWhenArmed = false;
+		CosmeticSlots.Add(Trousers);
+
+		FOneBrahamCosmeticSlot Shoes;
+		Shoes.SlotName = TEXT("Shoes");
+		Shoes.DisplayName = NSLOCTEXT("OneBraham", "Slot_Shoes", "Shoes");
+		Shoes.ParentBone = TEXT("foot_l");
+		Shoes.RelativeOffset = FVector(0f, 0f, 0f);
+		Shoes.bHiddenWhenArmed = false;
+		CosmeticSlots.Add(Shoes);
 
 		FOneBrahamCosmeticSlot Lanyard;
 		Lanyard.SlotName = TEXT("Lanyard");
 		Lanyard.DisplayName = NSLOCTEXT("OneBraham", "Slot_Lanyard", "Lanyard");
 		Lanyard.ParentBone = TEXT("spine_03");
-		Lanyard.RelativeOffset = FVector(-4.f, 0.f, 12.f);
+		Lanyard.RelativeOffset = FVector(-4f, 0f, 12f);
+		Lanyard.bHiddenWhenArmed = false;
 		CosmeticSlots.Add(Lanyard);
 
 		FOneBrahamCosmeticSlot Badge;
 		Badge.SlotName = TEXT("Badge");
 		Badge.DisplayName = NSLOCTEXT("OneBraham", "Slot_Badge", "Access Badge");
 		Badge.ParentBone = TEXT("spine_03");
+		Badge.RelativeOffset = FVector(-4f, 0f, 10f);
 		Badge.bHiddenWhenArmed = false;
 		CosmeticSlots.Add(Badge);
 
@@ -372,13 +413,41 @@ void UOneBrahamCharacterDataAsset::PostEditChangeProperty(FPropertyChangedEvent&
 		Bag.SlotName = TEXT("Bag");
 		Bag.DisplayName = NSLOCTEXT("OneBraham", "Slot_Bag", "Bag");
 		Bag.ParentBone = TEXT("spine_03");
+		Bag.RelativeOffset = FVector(0f, -8f, 0f);
+		Bag.bHiddenWhenArmed = false;
 		CosmeticSlots.Add(Bag);
 
 		FOneBrahamCosmeticSlot Headwear;
 		Headwear.SlotName = TEXT("Headwear");
 		Headwear.DisplayName = NSLOCTEXT("OneBraham", "Slot_Headwear", "Headwear");
 		Headwear.ParentBone = TEXT("head");
+		Headwear.RelativeOffset = FVector(0f, 0f, 0f);
+		Headwear.bHiddenWhenArmed = false;
 		CosmeticSlots.Add(Headwear);
+
+		FOneBrahamCosmeticSlot Gloves;
+		Gloves.SlotName = TEXT("Gloves");
+		Gloves.DisplayName = NSLOCTEXT("OneBraham", "Slot_Gloves", "Gloves");
+		Gloves.ParentBone = TEXT("hand_r");
+		Gloves.RelativeOffset = FVector(0f, 0f, 0f);
+		Gloves.bHiddenWhenArmed = false;
+		CosmeticSlots.Add(Gloves);
+
+		FOneBrahamCosmeticSlot Watch;
+		Watch.SlotName = TEXT("Watch");
+		Watch.DisplayName = NSLOCTEXT("OneBraham", "Slot_Watch", "Watch");
+		Watch.ParentBone = TEXT("hand_l");
+		Watch.RelativeOffset = FVector(0f, 0f, 0f);
+		Watch.bHiddenWhenArmed = false;
+		CosmeticSlots.Add(Watch);
+
+		FOneBrahamCosmeticSlot BagTag;
+		BagTag.SlotName = TEXT("BagTag");
+		BagTag.DisplayName = NSLOCTEXT("OneBraham", "Slot_BagTag", "Bag Tag");
+		BagTag.ParentBone = TEXT("spine_03");
+		BagTag.RelativeOffset = FVector(0f, -9f, 4f);
+		BagTag.bHiddenWhenArmed = false;
+		CosmeticSlots.Add(BagTag);
 	}
 }
 #endif

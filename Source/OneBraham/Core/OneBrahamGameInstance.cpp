@@ -126,14 +126,27 @@ bool UOneBrahamGameInstance::LoadProfile()
 
 			// Every player starts with the standard-issue cosmetics so the locker
 			// is never empty on a fresh install.
+			//
+			// These seven ids are the wardrobe in build_characters.py, which is
+			// the same table the registry asset is generated from and the same
+			// one Docs/13 documents. They were not: this list used a naming
+			// scheme (Head_*, Torso_*, Legs_*, Feet_*, Outerwear_*) that no
+			// wardrobe has ever contained, so a fresh profile unlocked seven
+			// cosmetics that do not exist and a player's first outfit was bare.
+			// The lanyard and the badge are in the set deliberately: the badge
+			// carries the access tier and the lobby reads it at a glance.
 			const TArray<FName> StarterCosmetics = {
-				TEXT("Head_ShortBackAndSides"),
-				TEXT("Torso_Shirt_WhiteCollar"),
-				TEXT("Legs_Chinos_Slate"),
-				TEXT("Feet_SmartShoes_Worn"),
-				TEXT("Outerwear_Softshell_Navy"),
-				TEXT("Lanyard_OneBraham_Blue"),
-				TEXT("Badge_Visitor_Paper")
+				TEXT("Jacket_Chino"),
+				TEXT("Fleece_Grey"),
+				TEXT("Trousers_Chino"),
+				TEXT("Shoes_Loafer"),
+				TEXT("Bag_None"),
+				TEXT("Lanyard_Visitor"),
+				TEXT("Badge_Public"),
+				TEXT("Hat_None"),
+				TEXT("Gloves_None"),
+				TEXT("Watch_None"),
+				TEXT("BagTag_Staff")
 			};
 			for (const FName& CosmeticId : StarterCosmetics)
 			{

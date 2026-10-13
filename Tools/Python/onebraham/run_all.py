@@ -96,6 +96,10 @@ STEPS = [
      "the ten weapons as four places describe them: the armoury table that "
      "generates them, the spawn table that rolls them, the defaults that hand "
      "them out, and Docs/05"),
+    ("cosmetic_ids", "onebraham.check_cosmetic_ids", False,
+     "the wardrobe as three places describe it: the slots and options the "
+     "character builder generates, the compiled-in default a fresh clone runs "
+     "on, and the starter outfit a new profile unlocks"),
     ("materials", "onebraham.build_materials", True,
      "master materials, physical materials, surface and brand instances"),
     ("environment", "onebraham.build_environment", True,

@@ -1623,6 +1623,35 @@ def check_weapon_ids(v, _config_only):
         v.fail("weapon ids", u"[{0}] {1}".format(kind, message))
 
 
+def check_cosmetic_ids(v, _config_only):
+    """The wardrobe is one wardrobe.
+
+    Cosmetics are the entire monetisation model and the ids are `FName`s, so a
+    wrong one is a string that matches nothing rather than an error. The
+    compiled-in `CosmeticSlots` default carried five of the twelve slots, which
+    meant `ApplyCosmetics` - which drops a pair whose slot it cannot find -
+    silently applied the lanyard and the badge and threw away the jacket,
+    trousers, shoes, fleece, hi-vis, bag tag, gloves and watch. The starter
+    outfit unlocked seven ids in a naming scheme no wardrobe contains, so a
+    fresh profile unlocked nothing a player could wear.
+    """
+    try:
+        from onebraham import check_cosmetic_ids
+    except Exception as exc:  # noqa: BLE001
+        v.warn("cosmetic ids", u"checker unavailable: {0}".format(exc))
+        return
+
+    checked, problems = check_cosmetic_ids.run()
+
+    if not problems:
+        v.pass_("cosmetic ids", u"{0} checks: the builder, the compiled-in default, the "
+                               u"starter outfit and Docs/13 are one wardrobe".format(checked))
+        return
+
+    for message, kind in problems:
+        v.fail("cosmetic ids", u"[{0}] {1}".format(kind, message))
+
+
 def check_input_actions(v, _config_only):
     """The input pipeline is one pipeline.
 
@@ -1754,6 +1783,7 @@ def build_all(config_only=False):
         ("documented files", check_doc_files),
         ("documented types", check_doc_types),
         ("weapon ids", check_weapon_ids),
+        ("cosmetic ids", check_cosmetic_ids),
     ]
 
     for label, fn in checks:
