@@ -50,7 +50,6 @@ class ONEBRAHAM_API UOneBrahamQuickLineWidget : public UUserWidget
 public:
 	UOneBrahamQuickLineWidget(const FObjectInitializer& ObjectInitializer);
 
-	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 	virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
@@ -120,6 +119,11 @@ protected:
 	 *  slow enough that the eye registers it as a thing that opened. */
 	UPROPERTY(EditDefaultsOnly, Category = "Comms") float OpenSeconds = 0.09f;
 
-	/** Current open animation 0..1. */
-	float OpenAlpha = 0.f;
+	/** Current open animation 0..1. Derived from the clock at paint, hence mutable. */
+	mutable float OpenAlpha = 0.f;
+
+	/** World time the wheel was last opened. There is no tick: the open
+	 *  animation is a function of this and the clock, for the reason written out
+	 *  at the top of UOneBrahamFloorPlanWidget::NativePaint. */
+	float OpenedAtSeconds = 0.f;
 };

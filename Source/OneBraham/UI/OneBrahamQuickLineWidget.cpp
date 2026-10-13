@@ -45,32 +45,15 @@ void UOneBrahamQuickLineWidget::SetWheelVisible(bool bVisible)
 		// hover is how "never mind" gets said by mistake.
 		HoveredSegment = INDEX_NONE;
 		OpenAlpha = 0.f;
+
+		const UWorld* World = GetWorld();
+		OpenedAtSeconds = World != nullptr ? World->GetTimeSeconds() : 0.f;
+
 		SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-		SetTickEnabled(true);
 	}
 	else
 	{
 		SetVisibility(ESlateVisibility::Collapsed);
-		SetTickEnabled(false);
-	}
-}
-
-void UOneBrahamQuickLineWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
-{
-	Super::NativeTick(MyGeometry, InDeltaTime);
-
-	if (!bWheelVisible)
-	{
-		return;
-	}
-
-	if (OpenSeconds > KINDA_SMALL_NUMBER)
-	{
-		OpenAlpha = FMath::Min(1.f, OpenAlpha + InDeltaTime / OpenSeconds);
-	}
-	else
-	{
-		OpenAlpha = 1.f;
 	}
 }
 

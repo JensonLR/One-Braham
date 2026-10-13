@@ -59,10 +59,38 @@ void UOneBrahamHUDWidget::NativeConstruct()
 		bBuiltLayoutInCode ? TEXT("code") : TEXT("authored"));
 }
 
-void UOneBrahamHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+int32 UOneBrahamHUDWidget::NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
+	const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements,
+	int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
 {
-	Super::NativeTick(MyGeometry, InDeltaTime);
+	const int32 CurrentLayer = Super::NativePaint(Args, AllottedGeometry, MyCullingRect,
+		OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
 
+	// --- Why there is no NativeTick here ---------------------------------
+	// A C++ UUserWidget is created with EWidgetTickFrequency::Auto, and Auto
+	// means "tick only if this widget has a tick event implemented in
+	// Blueprint". An override of NativeTick is not one, so this widget's tick
+	// was never going to be called: the banner, the subtitle and the damage
+	// flash would each have frozen at whatever the last component snapshot set
+	// them to. Paint is the one callback a visible widget is guaranteed, so the
+	// same timers advance from the clock that the painter already has.
+	if (const UWorld* World = GetWorld())
+	{
+		const double Now = World->GetTimeSeconds();
+		const double Delta = LastPaintTimeSeconds < 0.0 ? 0.0 : Now - LastPaintTimeSeconds;
+		LastPaintTimeSeconds = Now;
+
+		if (Delta > 0.0)
+		{
+			AdvanceOverlayTimers(static_cast<float>(Delta));
+		}
+	}
+
+	return CurrentLayer;
+}
+
+void UOneBrahamHUDWidget::AdvanceOverlayTimers(float InDeltaTime) const
+{
 	// Overlay fades are widget-side because they are purely cosmetic: the
 	// component's snapshot stays authoritative for gameplay-visible values.
 	if (BannerRemaining > 0.f)

@@ -34,15 +34,11 @@ void UOneBrahamFloorPlanWidget::SetPlanVisible(bool bVisible)
 
 	if (bPlanVisible)
 	{
-		// Start the tick so the fade and the pulse run, and drop it again when
-		// the plan closes: an overlay nobody is looking at should cost nothing.
-		SetTickEnabled(true);
+		// The fade and the pulse are both measured from this instant, in paint.
+		const UWorld* World = GetWorld();
+		OpenedAtSeconds = World != nullptr ? World->GetTimeSeconds() : 0.f;
 		FadeAlpha = 0.f;
 		PulseTime = 0.f;
-	}
-	else
-	{
-		SetTickEnabled(false);
 	}
 }
 
@@ -57,27 +53,6 @@ bool UOneBrahamFloorPlanWidget::HasDownedSquadmate() const
 	}
 
 	return false;
-}
-
-void UOneBrahamFloorPlanWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
-{
-	Super::NativeTick(MyGeometry, InDeltaTime);
-
-	if (!bPlanVisible)
-	{
-		return;
-	}
-
-	PulseTime += InDeltaTime;
-
-	if (FadeSeconds > KINDA_SMALL_NUMBER)
-	{
-		FadeAlpha = FMath::Min(1.f, FadeAlpha + InDeltaTime / FadeSeconds);
-	}
-	else
-	{
-		FadeAlpha = 1.f;
-	}
 }
 
 void UOneBrahamFloorPlanWidget::PaintFloorRow(FSlateWindowElementList& OutDrawElements, int32 LayerId,
@@ -135,8 +110,7 @@ void UOneBrahamFloorPlanWidget::PaintFloorRow(FSlateWindowElementList& OutDrawEl
 		// Pulses toward full opacity. One property of one element: a panel that
 		// animates as a whole is noise in the corner of the eye of a player who
 		// is being shot at.
-		const float Pulse = 0.55f + 0.45f * FMath::Sin(PulseTime * PulseTime > 0.f
-			? PulseTime * 2.f * PI * DownedPulseHz : 0.f);
+		const float Pulse = 0.55f + 0.45f * FMath::Sin(PulseTime * 2.f * PI * DownedPulseHz);
 		RuleColour = UOneBrahamUIStyle::EmergencyRed();
 		RuleColour.A = Pulse;
 	}
@@ -342,6 +316,28 @@ int32 UOneBrahamFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeom
 {
 	int32 CurrentLayer = Super::NativePaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements,
 		LayerId, InWidgetStyle, bParentEnabled);
+
+	// --- Animation, taken from the clock rather than from a tick -------------
+	// A C++ UUserWidget starts at EWidgetTickFrequency::Auto, and the engine
+	// reads Auto as "tick only if this widget has a tick implemented in
+	// Blueprint" - an overridden NativeTick does not count as one. So a widget
+	// that animates itself in NativeTick is a widget that may simply never
+	// animate, and the plan would open at zero alpha and stay there.
+	//
+	// Nothing here needs a tick. A visible widget is painted every frame, so the
+	// fade and the downed pulse are computed from the world clock each time the
+	// painter runs. It costs two subtractions, it cannot be switched off by a
+	// property nobody remembered, and it is exactly as smooth as the framerate.
+	if (bPlanVisible)
+	{
+		const UWorld* World = GetWorld();
+		const float Now = World != nullptr ? World->GetTimeSeconds() : OpenedAtSeconds;
+
+		PulseTime = FMath::Max(0.f, Now - OpenedAtSeconds);
+		FadeAlpha = FadeSeconds > KINDA_SMALL_NUMBER
+			? FMath::Min(1.f, PulseTime / FadeSeconds)
+			: 1.f;
+	}
 
 	if (!bPlanVisible || PlanData.Floors.Num() == 0 || FadeAlpha <= KINDA_SMALL_NUMBER)
 	{

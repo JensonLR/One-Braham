@@ -47,8 +47,6 @@ public:
 		const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements,
 		int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
 
-	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
-
 	// -----------------------------------------------------------------------
 	//  Data
 	// -----------------------------------------------------------------------
@@ -106,13 +104,19 @@ protected:
 	/** Fade-in time, seconds. A map that appears instantly reads as a glitch. */
 	UPROPERTY(EditDefaultsOnly, Category = "Plan") float FadeSeconds = 0.12f;
 
-	/** Current fade 0..1. */
-	float FadeAlpha = 0.f;
+	/** Current fade 0..1. Derived from the clock at paint, hence mutable. */
+	mutable float FadeAlpha = 0.f;
 
 	/** Pulses the downed markers so they catch the eye without animating a
 	 *  whole panel: 0.5 Hz, subtle, off by default in the accessibility
 	 *  settings because a pulsing UI is a migraine for some players. */
 	UPROPERTY(EditDefaultsOnly, Category = "Plan") float DownedPulseHz = 0.5f;
 
-	float PulseTime = 0.f;
+	/** Seconds since the plan opened. Derived at paint, like the fade. */
+	mutable float PulseTime = 0.f;
+
+	/** World time the plan was last opened. The fade and the downed pulse are a
+	 *  function of this and the clock - see NativePaint for why there is no
+	 *  tick. */
+	float OpenedAtSeconds = 0.f;
 };

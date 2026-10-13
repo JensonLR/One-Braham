@@ -46,7 +46,9 @@ public:
 
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
-	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+	virtual int32 NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
+		const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements,
+		int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
 
 	// ======================================================================
 	//  Data in
@@ -87,6 +89,11 @@ public:
 	bool IsCodelessLayout() const { return bBuiltLayoutInCode; }
 
 protected:
+	/** World time of the last paint. Overlay timers advance by the difference:
+	 *  paint is the only callback this widget is guaranteed every frame, and a
+	 *  widget that expects NativeTick to be called has a bug it cannot see. */
+	mutable double LastPaintTimeSeconds = -1.0;
+
 	// --- layout construction ---------------------------------------------
 	/** Builds the whole tree in code when the Blueprint has none. */
 	void BuildDefaultLayout();
@@ -102,6 +109,12 @@ protected:
 
 	/** Adds a widget filling the whole canvas (anchors 0,0 - 1,1, zero offsets). */
 	void AddStretched(UWidget* Widget);
+
+	// --- time-based overlays ---------------------------------------------
+	/** Decays the banner, sub-banner and subtitle timers and eases the damage
+	 *  flash. Called from NativePaint with the real elapsed time since the last
+	 *  paint, because this widget does not tick - see NativePaint. */
+	void AdvanceOverlayTimers(float DeltaSeconds) const;
 
 	// --- panel update helpers --------------------------------------------
 	void UpdateHealthPanel(const FOneBrahamHUDData& InData);
@@ -215,9 +228,9 @@ protected:
 	// --- state ------------------------------------------------------------
 	FOneBrahamHUDData Data;
 
-	float BannerRemaining = 0.f;
-	float SubBannerRemaining = 0.f;
-	float SubtitleRemaining = 0.f;
+	mutable float BannerRemaining = 0.f;
+	mutable float SubBannerRemaining = 0.f;
+	mutable float SubtitleRemaining = 0.f;
 
 	/** Ping actors are drawn in world space by the map marker component; the HUD
 	 *  keeps the list only so the compass can use it as a fallback. */

@@ -29,7 +29,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `build_vfx.py` | 17 Niagara systems, 3 camera shakes, 6 decal materials, the authoring sheet | yes | yes |
 | `import_font.py` | font faces from `Content/UI/Fonts` | yes | yes |
 | `check_cpp_symbols.py` | reads `Source/OneBraham` and reports every member function declared with no definition | **no** | yes |
-| `check_uht_contracts.py` | UE reflection contracts: RPC bodies, RepNotify callbacks, replicated properties named in a `DOREPLIFETIME` | **no** | yes |
+| `check_uht_contracts.py` | UE reflection contracts: RPC bodies, RepNotify callbacks, replicated properties named in a `DOREPLIFETIME`, and widgets that animate in a `NativeTick` the engine never calls | **no** | yes |
 | `check_soft_paths.py` | every `/Game/` path the C++ loads by name, against the directories and name prefixes the pipeline writes | **no** | yes |
 | `check_calls.py` | call sites whose argument count cannot match the project's own declaration (defaults honoured, qualified calls skipped) | **no** | yes |
 | `check_gameplay_tags.py` | every tag the code requests, declared natively or in `DefaultGame.ini`; also resolves `Printf`-assembled tags from local string tables | **no** | yes |
@@ -66,7 +66,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | --- | --- | --- | --- |
 | input_ini | OK | 0.0 | wrote 41 actions (40 with a default key) |
 | cpp_symbols | OK | 0.1 | 495 declarations, all defined |
-| uht_contracts | OK | 0.5 | 600 UE reflection contracts, all satisfied |
+| uht_contracts | OK | 0.5 | 636 UE reflection contracts, all satisfied |
 | soft_paths | OK | 0.0 | 42 name-loaded asset paths, all conventional |
 | calls | OK | 0.1 | 823 call sites, all arities plausible |
 | tags | OK | 0.2 | 6 resolvable tag requests, all declared |
@@ -86,7 +86,7 @@ Exit code 0 only if every step passed. CI reads the exit code, not the log.
 ```
 generate_input_ini        text only; can fail before the editor opens
 cpp_symbols               text only; a link error found in 0.1 s, not 4 minutes
-uht_contracts             text only; a property that silently never replicates
+uht_contracts             text only; a property that silently never replicates, a tick a widget never has
 soft_paths                text only; an asset path that silently loads nothing
 calls                     text only; a call that cannot compile: wrong argument count
 tags                      text only; a tag that silently matches nothing

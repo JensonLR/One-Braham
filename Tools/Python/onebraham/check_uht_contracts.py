@@ -33,14 +33,27 @@ WHY THIS EXISTS
          contains it. The specifier is not an error to UHT and not an error to
          the compiler - it is a lie to the next reader, which is worse.
 
-      7. **A replicated property with no DOREPLIFETIME.** This is the expensive
+      7. **A C++ UUserWidget that overrides NativeTick.** A UserWidget is created
+         with EWidgetTickFrequency::Auto, and Auto means "tick only if this
+         widget has a tick event implemented in Blueprint". An override of
+         NativeTick is not one, so the engine never calls it: the animation in it
+         does not stutter, does not warn - it never runs, and the widget is drawn
+         frozen at whatever the first frame set. Three widgets in this project
+         had that shape, including the HUD's banner, subtitle and damage-flash
+         timers. Paint is the callback a visible widget is guaranteed, so time
+         belongs in NativePaint (see UOneBrahamHUDWidget::NativePaint).
+
+         A class that assigns TickFrequency is exempt: that is the deliberate way
+         to ask for a tick, and the check is about doing it on purpose.
+
+      8. **A replicated property with no DOREPLIFETIME.** This is the expensive
          one. It compiles, it validates, it does not warn, and the property
          simply never reaches a client - so a team score, a lockdown stage or a
          squad id is correct on the listen server and permanently zero
          everywhere else. It is the single most common bug in a hand-written
          multiplayer project and the hardest to notice while testing alone.
 
-    All six are found by comparing headers against sources textually, in a
+    All of them are found by comparing headers against sources textually, in a
     fifth of a second, on a machine with no engine on it.
 
 WHAT IT IS NOT
@@ -217,6 +230,14 @@ def run(source_root=None):
             # same convention the rest of Unreal uses.
             is_struct = class_name.startswith("F")
 
+            # UI classes are widgets: the tick contract below is one verification
+            # each, so the count reflects the rule and not only the classes that
+            # manage to break it.
+            is_widget = rel.replace("\\", "/").startswith("UI/")
+
+            if is_widget:
+                checked += 1
+
             for macros, statement in split_statements(body):
                 text = " ".join(statement.split()).strip()
 
@@ -229,6 +250,27 @@ def run(source_root=None):
 
                 if function_name is not None:
                     declared_here.add(function_name)
+
+                # --- the widget tick contract ---------------------------------
+                # A UI class in this project is a UUserWidget. Widgets are
+                # created with EWidgetTickFrequency::Auto, and Auto means "tick
+                # only if this widget has a tick event implemented in Blueprint"
+                # - a C++ override of NativeTick is not one, so the engine never
+                # calls it. The animation in it does not stutter or warn: it
+                # never runs. Three widgets had that shape, including the HUD's
+                # banner and subtitle timers.
+                #
+                # Assigning TickFrequency is the deliberate way to ask for a
+                # tick and is exempt, because the exemption is the point: this
+                # check is about ticking on purpose.
+                if is_widget and function_name == "NativeTick":
+                    if "TickFrequency" not in body:
+                        problems.append((rel, class_name,
+                                         u"{0} overrides NativeTick, which the engine never calls on a "
+                                         u"C++ widget: TickFrequency starts at Auto, which means "
+                                         u"\"tick only if Blueprint implements Tick\". Animate from the "
+                                         u"clock in NativePaint, or assign TickFrequency on purpose".format(
+                                             class_name)))
 
                 ufunction_specs = _specifier_list(macros, "UFUNCTION")
                 uproperty_specs = _specifier_list(macros, "UPROPERTY")
