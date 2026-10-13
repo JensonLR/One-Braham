@@ -1596,6 +1596,33 @@ def check_doc_types(v, _config_only):
                .format(type_name))
 
 
+def check_weapon_ids(v, _config_only):
+    """The ten weapons are ten weapons.
+
+    The registry asset is generated from build_weapons.py with ids like
+    `W_SMG`; the replayable default spawn table in the match settings listed
+    `SMG_MP5A3` and `Carbine_L85A2`, which the registry has never contained, and
+    the default loadout, the saved loadout and `ob.give` named the same ghosts.
+    Every floor-loot roll asked for a weapon that does not exist and got
+    nothing back - which is not an error, it is an empty hand.
+    """
+    try:
+        from onebraham import check_weapon_ids
+    except Exception as exc:  # noqa: BLE001
+        v.warn("weapon ids", u"checker unavailable: {0}".format(exc))
+        return
+
+    checked, problems = check_weapon_ids.run()
+
+    if not problems:
+        v.pass_("weapon ids", u"{0} checks: the armoury, the spawn table, the defaults and "
+                             u"Docs/05 are one list".format(checked))
+        return
+
+    for message, kind in problems:
+        v.fail("weapon ids", u"[{0}] {1}".format(kind, message))
+
+
 def check_input_actions(v, _config_only):
     """The input pipeline is one pipeline.
 
@@ -1726,6 +1753,7 @@ def build_all(config_only=False):
         ("test names", check_test_names),
         ("documented files", check_doc_files),
         ("documented types", check_doc_types),
+        ("weapon ids", check_weapon_ids),
     ]
 
     for label, fn in checks:

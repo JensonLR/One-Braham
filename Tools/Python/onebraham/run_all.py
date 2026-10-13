@@ -92,6 +92,10 @@ STEPS = [
     ("doc_types", "onebraham.check_doc_types", False,
      "every type name the documentation uses against the types this project "
      "declares - a reader who cannot find a type will invent it"),
+    ("weapon_ids", "onebraham.check_weapon_ids", False,
+     "the ten weapons as four places describe them: the armoury table that "
+     "generates them, the spawn table that rolls them, the defaults that hand "
+     "them out, and Docs/05"),
     ("materials", "onebraham.build_materials", True,
      "master materials, physical materials, surface and brand instances"),
     ("environment", "onebraham.build_environment", True,

@@ -55,7 +55,7 @@ bool UOneBrahamConsole::ConsoleCommand(const FString& Command)
 
 		if (Verb == TEXT("ob.give"))
 		{
-			OBGiveWeapon(ArgList.Num() > 0 ? ArgList[0] : TEXT("Carbine_L85A2"));
+			OBGiveWeapon(ArgList.Num() > 0 ? ArgList[0] : TEXT("W_Carbine556"));
 			return true;
 		}
 		if (Verb == TEXT("ob.lockdown"))

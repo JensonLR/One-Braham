@@ -210,8 +210,8 @@ bool FOneBrahamWeaponLootTest::RunTest(const FString& Parameters)
 	}
 
 	// A pistol that spawns on the ground floor, a marksman rifle that does not.
-	UOneBrahamWeaponDefinition* Pistol = MakeWeapon(TEXT("P99"), 420.f, 32.f, 15, 45);
-	UOneBrahamWeaponDefinition* Marksman = MakeWeapon(TEXT("L129A1"), 170.f, 78.f, 10, 40);
+	UOneBrahamWeaponDefinition* Pistol = MakeWeapon(TEXT("W_Pistol"), 420.f, 32.f, 15, 45);
+	UOneBrahamWeaponDefinition* Marksman = MakeWeapon(TEXT("W_MarksmanRifle"), 170.f, 78.f, 10, 40);
 
 	if (Pistol == nullptr || Marksman == nullptr)
 	{
@@ -223,7 +223,9 @@ bool FOneBrahamWeaponLootTest::RunTest(const FString& Parameters)
 	Pistol->MinFloor = 0;
 	Pistol->MaxFloor = 15;
 
-	Marksman->LootWeight = 0.25f;
+	// The shipping gate for the marksman rifle, from the armoury table and
+	// Docs/05 section 4: floor 6 and up.
+	Marksman->LootWeight = 1.9f;
 	Marksman->MinFloor = 6;
 	Marksman->MaxFloor = 15;
 
@@ -234,7 +236,7 @@ bool FOneBrahamWeaponLootTest::RunTest(const FString& Parameters)
 
 	// Lookup is by id, and an unknown id is a null pointer rather than a default
 	// weapon: silently handing somebody an M4 for a typo is worse than nothing.
-	TestTrue(TEXT("find by id"), Registry->FindWeapon(TEXT("P99")) == Pistol);
+	TestTrue(TEXT("find by id"), Registry->FindWeapon(TEXT("W_Pistol")) == Pistol);
 	TestTrue(TEXT("an unknown id finds nothing"), Registry->FindWeapon(TEXT("NotAWeapon")) == nullptr);
 
 	// Loot rolls respect the floor gate. Fifty rolls on the ground floor and fifty

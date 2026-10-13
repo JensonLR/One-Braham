@@ -40,6 +40,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `check_doc_files.py` | every `Scripts/` file and `Tools/Python/` path the documentation names against the files on disk, every script on disk against the script index, and every tooling module against this document's pipeline table | **no** | yes |
 | `check_voice_lines.py` | every `V_` line id the code asks for against the script table, every scripted line against the recording brief in `Docs/14`, and the sixty-six archetype variant rows against the six voices they claim | **no** | yes |
 | `check_doc_types.py` | every `[AUIFSE]OneBraham` type name in the README and in the docs against the types this module declares; the names that are deliberately not code (the example class in Docs/18) are listed in the checker with a reason | **no** | yes |
+| `check_weapon_ids.py` | the ten weapons as four places describe them: the armoury table in `build_weapons.py` that generates the definition assets, the `WeaponSpawnTable` default in `OneBrahamMatchSettingsAsset.cpp` that the floor loot rolls, every weapon id literal anywhere in `Source/`, and the two tables in `Docs/05` - ids, order, damage, pellets, RPM, magazine, reserve, loot weights and floor gates | **no** | yes |
 | `validate_project.py` | the health check and a markdown report | either | yes |
 | `run_all.py` | all of the above, in dependency order, with a report | either | yes |
 
@@ -76,7 +77,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 
 ```
 # ONE BRAHAM - content build report
-**24 steps succeeded, 0 failed.**
+**25 steps succeeded, 0 failed.**
 
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
@@ -93,6 +94,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | test_names | OK | 0.0 | 23 automation tests, every one documented and resolvable |
 | doc_files | OK | 0.1 | 72 documented paths, all on disk |
 | doc_types | OK | 0.1 | 61 documented type names, all declared |
+| weapon_ids | OK | 0.1 | 116 weapon-id checks, the armoury and the spawn table agree |
 | materials | OK | 3.1 | 5 masters, 15 physicals, 28 instances |
 ...
 ```
@@ -105,8 +107,8 @@ builders raise `"... must run inside the Unreal Editor."`, which is a fact about
 the machine rather than about the project, and a CI box with no engine install
 should not report a broken build - it should report that it did not run the
 content steps, with their names. On a fresh clone the full run is therefore
-"14 steps succeeded, 0 failed, 10 skipped" and the same run with an editor
-installed is "24 steps succeeded, 0 failed".
+"15 steps succeeded, 0 failed, 10 skipped" and the same run with an editor
+installed is "25 steps succeeded, 0 failed".
 
 ---
 
@@ -126,6 +128,7 @@ doc_numbers               text only; a count that reads as verification and is w
 test_names                text only; a suite the documentation lists and nobody wrote
 doc_files                 text only; a script the documentation tells you to run that does not exist
 doc_types                 text only; a type name in the manual that the code never declares
+weapon_ids                text only; a loot table rolling a weapon that does not exist
       ↓
 materials                 everything references MI_* and PM_OB_*
       ↓
@@ -184,13 +187,13 @@ a header gets noticed before it becomes a runtime null reference.
 # because the project's pipeline runs on a self-hosted UE5 runner.
 stages:
   - lint      : python -m py_compile on every tool
-  - cpp       : PYTHONPATH=Tools/Python python3 run_all.py --only cpp_symbols,uht_contracts,soft_paths,calls,tags,layout,voice_lines,input_actions,doc_numbers,test_names,doc_files,doc_types
+  - cpp       : PYTHONPATH=Tools/Python python3 run_all.py --only cpp_symbols,uht_contracts,soft_paths,calls,tags,layout,voice_lines,input_actions,doc_numbers,test_names,doc_files,doc_types,weapon_ids
                 (declared-but-undefined members, UE reflection contracts, the
                  naming contract for name-loaded assets, call arity, gameplay
                  tags, the building layout, the voice script, the input pipeline,
-                 the documented numbers, the documented files and the documented
-                 types - every check that needs no engine install at all, so they
-                 run before a runner is ever allocated)
+                 the documented numbers, the documented files, the documented
+                 types and the armoury - every check that needs no engine install
+                 at all, so they run before a runner is ever allocated)
   - config    : PYTHONPATH=Tools/Python python3 run_all.py --text-only
   - build     : UBT build of the Editor, Game, Server and Client targets
   - content   : UnrealEditor-Cmd -run=pythonscript run_all.py

@@ -21,10 +21,10 @@ struct FOneBrahamSavedLoadout
 	GENERATED_BODY()
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Loadout")
-	FName PrimaryWeaponId = TEXT("Carbine_L85A2");
+	FName PrimaryWeaponId = TEXT("W_Carbine556");
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Loadout")
-	FName SidearmWeaponId = TEXT("Pistol_Glock17");
+	FName SidearmWeaponId = TEXT("W_Pistol");
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Loadout")
 	TArray<FName> UtilityIds;

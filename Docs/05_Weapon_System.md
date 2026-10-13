@@ -13,18 +13,18 @@ Implementation: `Source/OneBraham/Weapons/` (`AOneBrahamWeaponBase`,
 
 ## 1. The armoury
 
-| # | Weapon | Class | Slot | Damage | RPM | Mag | Reserve | TTK at 10 m vs 100 HP |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | P99 Sidearm | Pistol | Sidearm | 32.0 | 420 | 15 | 45 | 0.43 s (4 shots: 50 armour + 42 HP) |
-| 2 | LCP Machine Pistol | Compact Pistol | Sidearm | 21.0 | 900 | 20 | 60 | 0.40 s (8 shots) |
-| 3 | P99-S Suppressed | Suppressed Pistol | Sidearm | 26.0 | 380 | 15 | 45 | 0.63 s (5 shots) |
-| 4 | MP5 9mm | SMG | Primary | 25.0 | 800 | 30 | 120 | 0.38 s (6 shots) |
-| 5 | MP7 PDW 4.6mm | PDW | Primary | 22.0 | 950 | 40 | 160 | 0.38 s (7 shots, 6 through armour) |
-| 6 | M870 Pump | Pump Shotgun | Primary | 17.0 × 8 | 75 | 7 | 28 | 0.00 s at 3 m; unusable at 25 m |
-| 7 | Semi-Auto 12 Bore | Semi Shotgun | Primary | 12.5 × 9 | 190 | 6 | 30 | 0.32 s (one pattern at 8 m) |
-| 8 | M4 Carbine | 5.56 Carbine | Primary | 33.0 | 740 | 30 | 120 | 0.32 s (5 shots) |
-| 9 | MCX Compact 5.56 | Compact AR | Primary | 31.0 | 780 | 25 | 100 | 0.31 s (5 shots) |
-| 10 | L129A1 Marksman | Marksman Rifle | Primary | 78.0 | 170 | 10 | 40 | 0.35 s (2 shots, or 1 headshot) |
+| # | Id | Weapon | Class | Slot | Damage | RPM | Mag | Reserve | TTK at 10 m vs 100 HP |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | `W_Pistol` | P99 Sidearm | Pistol | Sidearm | 32.0 | 420 | 15 | 45 | 0.43 s (4 shots: 50 armour + 42 HP) |
+| 2 | `W_CompactPistol` | LCP Machine Pistol | Compact Pistol | Sidearm | 21.0 | 900 | 20 | 60 | 0.40 s (8 shots) |
+| 3 | `W_SuppressedPistol` | P99-S Suppressed | Suppressed Pistol | Sidearm | 26.0 | 380 | 15 | 45 | 0.63 s (5 shots) |
+| 4 | `W_SMG` | MP5 9mm | SMG | Primary | 25.0 | 800 | 30 | 120 | 0.38 s (6 shots) |
+| 5 | `W_PDW` | MP7 PDW 4.6mm | PDW | Primary | 22.0 | 950 | 40 | 160 | 0.38 s (7 shots, 6 through armour) |
+| 6 | `W_PumpShotgun` | M870 Pump | Pump Shotgun | Primary | 17.0 × 8 | 75 | 7 | 28 | 0.00 s at 3 m; unusable at 25 m |
+| 7 | `W_SemiShotgun` | Semi-Auto 12 Bore | Semi Shotgun | Primary | 12.5 × 9 | 190 | 6 | 30 | 0.32 s (one pattern at 8 m) |
+| 8 | `W_Carbine556` | M4 Carbine | 5.56 Carbine | Primary | 33.0 | 740 | 30 | 120 | 0.32 s (5 shots) |
+| 9 | `W_CompactAR` | MCX Compact 5.56 | Compact AR | Primary | 31.0 | 780 | 25 | 100 | 0.31 s (5 shots) |
+| 10 | `W_MarksmanRifle` | L129A1 Marksman | Marksman Rifle | Primary | 78.0 | 170 | 10 | 40 | 0.35 s (2 shots, or 1 headshot) |
 
 None of these is the best weapon. Each one is the best weapon **somewhere**:
 
@@ -160,16 +160,27 @@ doorway. It is timed, it is loud, and a player who relies on it will be shot.
 and NIGHT SHIFT — ASCENT has no floors-locked loadout, because its floors are
 locked by *keycards*, not by a menu:
 
-| Weapon | Floors |
-| --- | --- |
-| Sidearms, SMG, M870, M4 | all |
-| MP7 PDW | from 3 |
-| MCX Compact | from 5 |
-| Semi-auto 12, L129A1 | from 6 |
+| Weapon | Id | Floors | Loot weight |
+| --- | --- | --- | --- |
+| P99, LCP, P99-S | `W_Pistol`, `W_CompactPistol`, `W_SuppressedPistol` | all | 1.0, 0.8, 0.9 |
+| MP5 9mm | `W_SMG` | all | 1.1 |
+| MP7 PDW | `W_PDW` | from 3 | 1.0 |
+| M870 Pump | `W_PumpShotgun` | all | 1.4 |
+| Semi-Auto 12 Bore | `W_SemiShotgun` | from 6 | 1.5 |
+| M4 Carbine | `W_Carbine556` | all | 1.6 |
+| MCX Compact | `W_CompactAR` | from 5 | 1.5 |
+| L129A1 Marksman | `W_MarksmanRifle` | from 6 | 1.9 |
 
-Weight (`weight=0.8…1.9`) drives the ADS and holster penalty, so the marksman
-rifle is not just slow to fire, it is slow to be holding when somebody comes
-through the door behind you.
+The same ids, weights and gates are the `WeaponSpawnTable` default in
+`UOneBrahamMatchSettingsAsset` — the table the floor loot actually rolls — and
+`check_weapon_ids.py` fails the build if either side moves without the other.
+
+Weight (`weight=0.8…1.9`) is the **loot roll weight**: the marksman rifle is the
+heaviest roll in the table and the least common thing on a floor, which is why
+finding one changes how a squad plays the rest of the match. How a weapon
+*handles* is not derived from it - `ads=` and `draw=` are their own numbers per
+weapon, so the marksman rifle is not just slow to fire, it is slow to be holding
+when somebody comes through the door behind you.
 
 ---
 

@@ -11,17 +11,24 @@
 // Every number a designer wants to touch is here. No weapon stat is hard-coded
 // in C++: if a value is needed at runtime it is read from the definition.
 //
-// SHIPPING WEAPON LIST (realistic only - no office supplies, no joke weapons):
-//   Pistol_Glock17            9x19 service pistol. Reliable, dull, effective.
-//   Pistol_P320_Compact       .40 compact. Snappier, smaller, faster draw.
-//   Pistol_Suppressed_P226    suppressed 9mm. Quiet, low damage, no tracer.
-//   SMG_MP5A3                 9x19 SMG. The server room's own weapon.
-//   PDW_P90                   5.7x28 PDW. Fast, high capacity, poor long range.
-//   Shotgun_Rem870            12g pump. One-shot at 6 m, useless past 15 m.
-//   Shotgun_SA_SX3            12g semi-auto. Faster follow-up, more spread.
-//   Carbine_L85A2             5.56 bullpup. The all-rounder; UK-plausible.
-//   Rifle_AR_Compact          5.56 compact AR. Better handling, more recoil.
-//   Marksman_L129A1           7.62 marksman. Executive-floor sniper angles.
+// SHIPPING WEAPON LIST (realistic only - no office supplies, no joke weapons).
+// These ten ids are the ids build_weapons.py writes onto the definition assets,
+// the ids the spawn table in OneBrahamMatchSettingsAsset.cpp rolls, and the ids
+// the default loadout carries; Docs/05 lists the same weapons by name. This
+// comment used to name a different ten (Pistol_Glock17, Carbine_L85A2, ...) that
+// no asset has ever contained, which is how the registry, the loot table and the
+// defaults drifted apart unnoticed. check_weapon_ids.py now compares all three:
+//
+//   W_Pistol             P99 Sidearm. 9x19, fifteen rounds, no surprises.
+//   W_CompactPistol      LCP machine pistol. .380, fast, no accuracy claim.
+//   W_SuppressedPistol   P99-S. Quiet, lower damage, no tracer.
+//   W_SMG                MP5 9mm. The server room's own weapon.
+//   W_PDW                MP7 4.6mm. Fast, high capacity, poor past 15 m.
+//   W_PumpShotgun        M870. One shot at 3 m, useless past 25 m.
+//   W_SemiShotgun        Semi-auto 12 bore. Faster follow-up, more spread.
+//   W_Carbine556         M4. The all-rounder; nothing it is bad at.
+//   W_CompactAR          MCX Compact 5.56. Better handling, more recoil.
+//   W_MarksmanRifle      L129A1 7.62. Executive-floor angles, two shots, slow.
 //
 // ATTACHMENTS: optic (1x/2x/3x), suppressor, grip (vertical/angled), laser,
 //   flashlight, extended magazine, stock. Attachments change handling and

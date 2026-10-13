@@ -92,6 +92,7 @@ def _expected_counts():
     from onebraham import check_soft_paths
     from onebraham import check_uht_contracts
     from onebraham import check_voice_lines
+    from onebraham import check_weapon_ids
 
     expectations = {}
 
@@ -101,6 +102,8 @@ def _expected_counts():
     expectations["calls"] = [check_calls.run()[0]]
     expectations["tags"] = [check_gameplay_tags.run()[0]]
     expectations["voice_lines"] = [check_voice_lines.run()[0]]
+
+    expectations["weapon_ids"] = [check_weapon_ids.run()[0]]
 
     reads, _problems = check_input_actions.run()
     expectations["input_actions"] = [

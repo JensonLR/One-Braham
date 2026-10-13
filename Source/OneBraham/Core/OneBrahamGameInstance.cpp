@@ -116,8 +116,8 @@ bool UOneBrahamGameInstance::LoadProfile()
 		{
 			// First run: give the player a complete, playable starting loadout.
 			FOneBrahamSavedLoadout Default;
-			Default.PrimaryWeaponId = TEXT("Carbine_L85A2");
-			Default.SidearmWeaponId = TEXT("Pistol_Glock17");
+			Default.PrimaryWeaponId = TEXT("W_Carbine556");
+			Default.SidearmWeaponId = TEXT("W_Pistol");
 			Default.UtilityIds = { TEXT("Utility_Frag"), TEXT("Utility_Flashbang"), TEXT("Utility_Smoke"), TEXT("Utility_BreachCharge") };
 			Default.ArchetypeId = TEXT("BusinessAnalyst");
 			Profile->Loadouts.Add(Default);

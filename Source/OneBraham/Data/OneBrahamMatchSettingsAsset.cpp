@@ -24,16 +24,25 @@ void UOneBrahamMatchSettingsAsset::EnsureDefaults()
 			WeaponSpawnTable.Add(Entry);
 		};
 
-		AddEntry(TEXT("Pistol_Glock17"),			3.0f, 0,  15, {});
-		AddEntry(TEXT("Pistol_P320_Compact"),	2.5f, 0,  15, {});
-		AddEntry(TEXT("Pistol_Suppressed_P226"), 1.2f, 2,  15, {});
-		AddEntry(TEXT("SMG_MP5A3"),				1.6f, 1,  13, {});
-		AddEntry(TEXT("PDW_P90"),				1.0f, 5,  15, {});
-		AddEntry(TEXT("Shotgun_Rem870"),		1.4f, 0,  10, {});
-		AddEntry(TEXT("Shotgun_SA_SX3"),		1.0f, 3,  15, {});
-		AddEntry(TEXT("Carbine_L85A2"),			2.0f, 2,  15, { TEXT("Utility_Frag") });
-		AddEntry(TEXT("Rifle_AR_Compact"),		1.8f, 3,  15, { TEXT("Utility_Smoke") });
-		AddEntry(TEXT("Marksman_L129A1"),		0.8f, 9,  15, {});
+		// The ten ids, weights and floor gates are the armoury table in
+		// Tools/Python/onebraham/build_weapons.py, which is also what the
+		// registry asset is generated from and what Docs/05 documents. They were
+		// not: this table used a second naming scheme (Pistol_Glock17,
+		// Carbine_L85A2) that the registry has never contained, so every row
+		// rolled an id that resolves to nothing and the floor loot spawned no
+		// weapons at all, while the gates it applied disagreed with the
+		// documentation. check_weapon_ids.py now holds the two tables together,
+		// in order.
+		AddEntry(TEXT("W_Pistol"),			1.0f, 0,  15, {});
+		AddEntry(TEXT("W_CompactPistol"),	0.8f, 0,  15, {});
+		AddEntry(TEXT("W_SuppressedPistol"), 0.9f, 0,  15, {});
+		AddEntry(TEXT("W_SMG"),				1.1f, 0,  15, {});
+		AddEntry(TEXT("W_PDW"),				1.0f, 3,  15, {});
+		AddEntry(TEXT("W_PumpShotgun"),		1.4f, 0,  15, {});
+		AddEntry(TEXT("W_SemiShotgun"),		1.5f, 6,  15, {});
+		AddEntry(TEXT("W_Carbine556"),		1.6f, 0,  15, { TEXT("Utility_Frag") });
+		AddEntry(TEXT("W_CompactAR"),		1.5f, 5,  15, { TEXT("Utility_Smoke") });
+		AddEntry(TEXT("W_MarksmanRifle"),	1.9f, 6,  15, {});
 	}
 
 	if (FloorLootProfiles.Num() == 0)

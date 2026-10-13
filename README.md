@@ -153,16 +153,17 @@ cosmetic is earnable.
 3. **Server authority for anything that matters.** Damage, unlocks, breaches,
    timers and cosmetics.
 4. **`validate_project.py` must report zero failures before a build goes out.**
-   It runs 30 checks, and thirteen of them need no engine at all — so a broken
+   It runs 31 checks, and fourteen of them need no engine at all — so a broken
    include, a member function with no definition, an RPC with no body, a
    replicated property with no `DOREPLIFETIME`, a log category with no verbosity,
    a VFX system nothing spawns, an asset path nothing creates, a call with the
    wrong number of arguments, a gameplay tag that does not exist, a floor the
    game names differently from the map, a voice line no one will ever say, an input
    action bound to nothing, a suite the documentation lists that nobody wrote, a
-   type name the documentation uses that this project never declared, or a count
-   in this file that the tooling disagrees with is found on any machine, in about
-   a second, before anybody waits for a compile:
+   type name the documentation uses that this project never declared, a loot
+   table rolling a weapon that does not exist, or a count in this file that the
+   tooling disagrees with is found on any machine, in about a second, before
+   anybody waits for a compile:
 
    ```
    PYTHONPATH=Tools/Python python3 Tools/Python/onebraham/validate_project.py --config-only
