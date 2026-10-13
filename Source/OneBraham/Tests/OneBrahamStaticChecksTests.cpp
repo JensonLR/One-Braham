@@ -49,7 +49,8 @@ namespace
 		{ TEXT("check_voice_lines"),   TEXT("every voice line id exists, is documented, and has a full variant set") },
 		{ TEXT("check_input_actions"), TEXT("the five lists of input actions are one list") },
 		{ TEXT("check_doc_numbers"),   TEXT("the numbers the documentation quotes are the numbers the build produces") },
-		{ TEXT("check_test_names"),    TEXT("every automation test the documentation lists exists, and every test that exists is listed") }
+		{ TEXT("check_test_names"),    TEXT("every automation test the documentation lists exists, and every test that exists is listed") },
+		{ TEXT("check_doc_files"),     TEXT("every script and tool the documentation tells the reader to run exists on disk") }
 
 		// Deliberately absent: validate_project.py, and check_soft_paths.py in its
 		// full (non-config) form. Both shell out to UnrealBuildTool or UnrealPak,
@@ -133,7 +134,7 @@ bool FOneBrahamEngineFreeChecksTest::RunTest(const FString& Parameters)
 			// No interpreter anywhere: say so once, with the fix, and stop.
 			AddError(FString::Printf(
 				TEXT("Could not run %s: no Python 3 interpreter found on PATH (tried python3, python, py). ")
-				TEXT("Install Python 3 or run Scripts\\RunAll.bat, which uses the project's own interpreter."),
+				TEXT("Install Python 3, or run Scripts\\RunAll.bat, which looks for one and says what to install."),
 				Check.Module));
 			return false;
 		}

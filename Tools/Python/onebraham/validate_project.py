@@ -1540,6 +1540,30 @@ def check_test_names(v, _config_only):
         v.fail("test names", u"[{0}] {1}".format(kind, message))
 
 
+def check_doc_files(v, _config_only):
+    """The files the documentation names are files that exist.
+
+    Docs/18 said the validator runs in `Scripts\\RunAll.bat`, and there was no
+    such script: an instruction that reads perfectly and cannot be typed. This
+    check holds every documented script and tool path against the disk, and the
+    reverse - an undocumented script, an undocumented checker.
+    """
+    try:
+        from onebraham import check_doc_files
+    except Exception as exc:  # noqa: BLE001
+        v.warn("documented files", u"checker unavailable: {0}".format(exc))
+        return
+
+    checked, problems = check_doc_files.run()
+
+    if not problems:
+        v.pass_("documented files", u"{0} documented paths all exist".format(checked))
+        return
+
+    for message, kind in problems:
+        v.fail("documented files", u"[{0}] {1}".format(kind, message))
+
+
 def check_input_actions(v, _config_only):
     """The input pipeline is one pipeline.
 
@@ -1668,6 +1692,7 @@ def build_all(config_only=False):
         ("input actions", check_input_actions),
         ("documented numbers", check_doc_numbers),
         ("test names", check_test_names),
+        ("documented files", check_doc_files),
     ]
 
     for label, fn in checks:

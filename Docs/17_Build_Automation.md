@@ -37,6 +37,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `check_input_actions.py` | every generated `IA_` action against the `UOneBrahamInputConfig` field that points at it, every field against its action, every `DefaultInput.ini` binding and prompt against a real action, and every `InputConfig->Field` read against the fields that exist | **no** | yes |
 | `check_doc_numbers.py` | every count quoted in this document's build report and in the README against the count the tooling produces | **no** | yes |
 | `check_test_names.py` | every automation test `Docs/18` lists against the tests that exist in `Source/OneBraham/Tests`, every test that exists against the table, and every `OneBraham.*` name in `Scripts/` against a test or a category | **no** | yes |
+| `check_doc_files.py` | every `Scripts/` file and `Tools/Python/` path the documentation names against the files on disk, every script on disk against the script index, and every tooling module against this document's pipeline table | **no** | yes |
 | `check_voice_lines.py` | every `V_` line id the code asks for against the script table, every scripted line against the recording brief in `Docs/14`, and the sixty-six archetype variant rows against the six voices they claim | **no** | yes |
 | `validate_project.py` | the health check and a markdown report | either | yes |
 | `run_all.py` | all of the above, in dependency order, with a report | either | yes |
@@ -74,7 +75,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 
 ```
 # ONE BRAHAM - content build report
-**22 steps succeeded, 0 failed.**
+**23 steps succeeded, 0 failed.**
 
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
@@ -89,6 +90,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | input_actions | OK | 0.0 | 41 actions, 41 fields, 92 reads |
 | doc_numbers | OK | 0.0 | 12 documented numbers, all current |
 | test_names | OK | 0.0 | 20 automation tests, every one documented and resolvable |
+| doc_files | OK | 0.0 | 72 documented paths, all on disk |
 | materials | OK | 3.1 | 5 masters, 15 physicals, 28 instances |
 ...
 ```
@@ -177,7 +179,7 @@ a header gets noticed before it becomes a runtime null reference.
 # because the project's pipeline runs on a self-hosted UE5 runner.
 stages:
   - lint      : python -m py_compile on every tool
-  - cpp       : PYTHONPATH=Tools/Python python3 run_all.py --only cpp_symbols,uht_contracts,soft_paths,calls,tags,layout,voice_lines,input_actions,doc_numbers,test_names
+  - cpp       : PYTHONPATH=Tools/Python python3 run_all.py --only cpp_symbols,uht_contracts,soft_paths,calls,tags,layout,voice_lines,input_actions,doc_numbers,test_names,doc_files
                 (declared-but-undefined members, UE reflection contracts, the
                  naming contract for name-loaded assets, call arity, gameplay
                  tags, the building layout, the voice script, the input pipeline,

@@ -43,8 +43,9 @@ running if you intend to build the platform configuration.
 2.  Right-click OneBraham.uproject    Generate Visual Studio project files
 3.  Build the Editor target           Development | Editor | Win64
 4.  Run BuildContent.bat              builds every generated asset and the map
-5.  RunTests.bat                      the automation suite
-6.  Play                              open L_Persistent_OneBraham and press Play
+5.  RunAll.bat                        every check that needs no engine
+6.  RunTests.bat                      the automation suite (needs the editor)
+7.  Play                              open L_Persistent_OneBraham and press Play
 ```
 
 `Scripts/README.md` is the full script index, with the switches each one takes
@@ -152,7 +153,7 @@ cosmetic is earnable.
 3. **Server authority for anything that matters.** Damage, unlocks, breaches,
    timers and cosmetics.
 4. **`validate_project.py` must report zero failures before a build goes out.**
-   It runs 28 checks, and eleven of them need no engine at all — so a broken
+   It runs 29 checks, and twelve of them need no engine at all — so a broken
    include, a member function with no definition, an RPC with no body, a
    replicated property with no `DOREPLIFETIME`, a log category with no verbosity,
    a VFX system nothing spawns, an asset path nothing creates, a call with the

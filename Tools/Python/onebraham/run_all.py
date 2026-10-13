@@ -86,6 +86,9 @@ STEPS = [
     ("test_names", "onebraham.check_test_names", False,
      "every automation test Docs/18 lists against the tests that exist, and every "
      "name Scripts/ runs"),
+    ("doc_files", "onebraham.check_doc_files", False,
+     "every script and tool the documentation tells the reader to run, against "
+     "the files on disk"),
     ("materials", "onebraham.build_materials", True,
      "master materials, physical materials, surface and brand instances"),
     ("environment", "onebraham.build_environment", True,

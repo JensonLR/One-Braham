@@ -54,6 +54,7 @@ A dedicated server needs 7777/udp for game traffic and 7778/udp for voice.
 
 | Script | What it does |
 | --- | --- |
+| `RunAll.bat` / `RunAll.sh` | Every check that needs no engine: the whole `run_all.py` pipeline plus the validator, with nothing but Python 3. Exit 0 only when nothing failed; with no editor installed the content steps report SKIPPED. |
 | `RunTests.bat` | All `OneBraham.*` automation tests, headless with `-NullRHI`. |
 | `RunTests.bat OneBraham.Weapons` | One category. Categories are listed in `Docs/18_Testing_Performance.md`. |
 | `RunTests.bat smoke` | The smoke category on a dedicated server: the match-boot composition check. The bot-driven twelve-player run is in `Docs/18_Testing_Performance.md` §3. |
@@ -78,9 +79,12 @@ workstation neither needs setting.
 ## The order that matters
 
 1. `Setup.bat`
-2. `BuildContent.bat` (the C++ must have compiled at least once so the reflected
+2. `RunAll.bat` (or `RunAll.sh`) — the engine-free checks. On a fresh clone this
+   is the whole pipeline minus the content steps, and it is what a CI box without
+   an engine runs.
+3. `BuildContent.bat` (the C++ must have compiled at least once so the reflected
    classes exist before the content scripts run)
-3. `RunTests.bat`
-4. `Package.bat Client` / `Package.bat LinuxServer`
-5. `RunServer.bat`, then `RunClient.bat` to play it
-6. `SteamUpload.bat` when the release checklist is signed off
+4. `RunTests.bat`
+5. `Package.bat Client` / `Package.bat LinuxServer`
+6. `RunServer.bat`, then `RunClient.bat` to play it
+7. `SteamUpload.bat` when the release checklist is signed off
