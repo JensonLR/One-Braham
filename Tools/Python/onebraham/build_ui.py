@@ -196,11 +196,23 @@ def build_hud_strings(report):
         return None
 
     if table is not None:
-        unreal.EditorAssetLibrary.save_asset(path)
-        report.created_asset(path)
+        # The rows, from the same list the reference implementation in
+        # Source/OneBraham/UI/OneBrahamHUDStringTable.cpp compiles in. The
+        # columns are the UPROPERTY names on FOneBrahamHUDStringRow; a CSV is
+        # the one way to fill a DataTable from Python that does not depend on
+        # per-row factory internals.
+        rows = "\n".join(
+            u"{0},{1}".format(key, text.replace(",", "\\,"))
+            for key, text in HUD_STRINGS)
 
-    for key, text in HUD_STRINGS:
-        C.log(u"  string {0}: {1}".format(key, text))
+        try:
+            unreal.DataTableFunctionLibrary.fill_data_table_from_csv_string(
+                table, "Key,Text\n" + rows)
+            unreal.EditorAssetLibrary.save_asset(path)
+            report.created_asset(path)
+            C.log(u"  DT_HUDStrings: {0} rows written".format(len(HUD_STRINGS)))
+        except Exception as exc:  # noqa: BLE001
+            report.failed("DT_HUDStrings", str(exc))
 
     return table
 

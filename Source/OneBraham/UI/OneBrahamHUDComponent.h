@@ -187,6 +187,36 @@ protected:
 	/** Resolves the pawn's components once, on bind. */
 	void CacheComponents();
 
+	/**
+	 * Announces what just changed: the winch, the shutters, and a squadmate
+	 * going down.
+	 *
+	 * The winch is here because nothing else tells the player: the extraction
+	 * component moves through five states and the HUD only ever drew a bar. The
+	 * shutters are not, because the lockdown component already reads the
+	 * building out over the tannoy, in the building's own voice, and two
+	 * announcements of the same event is worse than one.
+	 *
+	 * This is also the caller RefreshOverlays() was documented to have - "called
+	 * when the lockdown stage changes, a squadmate goes down" - and did not.
+	 */
+	void AnnounceStateChanges();
+
+	/** The copy table's text for a key, shown on the banner. */
+	void Announce(FName Key, float DurationSeconds, FLinearColor Colour);
+
+	/** The copy table's text for a key, shown on the sub-banner. */
+	void AnnounceSub(FName Key, float DurationSeconds);
+
+	/** Binds to the game state's announcement delegates once, lazily. */
+	void BindToGameState();
+
+	/** The tannoy's words, as a subtitle, while the tannoy audio plays. */
+	UFUNCTION() void HandleServerAnnouncement(const FText& Announcement);
+
+	/** A short imperative banner from the server. */
+	UFUNCTION() void HandleWarningBanner(const FText& Text, float DurationSeconds, FLinearColor Colour);
+
 	// --- cached components -------------------------------------------------
 	UFUNCTION(BlueprintPure, Category = "One Braham|HUD")
 	AOneBrahamCharacter* GetBoundCharacter() const { return BoundCharacter.Get(); }
@@ -208,6 +238,27 @@ protected:
 
 	/** The snapshot being filled and handed to the widget. */
 	FOneBrahamHUDData Data;
+
+	// --- change detectors for the announcements ---------------------------
+	/** Extraction state as of the last tick. */
+	EOneBrahamExtractionState LastExtractionState = EOneBrahamExtractionState::Inactive;
+	/** Lockdown stage as of the last tick, so the overlays rebuild when it moves. */
+	EOneBrahamLockdownStage LastLockdownStage = EOneBrahamLockdownStage::Normal;
+	/** Squadmates in Downed last tick; a rise is the event worth a sub-banner. */
+	int32 LastDownedSquadmates = 0;
+	/** Set once the game state's delegates are bound. */
+	bool bBoundToGameState = false;
+
+	/**
+	 * How long a tannoy announcement stays on screen as a subtitle.
+	 *
+	 * The lockdown paragraph is around twenty words: at a comfortable reading
+	 * speed that is five seconds, and reading it twice is the point of a
+	 * subtitle. The audio runs about the same length.
+	 */
+	static constexpr float TannoySubtitleSeconds = 6.f;
+	/** Set after the first AnnounceStateChanges, so a spawn is not a change. */
+	bool bAnnouncementsPrimed = false;
 
 	/** Transient feedback timers, seconds remaining. */
 	float HitMarkerRemaining = 0.f;

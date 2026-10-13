@@ -1623,6 +1623,31 @@ def check_weapon_ids(v, _config_only):
         v.fail("weapon ids", u"[{0}] {1}".format(kind, message))
 
 
+def check_hud_strings(v, _config_only):
+    """The HUD's copy table is real and every row is shown by something.
+
+    `build_ui.py` created `DT_HUDStrings` with a `struct` property set to a row
+    struct that did not exist, wrote no rows, and nothing in C++ read the table.
+    Docs/08 said it "holds every string the HUD shows". It now does: the rows are
+    compiled in, the builder writes them, and the C++ HUD reads fourteen of them.
+    """
+    try:
+        from onebraham import check_hud_strings
+    except Exception as exc:  # noqa: BLE001
+        v.warn("hud strings", u"checker unavailable: {0}".format(exc))
+        return
+
+    checked, problems = check_hud_strings.run()
+
+    if not problems:
+        v.pass_("hud strings", u"{0} checks: {1} rows, every one shown".format(
+            checked, len(check_hud_strings.compiled_rows())))
+        return
+
+    for message, kind in problems:
+        v.fail("hud strings", u"[{0}] {1}".format(kind, message))
+
+
 def check_cosmetic_ids(v, _config_only):
     """The wardrobe is one wardrobe.
 
@@ -1784,6 +1809,7 @@ def build_all(config_only=False):
         ("documented types", check_doc_types),
         ("weapon ids", check_weapon_ids),
         ("cosmetic ids", check_cosmetic_ids),
+        ("hud strings", check_hud_strings),
     ]
 
     for label, fn in checks:

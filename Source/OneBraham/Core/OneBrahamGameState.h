@@ -27,6 +27,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOneBrahamMatchPhaseChanged, EOneBra
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOneBrahamMatchResultReady, const FOneBrahamMatchResult&, Result);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOneBrahamServerAnnouncement, const FText&, Announcement);
 
+/** Short banner copy: text, seconds, colour. Raised on every client by MulticastWarningBanner. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOneBrahamWarningBanner, const FText&, Text, float, DurationSeconds, FLinearColor, Colour);
+
 UCLASS(BlueprintType)
 class ONEBRAHAM_API AOneBrahamGameState : public AGameStateBase
 {
@@ -149,6 +152,15 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "One Braham|Match") FOneBrahamMatchResultReady OnMatchResultReady;
 	UPROPERTY(BlueprintAssignable, Category = "One Braham|Match") FOneBrahamKillFeedUpdated OnKillFeedEntryAdded;
 	UPROPERTY(BlueprintAssignable, Category = "One Braham|Match") FOneBrahamServerAnnouncement OnAnnouncement;
+
+	/**
+	 * A short, imperative banner - "Shutters are down", "Security purge on lower
+	 * floors" - as opposed to OnAnnouncement's tannoy paragraph. Both exist
+	 * because the building says two different kinds of thing: the sentence a
+	 * building management system would read out in full, and the two words that
+	 * fit on a HUD.
+	 */
+	UPROPERTY(BlueprintAssignable, Category = "One Braham|Match") FOneBrahamWarningBanner OnWarningBanner;
 	UPROPERTY(BlueprintAssignable, Category = "One Braham|Squad") FOneBrahamServerAnnouncement OnSquadsChanged;
 
 protected:

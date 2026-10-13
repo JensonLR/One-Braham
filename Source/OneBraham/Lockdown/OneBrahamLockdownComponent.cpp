@@ -6,6 +6,8 @@
 #include "Characters/OneBrahamCharacter.h"
 #include "Characters/OneBrahamHealthComponent.h"
 #include "Core/OneBrahamGameState.h"
+#include "UI/OneBrahamHUDStringTable.h"
+#include "UI/OneBrahamUIStyle.h"
 #include "Core/OneBrahamPlayerController.h"
 #include "Core/OneBrahamPlayerState.h"
 #include "Data/OneBrahamMatchSettingsAsset.h"
@@ -541,6 +543,28 @@ void UOneBrahamLockdownComponent::BroadcastStageAnnouncement(EOneBrahamLockdownS
 	if (AOneBrahamGameState* GS = CachedGameState.Get())
 	{
 		GS->MulticastAnnounce(Announcement, /*bPlayTannoySound*/ true);
+
+		// The same event in two lengths, which is how a building actually tells
+		// you something: the paragraph over the speakers, and two words on the
+		// screen of everyone who has taken their headphones off. The short form
+		// comes from the copy table, so it is editable without a recompile.
+		switch (NewStage)
+		{
+		case EOneBrahamLockdownStage::PreLockdown:
+		case EOneBrahamLockdownStage::Lockdown:
+			GS->MulticastWarningBanner(OneBrahamHUDStrings::Get(TEXT("HUD_Objective_Lockdown")),
+				4.f, UOneBrahamUIStyle::SafetyYellow());
+			break;
+
+		case EOneBrahamLockdownStage::Purge:
+			GS->MulticastWarningBanner(OneBrahamHUDStrings::Get(TEXT("HUD_Objective_Purge")),
+				5.f, UOneBrahamUIStyle::EmergencyRed());
+			break;
+
+		case EOneBrahamLockdownStage::Normal:
+		default:
+			break;
+		}
 	}
 
 	// The Tannoy voice is a building asset, not a character, so it goes through

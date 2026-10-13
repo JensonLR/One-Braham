@@ -96,6 +96,10 @@ STEPS = [
      "the ten weapons as four places describe them: the armoury table that "
      "generates them, the spawn table that rolls them, the defaults that hand "
      "them out, and Docs/05"),
+    ("hud_strings", "onebraham.check_hud_strings", False,
+     "the HUD's copy: the list build_ui.py generates DT_HUDStrings from, the "
+     "rows compiled into the HUD, and the keys the code asks for - every key "
+     "exists, and every key has something that shows it"),
     ("cosmetic_ids", "onebraham.check_cosmetic_ids", False,
      "the wardrobe as three places describe it: the slots and options the "
      "character builder generates, the compiled-in default a fresh clone runs "

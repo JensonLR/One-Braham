@@ -87,6 +87,7 @@ def _expected_counts():
     """step -> list of counts the tooling actually produces, or None to skip."""
     from onebraham import check_calls
     from onebraham import check_cosmetic_ids
+    from onebraham import check_hud_strings
     from onebraham import check_cpp_symbols
     from onebraham import check_gameplay_tags
     from onebraham import check_input_actions
@@ -106,6 +107,7 @@ def _expected_counts():
 
     expectations["weapon_ids"] = [check_weapon_ids.run()[0]]
     expectations["cosmetic_ids"] = [check_cosmetic_ids.run()[0]]
+    expectations["hud_strings"] = [check_hud_strings.run()[0]]
 
     reads, _problems = check_input_actions.run()
     expectations["input_actions"] = [

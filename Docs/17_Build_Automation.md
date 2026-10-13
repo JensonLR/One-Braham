@@ -41,6 +41,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `check_voice_lines.py` | every `V_` line id the code asks for against the script table, every scripted line against the recording brief in `Docs/14`, and the sixty-six archetype variant rows against the six voices they claim | **no** | yes |
 | `check_doc_types.py` | every `[AUIFSE]OneBraham` type name in the README and in the docs against the types this module declares; the names that are deliberately not code (the example class in Docs/18) are listed in the checker with a reason | **no** | yes |
 | `check_weapon_ids.py` | the ten weapons as four places describe them: the armoury table in `build_weapons.py` that generates the definition assets, the `WeaponSpawnTable` default in `OneBrahamMatchSettingsAsset.cpp` that the floor loot rolls, every weapon id literal anywhere in `Source/`, and the two tables in `Docs/05` - ids, order, damage, pellets, RPM, magazine, reserve, loot weights and floor gates | **no** | yes |
+| `check_hud_strings.py` | the HUD's copy: the `HUD_STRINGS` list `build_ui.py` generates `DT_HUDStrings` from, the rows compiled into `OneBrahamHUDStrings`, the keys the code asks the table for, and the ownership table in `Docs/08` that says which layer shows each one | **no** | yes |
 | `check_cosmetic_ids.py` | the wardrobe: `COSMETIC_SLOTS` / `COSMETIC_OPTIONS` in `build_characters.py`, the compiled-in `CosmeticSlots` default (names, parent bones, offsets), the starter outfit in `UOneBrahamGameInstance`, and the slot table in `Docs/13` - names and option counts | **no** | yes |
 | `validate_project.py` | the health check and a markdown report | either | yes |
 | `run_all.py` | all of the above, in dependency order, with a report | either | yes |
@@ -78,13 +79,13 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 
 ```
 # ONE BRAHAM - content build report
-**26 steps succeeded, 0 failed.**
+**27 steps succeeded, 0 failed.**
 
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
 | input_ini | OK | 0.0 | wrote 41 actions (40 with a default key) |
-| cpp_symbols | OK | 0.1 | 541 declarations, all defined |
-| uht_contracts | OK | 0.5 | 784 UE reflection contracts, all satisfied |
+| cpp_symbols | OK | 0.1 | 545 declarations, all defined |
+| uht_contracts | OK | 0.5 | 788 UE reflection contracts, all satisfied |
 | soft_paths | OK | 0.0 | 45 name-loaded asset paths, all conventional |
 | calls | OK | 0.2 | 866 call sites, all arities plausible |
 | tags | OK | 0.4 | 6 resolvable tag requests and 146 documented tags, all declared |
@@ -97,6 +98,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | doc_types | OK | 0.1 | 61 documented type names, all declared |
 | weapon_ids | OK | 0.1 | 116 weapon-id checks, the armoury and the spawn table agree |
 | cosmetic_ids | OK | 0.1 | 135 cosmetic checks, one wardrobe |
+| hud_strings | OK | 0.1 | 83 HUD-string checks, 31 rows, every one shown |
 | materials | OK | 3.1 | 5 masters, 15 physicals, 28 instances |
 ...
 ```
@@ -109,8 +111,8 @@ builders raise `"... must run inside the Unreal Editor."`, which is a fact about
 the machine rather than about the project, and a CI box with no engine install
 should not report a broken build - it should report that it did not run the
 content steps, with their names. On a fresh clone the full run is therefore
-"16 steps succeeded, 0 failed, 10 skipped" and the same run with an editor
-installed is "26 steps succeeded, 0 failed".
+"17 steps succeeded, 0 failed, 10 skipped" and the same run with an editor
+installed is "27 steps succeeded, 0 failed".
 
 ---
 
@@ -132,6 +134,7 @@ doc_files                 text only; a script the documentation tells you to run
 doc_types                 text only; a type name in the manual that the code never declares
 weapon_ids                text only; a loot table rolling a weapon that does not exist
 cosmetic_ids              text only; a wardrobe id that matches nothing, silently
+hud_strings               text only; a HUD table with no rows and nothing reading it
       ↓
 materials                 everything references MI_* and PM_OB_*
       ↓
@@ -190,13 +193,13 @@ a header gets noticed before it becomes a runtime null reference.
 # because the project's pipeline runs on a self-hosted UE5 runner.
 stages:
   - lint      : python -m py_compile on every tool
-  - cpp       : PYTHONPATH=Tools/Python python3 run_all.py --only cpp_symbols,uht_contracts,soft_paths,calls,tags,layout,voice_lines,input_actions,doc_numbers,test_names,doc_files,doc_types,weapon_ids,cosmetic_ids
+  - cpp       : PYTHONPATH=Tools/Python python3 run_all.py --only cpp_symbols,uht_contracts,soft_paths,calls,tags,layout,voice_lines,input_actions,doc_numbers,test_names,doc_files,doc_types,weapon_ids,cosmetic_ids,hud_strings
                 (declared-but-undefined members, UE reflection contracts, the
                  naming contract for name-loaded assets, call arity, gameplay
                  tags, the building layout, the voice script, the input pipeline,
                  the documented numbers, the documented files, the documented
-                 types, the armoury and the wardrobe - every check that needs no
-                 engine install at all, so they run before a runner is ever
+                 types, the armoury, the wardrobe and the HUD's copy table - every
+                 check that needs no engine install at all, so they run before a runner is ever
                  allocated)
   - config    : PYTHONPATH=Tools/Python python3 run_all.py --text-only
   - build     : UBT build of the Editor, Game, Server and Client targets

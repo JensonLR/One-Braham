@@ -153,7 +153,7 @@ cosmetic is earnable.
 3. **Server authority for anything that matters.** Damage, unlocks, breaches,
    timers and cosmetics.
 4. **`validate_project.py` must report zero failures before a build goes out.**
-   It runs 32 checks, and fifteen of them need no engine at all — so a broken
+   It runs 33 checks, and sixteen of them need no engine at all — so a broken
    include, a member function with no definition, an RPC with no body, a
    replicated property with no `DOREPLIFETIME`, a log category with no verbosity,
    a VFX system nothing spawns, an asset path nothing creates, a call with the
@@ -162,7 +162,8 @@ cosmetic is earnable.
    action bound to nothing, a suite the documentation lists that nobody wrote, a
    type name the documentation uses that this project never declared, a loot
    table rolling a weapon that does not exist, a cosmetic id the wardrobe has
-   never contained, or a count in this file that the tooling disagrees with is
+   never contained, a HUD string with nothing that shows it, or a count in this
+   file that the tooling disagrees with is
    found on any machine, in about a second, before anybody waits for a
    compile:
 

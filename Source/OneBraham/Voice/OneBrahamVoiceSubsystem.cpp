@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Voice/OneBrahamVoiceSubsystem.h"
+#include "UI/OneBrahamHUDStringTable.h"
 
 #include "OneBraham.h"
 #include "Audio/OneBrahamAudioManagerComponent.h"
@@ -588,9 +589,13 @@ FText UOneBrahamVoiceSubsystem::GetChannelDisplayName(EOneBrahamVoiceChannel Cha
 {
 	switch (Channel)
 	{
-	case EOneBrahamVoiceChannel::Proximity:		return NSLOCTEXT("OneBraham", "VoiceChannel_Proximity", "PROXIMITY");
-	case EOneBrahamVoiceChannel::Squad:			return NSLOCTEXT("OneBraham", "VoiceChannel_Squad", "SQUAD");
-	case EOneBrahamVoiceChannel::Team:			return NSLOCTEXT("OneBraham", "VoiceChannel_Team", "TEAM");
+	// The three names the HUD shows come from the copy table, so the wheel and
+	// the scoreboard cannot disagree with it about what a channel is called. The
+	// building's own channel and the off state have no key: nothing but the
+	// voice wheel ever displays them.
+	case EOneBrahamVoiceChannel::Proximity:		return OneBrahamHUDStrings::Get(TEXT("HUD_Voice_Proximity"));
+	case EOneBrahamVoiceChannel::Squad:			return OneBrahamHUDStrings::Get(TEXT("HUD_Voice_Squad"));
+	case EOneBrahamVoiceChannel::Team:			return OneBrahamHUDStrings::Get(TEXT("HUD_Voice_Team"));
 	case EOneBrahamVoiceChannel::Announcement:	return NSLOCTEXT("OneBraham", "VoiceChannel_Announcement", "BUILDING");
 	case EOneBrahamVoiceChannel::None:
 	default:									return NSLOCTEXT("OneBraham", "VoiceChannel_None", "VOICE OFF");

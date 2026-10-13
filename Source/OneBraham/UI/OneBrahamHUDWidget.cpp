@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "UI/OneBrahamHUDWidget.h"
+#include "UI/OneBrahamHUDStringTable.h"
 
 #include "OneBraham.h"
 #include "Core/OneBrahamGameUserSettings.h"
@@ -766,7 +767,9 @@ void UOneBrahamHUDWidget::UpdateSquadPanel(const FOneBrahamHUDData& InData)
 			Range = Member.DistanceCm >= 0.f
 				? TEXT("  ") + UOneBrahamUIStyle::DistanceLabel(Member.DistanceCm).ToString()
 				: (Member.FloorIndex != INDEX_NONE
-					? TEXT("  FL ") + FString::FromInt(Member.FloorIndex)
+					? TEXT("  ") + FText::Format(
+						OneBrahamHUDStrings::Get(TEXT("HUD_Floor_Format")),
+						FText::AsNumber(Member.FloorIndex)).ToString()
 					: FString());
 		}
 
@@ -905,7 +908,11 @@ void UOneBrahamHUDWidget::UpdateOverlays(const FOneBrahamHUDData& InData)
 
 		if (bDowned && Text_BleedOut != nullptr)
 		{
-			Text_BleedOut->SetText(FText::Format(NSLOCTEXT("OneBraham", "HUD_BleedOutBig", "BLEEDING OUT  {0}s"),
+			// "BLEEDING OUT  12s": the words come from the copy table (which a
+			// writer can edit in DT_HUDStrings), the number from the state.
+			Text_BleedOut->SetText(FText::Format(
+				NSLOCTEXT("OneBraham", "HUD_BigValue", "{0}  {1}s"),
+				OneBrahamHUDStrings::Get(TEXT("HUD_Downed_BleedOut")),
 				FText::AsNumber(FMath::CeilToInt(InData.BleedOutRemaining))));
 		}
 	}

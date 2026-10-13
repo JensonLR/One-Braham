@@ -224,7 +224,11 @@ void AOneBrahamGameState::MulticastAnnounce_Implementation(const FText& Announce
 
 void AOneBrahamGameState::MulticastWarningBanner_Implementation(const FText& Text, float DurationSeconds, FLinearColor Colour)
 {
-	// UI listens for this through UOneBrahamHUDComponent -> WBP_WarningBanner.
+	// The HUD listens for this through UOneBrahamHUDComponent -> ShowBanner.
+	// This RPC used to end at the log line below, which meant the sentence that
+	// stood here - "UI listens for this" - was the only place the banner went.
+	OnWarningBanner.Broadcast(Text, DurationSeconds, Colour);
+
 	UE_LOG(LogOneBrahamUI, Verbose, TEXT("[OB.BANNER] %s (%.1fs)"), *Text.ToString(), DurationSeconds);
 }
 

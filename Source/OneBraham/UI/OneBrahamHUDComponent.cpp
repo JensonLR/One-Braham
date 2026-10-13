@@ -2,6 +2,8 @@
 
 #include "UI/OneBrahamHUDComponent.h"
 
+#include "UI/OneBrahamHUDStringTable.h"
+
 #include "OneBraham.h"
 #include "Characters/OneBrahamCharacter.h"
 #include "Characters/OneBrahamDownedComponent.h"
@@ -67,6 +69,20 @@ void UOneBrahamHUDComponent::BeginPlay()
 
 void UOneBrahamHUDComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (bBoundToGameState)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (AOneBrahamGameState* GS = World->GetGameState<AOneBrahamGameState>())
+			{
+				GS->OnAnnouncement.RemoveDynamic(this, &UOneBrahamHUDComponent::HandleServerAnnouncement);
+				GS->OnWarningBanner.RemoveDynamic(this, &UOneBrahamHUDComponent::HandleWarningBanner);
+			}
+		}
+
+		bBoundToGameState = false;
+	}
+
 	UnbindFromPawn();
 	DestroyHUD();
 
@@ -255,6 +271,7 @@ void UOneBrahamHUDComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		return;
 	}
 
+	BindToGameState();
 	ReadUserSettings();
 	GatherHUDData();
 
@@ -314,7 +331,178 @@ void UOneBrahamHUDComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		return (Now - Ping.SpawnTime) > Ping.Lifetime;
 	});
 
+	// Announcements run after the snapshot is gathered, so they read the same
+	// state the widget is about to draw.
+	AnnounceStateChanges();
+
 	HUDWidget->ApplyHUDData(Data);
+}
+
+void UOneBrahamHUDComponent::Announce(FName Key, float DurationSeconds, FLinearColor Colour)
+{
+	ShowBanner(OneBrahamHUDStrings::Get(Key), DurationSeconds, Colour);
+}
+
+void UOneBrahamHUDComponent::AnnounceSub(FName Key, float DurationSeconds)
+{
+	ShowSubBanner(OneBrahamHUDStrings::Get(Key), DurationSeconds);
+}
+
+void UOneBrahamHUDComponent::BindToGameState()
+{
+	if (bBoundToGameState)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	AOneBrahamGameState* GS = World != nullptr ? World->GetGameState<AOneBrahamGameState>() : nullptr;
+
+	if (GS == nullptr)
+	{
+		return;
+	}
+
+	// The building's two voices: the tannoy paragraph, read as a subtitle while
+	// the audio plays, and the short imperative banner. The client does not
+	// replicate these itself; the game state multicasts them.
+	GS->OnAnnouncement.AddDynamic(this, &UOneBrahamHUDComponent::HandleServerAnnouncement);
+	GS->OnWarningBanner.AddDynamic(this, &UOneBrahamHUDComponent::HandleWarningBanner);
+	bBoundToGameState = true;
+}
+
+void UOneBrahamHUDComponent::HandleServerAnnouncement(const FText& Announcement)
+{
+	if (Announcement.IsEmpty())
+	{
+		return;
+	}
+
+	// A tannoy sentence is four or five seconds of reading. Six is generous
+	// without being a permanent fixture on screen.
+	Data.SubtitleText = Announcement;
+	SubtitleRemaining = TannoySubtitleSeconds;
+}
+
+void UOneBrahamHUDComponent::HandleWarningBanner(const FText& Text, float DurationSeconds, FLinearColor Colour)
+{
+	if (Text.IsEmpty())
+	{
+		return;
+	}
+
+	ShowBanner(Text, DurationSeconds, Colour);
+}
+
+void UOneBrahamHUDComponent::AnnounceStateChanges()
+{
+	UWorld* World = GetWorld();
+	AOneBrahamGameState* GS = World != nullptr ? World->GetGameState<AOneBrahamGameState>() : nullptr;
+
+	if (GS == nullptr)
+	{
+		return;
+	}
+
+	// The palette, not four floats: anything the whole building hears is the
+	// emergency red, and the winch is the signal blue. Same pair the rest of
+	// the HUD uses for the same two meanings.
+	const FLinearColor AlarmRed = UOneBrahamUIStyle::EmergencyRed();
+	const FLinearColor WinchBlue = UOneBrahamUIStyle::SignalBlue();
+
+	// --- the winch: five states, and before this the HUD drew a bar ---------
+	if (const UOneBrahamExtractionComponent* Extraction = GS->GetExtractionComponent())
+	{
+		const EOneBrahamExtractionState State = Extraction->GetExtractionState();
+
+		if (!bAnnouncementsPrimed)
+		{
+			LastExtractionState = State;
+		}
+		else if (State != LastExtractionState)
+		{
+			switch (State)
+			{
+			case EOneBrahamExtractionState::Broadcast:
+				// The beacon is lit and the whole building knows. This is the
+				// moment the match turns, so it gets the full banner.
+				Announce(TEXT("HUD_Objective_Winch"), 4.f, WinchBlue);
+				break;
+
+			case EOneBrahamExtractionState::Holding:
+				Announce(TEXT("HUD_Extraction_Hold"), 4.f, WinchBlue);
+				break;
+
+			case EOneBrahamExtractionState::Complete:
+				Announce(TEXT("HUD_Match_Extracted"), 5.f, WinchBlue);
+				break;
+
+			case EOneBrahamExtractionState::Failed:
+			{
+				// Contested is worth its own word: it is the one failure the
+				// losing squad caused themselves.
+				const bool bContested =
+					Extraction->GetLastFailReason() == EOneBrahamExtractionFailReason::Contested;
+
+				if (bContested)
+				{
+					Announce(TEXT("HUD_Extraction_Contested"), 4.f, AlarmRed);
+				}
+				else
+				{
+					Announce(TEXT("HUD_Extraction_Failed"), 4.f, AlarmRed);
+				}
+				break;
+			}
+
+			case EOneBrahamExtractionState::Inactive:
+			case EOneBrahamExtractionState::Arriving:
+			default:
+				break;
+			}
+
+			LastExtractionState = State;
+		}
+	}
+
+	// --- the shutters: the tannoy does the talking, this rebuilds the plan --
+	if (const UOneBrahamLockdownComponent* Lockdown = GS->GetLockdownComponent())
+	{
+		const EOneBrahamLockdownStage Stage = Lockdown->GetStage();
+
+		if (!bAnnouncementsPrimed)
+		{
+			LastLockdownStage = Stage;
+		}
+		else if (Stage != LastLockdownStage)
+		{
+			LastLockdownStage = Stage;
+
+			// The floor plan dims the floors the shutters have taken, so it is
+			// stale the moment the stage moves.
+			RefreshOverlays();
+		}
+	}
+
+	// --- a squadmate going down --------------------------------------------
+	int32 DownedSquadmates = 0;
+
+	for (const FOneBrahamHUDSquadMember& Row : Data.Squad)
+	{
+		if (Row.LifeState == EOneBrahamLifeState::Downed)
+		{
+			++DownedSquadmates;
+		}
+	}
+
+	if (bAnnouncementsPrimed && DownedSquadmates > LastDownedSquadmates)
+	{
+		AnnounceSub(TEXT("HUD_Squad_Downed"), 3.f);
+		RefreshOverlays();
+	}
+
+	LastDownedSquadmates = DownedSquadmates;
+	bAnnouncementsPrimed = true;
 }
 
 void UOneBrahamHUDComponent::RefreshNow()
@@ -769,6 +957,15 @@ void UOneBrahamHUDComponent::NotifyDownedStateChanged(bool bDowned, float BleedO
 	if (HUDWidget != nullptr)
 	{
 		HUDWidget->SetDownedVisible(bDowned);
+	}
+
+	if (bDowned)
+	{
+		// Going down is the loudest thing that happens to a player in ASCENT:
+		// one life, up to a minute of bleed-out, and a squadmate who may or may
+		// not be able to reach you. The prompt is the copy table's, so a writer
+		// can turn "CALL FOR HELP" into "TELL YOUR SQUAD" without a recompile.
+		Announce(TEXT("HUD_Downed_CallHelp"), 4.f, UOneBrahamUIStyle::EmergencyRed());
 	}
 }
 
