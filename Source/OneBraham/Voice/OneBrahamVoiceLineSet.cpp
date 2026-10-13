@@ -341,7 +341,7 @@ void UOneBrahamVoiceLineSet::EnsureCoreLines()
 	UE_LOG(LogOneBrahamVoice, Log,
 		TEXT("[OB.VOICE] Core line set ensured: %d core and %d variant rows added, %d total. "
 			 "%d lines are recorded six times each."),
-		Added, VariantsAdded, Lines.Num(), UE_ARRAY_COUNT(Variants) / 6);
+		Added, VariantsAdded, Lines.Num(), static_cast<int32>(UE_ARRAY_COUNT(Variants)) / 6);
 }
 
 void UOneBrahamVoiceLineSet::FindLines(FName LineId, TArray<const FOneBrahamVoiceLine*>& OutLines) const

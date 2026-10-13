@@ -49,6 +49,8 @@ python_root = os.path.normpath(os.path.join(
 
 SOURCE_ROOT = os.path.join(python_root, "Source", "OneBraham")
 LINE_TABLE = os.path.join(SOURCE_ROOT, "Voice", "OneBrahamVoiceLineSet.cpp")
+SUBSYSTEM = os.path.join(SOURCE_ROOT, "Voice", "OneBrahamVoiceSubsystem.cpp")
+UI_DOC = os.path.join(python_root, "Docs", "08_UI.md")
 VOICE_DOC = os.path.join(python_root, "Docs", "14_Voice_Script.md")
 
 #: A line declared in the table: Line(TEXT("V_ID"), ...)
@@ -73,6 +75,12 @@ ARCHETYPE_TAGS = {
 
 #: How many variant rows the recording brief promises.
 DOCUMENTED_VARIANTS = 66
+
+#: The comms wheel's segment ids, from the array in the voice subsystem.
+WHEEL_ARRAY = re.compile(r'static const FName WheelIds\[\]\s*=\s*\{(.*?)\}', re.DOTALL)
+
+#: The section of Docs/08 that documents the wheel.
+WHEEL_DOC_HEADING = u"The comms wheel is not a menu"
 
 #: Any line id anywhere: TEXT("V_ID") or "V_ID" inside a comparison.
 REFERENCED = re.compile(r'"(V_[A-Z0-9_]+)"')
@@ -171,6 +179,51 @@ def documented_lines():
     return set(re.findall(r'\b(V_[A-Z0-9_]+)\b', text))
 
 
+def wheel_ids(source_root=None):
+    """The eight line ids the comms wheel draws, in order."""
+    if not os.path.isfile(SUBSYSTEM):
+        return []
+
+    text = io.open(SUBSYSTEM, encoding="utf-8", errors="ignore").read()
+    match = WHEEL_ARRAY.search(text)
+
+    if not match:
+        return []
+
+    return re.findall(r'TEXT\("(V_[A-Z0-9_]+)"\)', match.group(1))
+
+
+def wheel_ids_in_docs():
+    """The line ids listed in the Docs/08 wheel table."""
+    if not os.path.isfile(UI_DOC):
+        return []
+
+    text = io.open(UI_DOC, encoding="utf-8", errors="ignore").read()
+
+    if WHEEL_DOC_HEADING not in text:
+        return []
+
+    lines = text[text.index(WHEEL_DOC_HEADING):].splitlines()
+
+    # The table is the first run of lines starting with a pipe after the heading.
+    # The first version of this looked for the first blank line, which is the one
+    # *above* the table, so it read nothing and the rule passed by being empty -
+    # the exact failure mode this whole check exists for.
+    table = []
+    in_table = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        if stripped.startswith("|"):
+            in_table = True
+            table.append(stripped)
+        elif in_table:
+            break
+
+    return re.findall(r'`(V_[A-Z0-9_]+)`', "\n".join(table))
+
+
 def run(source_root=None):
     """Returns (references_checked, problems).
 
@@ -235,6 +288,21 @@ def run(source_root=None):
             u"the table has {0} archetype variant rows; Docs/14 section 4 promises {1}".format(
                 len(variants), DOCUMENTED_VARIANTS),
             u"variant count"))
+
+    # --- the comms wheel ----------------------------------------------------
+    # The wheel's segments are a third list of line ids: the array in the voice
+    # subsystem, and the table in Docs/08 that players and designers read. They
+    # disagreed once - the doc listed seven invented ids while the code spoke the
+    # real ones - and a doc that names lines the game cannot say is the same
+    # defect as a wheel that speaks lines the script does not have.
+    wheel = wheel_ids()
+    wheel_doc = wheel_ids_in_docs()
+
+    if wheel and wheel_doc and wheel != wheel_doc:
+        problems.append((
+            u"the comms wheel in code is [{0}] and Docs/08 documents [{1}]".format(
+                ", ".join(wheel), ", ".join(wheel_doc)),
+            u"wheel drift"))
 
     # Documentation coverage: the script is the recording brief.
     documented = documented_lines()
