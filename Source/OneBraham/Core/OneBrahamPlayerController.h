@@ -1,0 +1,355 @@
+// Copyright (c) One Braham. All Rights Reserved.
+//
+// OneBrahamPlayerController.h
+// ---------------------------------------------------------------------------
+// First-person controller. Responsibilities:
+//   * Enhanced Input: builds mapping contexts from UOneBrahamInputConfig,
+//     applies the player's sensitivity/crouch/lean preferences every frame.
+//   * Camera: 1P view, ADS FOV blending, hit-direction, death cam, spectator.
+//   * UI: owns the CommonUI root widget stack (HUD, scoreboard, pause, death).
+//   * Anti-cheat: RPC budget accounting and server-side validation helpers so
+//     every Server_* RPC in the project has one obvious place to rate-limit.
+//   * Voice: forwards push-to-talk state to the voice subsystem.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/PlayerController.h"
+#include "Core/OneBrahamTypes.h"
+#include "OneBrahamPlayerController.generated.h"
+
+class UOneBrahamInputConfig;
+class UOneBrahamHUDComponent;
+class UOneBrahamAudioManagerComponent;
+class UOneBrahamProximityVoiceComponent;
+class UInputMappingContext;
+class UInputAction;
+class UCommonActivatableWidget;
+class AOneBrahamCharacter;
+class USoundBase;
+class UUserWidget;
+
+/** What the player is currently looking at, for the interaction prompt. */
+USTRUCT(BlueprintType)
+struct FOneBrahamInteractionTarget
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	TObjectPtr<AActor> Actor = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	FText Prompt;
+
+	/** OB.Interaction.* tag on the target, used to pick the right input verb. */
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	FGameplayTag InteractionTag;
+
+	/** False when the player cannot use it yet ("Locked - Executive badge required"). */
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	bool bEnabled = true;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Interaction")
+	float Distance = 0.f;
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOneBrahamInteractionTargetChanged, const FOneBrahamInteractionTarget&, Target);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOneBrahamSpectatorTargetChanged, AOneBrahamCharacter*, Target);
+
+UCLASS(BlueprintType)
+class ONEBRAHAM_API AOneBrahamPlayerController : public APlayerController
+{
+	GENERATED_BODY()
+
+public:
+	AOneBrahamPlayerController();
+
+	virtual void BeginPlay() override;
+	virtual void SetupInputComponent() override;
+	virtual void PlayerTick(float DeltaTime) override;
+	virtual void OnPossess(APawn* InPawn) override;
+	virtual void OnUnPossess() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void InitPlayerState() override;
+
+	// ======================================================================
+	//  Components
+	// ======================================================================
+	UFUNCTION(BlueprintPure, Category = "One Braham|Controller")
+	UOneBrahamHUDComponent* GetHUDComponent() const { return HUDComponent; }
+
+	UFUNCTION(BlueprintPure, Category = "One Braham|Controller")
+	UOneBrahamAudioManagerComponent* GetAudioManager() const { return AudioManager; }
+
+	UFUNCTION(BlueprintPure, Category = "One Braham|Controller")
+	AOneBrahamCharacter* GetOneBrahamCharacter() const;
+
+	// ======================================================================
+	//  Input configuration
+	// ======================================================================
+	/** Assigned in BP_OneBrahamPlayerController; see Tools/Python/onebraham/build_input.py. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Input")
+	TObjectPtr<UOneBrahamInputConfig> InputConfig;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Input")
+	TObjectPtr<UInputMappingContext> GameplayMappingContext;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Input")
+	TObjectPtr<UInputMappingContext> SpectatorMappingContext;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Input")
+	TObjectPtr<UInputMappingContext> CommonMappingContext;
+
+	/** Runtime sensitivity multiplier, refreshed from settings each tick. */
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Input")
+	float EffectiveSensitivity = 0.07f;
+
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Input")
+	void PushMappingContext(UInputMappingContext* Context, int32 Priority = 0);
+
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Input")
+	void PopMappingContext(UInputMappingContext* Context);
+
+	// ======================================================================
+	//  Interaction
+	// ======================================================================
+	UPROPERTY(BlueprintAssignable, Category = "One Braham|Interaction")
+	FOneBrahamInteractionTargetChanged OnInteractionTargetChanged;
+
+	UFUNCTION(BlueprintPure, Category = "One Braham|Interaction")
+	const FOneBrahamInteractionTarget& GetInteractionTarget() const { return CurrentInteractionTarget; }
+
+	/** Performs the trace that fills CurrentInteractionTarget. Called at 10 Hz. */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Interaction")
+	void UpdateInteractionTarget();
+
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Interaction")
+	void NotifyInteractionStarted();   // the player pressed Interact
+
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Interaction")
+	void NotifyInteractionReleased();  // hold actions (terminals, revives) end here
+
+	// ======================================================================
+	//  UI
+	// ======================================================================
+	/** Widget classes are set on BP_OneBrahamPlayerController so art can swap them. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|UI")
+	TSubclassOf<class UOneBrahamHUDWidget> HUDWidgetClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|UI")
+	TSubclassOf<UUserWidget> PauseMenuWidgetClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|UI")
+	TSubclassOf<UUserWidget> DeathScreenWidgetClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|UI")
+	TSubclassOf<UUserWidget> ScoreboardWidgetClass;
+
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|UI")
+	TObjectPtr<class UOneBrahamHUDWidget> HUDWidget;
+
+	UFUNCTION(BlueprintCallable, Category = "One Braham|UI")
+	void TogglePauseMenu();
+
+	UFUNCTION(BlueprintCallable, Category = "One Braham|UI")
+	void SetScoreboardVisible(bool bVisible);
+
+	/** Pushed when the local player dies; the death screen doubles as the spectate HUD. */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|UI")
+	void ShowDeathScreen(bool bShow);
+
+	/** Shows a transient banner ("THE BUILDING IS NOW IN LOCKDOWN"). */
+	UFUNCTION(BlueprintCallable, Client, Reliable, Category = "One Braham|UI")
+	void ClientShowBanner(const FText& Text, float DurationSeconds, FLinearColor Colour);
+
+	/** Plays a one-shot 2D UI sound on this client. */
+	UFUNCTION(BlueprintCallable, Client, Reliable, Category = "One Braham|UI")
+	void ClientPlayUISound(USoundBase* Sound, float Volume = 1.f);
+
+	/** Blinds this client with a flashbang: white-out, tinnitus, temporary deafness. */
+	UFUNCTION(BlueprintCallable, Client, Reliable, Category = "One Braham|Effects")
+	void ClientApplyFlash(float DurationSeconds, bool bDirectHit);
+
+	/** Applies camera shake from an explosion at a distance. */
+	UFUNCTION(BlueprintCallable, Client, Unreliable, Category = "One Braham|Effects")
+	void ClientApplyExplosionShake(FVector_NetQuantize Origin, float Magnitude);
+
+	/** Local implementation of a flash - also used directly on a listen server. */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Effects")
+	void ApplyFlashLocally(float DurationSeconds, bool bDirectHit);
+
+	/** Local implementation of an explosion shake - also used directly on a listen server. */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Effects")
+	void ApplyExplosionShakeLocally(const FVector& Origin, float Magnitude);
+
+	/** Remaining flash duration on this client (0 = not flashed). */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Effects")
+	float GetFlashRemaining() const { return FlashRemaining; }
+
+protected:
+	/** Per-tick flash decay, called from PlayerTick. */
+	void TickFlash(float DeltaTime);
+
+	// ======================================================================
+	//  Spectating
+	// ======================================================================
+	UPROPERTY(ReplicatedUsing = OnRep_Spectating, BlueprintReadOnly, Category = "One Braham|Spectator")
+	bool bIsSpectating = false;
+
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Spectator")
+	int32 SpectatedPlayerId = INDEX_NONE;
+
+	UPROPERTY(BlueprintAssignable, Category = "One Braham|Spectator")
+	FOneBrahamSpectatorTargetChanged OnSpectatorTargetChanged;
+
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Spectator")
+	void SpectateNextPlayer();
+
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Spectator")
+	void SpectatePreviousPlayer();
+
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Spectator")
+	void SpectatePlayer(int32 PlayerId);
+
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Spectator")
+	void ToggleFreeCamera();
+
+	/** Server: begin spectating after death. */
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "One Braham|Spectator")
+	void ServerBeginSpectating(int32 PreferredTargetPlayerId);
+
+	// ======================================================================
+	//  Ping / comms rose markers
+	// ======================================================================
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Ping")
+	void PingLookDirection();
+
+	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "One Braham|Ping")
+	void ServerPingLocation(FVector_NetQuantize Location);
+
+	UFUNCTION(NetMulticast, Unreliable, Category = "One Braham|Ping")
+	void MulticastPingLocation(FVector_NetQuantize Location, EOneBrahamTeam PingingTeam, const FString& PingingName);
+
+	// ======================================================================
+	//  Clip marker (for the viral clip pipeline in Docs/19)
+	// ======================================================================
+	/** Drops a timestamped marker into Saved/Clips/<match>/markers.csv. */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Clip")
+	void MarkClipMoment(const FString& Label);
+
+	// ======================================================================
+	//  Anti-cheat / RPC budget
+	// ======================================================================
+	/** Returns false (and logs) when this client has exceeded its RPC budget. */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Security")
+	bool CheckRPCBudget(const TCHAR* RPCLabel);
+
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Security")
+	void ReportViolation(const FString& Reason, float Severity = 1.f);
+
+	UFUNCTION(BlueprintPure, Category = "One Braham|Security")
+	int32 GetViolationScore() const { return ViolationScore; }
+
+protected:
+	// ======================================================================
+	//  Enhanced Input handlers. One function per action; all of them call into
+	//  the character, which owns the authoritative movement/weapon logic.
+	// ======================================================================
+	void Input_Move(const struct FInputActionValue& Value);
+	void Input_Look(const struct FInputActionValue& Value);
+	void Input_LookGamepad(const struct FInputActionValue& Value);
+	void Input_JumpStarted(const struct FInputActionValue& Value);
+	void Input_JumpCompleted(const struct FInputActionValue& Value);
+	void Input_SprintStarted(const struct FInputActionValue& Value);
+	void Input_SprintCompleted(const struct FInputActionValue& Value);
+	void Input_WalkToggle(const struct FInputActionValue& Value);
+	void Input_CrouchToggle(const struct FInputActionValue& Value);
+	void Input_Lean(const struct FInputActionValue& Value);
+	void Input_Mantle(const struct FInputActionValue& Value);
+	void Input_Slide(const struct FInputActionValue& Value);
+	void Input_FireStarted(const struct FInputActionValue& Value);
+	void Input_FireCompleted(const struct FInputActionValue& Value);
+	void Input_AimStarted(const struct FInputActionValue& Value);
+	void Input_AimCompleted(const struct FInputActionValue& Value);
+	void Input_Reload(const struct FInputActionValue& Value);
+	void Input_FireModeSwitch(const struct FInputActionValue& Value);
+	void Input_Melee(const struct FInputActionValue& Value);
+	void Input_Inspect(const struct FInputActionValue& Value);
+	void Input_WeaponSlotPrimary(const struct FInputActionValue& Value);
+	void Input_WeaponSlotSidearm(const struct FInputActionValue& Value);
+	void Input_WeaponCycleNext(const struct FInputActionValue& Value);
+	void Input_WeaponCyclePrev(const struct FInputActionValue& Value);
+	void Input_ThrowGrenade(const struct FInputActionValue& Value);
+	void Input_UseUtility(const struct FInputActionValue& Value);
+	void Input_UseMedkit(const struct FInputActionValue& Value);
+	void Input_DropWeapon(const struct FInputActionValue& Value);
+	void Input_Interact(const struct FInputActionValue& Value);
+	void Input_InteractHoldStarted(const struct FInputActionValue& Value);
+	void Input_InteractHoldCompleted(const struct FInputActionValue& Value);
+	void Input_ToggleFlashlight(const struct FInputActionValue& Value);
+	void Input_ToggleLaser(const struct FInputActionValue& Value);
+	void Input_PushToTalkStarted(const struct FInputActionValue& Value);
+	void Input_PushToTalkCompleted(const struct FInputActionValue& Value);
+	void Input_VoiceChannelCycle(const struct FInputActionValue& Value);
+	void Input_VoiceMuteSelf(const struct FInputActionValue& Value);
+	void Input_ScoreboardStarted(const struct FInputActionValue& Value);
+	void Input_ScoreboardCompleted(const struct FInputActionValue& Value);
+	void Input_PauseMenu(const struct FInputActionValue& Value);
+	void Input_Ping(const struct FInputActionValue& Value);
+	void Input_SpectateNext(const struct FInputActionValue& Value);
+	void Input_SpectatePrev(const struct FInputActionValue& Value);
+	void Input_SpectateFreeCam(const struct FInputActionValue& Value);
+	void Input_ClipMarker(const struct FInputActionValue& Value);
+
+	/** Binds every action in InputConfig to the handlers above. */
+	void BindInputActions();
+
+	UFUNCTION()
+	void OnRep_Spectating();
+
+	/** Rebuilds the spectator view target from SpectatedPlayerId. */
+	void ApplySpectatorView();
+
+	UFUNCTION()
+	void HandleSettingsChanged();
+
+	UPROPERTY()
+	TObjectPtr<UOneBrahamHUDComponent> HUDComponent = nullptr;
+
+	UPROPERTY()
+	TObjectPtr<UOneBrahamAudioManagerComponent> AudioManager = nullptr;
+
+	/** Rolling RPC budget: timestamps of the last N RPCs inside the window. */
+	TArray<float> RPCWindowTimestamps;
+	static constexpr float RPCWindowSeconds = 1.f;
+
+	/** Escalating anti-cheat score; QA automation asserts this stays at 0. */
+	int32 ViolationScore = 0;
+
+	float InteractionTraceAccumulator = 0.f;
+	static constexpr float InteractionTraceInterval = 0.1f;
+
+	/** Whether the pause menu is currently up (blocks gameplay input). */
+	bool bPauseMenuOpen = false;
+	bool bScoreboardOpen = false;
+	bool bFreeCamActive = false;
+
+	/** Cached between ticks so the crosshair can grow/shrink predictably. */
+	float CurrentCrosshairSpread01 = 0.f;
+
+	/** Flashbang blindness remaining, seconds. */
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Effects")
+	float FlashRemaining = 0.f;
+
+	/** Strength of the current flash (1 = a direct hit at point blank). */
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Effects")
+	float FlashStrength01 = 0.f;
+
+	/** Latched so the post-process is cleared exactly once when the flash ends. */
+	bool bFlashActiveLastFrame = false;
+
+	/** Cached global parameter collection used for the flash white-out. */
+	UPROPERTY(Transient)
+	TWeakObjectPtr<UMaterialParameterCollection> CachedFlashCollection;
+};

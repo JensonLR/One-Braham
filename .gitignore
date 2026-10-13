@@ -1,0 +1,55 @@
+# ==========================================================================
+#  ONE BRAHAM - Unreal Engine 5.5 source control ignore rules
+#  Unreal conventions: never commit DerivedDataCache, Binaries, Intermediate,
+#  Saved, .vs, and generated project files. DO commit Config/, Source/,
+#  Content/, Docs/, Scripts/, Tools/ and OneBraham.uproject.
+# ==========================================================================
+
+# --- Unreal build artefacts -------------------------------------------------
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+Build/StagedBuilds/
+Build/*.log
+Build/PackageLogs/
+.vs/
+.vscode/
+.idea/
+*.VC.db
+*.VC.opendb
+*.opensdf
+*.sdf
+*.sln
+*.suo
+*.xcodeproj
+*.xcworkspace
+*.autosave
+*.tmp
+*.bak
+*.log
+
+# --- Plugin/engine copied folders ------------------------------------------
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+Plugins/Developer/
+
+# --- Content: raw source art is external, but keep generated metadata -------
+Content/**/*.uasset.autosave
+Content/Developers/
+Content/Collections/
+
+# --- OS ---------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Local secrets / server configs ----------------------------------------
+Config/Local*.ini
+Config/*Local.ini
+ServerSecrets/
+*.steam_appid.secret
+
+# --- Local packaged output --------------------------------------------------
+Dist/
+DistLocal/

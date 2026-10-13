@@ -1,0 +1,174 @@
+# ONE BRAHAM — build automation
+
+Every asset and every configuration file in this project is produced by a script.
+This document is the map of those scripts: what each one builds, in what order,
+what it needs, and what it does when a piece of content is not there yet.
+
+**The rule the whole pipeline is built on:** a build must never stop because a
+piece of art does not exist. It reports it, replaces it with something that works,
+and keeps going — and then the validator fails the *release* build if the
+placeholder is still in use. That is the difference between a pipeline a studio
+can work in and a pipeline that gets bypassed by the first artist in a hurry.
+
+---
+
+## 1. The scripts
+
+| Script | Builds | Needs the editor | Idempotent |
+| --- | --- | --- | --- |
+| `generate_input_ini.py` | `Config/DefaultInput.ini` `[OneBraham.Input]`, 41 actions, 72 bindings | no | yes |
+| `build_materials.py` | 15 physical materials, 5 masters (node graphs), 28 instances | yes | yes |
+| `build_environment.py` | the map: 8 areas, 16 levels, 40 rooms, 10 access zones, 5 terminals, 4 breach walls, 28 shutters | yes | yes |
+| `build_props.py` | 12 gameplay blueprints, 4 loot cards, the prop manifest, the dressing pass | yes | yes |
+| `build_weapons.py` | 10 weapon definitions, 10 blueprints, `DA_WeaponRegistry` | yes | yes |
+| `build_characters.py` | the cast payload + `ABP_OneBrahamCharacter` when the skeleton exists | yes | yes |
+| `apply_cast_payload.py` | writes the payload onto `DA_CharacterRegistry`, verifies 6 archetypes | yes | yes |
+| `build_audio.py` | 12 sound classes, 3 submixes, 4 mixes, 8 attenuations, 11 ambience, 8 music, `DA_AudioBank` | yes | yes |
+| `build_input.py` | 41 input actions, 4 mapping contexts, `DA_InputConfig` | yes | yes |
+| `build_ui.py` | 10 widgets, the HUD string table, the font slot, the palette check | yes | yes |
+| `build_vfx.py` | 17 Niagara systems, 3 camera shakes, 6 decal materials, the authoring sheet | yes | yes |
+| `import_font.py` | font faces from `Content/UI/Fonts` | yes | yes |
+| `validate_project.py` | the health check and a markdown report | either | yes |
+| `run_all.py` | all of the above, in dependency order, with a report | either | yes |
+
+Every script is runnable on its own. Every script imports cleanly **outside** the
+editor (the `unreal` import is guarded), which is what lets `--text-only` steps
+and the config checks run in CI with nothing but Python 3.
+
+---
+
+## 2. Running it
+
+```
+Scripts\BuildContent.bat                          everything
+Scripts\BuildContent.bat --only weapons           one step
+Scripts\BuildContent.bat --skip ui,vfx            everything except two
+Scripts\BuildContent.bat --text-only              the steps that need no editor
+Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress the map
+```
+
+`run_all.py` accepts the same switches and writes
+`Saved/Build/ob_build_<timestamp>.md`:
+
+```
+# ONE BRAHAM - content build report
+**12 steps succeeded, 0 failed.**
+
+| Step | Result | Seconds | Detail |
+| --- | --- | --- | --- |
+| input_ini | OK | 0.0 | wrote 41 actions (40 with a default key) |
+| materials | OK | 3.1 | 5 masters, 15 physicals, 28 instances |
+...
+```
+
+Exit code 0 only if every step passed. CI reads the exit code, not the log.
+
+---
+
+## 3. The order, and why
+
+```
+generate_input_ini        text only; can fail before the editor opens
+      ↓
+materials                 everything references MI_* and PM_OB_*
+      ↓
+environment               the map: floors, rooms, doors, shutters, the pad
+      ↓
+props                     blueprints + the dressing manifest
+      ↓
+weapons                   data assets → blueprints → registry
+      ↓
+characters                the cast payload
+      ↓
+apply_cast_payload        payload → DA_CharacterRegistry
+      ↓
+audio                     classes, mixes, attenuations, the bank
+      ↓
+input                     IA_* + DA_InputConfig
+      ↓
+ui                        widgets, strings, font slot
+      ↓
+vfx                       systems, shakes, decals
+      ↓
+validate                  the health check, on everything above
+```
+
+Two orderings that are not arbitrary and that will break if changed:
+
+* **Materials before the environment.** The map builder looks up `MI_*` per
+  surface. Running it first produces a blockout in the engine default material,
+  which is a valid build and a useless one.
+* **Characters before the cast payload.** The payload is a file the character
+  builder writes and the payload applier reads. Applying before building applies
+  last run's cast.
+
+---
+
+## 4. What happens when content is missing
+
+Every script follows the same three-state contract:
+
+| State | Example | What the script does | What the game does |
+| --- | --- | --- | --- |
+| `created` / `updated` | normal path | logs the asset path | uses it |
+| `skipped_asset` | a Niagara system with no stack yet, a font with no `.ttf` | records the path, the reason and the *exact* fix, and writes a human-readable brief | uses the documented fallback (sprite actor, procedural audio, code-drawn HUD) |
+| `failed` | a reflected property that no longer exists, a factory that returned null | records it and continues | may be missing a feature; `validate_project.py` will catch it |
+
+A `failed` entry in a build report means the C++ and the script disagree — the
+most valuable thing the pipeline produces, because it is the only way a rename in
+a header gets noticed before it becomes a runtime null reference.
+
+---
+
+## 5. The CI pipeline
+
+```yaml
+# .github/workflows/build.yml equivalents, described rather than templated,
+# because the project's pipeline runs on a self-hosted UE5 runner.
+stages:
+  - lint      : python -m py_compile on every tool; the C++ is linted by the build
+  - config    : PYTHONPATH=Tools/Python python3 run_all.py --text-only
+  - build     : UBT build of the Editor, Game, Server and Client targets
+  - content   : UnrealEditor-Cmd -run=pythonscript run_all.py
+  - validate  : UnrealEditor-Cmd -run=pythonscript validate_project.py
+  - test      : UnrealEditor-Cmd -ExecCmds="Automation RunTests OneBraham"
+  - package   : RunUAT BuildCookRun (client + Linux server)
+  - smoke     : the 12-player dedicated smoke test against the packaged server
+  - archive   : upload the artefacts, write the build report into the release notes
+```
+
+The pipeline fails on: a compile error, any `--text-only` failure, any validator
+FAIL, any automation test failure, or a smoke test that does not end in a
+`MatchResult`.
+
+---
+
+## 6. Reproducibility
+
+* Every script is deterministic: fixed iteration order, no time-dependent output
+  except the report timestamps, no random placement without a seeded
+  `FRandomStream`.
+* Running the pipeline twice produces the same assets. Running it on a clean
+  clone produces the same assets as running it on a developer's machine.
+* The one intentional exception: `--dress` places props from a manifest whose
+  ordering is stable but whose *outcome* depends on which prop meshes have been
+  imported — and it says so in its own output.
+
+---
+
+## 7. Adding a new generated asset
+
+1. Add the data to the relevant table (`SURFACES`, `PROPS`, `WEAPONS`,
+   `ARCHETYPES`, `NIAGARA_SYSTEMS`, `ACTIONS`, `WIDGETS`, `HUD_STRINGS`…).
+2. If it is a new *kind* of asset, add a `build_*` step and a row in `run_all.py`.
+3. Add an assertion to `validate_project.py` if the game would break silently
+   without it. Silent is the enemy: a missing map is obvious, a missing footstep
+   cue is not.
+4. Add the licence entry to `Docs/LICENCES.md` if it came from anywhere but this
+   repository.
+5. Run `Scripts\BuildContent.bat` and paste the report into the pull request.
+
+**Never hand-place something that a script could place.** Hand-edits are the
+reason map bugs take two weeks to find: the level, the manifest and the validator
+silently disagree, and the only way to be sure is to make the script the only
+writer.
