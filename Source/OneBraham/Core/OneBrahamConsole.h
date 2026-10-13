@@ -23,9 +23,15 @@ public:
 	virtual void PostRender_Console_GameViewport(UCanvas* Canvas) override;
 	virtual bool ConsoleCommand(const FString& Command) override;
 
-	/** QA helpers, bound in the constructor as exec functions. */
+	/** QA helpers, routed by ConsoleCommand and named for the command each one
+	 *  answers, so the table here and the table in Docs/18 section 6 are the same
+	 *  list. `ob.NetDebug` is not here: it is a console variable, handled by the
+	 *  engine's own console before anything reaches this class. */
 	void OBGiveWeapon(const FString& WeaponId);
 	void OBSetLockdownStage(int32 Stage);
 	void OBEndMatch(int32 WinningTeamIndex);
 	void OBReportNetBudget();
+	void OBDumpAudio();
+	void OBBenchSkydeck(float SecondsPerLeg);
+	void OBStopBench();
 };

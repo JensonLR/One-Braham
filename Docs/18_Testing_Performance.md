@@ -216,19 +216,34 @@ should be at 4 Hz.
 
 ## 6. Measuring
 
+Engine commands first, because most questions are answered by one of them:
+
 | Command | What it does |
 | --- | --- |
-| `stat unit` / `stat gpu` | frame breakdown |
+| `stat unit` / `stat gpu` | frame breakdown: game, draw, GPU |
 | `stat scenerendering` | draw calls and triangles |
-| `stat memory` | streaming pool |
-| `stat net` | replication bandwidth per actor |
-| `ob.Audio.Dump` | the whole mix state in one line per bus |
-| `ob.NetDebug 1` | per-actor replication cost overlay |
-| `OBBench.Skydeck` | the scripted benchmark flythrough on the release map |
+| `stat memory` | streaming pool and texture budget |
+| `stat net` | replication bandwidth |
+| `stat niagara` | particle counts per system |
 | `Automation RunTests OneBraham.Multiplayer.Smoke` | the match composition the budget has to hold for |
 
-Test hardware is recorded with every benchmark run. A budget measured on a
-developer's overclocked machine is not a budget.
+Then the project's own readouts, all routed by `UOneBrahamConsole` and all
+documented here rather than discovered in the source:
+
+| Command | What it does |
+| --- | --- |
+| `ob.Audio.Dump` | the local mix state, one line per bus, plus the voice duck and the occlusion filter. Needs a player: a dedicated server has no mix. |
+| `ob.NetDebug 1` | the per-actor replication cost overlay: the replicated actors near the local view, in the order the replication scheduler will spend bandwidth on them, from `AActor::GetNetPriority`, with update rate, cull distance and designed dormancy. `ob.NetDebug.Lines` (default 12) sets how many and `ob.NetDebug.Radius` (default 4000 cm) how far it looks. |
+| `ob.Bench.Skydeck [seconds]` | the scripted flythrough benchmark. One leg per floor of the building layout, default 6 s each, camera panning and yawing across each floor, frame time recorded every frame. Writes `Saved/Benchmarks/ob_bench_<stamp>.md` with overall and per-floor mean, median, p95, p99 and worst, plus the three blanks a real record needs: hardware, resolution and scalability, build. Needs a local player |
+| `ob.Bench.Skydeck.Stop` | ends a run early and writes the same report for the frames captured so far. |
+| `ob.netbudget` | the replication budget report: what the game state counts per second against `RpcBudgetPerSecond`. Server only. |
+| `ob.give <WeaponId>` | puts a weapon in the local player's hands. Cheat, development builds only. |
+| `ob.lockdown [stage]` | forces the lockdown to a stage, or with no argument advances it one. Server only. |
+| `ob.endmatch [team]` | ends the match with a result. Server only. |
+
+Test hardware is recorded with every benchmark run - the report has blank lines
+for it - because a budget measured on a developer's overclocked machine is not a
+budget.
 
 ---
 

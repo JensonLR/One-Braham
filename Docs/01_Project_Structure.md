@@ -46,7 +46,7 @@ Nothing in `Content/OneBraham` is hand-placed that a script can place. Nothing i
 
 | Folder | Contents | Belongs to |
 | --- | --- | --- |
-| `Core/` | Types, tags, settings, game instance, game state, player state, controller, game mode, spawn points, save/settings | PART 3 |
+| `Core/` | Types, tags, settings, game instance, game state, player state, controller, game mode, spawn points, save/settings, the console and its QA commands, the `ob.NetDebug` overlay and the `ob.Bench.Skydeck` flythrough | PART 3 |
 | `Characters/` | Character, movement, health, downed, ragdoll | PART 4 |
 | `Weapons/` | Weapon base, weapon component, inventory, projectile | PART 5 |
 | `Access/` | Access zone (the door), keycard, override terminal, fire shutter, breach interface | PART 6 |

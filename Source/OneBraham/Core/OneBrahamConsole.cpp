@@ -3,6 +3,8 @@
 #include "Core/OneBrahamConsole.h"
 
 #include "OneBraham.h"
+#include "Audio/OneBrahamAudioManagerComponent.h"
+#include "Core/OneBrahamBenchmark.h"
 #include "Core/OneBrahamGameMode.h"
 #include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamPlayerController.h"
@@ -28,9 +30,11 @@ void UOneBrahamConsole::PostRender_Console_GameViewport(UCanvas* Canvas)
 	if (Canvas != nullptr)
 	{
 		// Deliberately empty: the engine draws the console body. The override
-		// exists so the ONE BRAHAM HUD can draw QA telemetry under the console
-		// (see UOneBrahamHUDComponent::DrawDebugTelemetry) and so the function
-		// is a documented hook rather than a hidden engine default.
+		// exists so this class owns the hook rather than a hidden engine default
+		// appearing to be one, and so a future overlay has an obvious place to
+		// go. The QA readouts that exist today are commands, not overlays they
+		// hang off: `ob.Audio.Dump` logs the mix, `ob.NetDebug 1` draws the
+		// replication overlay, `ob.netbudget` reports the frame budget.
 	}
 #endif
 	Super::PostRender_Console_GameViewport(Canvas);
@@ -69,9 +73,99 @@ bool UOneBrahamConsole::ConsoleCommand(const FString& Command)
 			OBReportNetBudget();
 			return true;
 		}
+		if (Verb == TEXT("ob.audio.dump"))
+		{
+			OBDumpAudio();
+			return true;
+		}
+		if (Verb == TEXT("ob.bench.skydeck"))
+		{
+			// Seconds per floor, so a short pass can be run while iterating.
+			OBBenchSkydeck(ArgList.Num() > 0 ? FCString::Atof(*ArgList[0]) : 6.f);
+			return true;
+		}
+		if (Verb == TEXT("ob.bench.skydeck.stop"))
+		{
+			OBStopBench();
+			return true;
+		}
 	}
 
 	return Super::ConsoleCommand(Command);
+}
+
+void UOneBrahamConsole::OBDumpAudio()
+{
+	// The mix state, one line per bus: what the submix faders, the voice duck and
+	// the occlusion filter are actually doing, rather than what the settings say
+	// they should be. The audio manager owns the state; this is the way to see it
+	// without a debugger.
+	UWorld* World = GetWorld();
+	APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
+	AOneBrahamPlayerController* OBPC = Cast<AOneBrahamPlayerController>(PC);
+	UOneBrahamAudioManagerComponent* Audio = OBPC != nullptr ? OBPC->GetAudioManager() : nullptr;
+
+	if (Audio == nullptr)
+	{
+		OB_WARN("ob.audio.dump: no audio manager on the local player. Audio mixes only "
+			"exist where there is a player: run this on a client or a listen server.");
+		return;
+	}
+
+	// One line per bus, plus the voice duck and the occlusion filter, which are
+	// the two values a mix problem usually turns out to be.
+	TArray<FString> Lines;
+	Lines.Add(TEXT("ob.Audio.Dump - local mix state"));
+	Lines.Add(Audio->DumpAudioState());
+
+	for (const FString& Line : Lines)
+	{
+		OB_LOG("%s", *Line);
+	}
+}
+
+void UOneBrahamConsole::OBBenchSkydeck(float SecondsPerLeg)
+{
+	UWorld* World = GetWorld();
+
+	UOneBrahamBenchmarkSubsystem* Benchmark = World != nullptr
+		? World->GetSubsystem<UOneBrahamBenchmarkSubsystem>()
+		: nullptr;
+
+	if (Benchmark == nullptr)
+	{
+		OB_WARN("ob.Bench.Skydeck: this world has no benchmark subsystem. It exists in "
+			"game worlds on a client or listen server; a dedicated server cannot render.");
+		return;
+	}
+
+	FText Refusal;
+
+	if (!Benchmark->StartBenchmark(SecondsPerLeg, Refusal))
+	{
+		OB_WARN("ob.Bench.Skydeck: %s", *Refusal.ToString());
+		return;
+	}
+
+	OB_LOG("ob.Bench.Skydeck: started, %.1fs per floor, report goes to Saved/Benchmarks.",
+		SecondsPerLeg);
+}
+
+void UOneBrahamConsole::OBStopBench()
+{
+	UWorld* World = GetWorld();
+
+	UOneBrahamBenchmarkSubsystem* Benchmark = World != nullptr
+		? World->GetSubsystem<UOneBrahamBenchmarkSubsystem>()
+		: nullptr;
+
+	if (Benchmark == nullptr || !Benchmark->IsRunning())
+	{
+		OB_LOG("ob.Bench.Skydeck.Stop: nothing is running.");
+		return;
+	}
+
+	Benchmark->AbortBenchmark();
 }
 
 void UOneBrahamConsole::OBGiveWeapon(const FString& WeaponId)
