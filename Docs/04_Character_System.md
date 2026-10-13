@@ -18,7 +18,7 @@ the movement system exists to keep those three things in charge.
 | Crouched capsule | radius 34 cm, half-height 56 cm | |
 | Max health | 100 | |
 | Max armour | 50 | |
-| Archetype | `EOneBrahamArchetype` | cosmetic only, plus the animation personality |
+| Archetype | `FGameplayTag ArchetypeTag` | `OB.Character.Archetype.*`, cosmetic only, plus the animation personality |
 | `bIsDowned` / `bIsEliminated` | replicated | |
 | Components | `HealthComponent`, `DownedComponent`, `RagdollComponent`, `WeaponComponent`, `InventoryComponent`, `InteractComponent`, `ProximityVoiceComponent` | |
 
@@ -78,7 +78,7 @@ float MaxArmour;
 bool  bArmourBroken;
 bool  bInvulnerable;
 
-float ApplyDamage(float Amount, EOneBrahamDamageType, AActor* Causer, FName HitBone, bool bHeadshot);
+void ApplyDamage(float Amount, AActor* Causer, const FOneBrahamDamageReport& Report, AController* Instigator);
 void  ApplyHeal(float Amount, AActor* Healer);
 void  ApplyArmour(float Amount);
 ```
@@ -152,29 +152,33 @@ shot meant for a person.
 
 ## 6. `UOneBrahamCharacterDataAsset`
 
-One asset per archetype (`DA_Character_<Archetype>`), and the cast registry
-(`DA_CharacterRegistry`) holds all six. Fields:
+One registry asset (`DA_CharacterRegistry`) holds all six, rather than one asset
+per archetype - the wardrobe, the deploy screen and the character all read from
+exactly one place, and there is no ordering to get wrong. Fields:
+
+One `FOneBrahamArchetypeDefinition` per archetype, in the registry's
+`Archetypes` array. The struct is the single source for the deploy screen, the
+wardrobe and the character:
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `Archetype` | `EOneBrahamArchetype` | |
-| `DisplayName` / `Description` | `FText` | the deploy screen |
-| `Tag` | `FGameplayTag` | `OB.Character.Archetype.*` |
-| `BodyMesh` | `TSoftObjectPtr<USkeletalMesh>` | |
-| `FaceMesh`, `HairGroom` | soft pointers | |
-| `AnimBlueprint` | soft class pointer | one `ABP_OneBrahamCharacter` for all six |
-| `FirstPersonArms` | soft pointer | archetype-specific |
-| `VoiceSetId` | `FName` | `Vox_*_London` |
-| `HomeFloor` | int | flavour, shown on the deploy screen |
-| `BodyVariantIndex`, `HeightOffsetCm` | int / float | cosmetic, non-gameplay |
-| `WalkRateScale`, `ArmSwingScale`, `IdleLeanScale`, `SprintHunch` | float | the animation personality |
-| `WeaponHandlingScale` | float | cosmetic *feel* only: it does not touch recoil |
-| `SignatureLineIds` | `TArray<FName>` | the archetype's variant voice lines |
-| `CosmeticSlotDefaults` | map | the starting outfit per slot |
+| `ArchetypeTag` | `FGameplayTag` | `OB.Character.Archetype.*`, the identity used everywhere |
+| `DisplayName`, `Biography` | `FText` | the deploy screen; one dry line of biography |
+| `HomeFloor` | `int32` | flavour, and the floor the voice sets reference |
+| `BodyMesh`, `FirstPersonMesh` | `TSoftObjectPtr<USkeletalMesh>` | third person and cuffed first-person arms |
+| `AnimInstanceClass` | `TSubclassOf<UAnimInstance>` | one `ABP_OneBrahamCharacter` for all six |
+| `BodyVariant`, `HeightOffsetCm` | `int32`, `float` | cosmetic, non-gameplay, clamped |
+| `FaceMaterial`, `HairMaterial`, `HairPresetId` | soft pointers, `FName` | shared strand set, per-archetype preset |
+| `DefaultCosmetics` | `TMap<FName, FName>` | the starting outfit, slot id to cosmetic id |
+| `Personality` | `FOneBrahamAnimationPersonality` | the animation personality |
+| `VoiceSetId`, `VoicePitchRange` | `FName`, `FVector2D` | `Vox_*_London`, pitched per player |
+| `MovementFoleySet` | `TSoftObjectPtr<USoundBase>` | lanyard swing, bag rustle, ID rattle |
+| `UnlockRuleId`, `RequiredLevel`, `UnlockAchievementId` | metadata | all six ship unlocked; cosmetics are the only monetised content |
 
-**`WeaponHandlingScale` must never touch recoil patterns, spread or damage.** It
-changes how quickly the weapon mesh settles in the hands. Anything more is a
-gameplay advantage sold as a personality, and the validator refuses it.
+**`FOneBrahamAnimationPersonality` must never touch recoil patterns, spread or
+damage.** It changes how the weapon mesh sits in the hands - walk rate, arm
+swing, idle lean, how far he hunches over a sprint. Anything more is a gameplay
+advantage sold as a personality, and the validator refuses it.
 
 Loaded softly on deploy and cached for the match, so a 12-player match does not
 pay for six skeletal meshes it will never see.

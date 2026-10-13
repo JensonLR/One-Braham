@@ -58,7 +58,7 @@ Ten gated zones, five tiers, three ways through each:
 | Staff | `OB.Access.Tier.Staff` | 14 spawns | office floors 3–8 |
 | Secure | `OB.Access.Tier.Secure` | 6 spawns | server and comms 9–11 |
 | Executive | `OB.Access.Tier.Executive` | 3 spawns | floor 12 |
-| Sky | `OB.Access.Tier.Sky` | 2 spawns | canteen 13–14, Skydeck 15 |
+| Skydeck | `OB.Access.Tier.Skydeck` | 2 spawns | canteen 13–14, Skydeck 15 |
 
 ### The three routes
 

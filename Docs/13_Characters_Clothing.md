@@ -13,12 +13,12 @@ Cast table and payload: `Tools/Python/onebraham/build_characters.py`, applied to
 
 | Archetype | Tag | Home floor | Body | Height | Voice set | Who they are | Animation personality |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Business Analyst | `OB.Character.Archetype.Analyst` | 5 | 0 | +0 cm | `Vox_Analyst_London` | Measuring everything, out loud, because it helps | Brisk, upright, efficient. Walk 1.05, arms 0.90, lean 0.35 |
-| Graduate / Intern | `OB.Character.Archetype.Graduate` | 4 | 3 | −3 cm | `Vox_Graduate_London` | Trying hard not to be the one who panics | Hurried, slightly loose. Walk 1.12, arms 1.15, lean 0.70 |
-| Finance | `OB.Character.Archetype.Finance` | 8 | 1 | +4 cm | `Vox_Finance_London` | Unbothered. Has seen worse on a Tuesday | Economical, heavy. Walk 0.94, arms 0.80, lean 0.25 |
-| IT / Operations | `OB.Character.Archetype.ITOps` | 9 | 2 | −1 cm | `Vox_ITOps_London` | Knows exactly what the building is doing and is annoyed about it | Precise, hunched at the screen. Walk 0.98, arms 0.85, hunch 0.55 |
-| Facilities / Security | `OB.Character.Archetype.Facilities` | 15 | 4 | +2 cm | `Vox_Facilities_London` | Responsible for everyone, paid for none of it | Working gait, heavy boots. Walk 1.00, arms 0.95, composure 0.75 |
-| Consultant | `OB.Character.Archetype.Consultant` | 7 | 5 | +6 cm | `Vox_Consultant_London` | Here for six weeks, noticeably better at this than expected | Relaxed, athletic, never rushed. Walk 0.96, arms 1.05, lean 0.40 |
+| Business Analyst | `OB.Character.Archetype.BusinessAnalyst` | 5 | 0 | -2.0 cm | `Vox_BA_London` | Measuring everything, out loud, because it helps | Brisk, upright, efficient. Walk 1.00, arms 0.90, handling 1.00, lean 0.45, hunch 0.10, crouch 0.60 |
+| Graduate / Intern | `OB.Character.Archetype.Graduate` | 4 | 3 | +1.5 cm | `Vox_Grad_London` | Trying hard not to be the one who panics | Hurried, slightly loose. Walk 1.16, arms 1.30, handling 0.92, lean 0.75, hunch 0.35, crouch 0.35 |
+| Finance | `OB.Character.Archetype.FinanceBroker` | 8 | 1 | +3.0 cm | `Vox_Finance_London` | Unbothered. Has seen worse on a Tuesday | Economical, heavy. Walk 1.05, arms 1.05, handling 1.03, lean 0.35, hunch -0.05, crouch 0.70 |
+| IT / Operations | `OB.Character.Archetype.ITOperations` | 9 | 2 | +0.5 cm | `Vox_IT_London` | Knows exactly what the building is doing and is annoyed about it | Precise, hunched at the screen. Walk 0.97, arms 0.85, handling 1.08, lean 0.50, hunch 0.40, crouch 0.75 |
+| Facilities / Security | `OB.Character.Archetype.FacilitiesSecurity` | 15 | 4 | +2.0 cm | `Vox_Facilities_London` | Responsible for everyone, paid for none of it | Working gait, heavy boots. Walk 0.94, arms 0.80, handling 1.05, lean 0.30, hunch 0.05, crouch 0.85 |
+| Consultant | `OB.Character.Archetype.Consultant` | 7 | 5 | -0.5 cm | `Vox_Consultant_London` | Here for six weeks, noticeably better at this than expected | Relaxed, athletic, never rushed. Walk 1.08, arms 1.15, handling 0.96, lean 0.65, hunch 0.55, crouch 0.45 |
 
 **No archetype has a gameplay advantage.** Different body variants change
 nothing that damage, movement speed, hit volume, weapon handling or audio

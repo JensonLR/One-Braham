@@ -1444,7 +1444,7 @@ def check_gameplay_tags(v, _config_only):
         v.warn("gameplay tags", u"checker unavailable: {0}".format(exc))
         return
 
-    checked, problems, warnings, skipped = check_gameplay_tags.run()
+    checked, problems, warnings, skipped, documented, patterns = check_gameplay_tags.run()
 
     for message in warnings:
         v.warn("gameplay tags", message)
@@ -1562,6 +1562,38 @@ def check_doc_files(v, _config_only):
 
     for message, kind in problems:
         v.fail("documented files", u"[{0}] {1}".format(kind, message))
+
+
+def check_doc_types(v, _config_only):
+    """The type names in the documentation are type names in the code.
+
+    Docs/03 listed an `EOneBrahamExtractionStage` (the enum is
+    `EOneBrahamExtractionState`), an `EOneBrahamArchetype` (archetypes are
+    gameplay tags), an `EOneBrahamGameMode` (it is `EOneBrahamMatchMode`), an
+    `EOneBrahamDamageType` (it is `EOneBrahamKillFeedVerb`), a
+    `UOneBrahamCharacter` and a `UOneBrahamGameState` - both actors - and a
+    `UOneBrahamVoiceCodec`, which is a plain `F` class. Every one of them was a
+    name a reader would go looking for.
+    """
+    try:
+        from onebraham import check_doc_types
+    except Exception as exc:  # noqa: BLE001
+        v.warn("documented types", u"checker unavailable: {0}".format(exc))
+        return
+
+    checked, problems, allowed = check_doc_types.run()
+
+    if not problems:
+        v.pass_("documented types", u"{0} documented type names, all declared ({1} intentional)"
+                .format(checked, len(allowed)))
+        return
+
+    for message, kind in problems:
+        v.fail("documented types", u"[{0}] {1}".format(kind, message))
+
+    for type_name in sorted(allowed):
+        v.info("documented types", u"'{0}' is an intentional example, not a declaration"
+               .format(type_name))
 
 
 def check_input_actions(v, _config_only):
@@ -1693,6 +1725,7 @@ def build_all(config_only=False):
         ("documented numbers", check_doc_numbers),
         ("test names", check_test_names),
         ("documented files", check_doc_files),
+        ("documented types", check_doc_types),
     ]
 
     for label, fn in checks:

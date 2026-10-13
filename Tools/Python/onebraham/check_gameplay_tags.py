@@ -32,6 +32,16 @@ WHAT IT CHECKS
        it in the tag picker. This is a warning, not a failure: the code is
        correct, and the editor is simply less useful than it should be.
     3. A tag is not declared twice with the same name.
+    4. A tag the documentation names is declared. The registry reference in
+       Docs/03 lists all 146 in a brace form (`OB.Access.Tier.{Public,Staff}`)
+       which is expanded here before checking, so the table is verified rather
+       than trusted. This rule earned its place the day the table was read: it
+       listed an `OB.Area.*` namespace that has never existed, an
+       `OB.Character.Archetype.{Analyst,Graduate,...}` set missing the word
+       Business, an `OB.Weapon.Category.*` family and four more - all of them
+       things a designer would search the tag picker for, and not find.
+    5. A declared tag is documented somewhere. This is a warning: the code is
+       right and the reference is incomplete.
 
 WHAT IT IGNORES
     Editor-only metadata (`meta = (Categories = "OB.Access")`), which is a
@@ -69,6 +79,14 @@ REQUEST = re.compile(r'RequestGameplayTag(?:Checked)?\s*\(\s*(?:FName\s*\(\s*)?(
 #: Anything that looks like one of this project's tags.
 TAG_SHAPE = re.compile(r'^OB\.[A-Za-z][A-Za-z0-9_.]*$')
 
+
+#: The documentation lives in these files, and game rules are written in them.
+DOC_ROOTS = (os.path.join(python_root, "Docs"), python_root)
+DOC_SUFFIXES = (".md",)
+
+#: A documented tag, possibly in brace form. The brace form may wrap over lines:
+#: `OB.Audio.State.{Floor.Lobby, Floor.Mezzanine,\n Rain.Heavy}` is one entry.
+DOC_TOKEN = re.compile(r'OB\.[A-Za-z0-9_.{},\- ]*?(?:\}|(?=[`\s|,)]|$))')
 
 #: A tag assembled at runtime: Printf(TEXT("OB.Character.Archetype.%s"), <expr>)
 ASSEMBLED = re.compile(r'Printf\s*\(\s*(?:TEXT\s*\(\s*)?"((?:OB\.[A-Za-z0-9_.]*)%s)"')
@@ -233,6 +251,118 @@ def requested_tags(source_root=None):
     return requests, skipped
 
 
+def expand_documented(text):
+    """(offset, tag) for every tag a document names, brace forms expanded.
+
+    Two shapes count as a pattern rather than a tag and are skipped, with the
+    count kept so the caller can report it: a wildcard (`OB.Character.Archetype.*`,
+    which stands for a family) and a namespace with a trailing dot
+    (`OB.Match.Phase.`, which stands for "everything under here").
+
+    A brace form runs to its closing brace and may wrap over lines, which is why
+    this takes the whole file rather than a line: `OB.Audio.State.{Floor.Lobby,\n
+    Rain.Heavy}` is one entry, and a line-at-a-time reader would take the first
+    half for a tag called `Floor.Lobby` and the second half for nothing.
+    """
+    out = []
+    patterns = 0
+    index = 0
+
+    while index < len(text):
+        found = text.find("OB.", index)
+
+        if found == -1:
+            break
+
+        before = text[found - 1] if found > 0 else ""
+        index = found + 3
+
+        if before.isalnum() or before == "_":
+            continue                      # part of a longer identifier
+
+        end = found
+        depth = 0
+
+        while end < len(text):
+            char = text[end]
+
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    end += 1
+                    break
+            elif depth == 0 and (char in " \t\n`|,)(" or char == "*" or char == "%"):
+                break
+
+            end += 1
+
+        token = text[found:end].strip()
+        index = max(end, found + 3)
+
+        if "*" in token or "%" in token or token.endswith("."):
+            patterns += 1
+            continue
+
+        if "{" in token and token.endswith("}"):
+            prefix, _, members = token.partition(".{")
+            for member in members[:-1].split(","):
+                member = member.strip()
+                if member:
+                    out.append((found, prefix + "." + member))
+            continue
+
+        if "{" in token:
+            patterns += 1                  # an unclosed brace: not text-checkable
+            continue
+
+        out.append((found, token))
+
+    return out, patterns
+
+
+def documented_tags(doc_roots=None):
+    """(relative_path, line_number, tag) for every tag the documentation names."""
+    out = []
+    patterns = 0
+    roots = doc_roots if doc_roots is not None else DOC_ROOTS
+    visited = set()
+
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+
+        for dirpath, dirs, files in os.walk(root):
+            dirs[:] = [d for d in dirs
+                       if d not in (".git", "Source", "Tools", "Content", "Saved", "Scripts")]
+
+            for name in sorted(files):
+                if not name.endswith(DOC_SUFFIXES):
+                    continue
+
+                path = os.path.normpath(os.path.join(dirpath, name))
+
+                # The docs are reachable from two of the roots (the project root
+                # walks into Docs/); a file read twice reports its faults twice,
+                # and a fault reported twice looks like two faults.
+                if path in visited:
+                    continue
+
+                visited.add(path)
+
+                rel = os.path.relpath(path, python_root)
+                text = io.open(path, encoding="utf-8", errors="ignore").read()
+
+                found, skipped = expand_documented(text)
+                patterns += skipped
+
+                for offset, tag in found:
+                    out.append((rel, text.count("\n", 0, offset) + 1, tag))
+
+    return out, patterns
+
+
 def run(source_root=None):
     """Returns (requests_checked, problems, warnings).
 
@@ -273,15 +403,37 @@ def run(source_root=None):
                          u"designers cannot pick it, and the tag picker is how they are "
                          u"supposed to find it".format(tag)))
 
-    return len(requests), problems, warnings, skipped
+    # 4. Documented tags. A document that names a tag the project does not
+    #    declare sends a reader into the tag picker to look for something that is
+    #    not there, which ends one of two ways: they invent it, or they change a
+    #    working tag to match the document.
+    documented, doc_patterns = documented_tags()
+    documented_names = set(tag for _rel, _line, tag in documented)
+
+    for rel, line_number, tag in documented:
+        if not TAG_SHAPE.match(tag):
+            continue                       # an engine tag quoted in the docs
+
+        if tag not in declared:
+            problems.append((rel, line_number,
+                             u"the documentation names '{0}' and this project never declares "
+                             u"it".format(tag)))
+
+    for tag in sorted(declared - documented_names):
+        if TAG_SHAPE.match(tag):
+            warnings.append((u"'{0}' is declared but appears in no document - the registry "
+                             u"reference in Docs/03 is meant to list every tag".format(tag)))
+
+    return len(requests), problems, warnings, skipped, len(documented_names), doc_patterns
 
 
 class _TagReport(object):
-    def __init__(self, checked, problems, warnings, skipped=0):
+    def __init__(self, checked, problems, warnings, skipped=0, documented=0):
         self.checked = checked
         self.problems = list(problems)
         self.warnings = list(warnings)
         self.skipped = skipped
+        self.documented = documented
 
     def ok(self):
         return not self.problems
@@ -295,10 +447,15 @@ class _TagReport(object):
 
 def build_all():
     """Entry point used by run_all.py."""
-    checked, problems, warnings, skipped = run()
+    checked, problems, warnings, skipped, documented, doc_patterns = run()
 
     C.log(u"")
     C.log(u"  gameplay tag requests checked: {0}".format(checked))
+    C.log(u"  tags named in the documentation checked: {0}".format(documented))
+
+    if doc_patterns:
+        C.log(u"  {0} documented tag pattern(s) skipped (a wildcard or a namespace: a family "
+              u"cannot be looked up)".format(doc_patterns))
 
     if skipped:
         C.log(u"  {0} assembled request(s) not resolvable from text (a suffix from a travel "
@@ -312,19 +469,26 @@ def build_all():
             where = u"{0}:{1}".format(rel, line_number) if line_number else rel
             C.log(u"      {0} - {1}".format(where, message))
 
-    for message in warnings:
+    for message in warnings[:20]:
         C.log(u"      note: {0}".format(message))
 
-    return _TagReport(checked, problems, warnings, skipped)
+    if len(warnings) > 20:
+        C.log(u"      ... and {0} more note(s); see the report".format(len(warnings) - 20))
+
+    return _TagReport(checked, problems, warnings, skipped, documented)
 
 
 def main():
-    checked, problems, warnings, skipped = run()
+    checked, problems, warnings, skipped, documented, doc_patterns = run()
 
     C.log(u"=" * 70)
     C.log(u"ONE BRAHAM - gameplay tags")
     C.log(u"=" * 70)
     C.log(u"  requests checked: {0}".format(checked))
+    C.log(u"  documented tags checked: {0}".format(documented))
+
+    if doc_patterns:
+        C.log(u"  documented patterns skipped: {0}".format(doc_patterns))
 
     if skipped:
         C.log(u"  skipped (assembled from a value only known at runtime): {0}".format(skipped))

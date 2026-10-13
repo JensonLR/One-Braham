@@ -28,6 +28,15 @@ WHAT IT CHECKS
     3. The README's claim about how many checks the validator runs, and how many
        of them need no engine, matches the validator's check list and the
        engine-free steps in the run list.
+    4. The archetype table in `Docs/13_Characters_Clothing.md` is the table
+       `build_characters.py` declares: the tag, home floor, body variant, height,
+       voice set and all six animation personality values, for all six
+       archetypes. This table had drifted further than any other - three of the
+       six voice sets named ids that exist nowhere (`Vox_Analyst_London`,
+       `Vox_Graduate_London`, `Vox_ITOps_London`; the builder casts
+       `Vox_BA_London`, `Vox_Grad_London`, `Vox_IT_London`), and every height
+       and personality value was wrong. A wrong voice-set id is a character who
+       says nothing, which is the kind of fault nobody reports as a bug.
 
     Rows whose Detail is prose rather than a count (the content steps, which need
     the editor) are skipped, and the skip is stated in the output instead of
@@ -133,6 +142,142 @@ def _validator_count():
     return len(re.findall(r'\("([^"]+)",\s*check_', block))
 
 
+CHARACTER_BUILDER = os.path.join(python_root, "Tools", "Python", "onebraham", "build_characters.py")
+DOCS_13 = os.path.join(python_root, "Docs", "13_Characters_Clothing.md")
+
+#: The archetype table row: | name | `tag` | home | body | height cm | `voice` | who | personality |
+ARCHETYPE_ROW = re.compile(
+    r'^\|\s*([^|]+?)\s*\|\s*`(OB\.Character\.Archetype\.[A-Za-z]+)`\s*\|\s*([0-9]+)\s*\|'
+    r'\s*([0-9]+)\s*\|\s*([+-][0-9.]+)\s*cm\s*\|\s*`([A-Za-z0-9_]+)`\s*\|', re.MULTILINE)
+
+PERSONALITY_ROW = re.compile(
+    r'Walk ([0-9.]+), arms ([0-9.]+), handling ([0-9.]+), lean ([0-9.]+), '
+    r'hunch (-?[0-9.]+), crouch ([0-9.]+)')
+
+PERSONALITY_KEYS = ("walk", "arms", "handling", "lean", "hunch", "crouch")
+
+
+def _builder_archetypes():
+    """The cast as build_characters.py declares it: name -> dict."""
+    if not os.path.isfile(CHARACTER_BUILDER):
+        return {}
+
+    text = io.open(CHARACTER_BUILDER, encoding="utf-8", errors="ignore").read()
+
+    if "ARCHETYPES = [" not in text:
+        return {}
+
+    block = text[text.index("ARCHETYPES = ["):]
+    block = block[:block.index("\n]\n")]
+    out = {}
+
+    for entry in block.split("    {\n")[1:]:
+        def grab(key):
+            match = re.search(r'"' + key + r'":\s*"?([^",\n]+)"?', entry)
+            return match.group(1).strip() if match else ""
+
+        name = grab("name")
+
+        if not name:
+            continue
+
+        out[name] = {
+            "tag": grab("tag"),
+            "home": grab("home_floor"),
+            "body": grab("body_variant"),
+            "height": grab("height_cm"),
+            "voice": grab("voice_set"),
+            "personality": dict(re.findall(
+                r'"(walk|arms|handling|lean|hunch|crouch)":\s*(-?[0-9.]+)', entry)),
+        }
+
+    return out
+
+
+def _check_archetype_table(problems):
+    """Rule 4. Returns how many fields were compared."""
+    declared = _builder_archetypes()
+
+    if not declared or not os.path.isfile(DOCS_13):
+        return 0
+
+    text = io.open(DOCS_13, encoding="utf-8", errors="ignore").read()
+    compared = 0
+    documented = {}
+
+    for match in ARCHETYPE_ROW.finditer(text):
+        name, tag, home, body, height, voice = match.groups()
+        name = name.strip()
+        documented[name] = (tag, home, body, height, voice)
+
+        if name not in declared:
+            problems.append((
+                u"Docs/13 documents an archetype called '{0}' that build_characters.py does "
+                u"not declare".format(name), u"unknown archetype"))
+            continue
+
+        real = declared[name]
+
+        for label, claimed, actual in (
+                ("tag", tag, real["tag"]),
+                ("home floor", home, real["home"]),
+                ("body variant", body, real["body"]),
+                ("voice set", voice, real["voice"])):
+            compared += 1
+
+            if claimed != actual:
+                problems.append((
+                    u"Docs/13 gives '{0}' the {1} '{2}' and build_characters.py says "
+                    u"'{3}'".format(name, label, claimed, actual), u"stale archetype row"))
+
+        # Height: the document writes one decimal, the builder a float.
+        try:
+            claimed_height = float(height)
+        except ValueError:
+            claimed_height = None
+
+        compared += 1
+
+        if claimed_height is None or abs(claimed_height - float(real["height"])) > 0.05:
+            problems.append((
+                u"Docs/13 gives '{0}' a height of {1} cm and build_characters.py says "
+                u"{2} cm".format(name, height, real["height"]), u"stale archetype row"))
+
+    for name, (tag, home, body, height, voice) in sorted(documented.items()):
+        if name not in declared:
+            continue
+
+        # The personality numbers live in the same row, past the last pipe.
+        row_start = text.find("`" + tag + "`")
+        row_end = text.find("\n", row_start)
+        row_text = text[row_start:row_end] if row_start != -1 else ""
+        numbers = PERSONALITY_ROW.search(row_text)
+
+        compared += 1
+
+        if numbers is None:
+            problems.append((
+                u"the Docs/13 row for '{0}' does not state the animation personality in the "
+                u"checked form".format(name), u"missing personality"))
+            continue
+
+        for key, claimed in zip(PERSONALITY_KEYS, numbers.groups()):
+            compared += 1
+            actual = declared[name]["personality"].get(key)
+
+            if actual is None or abs(float(claimed) - float(actual)) > 0.005:
+                problems.append((
+                    u"Docs/13 gives '{0}' {1} = {2} and build_characters.py says "
+                    u"{3}".format(name, key, claimed, actual), u"stale archetype row"))
+
+    for name in sorted(set(declared) - set(documented)):
+        problems.append((
+            u"build_characters.py declares the archetype '{0}' and the Docs/13 table has no "
+            u"row for it".format(name), u"missing archetype row"))
+
+    return compared
+
+
 def run():
     """Returns (numbers_checked, problems)."""
     rows = _documented_rows()
@@ -191,6 +336,9 @@ def run():
                         step, rows[step], count),
                     u"stale number"))
 
+    # 4. The archetype table, field by field.
+    numbers_checked += _check_archetype_table(problems)
+
     # 3. The README's claims about the pipeline.
     if os.path.isfile(README):
         readme = io.open(README, encoding="utf-8", errors="ignore").read()
@@ -203,7 +351,9 @@ def run():
         else:
             claimed_checks = int(match.group(1))
             words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
-                     "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12}
+                     "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+                     "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
+                     "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20}
             claimed_free = words.get(match.group(2).lower(), 0)
 
             actual_checks = _validator_count()

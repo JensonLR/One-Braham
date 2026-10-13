@@ -14,46 +14,109 @@ Every shared enum and struct. The ones that matter:
 
 | Type | Values / fields | Notes |
 | --- | --- | --- |
-| `EOneBrahamMatchPhase` | `Warmup, Deploy, Playing, Lockdown, Extraction, Results` | the top-level state machine |
-| `EOneBrahamGameMode` | `Ascent, FireDrill, NightShift` | `NightShift` exists and is post-launch |
-| `EOneBrahamTeam` | `None, InternalStaff, ExternalContractors, SquadA…D` | ASCENT uses squads, FIRE DRILL uses teams |
-| `EOneBrahamArchetype` | `Analyst, Graduate, Finance, ITOps, Facilities, Consultant` | |
-| `EOneBrahamAccessTier` | `Public, Staff, Secure, Executive, Sky` | five tiers, matching the five keycards |
-| `EOneBrahamFireMode` | `Auto, Pump, Bolt` | note: `Pump` is the shotgun, `Bolt` is the marksman |
-| `EOneBrahamDamageType` | `Ballistic, Explosive, Fall, Purge, Breach, Melee` | drives the death screen wording |
+| `EOneBrahamMatchMode` | `Ascent, FireDrill, NightShift` | `NightShift` is post-launch |
+| `EOneBrahamMatchPhase` | `Warmup, Active, Extraction, Complete, PostMatch` | the top-level state machine |
+| `EOneBrahamTeam` | `None, Alpha, Bravo, Charlie, Delta, InternalStaff, ExternalContractors, Spectator` | ASCENT squads use Alpha–Delta, FIRE DRILL the two staff teams |
+| `EOneBrahamLifeState` | `Alive, Downed, Dead, Spectating, Extracted` | |
+| `EOneBrahamAccessTier` | `Public, Staff, Secure, Executive, Skydeck, Override` | six tiers; `Override` is the security tool, never loot |
+| `EOneBrahamUnlockMethod` | `None, Keycard, Override, Breach, Escalation, Cheat` | an access zone records how it opened |
+| `EOneBrahamFireMode` | `Single, Burst, Auto, Pump, Bolt` | `Pump` is the shotgun, `Bolt` the marksman |
+| `EOneBrahamKillFeedVerb` | `Killed, Headshot, Executed, Building, Left, OwnUtility` | one verb drives the feed and the death screen |
 | `EOneBrahamLockdownStage` | `Normal, PreLockdown, Lockdown, Purge` | |
-| `EOneBrahamExtractionStage` | `Inactive, Broadcast, Arriving, Holding, Complete, Failed` | |
-| `EOneBrahamHitZone` | `Head, Torso, Arms, Legs` | multipliers 2.40 / 1.00 / 0.75 / 0.70 |
-| `FOneBrahamSquadInfo` | id, name, colour, members, alive count, `bHasExtractionClaim` | replicated struct |
+| `EOneBrahamExtractionState` | `Inactive, Broadcast, Arriving, Holding, Complete, Failed` | |
+| `EOneBrahamExtractionFailReason` | `None, CallersEliminated, Contested, LoiterExpired, Purge` | the end-of-match copy |
+| `EOneBrahamHitZone` | `Head, Neck, Torso, UpperArm, LowerArm, Hand, UpperLeg, LowerLeg, Foot` | multipliers 2.6 / 0.8 / 1.0 / 0.82 |
+| `EOneBrahamWeaponCategory` | `Pistol, CompactPistol, SuppressedPistol, SMG, PDW, PumpShotgun, SemiAutoShotgun, Carbine556, CompactAssaultRifle, MarksmanRifle, Utility` | |
+| `EOneBrahamWeaponSlot` | `Primary, Sidearm, Utility, Access, Melee` | |
+| `FOneBrahamKillFeedEntry` | killer, victim, both teams, verb, `WeaponId`, `bWasDowned`, `bAssisted`, timestamp | replicated struct |
+| `FOneBrahamSquadInfo` | `SquadId`, `Team`, `SquadName`, `Members`, `bEliminated`, `bHasExtractionClaim` | replicated struct |
+| `FOneBrahamArchetypeDefinition` | `ArchetypeTag`, body, face, hair, clothing, animation, voice, cosmetics | archetypes are tags, not an enum — see §2 |
 
-Health model: **100 HP + 50 armour**. Armour absorbs 60% of incoming damage until
-it breaks, then full damage applies. At 0 HP a player is **downed, not dead**;
-bleed-out is 45 seconds, a revive takes 4 seconds, and a second down while
-bleeding out is fatal. This is the whole reason ASCENT has tension: a fight that
-goes badly leaves you alive and helpless, which is worse than dying.
+Health model: **100 HP + 50 armour**, and armour absorbs 60% of incoming damage
+until it breaks. At 0 HP a player is **downed, not dead** — bleed-out is 60
+seconds, a revive takes 4.5 seconds and returns you at 40 HP, an execution takes
+2 seconds, and a downed player who takes lethal damage again dies outright, with
+two revives per match. A headshot bypasses the downed state entirely, an
+explosion of 120+ base damage does too, and the building never leaves anyone
+alive to be revived. FIRE DRILL switches the state off in `MatchSettings` and
+respawns instead. This is the whole reason ASCENT has tension: a fight that goes
+badly leaves you alive and helpless, which is worse than dying.
 
 ---
 
 ## 2. Gameplay tags
 
-`OneBrahamTags` namespace, one `FGameplayTag` per name, resolved once at startup.
+`OneBrahamTags` namespace, one `FGameplayTag` per name, declared natively in
+`OneBrahamGameplayTags.h` / `.cpp` and mirrored in `Config/DefaultGame.ini` so
+designers can pick them before the first compile. All 146:
 
 ```
-OB.Access.Tier.{Public,Staff,Secure,Executive,Sky}
-OB.Area.{GroundPlaza,Lobby,Mezzanine,OpenPlan,ServerComms,Executive,Canteen,Skydeck}
-OB.Character.Archetype.{Analyst,Graduate,Finance,ITOps,Facilities,Consultant}
-OB.Weapon.Slot.{Primary,Sidearm}
-OB.Weapon.Category.{Pistol,CompactPistol,SuppressedPistol,SMG,PDW,PumpShotgun,
-                    SemiShotgun,Carbine,CompactAR,MarksmanRifle}
-OB.State.{Downed,Extracted,Eliminated,BleedingOut,Overriding,Reviving}
-OB.Cue.{Alert,Death,Objective,Alarm,Extraction,Lockdown}
-OB.Damage.{Head,Torso,Armour,Elimination,Assist}
-OB.Extraction.{Inbound,Holding,Contested,Complete,Failed}
-OB.Mode.{Ascent,FireDrill,NightShift}
+OB.Access.Method.{Breach, Escalation, Keycard, Override}
+OB.Access.Tier.{Executive, Override, Public, Secure, Skydeck, Staff}
+OB.Access.Zone.{Canteen, Executive, Lobby, Mezzanine, Offices, ServerFloor,
+    Skydeck}
+OB.Audio.Event.{Alarm, Announcement, Helicopter, Lift, Shutter}
+OB.Audio.State.{Floor.Canteen, Floor.Executive, Floor.Exterior, Floor.Lobby,
+    Floor.Mezzanine, Floor.Offices, Floor.Server, Floor.Skydeck, Rain.Heavy,
+    Rain.Light}
+OB.Character.Archetype.{BusinessAnalyst, Consultant, FacilitiesSecurity,
+    FinanceBroker, Graduate, ITOperations}
+OB.Character.State.{Alive, Dead, Downed, Extracted, Extracting, Spectating}
+OB.Cosmetic.Rarity.{Rare, Standard, Uncommon}
+OB.Cosmetic.Slot.{Backpack, Badge, Feet, Head, Lanyard, Legs, Outerwear,
+    Torso, WeaponSkin}
+OB.Cosmetic.Unlock.{Achievement.FireDrill50, Default, Milestone.Extract5,
+    Milestone.NoDamageExtract, Milestone.ServerFloorWin}
+OB.Extraction.Arriving
+OB.Extraction.Broadcast
+OB.Extraction.Complete
+OB.Extraction.Failed
+OB.Extraction.Holding
+OB.Extraction.Inactive
+OB.Interaction.Ammo
+OB.Interaction.Body
+OB.Interaction.Door
+OB.Interaction.Door.{Breachable, Secure}
+OB.Interaction.Extraction
+OB.Interaction.HoldToUnlock
+OB.Interaction.Keycard
+OB.Interaction.Lift
+OB.Interaction.Medkit
+OB.Interaction.Revive
+OB.Interaction.TapToUse
+OB.Interaction.Terminal
+OB.Interaction.Utility
+OB.Interaction.Weapon
+OB.Match.Lockdown.{Lockdown, Normal, PreLockdown, Purge}
+OB.Match.Mode.{Ascent, FireDrill, NightShift}
+OB.Match.Phase.{Active, Complete, Extraction, Warmup}
+OB.Team.Alpha
+OB.Team.Bravo
+OB.Team.Charlie
+OB.Team.Delta
+OB.Team.ExternalContractors
+OB.Team.InternalStaff
+OB.Team.Spectator
+OB.Voice.Category.{Access, Banter, Combat, Contact, Death, Down, Extraction,
+    Lose, LowAmmo, Movement, Reactive, Reload, Revive, RoundStart, Win}
+OB.Voice.Channel.{Proximity, Radio, Squad, Team}
+OB.Weapon.Attachment.{Flashlight, Grip, Laser, Magazine, Muzzle, Optic}
+OB.Weapon.Carbine.556
+OB.Weapon.Fire.{Auto, Bolt, Burst, Pump, Single}
+OB.Weapon.Marksman
+OB.Weapon.PDW
+OB.Weapon.Pistol
+OB.Weapon.Pistol.{Compact, Suppressed}
+OB.Weapon.Rifle.Compact
+OB.Weapon.SMG
+OB.Weapon.Shotgun.{Pump, SemiAuto}
+OB.Weapon.Utility
+OB.Weapon.Utility.{BreachCharge, Flashbang, Frag, Medkit, Smoke}
 ```
 
 A tag is an interface. Blueprint, data assets and C++ all agree on the string,
-and no code depends on an asset's name.
+and no code depends on an asset's name. `check_gameplay_tags.py` fails the build
+if this list and `Config/DefaultGame.ini` ever disagree, in either direction.
 
 ---
 

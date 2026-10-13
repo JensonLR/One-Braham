@@ -25,20 +25,21 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `apply_cast_payload.py` | writes the payload onto `DA_CharacterRegistry`, verifies 6 archetypes | yes | yes |
 | `build_audio.py` | 12 sound classes, 3 submixes, 4 mixes, 8 attenuations, 11 ambience, 8 music, `DA_AudioBank` | yes | yes |
 | `build_input.py` | 41 input actions, 4 mapping contexts, `DA_InputConfig` | yes | yes |
-| `build_ui.py` | 10 widgets, the HUD string table, the font slot, the palette check | yes | yes |
+| `build_ui.py` | 12 widget blueprints, the HUD string table, the font slot, the palette check | yes | yes |
 | `build_vfx.py` | 17 Niagara systems, 3 camera shakes, 6 decal materials, the authoring sheet | yes | yes |
 | `import_font.py` | font faces from `Content/UI/Fonts` | yes | yes |
 | `check_cpp_symbols.py` | reads `Source/OneBraham` and reports every member function declared with no definition | **no** | yes |
 | `check_uht_contracts.py` | UE reflection contracts: RPC bodies, RepNotify callbacks, replicated properties named in a `DOREPLIFETIME`, widgets that animate in a `NativeTick` the engine never calls, duplicate type names, `TSoftObjectPtr`s that name a type existing nowhere in the module, and settings fields that no code reads | **no** | yes |
 | `check_soft_paths.py` | every `/Game/` path the C++ loads by name, against the directories and name prefixes the pipeline writes | **no** | yes |
 | `check_calls.py` | call sites whose argument count cannot match the project's own declaration (defaults honoured, qualified calls skipped) | **no** | yes |
-| `check_gameplay_tags.py` | every tag the code requests, declared natively or in `DefaultGame.ini`; also resolves `Printf`-assembled tags from local string tables | **no** | yes |
+| `check_gameplay_tags.py` | every tag the code requests, declared natively or in `DefaultGame.ini`; resolves `Printf`-assembled tags from local string tables; and every tag the documentation names, the 146-entry registry block in Docs/03 included | **no** | yes |
 | `check_building_layout.py` | the floor/area table the map is built from against the floor table the game describes (`DA_BuildingLayout` / its compiled-in default) | **no** | yes |
 | `check_input_actions.py` | every generated `IA_` action against the `UOneBrahamInputConfig` field that points at it, every field against its action, every `DefaultInput.ini` binding and prompt against a real action, and every `InputConfig->Field` read against the fields that exist | **no** | yes |
-| `check_doc_numbers.py` | every count quoted in this document's build report and in the README against the count the tooling produces | **no** | yes |
+| `check_doc_numbers.py` | every count quoted in this document's build report and in the README against the count the tooling produces, and the Docs/13 archetype table against `build_characters.py` field by field | **no** | yes |
 | `check_test_names.py` | every automation test `Docs/18` lists against the tests that exist in `Source/OneBraham/Tests`, every test that exists against the table, and every `OneBraham.*` name in `Scripts/` against a test or a category | **no** | yes |
 | `check_doc_files.py` | every `Scripts/` file and `Tools/Python/` path the documentation names against the files on disk, every script on disk against the script index, and every tooling module against this document's pipeline table | **no** | yes |
 | `check_voice_lines.py` | every `V_` line id the code asks for against the script table, every scripted line against the recording brief in `Docs/14`, and the sixty-six archetype variant rows against the six voices they claim | **no** | yes |
+| `check_doc_types.py` | every `[AUIFSE]OneBraham` type name in the README and in the docs against the types this module declares; the names that are deliberately not code (the example class in Docs/18) are listed in the checker with a reason | **no** | yes |
 | `validate_project.py` | the health check and a markdown report | either | yes |
 | `run_all.py` | all of the above, in dependency order, with a report | either | yes |
 
@@ -75,22 +76,23 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 
 ```
 # ONE BRAHAM - content build report
-**23 steps succeeded, 0 failed.**
+**24 steps succeeded, 0 failed.**
 
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
 | input_ini | OK | 0.0 | wrote 41 actions (40 with a default key) |
-| cpp_symbols | OK | 0.1 | 538 declarations, all defined |
-| uht_contracts | OK | 0.5 | 783 UE reflection contracts, all satisfied |
+| cpp_symbols | OK | 0.1 | 541 declarations, all defined |
+| uht_contracts | OK | 0.5 | 784 UE reflection contracts, all satisfied |
 | soft_paths | OK | 0.0 | 45 name-loaded asset paths, all conventional |
-| calls | OK | 0.1 | 861 call sites, all arities plausible |
-| tags | OK | 0.2 | 6 resolvable tag requests, all declared |
+| calls | OK | 0.2 | 866 call sites, all arities plausible |
+| tags | OK | 0.4 | 6 resolvable tag requests and 146 documented tags, all declared |
 | layout | OK | 0.0 | 16 floors, map and layout agree |
 | voice_lines | OK | 0.0 | 41 line references, all declared and documented |
 | input_actions | OK | 0.0 | 41 actions, 41 fields, 92 reads |
-| doc_numbers | OK | 0.0 | 12 documented numbers, all current |
-| test_names | OK | 0.0 | 20 automation tests, every one documented and resolvable |
-| doc_files | OK | 0.0 | 72 documented paths, all on disk |
+| doc_numbers | OK | 2.2 | 84 documented numbers, all current |
+| test_names | OK | 0.0 | 23 automation tests, every one documented and resolvable |
+| doc_files | OK | 0.1 | 72 documented paths, all on disk |
+| doc_types | OK | 0.1 | 61 documented type names, all declared |
 | materials | OK | 3.1 | 5 masters, 15 physicals, 28 instances |
 ...
 ```
@@ -103,8 +105,8 @@ builders raise `"... must run inside the Unreal Editor."`, which is a fact about
 the machine rather than about the project, and a CI box with no engine install
 should not report a broken build - it should report that it did not run the
 content steps, with their names. On a fresh clone the full run is therefore
-"12 steps succeeded, 0 failed, 10 skipped" and the same run with an editor
-installed is "22 steps succeeded, 0 failed".
+"14 steps succeeded, 0 failed, 10 skipped" and the same run with an editor
+installed is "24 steps succeeded, 0 failed".
 
 ---
 
@@ -121,6 +123,9 @@ layout                    text only; a floor plan that names the wrong floor
 voice_lines               text only; a character who says nothing, silently
 input_actions             text only; a key that does nothing, and a field that is not there
 doc_numbers               text only; a count that reads as verification and is wrong
+test_names                text only; a suite the documentation lists and nobody wrote
+doc_files                 text only; a script the documentation tells you to run that does not exist
+doc_types                 text only; a type name in the manual that the code never declares
       ↓
 materials                 everything references MI_* and PM_OB_*
       ↓
@@ -179,12 +184,13 @@ a header gets noticed before it becomes a runtime null reference.
 # because the project's pipeline runs on a self-hosted UE5 runner.
 stages:
   - lint      : python -m py_compile on every tool
-  - cpp       : PYTHONPATH=Tools/Python python3 run_all.py --only cpp_symbols,uht_contracts,soft_paths,calls,tags,layout,voice_lines,input_actions,doc_numbers,test_names,doc_files
+  - cpp       : PYTHONPATH=Tools/Python python3 run_all.py --only cpp_symbols,uht_contracts,soft_paths,calls,tags,layout,voice_lines,input_actions,doc_numbers,test_names,doc_files,doc_types
                 (declared-but-undefined members, UE reflection contracts, the
                  naming contract for name-loaded assets, call arity, gameplay
                  tags, the building layout, the voice script, the input pipeline,
-                 the documented numbers, and the checks that need no engine
-                 install at all - so they run before a runner is ever allocated)
+                 the documented numbers, the documented files and the documented
+                 types - every check that needs no engine install at all, so they
+                 run before a runner is ever allocated)
   - config    : PYTHONPATH=Tools/Python python3 run_all.py --text-only
   - build     : UBT build of the Editor, Game, Server and Client targets
   - content   : UnrealEditor-Cmd -run=pythonscript run_all.py

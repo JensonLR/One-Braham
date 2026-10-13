@@ -151,7 +151,7 @@ dust, which is what actually sells it.
 
 0.08 s pure white sphere (emissive 120) plus a 0.25 s afterglow. The screen
 effect is **not** this system: it is the post-process blend driven by
-`UOneBrahamCharacter`, and the two are tuned together so that the white of the
+`AOneBrahamCharacter`, and the two are tuned together so that the white of the
 sprite and the white of the screen agree. If they disagree, the effect reads as a
 bug in the game rather than as an injury to the player.
 

@@ -89,6 +89,9 @@ STEPS = [
     ("doc_files", "onebraham.check_doc_files", False,
      "every script and tool the documentation tells the reader to run, against "
      "the files on disk"),
+    ("doc_types", "onebraham.check_doc_types", False,
+     "every type name the documentation uses against the types this project "
+     "declares - a reader who cannot find a type will invent it"),
     ("materials", "onebraham.build_materials", True,
      "master materials, physical materials, surface and brand instances"),
     ("environment", "onebraham.build_environment", True,
