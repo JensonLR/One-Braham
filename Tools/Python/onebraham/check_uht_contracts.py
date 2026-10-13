@@ -28,7 +28,12 @@ WHY THIS EXISTS
       5. `ReplicatedUsing = OnRep_Thing` naming something that is not a
          UFUNCTION, or is nothing at all.
 
-      6. **A replicated property with no DOREPLIFETIME.** This is the expensive
+      6. **A Replicated specifier on a struct member.** A struct is not a
+         replication unit; it travels as one property on the object that
+         contains it. The specifier is not an error to UHT and not an error to
+         the compiler - it is a lie to the next reader, which is worse.
+
+      7. **A replicated property with no DOREPLIFETIME.** This is the expensive
          one. It compiles, it validates, it does not warn, and the property
          simply never reaches a client - so a team score, a lockdown stage or a
          squad id is correct on the listen server and permanently zero
@@ -91,98 +96,18 @@ def strip_comments_and_strings(text):
 
 
 def class_bodies(text):
-    """Yields (class_name, body, is_interface)."""
-    for match in re.finditer(r'\b(?:class|struct)\s+(?:ONEBRAHAM_API\s+)?([AUIE][A-Za-z0-9_]+)[^;{]*\{', text):
-        name = match.group(1)
-        open_index = text.index("{", match.end() - 1)
-
-        depth = 0
-        index = open_index
-
-        while index < len(text):
-            if text[index] == "{":
-                depth += 1
-            elif text[index] == "}":
-                depth -= 1
-                if depth == 0:
-                    break
-            index += 1
-
-        if depth != 0:
-            continue
-
-        is_interface = len(name) > 1 and name[0] == "I" and name[1].isupper()
-        yield name, text[open_index + 1:index], is_interface
+    """The shared class-body brace matcher, which lives in common.py."""
+    return C.class_bodies(text)
 
 
 def split_statements(body):
-    """Brace-depth-zero statements of a class body, with their pending macros.
+    """The shared class-body parser, which lives in common.py.
 
-    Returns a list of (macros, statement_text) where macros is the list of macro
-    invocations that immediately precede the statement (UPROPERTY(...),
-    UFUNCTION(...), UCLASS(...) and so on).
+    Two checkers need this and it took three iterations to get right - a macro
+    invocation is not semicolon-terminated, and `protected:` lands in the same
+    statement as the macro above it - so there is exactly one copy of it.
     """
-    statements = []
-    current = []
-    depth_paren = 0
-    depth_brace = 0
-
-    for char in body:
-        if char in "([":
-            depth_paren += 1
-        elif char in ")]":
-            depth_paren -= 1
-        elif char == "{":
-            depth_brace += 1
-        elif char == "}":
-            depth_brace -= 1
-
-        if char == ";" and depth_paren == 0 and depth_brace == 0:
-            statements.append("".join(current) + ";")
-            current = []
-        elif char == "}" and depth_paren == 0 and depth_brace == 0:
-            statements.append("".join(current) + "}")
-            current = []
-        else:
-            current.append(char)
-
-        # A macro invocation is not terminated by a semicolon, so
-        # `UPROPERTY(...) FName ZoneId;` arrives as a single statement and the
-        # specifier is never seen. Flush the macro at its own closing paren:
-        # an all-caps call at the start of a statement is one (UPROPERTY,
-        # UFUNCTION, DECLARE_*_DELEGATE, GENERATED_BODY), and no declaration
-        # looks like that because a declaration has a type in front of the
-        # parentheses.
-        #
-        # `protected:` is stripped first, because an access specifier is
-        # commonly written on the line above the macro and lands in the same
-        # statement - which is how the first version of this check missed
-        # OnRep_Appearance and reported eleven correct callbacks as broken.
-        if char == ")" and depth_paren == 0 and depth_brace == 0:
-            so_far = ACCESS_SPECIFIER.sub("", "".join(current).strip())
-
-            if re.match(r'^[A-Z][A-Z0-9_]*\s*\(', so_far):
-                statements.append(so_far)
-                current = []
-
-    if current:
-        statements.append("".join(current))
-
-    pending = []
-    out = []
-
-    for statement in statements:
-        text = " ".join(statement.split()).strip()
-
-        macro = MACRO_START.match(text)
-        if macro is not None and text.endswith(")"):
-            pending.append((macro.group(1), text))
-            continue
-
-        out.append((list(pending), text))
-        pending = []
-
-    return out
+    return C.split_class_statements(body)
 
 
 def _specifier_list(macros, macro_name):
@@ -284,6 +209,14 @@ def run(source_root=None):
         for class_name, body, is_interface in class_bodies(clean):
             declared_here = set()
 
+            # A USTRUCT is not a replication unit. Its whole value travels as
+            # one property on a UObject, named in that object's
+            # GetLifetimeReplicatedProps, so a `Replicated` specifier on a
+            # struct member names a path that cannot exist and a DOREPLIFETIME
+            # in a struct would not compile. This project names structs F*, the
+            # same convention the rest of Unreal uses.
+            is_struct = class_name.startswith("F")
+
             for macros, statement in split_statements(body):
                 text = " ".join(statement.split()).strip()
 
@@ -309,7 +242,13 @@ def run(source_root=None):
                     if "Replicated" in specs or any(s.startswith("Replicated") for s in specs):
                         checked += 1
 
-                        if property_name not in replicated_in_lifetime:
+                        if is_struct:
+                            problems.append((rel, class_name,
+                                             u"'{0}' is marked Replicated inside a struct: a struct "
+                                             u"replicates as part of its containing property, so this "
+                                             u"specifier does nothing except suggest otherwise".format(
+                                                 property_name)))
+                        elif property_name not in replicated_in_lifetime:
                             problems.append((rel, class_name,
                                              u"'{0}' is replicated but no DOREPLIFETIME mentions it - "
                                              u"it will never reach a client".format(property_name)))

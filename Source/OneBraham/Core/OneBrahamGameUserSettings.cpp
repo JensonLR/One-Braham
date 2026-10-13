@@ -343,7 +343,15 @@ void UOneBrahamGameUserSettings::SetFrameRateLimit(int32 MenuLimit, int32 Gamepl
 {
 	FPSLimitMenu = FMath::Clamp(MenuLimit, 30, 360);
 	FPSLimitGameplay = FMath::Clamp(GameplayLimit, 0, 360);
-	SetFrameRateLimit(static_cast<float>(FPSLimitGameplay));
+
+	// Qualified on purpose. This class declares its own two-argument
+	// SetFrameRateLimit, which hides the engine's one-argument
+	// UGameUserSettings::SetFrameRateLimit(float) - a member of the same name in
+	// a derived class hides every base overload of that name. Unqualified, this
+	// line resolves against the two-argument version, finds no viable candidate,
+	// and stops the build. The engine setter is the one that actually caps the
+	// frame rate; the two fields above are the menu's remembered preferences.
+	UGameUserSettings::SetFrameRateLimit(static_cast<float>(FPSLimitGameplay));
 	ApplySettings(false);
 }
 

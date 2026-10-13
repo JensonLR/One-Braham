@@ -23,25 +23,33 @@ class AOneBrahamCharacter;
 class UOneBrahamWeaponComponent;
 class AOneBrahamProjectileBase;
 
-/** Counts of each utility type carried. */
+/**
+ * Counts of each utility type carried.
+ *
+ * The members carry no `Replicated` specifier, and should not: a struct does not
+ * replicate itself. The whole struct travels as one property - see
+ * UOneBrahamInventoryComponent::Utility, which is `ReplicatedUsing =
+ * OnRep_Loadout` and named in GetLifetimeReplicatedProps. Marking the members
+ * individually suggests a replication path that does not exist.
+ */
 USTRUCT(BlueprintType)
 struct FOneBrahamUtilityLoadout
 {
 	GENERATED_BODY()
 
-	UPROPERTY(Replicated, BlueprintReadOnly, EditAnywhere, Category = "Utility")
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Utility")
 	int32 FragCount = 1;
 
-	UPROPERTY(Replicated, BlueprintReadOnly, EditAnywhere, Category = "Utility")
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Utility")
 	int32 FlashbangCount = 1;
 
-	UPROPERTY(Replicated, BlueprintReadOnly, EditAnywhere, Category = "Utility")
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Utility")
 	int32 SmokeCount = 1;
 
-	UPROPERTY(Replicated, BlueprintReadOnly, EditAnywhere, Category = "Utility")
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Utility")
 	int32 BreachChargeCount = 1;
 
-	UPROPERTY(Replicated, BlueprintReadOnly, EditAnywhere, Category = "Utility")
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Utility")
 	int32 MedkitCount = 1;
 
 	/** Total items held, for the HUD's utility strip. */

@@ -66,6 +66,13 @@ WHAT IT CHECKS, AND WHY EACH ONE HAS BITTEN SOMEONE
                                                         pipeline never writes is
                                                         a silent null at runtime
                                                         and nothing else.
+    22. Call arity                                    - a call whose argument
+                                                        count cannot match the
+                                                        declaration is a build
+                                                        that stops, and it is
+                                                        the most common compile
+                                                        error in a codebase this
+                                                        size.
 
     It writes Saved/Validation/ob_validation_<timestamp>.md and exits non-zero on
     any FAIL. Warnings do not fail the build; failures do.
@@ -1351,6 +1358,40 @@ def check_soft_paths(v, _config_only):
         v.fail("soft paths", u"{0}: {1} - {2}".format(rel, literal, message))
 
 
+def check_calls(v, _config_only):
+    """Call sites whose argument count cannot match their declaration.
+
+    The compiler catches every one of these, in the same pass as a thousand other
+    things, at the end of a twenty-minute build. This finds them in a fraction of
+    a second with no engine installed, which matters more here than anywhere
+    else: this project has never been compiled, so every arity error is a build
+    that stops before it starts.
+
+    It is deliberately narrow. It only checks calls to a name that exactly one
+    project class declares, only when the call is unqualified or through
+    `this->`, honours default arguments, and skips anything containing a braced
+    initialiser. When it cannot be certain, it says nothing.
+    """
+    try:
+        from onebraham import check_calls
+    except Exception as exc:  # noqa: BLE001
+        v.warn("call arity", u"checker unavailable: {0}".format(exc))
+        return
+
+    checked, problems = check_calls.run(source_root=SOURCE_DIR)
+
+    if checked == 0:
+        v.warn("call arity", u"no call sites matched a unique project signature")
+        return
+
+    if not problems:
+        v.pass_("call arity", u"all {0} unambiguous call sites match their declarations".format(checked))
+        return
+
+    for rel, line_number, message in problems:
+        v.fail("call arity", u"{0}:{1} - {2}".format(rel, line_number, message))
+
+
 # ---------------------------------------------------------------------------
 #  Report
 # ---------------------------------------------------------------------------
@@ -1412,6 +1453,7 @@ def build_all(config_only=False):
         ("surface coverage", check_surface_coverage),
         ("uht contracts", check_uht_contracts),
         ("soft paths", check_soft_paths),
+        ("call arity", check_calls),
     ]
 
     for label, fn in checks:

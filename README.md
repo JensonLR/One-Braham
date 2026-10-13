@@ -149,11 +149,12 @@ cosmetic is earnable.
 3. **Server authority for anything that matters.** Damage, unlocks, breaches,
    timers and cosmetics.
 4. **`validate_project.py` must report zero failures before a build goes out.**
-   It runs 21 checks, and four of them need no engine at all — so a broken
+   It runs 22 checks, and five of them need no engine at all — so a broken
    include, a member function with no definition, an RPC with no body, a
    replicated property with no `DOREPLIFETIME`, a log category with no verbosity,
-   a VFX system nothing spawns, or an asset path nothing creates is found on any
-   machine, in about a second, before anybody waits for a compile:
+   a VFX system nothing spawns, an asset path nothing creates, or a call with the
+   wrong number of arguments is found on any machine, in about a second, before
+   anybody waits for a compile:
 
    ```
    PYTHONPATH=Tools/Python python3 Tools/Python/onebraham/validate_project.py --config-only

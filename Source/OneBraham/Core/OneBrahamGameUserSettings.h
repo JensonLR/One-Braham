@@ -100,6 +100,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Graphics")
 	void SetResolutionScalePercent(float Percent, bool bApplyImmediately = true);
 
+	/**
+	 * Sets the frame cap for the menu and for gameplay separately.
+	 *
+	 * The `using` is load-bearing: this method hides the engine's
+	 * UGameUserSettings::SetFrameRateLimit(float), and without pulling that back
+	 * into scope every one-argument call in this class - including the one inside
+	 * this method - fails to compile.
+	 */
+	using UGameUserSettings::SetFrameRateLimit;
+
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Graphics")
 	void SetFrameRateLimit(int32 MenuLimit, int32 GameplayLimit);
 

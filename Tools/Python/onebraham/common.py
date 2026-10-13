@@ -13,6 +13,7 @@ Nothing in this module touches the world. It is imported by the builders.
 from __future__ import print_function
 
 import os
+import re
 import sys
 import traceback
 
@@ -176,6 +177,125 @@ PALETTE = {
     "LightGrey":     (0.878, 0.898, 0.922),
     "White":         (1.000, 1.000, 1.000),
 }
+
+# ---------------------------------------------------------------------------
+#  Parsing C++ class bodies
+# ---------------------------------------------------------------------------
+# Two checkers need this - check_uht_contracts.py to attribute UPROPERTY and
+# UFUNCTION specifiers, check_calls.py to read declarations - and it took three
+# iterations to get right, so it lives in one place.
+MACRO_START = re.compile(r"^([A-Z][A-Z0-9_]*)\s*\(")
+ACCESS_SPECIFIER = re.compile(r"^\s*(?:public|protected|private)\s*:\s*")
+
+
+def class_bodies(text):
+    """Yields (class_name, body, is_interface) for every class or struct.
+
+    is_interface is inferred from the name: an `I` followed by a capital is how
+    this project names its interfaces (IOneBrahamBreachableInterface), and the
+    UHT checker treats those differently because an interface is allowed to
+    declare a method with no definition where a class is not.
+    """
+    # The prefix set is Unreal's conventions, not a guess: A actors, U objects
+    # and components, I interfaces, E enums, F structs. Leaving F out was a real
+    # blind spot - every USTRUCT in this project was invisible to both the UHT
+    # contract check and the call-arity check, and a struct is exactly where a
+    # replicated property hides.
+    for match in re.finditer(r"\b(?:class|struct)\s+(?:ONEBRAHAM_API\s+)?([AUIEF][A-Za-z0-9_]+)[^;{]*\{",
+                            text):
+        open_index = text.index("{", match.end() - 1)
+
+        depth = 0
+        index = open_index
+
+        while index < len(text):
+            if text[index] == "{":
+                depth += 1
+            elif text[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            index += 1
+
+        if depth != 0:
+            continue
+
+        name = match.group(1)
+        is_interface = len(name) > 1 and name[0] == "I" and name[1].isupper()
+
+        yield name, text[open_index + 1:index], is_interface
+
+
+def split_class_statements(body):
+    """Brace-depth-zero statements of a class body, with their pending macros.
+
+    Returns a list of (macros, statement_text), where macros is the list of
+    (name, text) macro invocations immediately above the statement - the
+    UPROPERTY(...) or UFUNCTION(...) that gives it its specifiers.
+
+    Three things about C++ that this has to know:
+
+      * A macro invocation is not semicolon-terminated, so `UPROPERTY(...) FName
+        ZoneId;` arrives as a single statement and the specifier is never seen.
+        The macro is flushed at its own closing paren: an all-caps call at the
+        start of a statement is one, and no declaration looks like that, because
+        a declaration has a type in front of its parentheses.
+
+      * `protected:` is commonly written on the line above the macro and lands
+        in the same statement, so it is stripped first. Missing this is how an
+        earlier version of the UHT check reported eleven correct callbacks as
+        broken.
+    """
+    statements = []
+    current = []
+    depth_paren = 0
+    depth_brace = 0
+
+    for char in body:
+        if char in "([":
+            depth_paren += 1
+        elif char in ")]":
+            depth_paren -= 1
+        elif char == "{":
+            depth_brace += 1
+        elif char == "}":
+            depth_brace -= 1
+
+        if char == ";" and depth_paren == 0 and depth_brace == 0:
+            statements.append("".join(current) + ";")
+            current = []
+        elif char == "}" and depth_paren == 0 and depth_brace == 0:
+            statements.append("".join(current) + "}")
+            current = []
+        else:
+            current.append(char)
+
+        if char == ")" and depth_paren == 0 and depth_brace == 0:
+            so_far = ACCESS_SPECIFIER.sub("", "".join(current).strip())
+
+            if MACRO_START.match(so_far):
+                statements.append(so_far)
+                current = []
+
+    if current:
+        statements.append("".join(current))
+
+    pending = []
+    out = []
+
+    for statement in statements:
+        text = " ".join(statement.split()).strip()
+        macro = MACRO_START.match(text)
+
+        if macro is not None and text.endswith(")"):
+            pending.append((macro.group(1), text))
+            continue
+
+        out.append((list(pending), text))
+        pending = []
+
+    return out
+
 
 # ---------------------------------------------------------------------------
 #  Logging

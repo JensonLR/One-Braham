@@ -111,30 +111,13 @@ def strip_comments_and_strings(text):
 
 
 def class_bodies(text):
-    """Yields (class_name, body_text, is_interface) for each class with a body."""
-    for match in re.finditer(r'\b(?:class|struct)\s+(?:ONEBRAHAM_API\s+)?([AUIE][A-Za-z0-9_]+)[^;{]*\{', text):
-        name = match.group(1)
-        open_index = text.index("{", match.end() - 1)
+    """The shared class-body brace matcher, which lives in common.py.
 
-        depth = 0
-        index = open_index
-
-        while index < len(text):
-            char = text[index]
-            if char == "{":
-                depth += 1
-            elif char == "}":
-                depth -= 1
-                if depth == 0:
-                    break
-            index += 1
-
-        if depth != 0:
-            continue  # unbalanced: not a class we can trust
-
-        body = text[open_index + 1:index]
-        is_interface = name.startswith("I") and len(name) > 1 and name[1].isupper()
-        yield name, body, is_interface
+    It used to be a copy of this, with the same `[AUIE]` prefix set that left
+    every F struct invisible - so a method declared in a struct was never checked
+    for a definition at all. One implementation, in one place.
+    """
+    return C.class_bodies(text)
 
 
 def split_statements(body):
