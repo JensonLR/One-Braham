@@ -12,12 +12,16 @@
 #include "Core/OneBrahamSaveSettings.h"
 #include "Core/OneBrahamSpawnPoint.h"
 #include "Characters/OneBrahamCharacter.h"
+#include "Characters/OneBrahamDownedComponent.h"
 #include "Characters/OneBrahamHealthComponent.h"
+#include "Weapons/OneBrahamWeaponBase.h"
+#include "Weapons/OneBrahamWeaponComponent.h"
 #include "Extraction/OneBrahamExtractionComponent.h"
 #include "Lockdown/OneBrahamLockdownComponent.h"
 #include "Audio/OneBrahamAudioManagerComponent.h"
 #include "Bots/OneBrahamBotController.h"
 #include "Data/OneBrahamMatchSettingsAsset.h"
+#include "Data/OneBrahamWeaponDataAsset.h"
 
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -558,6 +562,118 @@ FOneBrahamMatchResult AOneBrahamGameMode::BuildMatchResult(EOneBrahamTeam Winnin
 	}
 
 	return Result;
+}
+
+EOneBrahamKillFeedVerb AOneBrahamGameMode::ChooseKillVerb(bool bKilledByBuilding, bool bSelfKill,
+	bool bVictimWasDowned, EOneBrahamHitZone HitZone)
+{
+	if (bKilledByBuilding)
+	{
+		return EOneBrahamKillFeedVerb::Building;
+	}
+
+	if (bSelfKill)
+	{
+		return EOneBrahamKillFeedVerb::OwnUtility;
+	}
+
+	if (bVictimWasDowned)
+	{
+		return EOneBrahamKillFeedVerb::Executed;
+	}
+
+	if (HitZone == EOneBrahamHitZone::Head || HitZone == EOneBrahamHitZone::Neck)
+	{
+		return EOneBrahamKillFeedVerb::Headshot;
+	}
+
+	return EOneBrahamKillFeedVerb::Killed;
+}
+
+FName AOneBrahamGameMode::GetKillWeaponId(const AController* KillerController) const
+{
+	const APawn* KillerPawn = KillerController != nullptr ? KillerController->GetPawn() : nullptr;
+
+	const UOneBrahamWeaponComponent* Weapons = KillerPawn != nullptr
+		? KillerPawn->FindComponentByClass<UOneBrahamWeaponComponent>()
+		: nullptr;
+
+	const AOneBrahamWeaponBase* Weapon = Weapons != nullptr ? Weapons->GetCurrentWeapon() : nullptr;
+
+	return (Weapon != nullptr && Weapon->Definition != nullptr) ? Weapon->Definition->WeaponId : NAME_None;
+}
+
+FOneBrahamKillFeedEntry AOneBrahamGameMode::RegisterKill(AActor* Victim, AController* KillerController,
+	const FOneBrahamDamageReport& Report)
+{
+	FOneBrahamKillFeedEntry Entry;
+
+	AOneBrahamGameState* GS = GetOBGameState();
+
+	if (GS == nullptr)
+	{
+		return Entry;
+	}
+
+	const APawn* VictimPawn = Cast<APawn>(Victim);
+	AOneBrahamPlayerState* VictimState = VictimPawn != nullptr
+		? VictimPawn->GetPlayerState<AOneBrahamPlayerState>()
+		: nullptr;
+	AOneBrahamPlayerState* KillerState = KillerController != nullptr
+		? Cast<AOneBrahamPlayerState>(KillerController->PlayerState)
+		: nullptr;
+
+	Entry.VictimName = VictimState != nullptr
+		? VictimState->GetPlayerName()
+		: (Victim != nullptr ? Victim->GetName() : FString(TEXT("Someone")));
+	Entry.VictimTeam = VictimState != nullptr ? VictimState->Team : EOneBrahamTeam::None;
+	Entry.KillerName = KillerState != nullptr ? KillerState->GetPlayerName() : FString();
+	Entry.KillerTeam = KillerState != nullptr ? KillerState->Team : EOneBrahamTeam::None;
+
+	// The building cannot be self-killed and a self-kill is not a kill by anyone
+	// else, so both facts are decided here and handed to the verb selector, whose
+	// branch order is the order of the claims.
+	const bool bKilledByBuilding = KillerController == nullptr || KillerState == nullptr;
+	const bool bSelfKill = !bKilledByBuilding
+		&& VictimPawn != nullptr && VictimPawn->GetController() == KillerController;
+
+	const AOneBrahamCharacter* VictimCharacter = Cast<AOneBrahamCharacter>(VictimPawn);
+	const UOneBrahamDownedComponent* Downed = VictimCharacter != nullptr
+		? VictimCharacter->GetDownedComponent()
+		: nullptr;
+
+	Entry.bWasDowned = Downed != nullptr && Downed->IsDowned();
+	Entry.Verb = ChooseKillVerb(bKilledByBuilding, bSelfKill, Entry.bWasDowned, Report.HitZone);
+
+	Entry.WeaponId = GetKillWeaponId(KillerController);
+	Entry.bAssisted = false;   // the report carries one instigator; assists are future work
+	Entry.Timestamp = GS->GetServerWorldTimeSeconds();
+
+	GS->AddKillFeedEntry(Entry);
+
+	// Credit. Personal score always - the scoreboard is the player's own record
+	// of the match - and team score only in the mode that wins on points, because
+	// in ASCENT the win condition is the winch and a kill count is not a score.
+	if (KillerState != nullptr && !bSelfKill && !bKilledByBuilding)
+	{
+		const int32 ScorePerKill = MatchSettings != nullptr ? MatchSettings->ScorePerKill : 1;
+
+		KillerState->ServerRegisterKill(ScorePerKill);
+
+		if (MatchSettings != nullptr && MatchSettings->Mode == EOneBrahamMatchMode::FireDrill)
+		{
+			AddTeamScoreByIndex(KillerState->Team == EOneBrahamTeam::InternalStaff ? 0 : 1, ScorePerKill);
+		}
+	}
+
+	OB_MATCH_LOG("Kill feed: '%s' %s '%s' (%s, floor %d).",
+		Entry.KillerName.IsEmpty() ? TEXT("the building") : *Entry.KillerName,
+		*UEnum::GetValueAsString(Entry.Verb),
+		*Entry.VictimName,
+		Entry.WeaponId.IsNone() ? TEXT("no weapon") : *Entry.WeaponId.ToString(),
+		VictimCharacter != nullptr ? VictimCharacter->GetCurrentFloorIndex() : -1);
+
+	return Entry;
 }
 
 void AOneBrahamGameMode::AddTeamScoreByIndex(int32 TeamIndex, int32 Amount)

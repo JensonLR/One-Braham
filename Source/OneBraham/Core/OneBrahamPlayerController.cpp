@@ -1140,11 +1140,11 @@ void AOneBrahamPlayerController::SetScoreboardVisible(bool bVisible)
 	}
 }
 
-void AOneBrahamPlayerController::ShowDeathScreen(bool bShow)
+void AOneBrahamPlayerController::ClientShowDeathScreen_Implementation(bool bShow, const FText& CauseText)
 {
 	if (HUDComponent != nullptr)
 	{
-		HUDComponent->SetDeathScreenVisible(bShow);
+		HUDComponent->SetDeathScreenVisible(bShow, CauseText);
 	}
 }
 

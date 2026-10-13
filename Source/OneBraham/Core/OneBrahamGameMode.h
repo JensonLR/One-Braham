@@ -96,6 +96,35 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Fire Drill")
 	void AddTeamScoreByIndex(int32 TeamIndex, int32 Amount);
 
+	/**
+	 * Server: somebody died. Fills the kill feed, credits the killer, and returns
+	 * the entry it wrote so the caller can put the same words on the death screen.
+	 *
+	 * This is the only place a kill is recorded, for the same reason damage has
+	 * one entry point: the feed, the scoreboard and the death screen disagreeing
+	 * about who killed whom is the kind of bug that survives a playtest because
+	 * two of the three are believed.
+	 */
+	FOneBrahamKillFeedEntry RegisterKill(AActor* Victim, AController* KillerController,
+		const FOneBrahamDamageReport& Report);
+
+	/** The weapon id a killer was holding, or None for the building, or a fall. */
+	FName GetKillWeaponId(const AController* KillerController) const;
+
+	/**
+	 * Which verb the feed prints between the two names.
+	 *
+	 * Pure and static because the order of these claims is the whole content of
+	 * the function: the building outranks everything, a player who killed
+	 * themselves is not credited, finishing a downed player is an execution even
+	 * if the round went through the head, and only then does a headshot read as
+	 * a headshot. Reordering two of the branches is a plausible edit that
+	 * changes what the feed says, so a test pins the order.
+	 */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Match")
+	static EOneBrahamKillFeedVerb ChooseKillVerb(bool bKilledByBuilding, bool bSelfKill,
+		bool bVictimWasDowned, EOneBrahamHitZone HitZone);
+
 	/** Called whenever a player state changes in a way that might end the match. */
 	void EvaluateMatchEndConditions();
 

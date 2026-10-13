@@ -211,6 +211,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Character")
 	void ServerOnDied(AController* Killer, const FOneBrahamDamageReport& Report);
 
+	/**
+	 * The line under the death screen title, built from the kill-feed entry.
+	 * Static and pure so a test can assert the wording without a world.
+	 */
+	static FText BuildDeathCauseText(const FOneBrahamKillFeedEntry& Entry);
+
 	// ======================================================================
 	//  Weapon trace origin (server-side hit validation uses this exact value)
 	// ======================================================================

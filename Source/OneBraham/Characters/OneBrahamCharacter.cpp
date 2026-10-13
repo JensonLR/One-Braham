@@ -731,6 +731,48 @@ void AOneBrahamCharacter::HandleHealthChanged(float NewHealth, float MaxHealth, 
 	}
 }
 
+FText AOneBrahamCharacter::BuildDeathCauseText(const FOneBrahamKillFeedEntry& Entry)
+{
+	FFormatNamedArguments Args;
+	Args.Add(TEXT("Killer"), FText::FromString(Entry.KillerName));
+	Args.Add(TEXT("Victim"), FText::FromString(Entry.VictimName));
+	Args.Add(TEXT("Weapon"), FText::FromName(Entry.WeaponId));
+
+	if (Entry.KillerName.IsEmpty())
+	{
+		// The building does not gloat. It states the position.
+		return NSLOCTEXT("OneBraham", "DeathCause_Building",
+			"ONE BRAHAM SECURITY - no hostile contact recorded.");
+	}
+
+	switch (Entry.Verb)
+	{
+	case EOneBrahamKillFeedVerb::Headshot:
+		return FText::Format(NSLOCTEXT("OneBraham", "DeathCause_Headshot",
+			"{Killer} - head shot"), Args);
+
+	case EOneBrahamKillFeedVerb::Executed:
+		return FText::Format(NSLOCTEXT("OneBraham", "DeathCause_Executed",
+			"{Killer} - finished you off"), Args);
+
+	case EOneBrahamKillFeedVerb::OwnUtility:
+		return NSLOCTEXT("OneBraham", "DeathCause_OwnUtility",
+			"Your own utility. Commendable.");
+
+	case EOneBrahamKillFeedVerb::Left:
+		return NSLOCTEXT("OneBraham", "DeathCause_Left",
+			"You left the building before the job was done.");
+
+	case EOneBrahamKillFeedVerb::Building:
+		return NSLOCTEXT("OneBraham", "DeathCause_Building",
+			"ONE BRAHAM SECURITY - no hostile contact recorded.");
+
+	default:
+		return FText::Format(NSLOCTEXT("OneBraham", "DeathCause_Killed",
+			"{Killer} - {Weapon}"), Args);
+	}
+}
+
 void AOneBrahamCharacter::HandleDeath(AActor* Killer, const FOneBrahamDamageReport& Report)
 {
 	ServerOnDied(Killer ? Killer->GetInstigatorController() : nullptr, Report);
@@ -767,17 +809,32 @@ void AOneBrahamCharacter::ServerOnDied(AController* Killer, const FOneBrahamDama
 		State->ServerRegisterDeath();
 	}
 
-	// Notify the controller so the death screen + spectate flow starts.
+	// The kill feed and the credit: the one place a kill is recorded, so the feed,
+	// the scoreboard and the death screen cannot disagree about who killed whom.
+	AOneBrahamGameMode* GameMode = GetWorld() != nullptr
+		? GetWorld()->GetAuthGameMode<AOneBrahamGameMode>()
+		: nullptr;
+
+	FOneBrahamKillFeedEntry KillEntry;
+
+	if (GameMode != nullptr)
+	{
+		KillEntry = GameMode->RegisterKill(this, Killer, Report);
+	}
+
+	// Notify the controller so the death screen + spectate flow starts. This is a
+	// Client RPC: the death was detected here, on the server, and the player who
+	// died is usually on another machine.
 	if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(GetController()))
 	{
-		PC->ShowDeathScreen(true);
+		PC->ClientShowDeathScreen(true, BuildDeathCauseText(KillEntry));
 		PC->ServerBeginSpectating(INDEX_NONE);
 	}
 
 	OnDamageReported.Broadcast(Killer, Report);
 
 	// If the mode allows respawn (FIRE DRILL), queue one now.
-	if (AOneBrahamGameMode* GameMode = GetWorld() ? GetWorld()->GetAuthGameMode<AOneBrahamGameMode>() : nullptr)
+	if (GameMode != nullptr)
 	{
 		if (const UOneBrahamMatchSettingsAsset* Settings = GameMode->GetMatchSettings())
 		{
@@ -829,7 +886,7 @@ void AOneBrahamCharacter::ServerOnRespawned()
 
 	if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(GetController()))
 	{
-		PC->ShowDeathScreen(false);
+		PC->ClientShowDeathScreen(false, FText::GetEmpty());
 		PC->bIsSpectating = false;
 	}
 

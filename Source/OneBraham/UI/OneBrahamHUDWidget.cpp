@@ -978,8 +978,11 @@ void UOneBrahamHUDWidget::SetDeathScreenVisible(bool bVisible, const FText& Caus
 
 	if (Text_DeathCause != nullptr)
 	{
-		// The cause line is deliberately plain: "KILLED BY HOLLY FERRIS - L85A2". The
-		// game does not editorialise and it never blames the player.
+		// The cause line is deliberately plain: "h.ferris - MP5", or the head
+		// shot / execution variant of it, built by
+		// AOneBrahamCharacter::BuildDeathCauseText from the same kill-feed entry
+		// the feed prints. The game does not editorialise and it never blames
+		// the player.
 		Text_DeathCause->SetText(CauseText);
 	}
 }

@@ -155,9 +155,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|UI")
 	void SetScoreboardVisible(bool bVisible);
 
-	/** Pushed when the local player dies; the death screen doubles as the spectate HUD. */
-	UFUNCTION(BlueprintCallable, Category = "One Braham|UI")
-	void ShowDeathScreen(bool bShow);
+	/**
+	 * Pushed when the player dies; the death screen doubles as the spectate HUD.
+	 *
+	 * A Client RPC, and that is the whole point of it being one: the death is
+	 * detected on the server, in AOneBrahamCharacter::ServerOnDied, and a plain
+	 * function called on the server's copy of a remote player's controller draws
+	 * a death screen on a machine with no player sitting at it. Every remote
+	 * client died to a screen that never appeared, and the server quietly built
+	 * the widget for nobody.
+	 *
+	 * CauseText is what the death screen prints under the title: who did it, and
+	 * how, from the same kill-feed entry the feed gets.
+	 */
+	UFUNCTION(BlueprintCallable, Client, Reliable, Category = "One Braham|UI")
+	void ClientShowDeathScreen(bool bShow, const FText& CauseText);
 
 	/** Shows a transient banner ("THE BUILDING IS NOW IN LOCKDOWN"). */
 	UFUNCTION(BlueprintCallable, Client, Reliable, Category = "One Braham|UI")

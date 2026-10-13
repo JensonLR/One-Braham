@@ -113,7 +113,7 @@ the wrong floor is a squad that gets found.
 | Jitter buffer | 60 ms adaptive, 200 ms maximum |
 | Radio band | 3200 Hz low-pass, applied per channel, not per player |
 
-`UOneBrahamVoiceCodec` packs 20 ms frames to the platform encoder and refuses
+`FOneBrahamVoiceCodec` packs 20 ms frames to the platform encoder and refuses
 anything over the frame budget, which is how a modified client cannot use the
 voice channel as a data channel.
 
@@ -158,7 +158,9 @@ and the game never confuses the two.
 | Doors and shutters replicate state, not position: the opening animation is driven locally from a multicast timestamp | `AOneBrahamAccessZone`, `AOneBrahamFireShutter` |
 | Breach damage is applied server-side and the opening replicates as a state change | `IOneBrahamBreachableInterface` |
 | Extraction is a state machine on the game state component; the countdown is derived locally from the replicated stage start time, so it never drifts | `UOneBrahamExtractionComponent` |
-| Kill feed entries are replicated reliably, batched per frame | `UOneBrahamGameState` |
+| Kill feed entries are replicated reliably, batched per frame | `AOneBrahamGameState` |
+| The death screen and its cause line go to the player who died, and only to them | `AOneBrahamPlayerController::ClientShowDeathScreen` (Client, Reliable) |
+| A kill is recorded once - feed, personal score and team score in one function | `AOneBrahamGameMode::RegisterKill` |
 | Voice transmission state is replicated so the HUD can show a speaker without the audio | `UOneBrahamVoiceSubsystem` |
 
 ### Why timers are derived rather than replicated
