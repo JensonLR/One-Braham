@@ -139,6 +139,16 @@ AREAS = [
 
 AREA_NAMES = [a[0] for a in AREAS]
 
+def AREAS_AS_PAIRS():
+    """(name, (first_floor, last_floor)) for every area, in build order.
+
+    Exists so a check can ask the map what it builds without importing the four
+    hundred lines of the environment builder that spawn it. check_building_layout
+    compares this against the game's own layout table, which is how the floor
+    plan stops naming the wrong area.
+    """
+    return [(name, floors) for name, floors, _x, _y, _sx, _sy in AREAS]
+
 # Core / circulation dimensions.
 LIFT_CORE_SIZE_CM = 1200.0          # 6 x 6 m lift core
 LIFT_CAR_SIZE_CM = 220.0

@@ -633,3 +633,109 @@ void UOneBrahamVoiceSubsystem::SpeakAnnouncement(FName LineId)
 		}
 	}
 }
+
+
+// ==========================================================================
+//  Quick lines
+// ==========================================================================
+float UOneBrahamVoiceSubsystem::GetLineCooldownRemaining(const AActor* Speaker, FName LineId) const
+{
+	const UWorld* World = GetWorld();
+
+	if (World == nullptr || Speaker == nullptr || LineId.IsNone())
+	{
+		return 0.f;
+	}
+
+	const AOneBrahamPlayerState* State = Cast<AOneBrahamPlayerState>(Speaker);
+	const AOneBrahamCharacter* Character = Cast<AOneBrahamCharacter>(Speaker);
+
+	if (Character != nullptr && State == nullptr)
+	{
+		State = Character->GetPlayerState<AOneBrahamPlayerState>();
+	}
+
+	if (State == nullptr)
+	{
+		return 0.f;
+	}
+
+	// How long the line would be unavailable for, from the table.
+	float CooldownSeconds = 0.f;
+
+	if (LineSet != nullptr)
+	{
+		TArray<const FOneBrahamVoiceLine*> Lines;
+		LineSet->FindLines(LineId, Lines);
+
+		if (Lines.Num() > 0)
+		{
+			CooldownSeconds = Lines[0]->CooldownSeconds;
+		}
+	}
+
+	if (CooldownSeconds <= 0.f)
+	{
+		return 0.f;
+	}
+
+	const uint64 CooldownKey = MakeCooldownKey(State->GetPlayerId(), LineId);
+	const float* LastTime = LineCooldowns.Find(CooldownKey);
+
+	if (LastTime == nullptr)
+	{
+		return 0.f;
+	}
+
+	const float Elapsed = World->GetTimeSeconds() - *LastTime;
+
+	return Elapsed >= CooldownSeconds ? 0.f : CooldownSeconds - Elapsed;
+}
+
+void UOneBrahamVoiceSubsystem::GetQuickLineWheel(FName& OutLineId, FText& OutLabel, int32 SegmentIndex)
+{
+	// Eight segments, clockwise from the top. The order is the design: the first
+	// is the one that keeps people alive, the last is the one that ends a
+	// conversation, and the ones in between are what a squad says while it moves.
+	//
+	// The ids are checked against the voice script by the tags checker and by
+	// Docs/14; a missing id means the segment is dropped from the wheel rather
+	// than drawn empty, so a content fault is visible rather than decorative.
+	static const FName WheelIds[] =
+	{
+		TEXT("V_CONTACT_ENEMY"),
+		TEXT("V_PUSHING"),
+		TEXT("V_HOLDING"),
+		TEXT("V_RELOADING_COVER"),
+		TEXT("V_MOVING_UP"),
+		TEXT("V_MAN_DOWN_ONE"),
+		TEXT("V_GOING_QUIET"),
+		TEXT("V_NEVER_MIND")
+	};
+
+	static const FText WheelLabels[] =
+	{
+		NSLOCTEXT("OneBraham", "Wheel_Contact", "CONTACT"),
+		NSLOCTEXT("OneBraham", "Wheel_Pushing", "PUSHING"),
+		NSLOCTEXT("OneBraham", "Wheel_Holding", "HOLDING"),
+		NSLOCTEXT("OneBraham", "Wheel_Reloading", "RELOADING"),
+		NSLOCTEXT("OneBraham", "Wheel_MovingUp", "MOVING UP"),
+		NSLOCTEXT("OneBraham", "Wheel_ManDown", "MAN DOWN"),
+		NSLOCTEXT("OneBraham", "Wheel_GoingQuiet", "GOING QUIET"),
+		NSLOCTEXT("OneBraham", "Wheel_NeverMind", "NEVER MIND")
+	};
+
+	static_assert(UE_ARRAY_COUNT(WheelIds) == UE_ARRAY_COUNT(WheelLabels),
+		"The comms wheel's ids and labels must stay the same length: a segment with an id "
+		"and no label draws an empty button, which is worse than no wheel at all.");
+
+	if (SegmentIndex < 0 || SegmentIndex >= static_cast<int32>(UE_ARRAY_COUNT(WheelIds)))
+	{
+		OutLineId = NAME_None;
+		OutLabel = FText::GetEmpty();
+		return;
+	}
+
+	OutLineId = WheelIds[SegmentIndex];
+	OutLabel = WheelLabels[SegmentIndex];
+}

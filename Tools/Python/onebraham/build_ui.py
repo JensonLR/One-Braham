@@ -19,6 +19,8 @@ WHY THE HUD IS MOSTLY CODE
 WHAT IT CREATES
     /Game/OneBraham/UI/HUD/WBP_OneBrahamHUD          subclass of the C++ HUD widget
     /Game/OneBraham/UI/HUD/WBP_OneBrahamScoreboard   C++-driven, optional override
+    /Game/OneBraham/UI/HUD/WBP_QuickLineWheel        the comms wheel (C++ draws it)
+    /Game/OneBraham/UI/HUD/WBP_FloorPlan             the floor plan (C++ draws it)
     /Game/OneBraham/UI/Menus/WBP_MainMenu
     /Game/OneBraham/UI/Menus/WBP_DeployScreen        archetype + loadout
     /Game/OneBraham/UI/Menus/WBP_Wardrobe            cosmetics (the monetisation)
@@ -61,8 +63,18 @@ WIDGETS = [
      "Map name, mode, squad, and a flat map of floors climbed so far."),
     ("WBP_ServerBrowser",   C.UI + "/Menus", None,
      "Steam server list, favourites, ping, mode filter."),
+    ("WBP_QuickLineWheel",  C.UI_HUD, "OneBrahamQuickLineWidget",
+     "The comms wheel: eight segments, clockwise from the top. Subclasses the "
+     "C++ widget, which already draws the ring, the labels and the cooldowns - "
+     "the Blueprint exists to restyle it and to put a squad panel behind it."),
+    ("WBP_FloorPlan",       C.UI_HUD, "OneBrahamFloorPlanWidget",
+     "The floor plan: fifteen floors, sealed floors, squad positions, the "
+     "extraction. Code-drawn by the C++ widget; this exists to add anything "
+     "the design wants around it."),
     ("WBP_VoiceWheel",      C.UI + "/HUD", None,
-     "Quick voice line wheel (contextual lines, no meme lines)."),
+     "Legacy stub kept so existing Blueprint references (and the reference in "
+     "Docs/08) do not break. WBP_QuickLineWheel is the one the code loads: if "
+     "you are reading this as a designer, that is the file to open."),
 ]
 
 # HUD copy lives in a data table so it can be localised and so a wordsmith can

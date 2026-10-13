@@ -115,6 +115,25 @@ public:
 	UFUNCTION(BlueprintPure, Category = "One Braham|Voice")
 	FText GetChannelDisplayName(EOneBrahamVoiceChannel Channel) const;
 
+	// ======================================================================
+	//  Quick-line queries
+	// ======================================================================
+	/** Seconds until this speaker may say this line again, or 0.
+	 *
+	 *  The comms wheel greys a line out until it is available, and it has to
+	 *  agree with the server: the cooldown that matters is the one enforced when
+	 *  the line is actually requested, a moment after the wheel closes. Reading
+	 *  the same table keeps a player from picking a line that is silently
+	 *  refused. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Voice")
+	float GetLineCooldownRemaining(const AActor* Speaker, FName LineId) const;
+
+	/** The wheel's own labels for the eight quick lines, in the order the wheel
+	 *  draws them. A label is not a subtitle: it fits a segment, so it is short,
+	 *  and it is UI text, so it is not the same string the character says. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Voice")
+	static void GetQuickLineWheel(FName& OutLineId, FText& OutLabel, int32 SegmentIndex);
+
 	/** Announcement channel: used by the match director for building announcements. */
 	void SpeakAnnouncement(FName LineId);
 

@@ -7,15 +7,20 @@
 #include "Characters/OneBrahamDownedComponent.h"
 #include "Characters/OneBrahamHealthComponent.h"
 #include "Core/OneBrahamGameState.h"
+#include "Core/OneBrahamGameplayTags.h"
+#include "Data/OneBrahamBuildingLayoutAsset.h"
 #include "Core/OneBrahamGameUserSettings.h"
 #include "Core/OneBrahamPlayerController.h"
 #include "Core/OneBrahamPlayerState.h"
 #include "Interaction/OneBrahamInteractComponent.h"
+#include "UI/OneBrahamFloorPlanWidget.h"
 #include "UI/OneBrahamHUDWidget.h"
+#include "UI/OneBrahamQuickLineWidget.h"
 #include "UI/OneBrahamUIStyle.h"
 #include "Voice/OneBrahamProximityVoiceComponent.h"
 #include "Voice/OneBrahamVoiceSubsystem.h"
 #include "Extraction/OneBrahamExtractionComponent.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Lockdown/OneBrahamLockdownComponent.h"
 #include "Weapons/OneBrahamInventoryComponent.h"
 #include "Weapons/OneBrahamWeaponBase.h"
@@ -823,6 +828,375 @@ void UOneBrahamHUDComponent::HandleVoiceLineSpoken(APlayerState* Speaker, FName 
 void UOneBrahamHUDComponent::HandleHitConfirmed(bool bHeadshot, bool bKill, float DistanceCm)
 {
 	NotifyHitConfirmed(bHeadshot, bKill);
+}
+
+// ==========================================================================
+//  Overlays: the HUD toggle, the floor plan and the comms wheel
+// ==========================================================================
+
+void UOneBrahamHUDComponent::SetHUDVisible(bool bVisible)
+{
+	if (bHUDVisible == bVisible)
+	{
+		return;
+	}
+
+	bHUDVisible = bVisible;
+
+	// The widget is hidden rather than destroyed: rebuilding a HUD on every
+	// press of the screenshot key would drop frames exactly when somebody is
+	// trying to take a screenshot.
+	if (HUDWidget != nullptr)
+	{
+		HUDWidget->SetVisibility(bHUDVisible ? ESlateVisibility::SelfHitTestInvisible
+			: ESlateVisibility::Collapsed);
+	}
+
+	// The overlays follow the HUD: hiding the interface and then opening the
+	// map is a contradiction, and "the plan is what is left of the HUD" is not
+	// a state anybody wants to explain.
+	if (!bHUDVisible)
+	{
+		SetFloorPlanVisible(false);
+		SetQuickLineMenuVisible(false);
+	}
+
+	UE_LOG(LogOneBrahamUI, Verbose, TEXT("[OB.UI] HUD %s."), bHUDVisible ? TEXT("shown") : TEXT("hidden"));
+}
+
+void UOneBrahamHUDComponent::EnsureOverlayWidgets()
+{
+	AOneBrahamPlayerController* Controller = OwningController.Get();
+
+	if (Controller == nullptr || !bHUDEnabled)
+	{
+		return;
+	}
+
+	if (FloorPlanWidget == nullptr)
+	{
+		// The authored Blueprint when it exists, the code-drawn C++ class
+		// otherwise: the plan is generated geometry, so the fallback is the real
+		// thing rather than a stand-in.
+		TSubclassOf<UOneBrahamFloorPlanWidget> PlanClass =
+			LoadClass<UOneBrahamFloorPlanWidget>(nullptr,
+				TEXT("/Game/OneBraham/UI/HUD/WBP_FloorPlan.WBP_FloorPlan_C"));
+
+		if (PlanClass == nullptr)
+		{
+			PlanClass = UOneBrahamFloorPlanWidget::StaticClass();
+		}
+
+		FloorPlanWidget = CreateWidget<UOneBrahamFloorPlanWidget>(Controller, PlanClass);
+
+		if (FloorPlanWidget != nullptr)
+		{
+			FloorPlanWidget->AddToPlayerScreen(1);
+			FloorPlanWidget->SetPlanVisible(false);
+		}
+	}
+
+	if (QuickLineWidget == nullptr)
+	{
+		TSubclassOf<UOneBrahamQuickLineWidget> WheelClass =
+			LoadClass<UOneBrahamQuickLineWidget>(nullptr,
+				TEXT("/Game/OneBraham/UI/HUD/WBP_QuickLineWheel.WBP_QuickLineWheel_C"));
+
+		if (WheelClass == nullptr)
+		{
+			WheelClass = UOneBrahamQuickLineWidget::StaticClass();
+		}
+
+		QuickLineWidget = CreateWidget<UOneBrahamQuickLineWidget>(Controller, WheelClass);
+
+		if (QuickLineWidget != nullptr)
+		{
+			// Above the plan: the wheel is a reflex, the plan is a decision, and
+			// the two are never open for the same reason.
+			QuickLineWidget->AddToPlayerScreen(2);
+			QuickLineWidget->OnQuickLineChosen.AddDynamic(this, &UOneBrahamHUDComponent::HandleQuickLineChosen);
+			QuickLineWidget->SetWheelVisible(false);
+		}
+	}
+}
+
+void UOneBrahamHUDComponent::SetFloorPlanVisible(bool bVisible)
+{
+	if (bFloorPlanVisible == bVisible)
+	{
+		return;
+	}
+
+	bFloorPlanVisible = bVisible;
+
+	if (!bFloorPlanVisible)
+	{
+		if (FloorPlanWidget != nullptr)
+		{
+			FloorPlanWidget->SetPlanVisible(false);
+		}
+
+		return;
+	}
+
+	EnsureOverlayWidgets();
+
+	if (FloorPlanWidget == nullptr)
+	{
+		// No viewport: a dedicated server, a headless test, or a controller that
+		// has not reached BeginPlay. The state still flips, so the input handler
+		// is consistent, and the next call after the widget exists will draw it.
+		UE_LOG(LogOneBrahamUI, Verbose, TEXT("[OB.UI] Floor plan requested with no widget available."));
+		return;
+	}
+
+	FOneBrahamFloorPlanData PlanData;
+	GatherFloorPlanData(PlanData);
+	FloorPlanWidget->SetPlanData(PlanData);
+	FloorPlanWidget->SetPlanVisible(true);
+}
+
+void UOneBrahamHUDComponent::SetQuickLineMenuVisible(bool bVisible)
+{
+	if (bQuickLineMenuVisible == bVisible)
+	{
+		return;
+	}
+
+	bQuickLineMenuVisible = bVisible;
+
+	if (!bQuickLineMenuVisible)
+	{
+		if (QuickLineWidget != nullptr)
+		{
+			// A press-and-release wheel commits on release, so the close path
+			// asks the widget what is selected rather than assuming nothing is.
+			QuickLineWidget->CommitHoveredSegment();
+		}
+
+		return;
+	}
+
+	EnsureOverlayWidgets();
+
+	if (QuickLineWidget == nullptr)
+	{
+		return;
+	}
+
+	FOneBrahamQuickLineData WheelData;
+	GatherQuickLineData(WheelData);
+	QuickLineWidget->SetWheelData(WheelData);
+	QuickLineWidget->SetWheelVisible(true);
+}
+
+void UOneBrahamHUDComponent::RefreshOverlays()
+{
+	// Called when something the plan or the wheel draws has changed: a lockdown
+	// stage, a squadmate going down, a line's cooldown lapsing. Rebuilding only
+	// what is open keeps a closed overlay at zero cost.
+	if (bFloorPlanVisible && FloorPlanWidget != nullptr)
+	{
+		FOneBrahamFloorPlanData PlanData;
+		GatherFloorPlanData(PlanData);
+		FloorPlanWidget->SetPlanData(PlanData);
+	}
+
+	if (bQuickLineMenuVisible && QuickLineWidget != nullptr)
+	{
+		FOneBrahamQuickLineData WheelData;
+		GatherQuickLineData(WheelData);
+		QuickLineWidget->SetWheelData(WheelData);
+	}
+}
+
+void UOneBrahamHUDComponent::HandleQuickLineChosen(FName LineId)
+{
+	bQuickLineMenuVisible = false;
+
+	AOneBrahamPlayerController* Controller = OwningController.Get();
+
+	if (Controller == nullptr)
+	{
+		return;
+	}
+
+	// The request goes to the server, which validates it against the line set,
+	// the cooldowns and the speaker's own components before anything is said.
+	// A client that opens the wheel and presses a key has asked a question, not
+	// made a statement.
+	Controller->RequestQuickLine(LineId);
+}
+
+void UOneBrahamHUDComponent::GatherFloorPlanData(FOneBrahamFloorPlanData& OutData) const
+{
+	const UWorld* World = GetWorld();
+
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	const UOneBrahamBuildingLayoutAsset* Layout = UOneBrahamBuildingLayoutAsset::Get(this);
+
+	if (Layout == nullptr)
+	{
+		return;
+	}
+
+	const AOneBrahamGameState* GameState = World->GetGameState<AOneBrahamGameState>();
+	const AOneBrahamCharacter* Character = BoundCharacter.Get();
+	const AOneBrahamPlayerState* LocalState = Character != nullptr
+		? Character->GetPlayerState<AOneBrahamPlayerState>() : nullptr;
+
+	const int32 LocalFloor = Character != nullptr ? Character->GetCurrentFloorIndex() : INDEX_NONE;
+
+	OutData.BuildingName = Layout->BuildingName;
+	OutData.LocalFloorLabel = Layout->GetFloorAnnouncement(LocalFloor);
+	OutData.Floors.Reset();
+
+	// Floors are collected ascending, then reversed: the plan draws the Skydeck
+	// at the top because that is the direction the match moves in.
+	TArray<FOneBrahamFloorDescription> Ascending;
+	Layout->GetFloorsAscending(Ascending);
+
+	const UOneBrahamLockdownComponent* Lockdown = GameState != nullptr
+		? GameState->GetLockdownComponent() : nullptr;
+
+	// Squad count per floor, and whether anybody is down on it. Read from the
+	// player array rather than from replicated per-floor counters: the plan is
+	// open for a second at a time and this is a handful of iterations.
+	for (int32 Index = Ascending.Num() - 1; Index >= 0; --Index)
+	{
+		const FOneBrahamFloorDescription& Description = Ascending[Index];
+
+		FOneBrahamFloorPlanFloor Row;
+		Row.FloorIndex = Description.FloorIndex;
+		Row.AreaName = Layout->GetFloorShortName(Description.FloorIndex);
+		Row.bLocalPlayerFloor = Description.FloorIndex == LocalFloor;
+		Row.bSealed = Lockdown != nullptr && Lockdown->IsFloorSealed(Description.FloorIndex);
+
+		if (GameState != nullptr && LocalState != nullptr && LocalState->SquadId != INDEX_NONE)
+		{
+			for (APlayerState* OtherState : GameState->PlayerArray)
+			{
+				const AOneBrahamPlayerState* Other = Cast<AOneBrahamPlayerState>(OtherState);
+
+				if (Other == nullptr || Other->SquadId != LocalState->SquadId)
+				{
+					continue;
+				}
+
+				const AOneBrahamCharacter* OtherCharacter = Cast<AOneBrahamCharacter>(Other->GetPawn());
+
+				if (OtherCharacter == nullptr || OtherCharacter->GetCurrentFloorIndex() != Description.FloorIndex)
+				{
+					continue;
+				}
+
+				++Row.SquadCount;
+
+				if (Other->IsDowned())
+				{
+					Row.bSquadmateDown = true;
+				}
+			}
+		}
+
+		OutData.Floors.Add(Row);
+	}
+
+	if (const UOneBrahamExtractionComponent* Extraction = GameState != nullptr
+		? GameState->GetExtractionComponent() : nullptr)
+	{
+		OutData.bExtractionInProgress = Extraction->IsExtractionActive();
+		OutData.ExtractionProgress01 = Extraction->GetHoldProgress01();
+		OutData.ExtractingSquadId = Extraction->GetHoldingSquadId();
+	}
+
+	if (Lockdown != nullptr)
+	{
+		OutData.LockdownStageLabel = Lockdown->IsWarningActive()
+			? NSLOCTEXT("OneBraham", "PlanWarning", "LOCKDOWN INBOUND")
+			: UEnum::GetDisplayValueAsText(Lockdown->GetStage());
+	}
+
+	if (GameState != nullptr)
+	{
+		// The game state keeps a limit and a phase clock rather than a countdown,
+		// because a countdown has to be replicated and a limit plus an elapsed
+		// time does not. The plan does the subtraction, and clamps: a match in
+		// sudden death has no remaining time and should not draw a negative one.
+		OutData.MatchTimeRemaining = FMath::Max(0.f,
+			GameState->MatchTimeLimitSeconds - GameState->PhaseElapsedSeconds);
+	}
+}
+
+void UOneBrahamHUDComponent::GatherQuickLineData(FOneBrahamQuickLineData& OutData) const
+{
+	OutData.Entries.Reset();
+	OutData.bTransmitting = Data.bLocalTransmitting;
+
+	const AOneBrahamCharacter* Character = BoundCharacter.Get();
+
+	if (Character == nullptr)
+	{
+		return;
+	}
+
+	if (const UOneBrahamProximityVoiceComponent* Voice = Character->GetVoiceComponent())
+	{
+		OutData.bTransmitting = Voice->IsLocalTransmitting();
+	}
+
+	UOneBrahamVoiceSubsystem* VoiceSubsystem = UOneBrahamVoiceSubsystem::Get(Character);
+	UOneBrahamVoiceLineSet* LineSet = VoiceSubsystem != nullptr ? VoiceSubsystem->GetLineSet() : nullptr;
+
+	if (LineSet == nullptr)
+	{
+		return;
+	}
+
+	// The wheel's ids and labels live on the voice subsystem, next to the line
+	// table they are checked against, so the list cannot be extended in the UI
+	// without extending the script. The component only decides what state each
+	// segment is in.
+	for (int32 SegmentIndex = 0; SegmentIndex < 8; ++SegmentIndex)
+	{
+		FName LineId;
+		FText WheelLabel;
+		UOneBrahamVoiceSubsystem::GetQuickLineWheel(LineId, WheelLabel, SegmentIndex);
+
+		if (LineId.IsNone())
+		{
+			continue;
+		}
+
+		TArray<const FOneBrahamVoiceLine*> Lines;
+		LineSet->FindLines(LineId, Lines);
+
+		if (Lines.Num() == 0)
+		{
+			// A segment whose line is not in the script is dropped rather than
+			// drawn empty: the voice script check reports the missing id, and an
+			// empty button on a wheel is a bug a player cannot act on.
+			OB_VOICE_LOG("Comms wheel segment %d requests '%s', which the voice script does not have.",
+				SegmentIndex, *LineId.ToString());
+			continue;
+		}
+
+		FOneBrahamQuickLineEntry Entry;
+		Entry.LineId = LineId;
+		Entry.Label = WheelLabel;
+
+		if (VoiceSubsystem != nullptr)
+		{
+			Entry.CooldownRemaining = VoiceSubsystem->GetLineCooldownRemaining(Character, LineId);
+			Entry.bAvailable = Entry.CooldownRemaining <= 0.f;
+		}
+
+		OutData.Entries.Add(Entry);
+	}
 }
 
 // ==========================================================================

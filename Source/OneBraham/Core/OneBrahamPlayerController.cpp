@@ -310,6 +310,20 @@ void AOneBrahamPlayerController::BindInputActions()
 	if (InputConfig->SpectatePrevPlayer) EIC->BindAction(InputConfig->SpectatePrevPlayer, ETriggerEvent::Started, this, &AOneBrahamPlayerController::Input_SpectatePrev);
 	if (InputConfig->SpectateToggleFreeCam) EIC->BindAction(InputConfig->SpectateToggleFreeCam, ETriggerEvent::Started, this, &AOneBrahamPlayerController::Input_SpectateFreeCam);
 	if (InputConfig->ClipMarker)	EIC->BindAction(InputConfig->ClipMarker, ETriggerEvent::Started, this, &AOneBrahamPlayerController::Input_ClipMarker);
+
+	// --- Overlays ---------------------------------------------------------
+	// Three actions the content pipeline has always generated and nothing ever
+	// bound: the HUD toggle, the floor plan and the comms wheel. An Enhanced
+	// Input action with no handler is silent in both directions - the key does
+	// nothing and nothing says why - so they are bound here like every other
+	// action, with the wheel on press-and-release.
+	if (InputConfig->ToggleHUD)		EIC->BindAction(InputConfig->ToggleHUD, ETriggerEvent::Started, this, &AOneBrahamPlayerController::Input_ToggleHUD);
+	if (InputConfig->Map)			EIC->BindAction(InputConfig->Map, ETriggerEvent::Started, this, &AOneBrahamPlayerController::Input_MapToggle);
+	if (InputConfig->VoiceLineMenu)
+	{
+		EIC->BindAction(InputConfig->VoiceLineMenu, ETriggerEvent::Started, this, &AOneBrahamPlayerController::Input_VoiceLineMenuStarted);
+		EIC->BindAction(InputConfig->VoiceLineMenu, ETriggerEvent::Completed, this, &AOneBrahamPlayerController::Input_VoiceLineMenuCompleted);
+	}
 }
 
 void AOneBrahamPlayerController::PushMappingContext(UInputMappingContext* Context, int32 Priority)
@@ -844,6 +858,139 @@ void AOneBrahamPlayerController::Input_PushToTalkCompleted(const FInputActionVal
 	{
 		Voice->SetTransmitting(this, false);
 	}
+}
+
+void AOneBrahamPlayerController::Input_ToggleHUD(const FInputActionValue& Value)
+{
+	if (HUDComponent == nullptr || !IsLocalController())
+	{
+		return;
+	}
+
+	HUDComponent->SetHUDVisible(!HUDComponent->IsHUDVisible());
+
+	// A banner that says so, because a HUD that vanished because of a mistyped
+	// key is indistinguishable from a HUD that broke. Two seconds, no sound.
+	if (HUDComponent->IsHUDVisible())
+	{
+		HUDComponent->ShowSubBanner(
+			NSLOCTEXT("OneBraham", "HUDShown", "Interface shown"), 2.f);
+	}
+}
+
+void AOneBrahamPlayerController::Input_MapToggle(const FInputActionValue& Value)
+{
+	if (HUDComponent == nullptr || !IsLocalController())
+	{
+		return;
+	}
+
+	// The comms wheel and the plan are never both open: they are both read at a
+	// glance, and two overlays competing for that glance is neither.
+	if (bQuickLineMenuOpen)
+	{
+		Input_VoiceLineMenuCompleted(Value);
+	}
+
+	HUDComponent->SetFloorPlanVisible(!HUDComponent->IsFloorPlanVisible());
+}
+
+void AOneBrahamPlayerController::Input_VoiceLineMenuStarted(const FInputActionValue& Value)
+{
+	if (HUDComponent == nullptr || !IsLocalController() || bQuickLineMenuOpen)
+	{
+		return;
+	}
+
+	bQuickLineMenuOpen = true;
+
+	// Opening closes the plan for the same reason the plan closes the wheel.
+	if (HUDComponent->IsFloorPlanVisible())
+	{
+		HUDComponent->SetFloorPlanVisible(false);
+	}
+
+	HUDComponent->SetQuickLineMenuVisible(true);
+}
+
+void AOneBrahamPlayerController::Input_VoiceLineMenuCompleted(const FInputActionValue& Value)
+{
+	if (!bQuickLineMenuOpen)
+	{
+		return;
+	}
+
+	bQuickLineMenuOpen = false;
+
+	if (HUDComponent != nullptr)
+	{
+		// Closing the wheel commits whatever is under the cursor. The wheel's own
+		// widget decides that, because it is the thing that knows where the mouse
+		// is; the component forwards the chosen line back here.
+		HUDComponent->SetQuickLineMenuVisible(false);
+	}
+}
+
+void AOneBrahamPlayerController::RequestQuickLine(FName LineId)
+{
+	if (LineId.IsNone())
+	{
+		return;
+	}
+
+	// Deliberately no local play and no prediction: a line is the only thing in
+	// this game that other players hear, and hearing it before the server agreed
+	// it happened would make the voice channel client-authoritative by accident.
+	if (HasAuthority())
+	{
+		ServerRequestQuickLine_Implementation(LineId);
+	}
+	else
+	{
+		ServerRequestQuickLine(LineId);
+	}
+}
+
+void AOneBrahamPlayerController::ServerRequestQuickLine_Implementation(FName LineId)
+{
+	if (LineId.IsNone())
+	{
+		return;
+	}
+
+	// The voice subsystem speaks through a character: it resolves the line from
+	// the speaker's archetype, plays the sound on the speaker's own component and
+	// measures distance from the speaker's head. A controller has none of those,
+	// so the pawn is the speaker and the PlayerState is the fallback for the one
+	// frame where a spectating player has no pawn at all.
+	AActor* Speaker = GetPawn();
+
+	if (Speaker == nullptr)
+	{
+		Speaker = GetPlayerState<AOneBrahamPlayerState>();
+	}
+
+	if (Speaker == nullptr)
+	{
+		return;
+	}
+
+	// Priority comes from the line itself, raised by the subsystem when the line
+	// is urgent. Asking for a quick line is a request, not an override.
+	UOneBrahamVoiceSubsystem* Voice = UOneBrahamVoiceSubsystem::Get(this);
+
+	if (Voice == nullptr)
+	{
+		return;
+	}
+
+	const bool bSpoken = Voice->SpeakContextualLine(Speaker, LineId, 0.6f);
+
+	// Refusals are logged at Verbose: a refused "enemy spotted" because the
+	// player said it four seconds ago is the system working, and a log file full
+	// of the system working is a log file nobody reads.
+	UE_LOG(LogOneBrahamVoice, Verbose, TEXT("[OB.VOICE] Quick line '%s' requested by '%s': %s."),
+		*LineId.ToString(), *GetName(), bSpoken ? TEXT("said") : TEXT("refused"));
 }
 
 void AOneBrahamPlayerController::Input_VoiceChannelCycle(const FInputActionValue& Value)

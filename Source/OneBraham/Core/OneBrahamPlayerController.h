@@ -251,6 +251,33 @@ protected:
 	UFUNCTION(BlueprintPure, Category = "One Braham|Security")
 	int32 GetViolationScore() const { return ViolationScore; }
 
+	// ======================================================================
+	//  Quick lines
+	// ======================================================================
+	/** Asks the server to have this character say a comms-wheel line.
+	 *
+	 *  Client-side entry point for the wheel. Nothing is spoken here: the server
+	 *  resolves the line against the voice script, the archetype filter and the
+	 *  cooldowns, then multicasts it to whoever can hear it. A client that
+	 *  modified this call can only ask faster - the answer is still the
+	 *  server's. */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Controller|Voice")
+	void RequestQuickLine(FName LineId);
+
+	/** Server: validate and deliver a comms-wheel line.
+	 *
+	 *  Server-authoritative because the alternative is a client that can set its
+	 *  own cooldowns, decide which archetype filter applies, and speak into a
+	 *  proximity channel that other players paid for. The line set already knows
+	 *  how to refuse a line - wrong archetype, on cooldown, no recorded asset -
+	 *  so this forwards and lets it answer. */
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "One Braham|Controller|Voice")
+	void ServerRequestQuickLine(FName LineId);
+
+	/** True while the comms wheel is open on this client. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Controller|Voice")
+	bool IsQuickLineMenuOpen() const { return bQuickLineMenuOpen; }
+
 protected:
 	// ======================================================================
 	//  Enhanced Input handlers. One function per action; all of them call into
@@ -297,6 +324,24 @@ protected:
 	void Input_ScoreboardCompleted(const struct FInputActionValue& Value);
 	void Input_PauseMenu(const struct FInputActionValue& Value);
 	void Input_Ping(const struct FInputActionValue& Value);
+
+	// -----------------------------------------------------------------------
+	//  Overlays (IA_ToggleHUD, IA_Map, IA_VoiceLineMenu)
+	// -----------------------------------------------------------------------
+	/** Hides or shows the interface. Session-only, and bound to a key that is
+	 *  deliberately obscure: this exists for screenshots and for clips. */
+	void Input_ToggleHUD(const struct FInputActionValue& Value);
+
+	/** Opens or closes the floor plan. */
+	void Input_MapToggle(const struct FInputActionValue& Value);
+
+	/** Press to open the comms wheel, aim, release to say it.
+	 *
+	 *  Press-and-release rather than a toggle, because a wheel that stays open
+	 *  until it is dismissed is a menu, and a menu in a firefight is a death. */
+	void Input_VoiceLineMenuStarted(const struct FInputActionValue& Value);
+	void Input_VoiceLineMenuCompleted(const struct FInputActionValue& Value);
+
 	void Input_SpectateNext(const struct FInputActionValue& Value);
 	void Input_SpectatePrev(const struct FInputActionValue& Value);
 	void Input_SpectateFreeCam(const struct FInputActionValue& Value);
@@ -307,6 +352,11 @@ protected:
 
 	UFUNCTION()
 	void OnRep_Spectating();
+
+	/** True while the local player is holding the comms wheel open. A press
+	 *  opens it and a release commits: press, aim, release, which is the only
+	 *  wheel interaction that survives a firefight. */
+	bool bQuickLineMenuOpen = false;
 
 	/** Rebuilds the spectator view target from SpectatedPlayerId. */
 	void ApplySpectatorView();

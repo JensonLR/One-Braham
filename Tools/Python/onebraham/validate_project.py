@@ -78,6 +78,13 @@ WHAT IT CHECKS, AND WHY EACH ONE HAS BITTEN SOMEONE
                                                         invalid tag, and every
                                                         query on it falls through
                                                         in silence.
+    24. Building layout                               - the floor table the map
+                                                        is built from against the
+                                                        floor table the game
+                                                        describes: a mismatch
+                                                        names floors wrongly, in
+                                                        every direction, without
+                                                        an error.
 
     It writes Saved/Validation/ob_validation_<timestamp>.md and exits non-zero on
     any FAIL. Warnings do not fail the build; failures do.
@@ -1433,6 +1440,36 @@ def check_gameplay_tags(v, _config_only):
         v.fail("gameplay tags", u"{0} - {1}".format(where, message))
 
 
+def check_building_layout(v, _config_only):
+    """The building the map builds is the building the game describes.
+
+    The level is laid out from a table in build_environment.py. The game
+    describes that level from a table in OneBrahamBuildingLayoutAsset.cpp: which
+    floor the server hall is on, which floors the lockdown may seal, what the
+    lift says. Two tables, two languages, one building - and when they disagree
+    the plan tells a player they are on the executive floor while they are
+    standing in the server hall, with no error anywhere.
+    """
+    try:
+        from onebraham import check_building_layout
+    except Exception as exc:  # noqa: BLE001
+        v.warn("building layout", u"checker unavailable: {0}".format(exc))
+        return
+
+    checked, problems = check_building_layout.run()
+
+    if checked == 0:
+        v.warn("building layout", u"no floors were parsed out of the layout asset")
+        return
+
+    if not problems:
+        v.pass_("building layout", u"all {0} floors agree between the map and the layout asset".format(checked))
+        return
+
+    for message, _ in problems:
+        v.fail("building layout", message)
+
+
 # ---------------------------------------------------------------------------
 #  Report
 # ---------------------------------------------------------------------------
@@ -1496,6 +1533,7 @@ def build_all(config_only=False):
         ("soft paths", check_soft_paths),
         ("call arity", check_calls),
         ("gameplay tags", check_gameplay_tags),
+        ("building layout", check_building_layout),
     ]
 
     for label, fn in checks:

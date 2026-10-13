@@ -202,3 +202,109 @@ struct ONEBRAHAM_API FOneBrahamHUDData
 	UPROPERTY(BlueprintReadOnly, Category = "HUD") bool bShowVoiceIndicator = true;
 	UPROPERTY(BlueprintReadOnly, Category = "HUD") float HUDOpacity = 1.f;
 };
+
+// ===========================================================================
+//  Floor plan (the map overlay)
+// ===========================================================================
+// ONE BRAHAM has no minimap, on purpose: a minimap turns a fifteen-floor
+// building into a corridor and removes the thing the game is about. What it has
+// instead is a floor plan the player chooses to look at, which pauses nothing
+// and tells them less than a minimap would - which floors are sealed, where
+// their squad is, and where the extraction is running. The player still has to
+// know where the stairs are.
+
+/** One floor of the building, as the plan draws it. */
+USTRUCT(BlueprintType)
+struct ONEBRAHAM_API FOneBrahamFloorPlanFloor
+{
+	GENERATED_BODY()
+
+	/** 0 = ground, 15 = Skydeck. */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Plan") int32 FloorIndex = 0;
+
+	/** "Canteen and Skydeck", "Server and comms", "Lobby". */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Plan") FText AreaName;
+
+	/** Count of live squadmates on this floor, self included. */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Plan") int32 SquadCount = 0;
+
+	/** Sealed by the lockdown director. Drawn in alarm red. */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Plan") bool bSealed = false;
+
+	/** The floor the local player is standing on. Drawn filled. */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Plan") bool bLocalPlayerFloor = false;
+
+	/** A squadmate is down here. Drawn with a pulse, because that is the one
+	 *  piece of information on this panel that changes what the player does. */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Plan") bool bSquadmateDown = false;
+};
+
+/** Everything the floor plan draws. Rebuilt when it opens, not every frame. */
+USTRUCT(BlueprintType)
+struct ONEBRAHAM_API FOneBrahamFloorPlanData
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Plan") TArray<FOneBrahamFloorPlanFloor> Floors;
+
+	/** Name of the building, from the map's own metadata. One Braham, by default. */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Plan") FText BuildingName;
+
+	/** Where the local player is, spelled the way the lift announces it. */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Plan") FText LocalFloorLabel;
+
+	/** True while a squad is holding the Skydeck winch. */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Plan") bool bExtractionInProgress = false;
+
+	/** 0..1 hold progress, when bExtractionInProgress. */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Plan") float ExtractionProgress01 = 0.f;
+
+	/** Which squad is extracting, or INDEX_NONE. */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Plan") int32 ExtractingSquadId = INDEX_NONE;
+
+	/** Match phase name, so the plan can say why the floors are sealed. */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Plan") FText LockdownStageLabel;
+
+	/** Server clock, for the plan's footer. */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Plan") float MatchTimeRemaining = 0.f;
+};
+
+// ===========================================================================
+//  Quick lines (the comms wheel)
+// ===========================================================================
+// Eight lines, chosen by the player, spoken by the character. The wheel is
+// deliberately small: a wheel with twenty entries is a menu, and a menu in a
+// firefight is a death. Eight is what an extraction squad says to each other.
+
+/** One segment of the comms wheel. */
+USTRUCT(BlueprintType)
+struct ONEBRAHAM_API FOneBrahamQuickLineEntry
+{
+	GENERATED_BODY()
+
+	/** The voice-script id this segment speaks, e.g. V_CONTACT_ENEMY. */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Comms") FName LineId;
+
+	/** Short label for the wheel, in caps: "CONTACT", "MOVING UP". */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Comms") FText Label;
+
+	/** False while the line is on cooldown; the wheel draws it greyed and
+	 *  refuses the selection, so the player is told before they commit. */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Comms") bool bAvailable = true;
+
+	/** Seconds until it becomes available again; 0 when available. */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Comms") float CooldownRemaining = 0.f;
+};
+
+/** The comms wheel's contents. */
+USTRUCT(BlueprintType)
+struct ONEBRAHAM_API FOneBrahamQuickLineData
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Comms") TArray<FOneBrahamQuickLineEntry> Entries;
+
+	/** True while the local player is holding push-to-talk: the wheel says so,
+	 *  because talking and pressing a button that talks are different things. */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Comms") bool bTransmitting = false;
+};

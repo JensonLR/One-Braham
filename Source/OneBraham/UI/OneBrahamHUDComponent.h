@@ -88,6 +88,42 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|HUD")
 	void SetPauseMenuVisible(bool bVisible);
 
+	// -----------------------------------------------------------------------
+	//  Overlays the player asks for (the IA_ToggleHUD, IA_Map and
+	//  IA_VoiceLineMenu actions). Each is owned here rather than by the widget
+	//  so that a Blueprint-authored HUD and the C++ fallback behave identically,
+	//  and so a headless test can drive them.
+	// -----------------------------------------------------------------------
+
+	/** Shows or hides the whole HUD. Session-only: the player's saved setting is
+	 *  a scale and a set of element switches, not "hide everything". */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|HUD")
+	void SetHUDVisible(bool bVisible);
+
+	UFUNCTION(BlueprintPure, Category = "One Braham|HUD")
+	bool IsHUDVisible() const { return bHUDVisible; }
+
+	/** Opens or closes the floor plan, gathering its data on open. */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|HUD")
+	void SetFloorPlanVisible(bool bVisible);
+
+	UFUNCTION(BlueprintPure, Category = "One Braham|HUD")
+	bool IsFloorPlanVisible() const { return bFloorPlanVisible; }
+
+	/** Opens or closes the comms wheel, gathering the line list on open. */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|HUD")
+	void SetQuickLineMenuVisible(bool bVisible);
+
+	UFUNCTION(BlueprintPure, Category = "One Braham|HUD")
+	bool IsQuickLineMenuVisible() const { return bQuickLineMenuVisible; }
+
+	/** Rebuilds the plan or the wheel while it is open. Called when the lockdown
+	 *  stage changes, a squadmate goes down, or a line's cooldown lapses - and
+	 *  by the controller when the wheel opens, so the cooldowns it shows are the
+	 *  ones the server will enforce a moment later. */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|HUD")
+	void RefreshOverlays();
+
 	UFUNCTION(BlueprintCallable, Category = "One Braham|HUD")
 	void ShowBanner(const FText& Text, float DurationSeconds, FLinearColor Colour);
 
@@ -193,4 +229,34 @@ protected:
 
 	/** Set to false on a dedicated server: no widget, no gathering. */
 	bool bHUDEnabled = true;
+
+	// --- overlay state -----------------------------------------------------
+	/** True unless the player has hidden the HUD with IA_ToggleHUD. */
+	bool bHUDVisible = true;
+
+	bool bFloorPlanVisible = false;
+	bool bQuickLineMenuVisible = false;
+
+	/** The floor plan widget. Created on first open, kept afterwards: it is one
+	 *  widget with no children, and recreating it on every press would cost more
+	 *  than it saves. */
+	UPROPERTY(Transient)
+	TObjectPtr<class UOneBrahamFloorPlanWidget> FloorPlanWidget = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<class UOneBrahamQuickLineWidget> QuickLineWidget = nullptr;
+
+	/** Fills PlanData from the game state, the squad and the extraction. */
+	void GatherFloorPlanData(FOneBrahamFloorPlanData& OutData) const;
+
+	/** Fills QuickLineData: the eight lines, with live cooldown state. */
+	void GatherQuickLineData(FOneBrahamQuickLineData& OutData) const;
+
+	/** Creates the two overlay widgets on demand, on the same viewport layer
+	 *  ordering as the HUD: below the HUD's own panels, above the world. */
+	void EnsureOverlayWidgets();
+
+	/** Forwarded from the wheel: the player chose a line. */
+	UFUNCTION()
+	void HandleQuickLineChosen(FName LineId);
 };
