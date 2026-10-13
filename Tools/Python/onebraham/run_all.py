@@ -78,6 +78,9 @@ STEPS = [
     ("doc_numbers", "onebraham.check_doc_numbers", False,
      "every count in the build report and the README against the count the tooling "
      "actually produces"),
+    ("test_names", "onebraham.check_test_names", False,
+     "every automation test Docs/18 lists against the tests that exist, and every "
+     "name Scripts/ runs"),
     ("materials", "onebraham.build_materials", True,
      "master materials, physical materials, surface and brand instances"),
     ("environment", "onebraham.build_environment", True,

@@ -36,6 +36,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `check_building_layout.py` | the floor/area table the map is built from against the floor table the game describes (`DA_BuildingLayout` / its compiled-in default) | **no** | yes |
 | `check_input_actions.py` | every generated `IA_` action against the `UOneBrahamInputConfig` field that points at it, every field against its action, every `DefaultInput.ini` binding and prompt against a real action, and every `InputConfig->Field` read against the fields that exist | **no** | yes |
 | `check_doc_numbers.py` | every count quoted in this document's build report and in the README against the count the tooling produces | **no** | yes |
+| `check_test_names.py` | every automation test `Docs/18` lists against the tests that exist in `Source/OneBraham/Tests`, every test that exists against the table, and every `OneBraham.*` name in `Scripts/` against a test or a category | **no** | yes |
 | `check_voice_lines.py` | every `V_` line id the code asks for against the script table, every scripted line against the recording brief in `Docs/14`, and the sixty-six archetype variant rows against the six voices they claim | **no** | yes |
 | `validate_project.py` | the health check and a markdown report | either | yes |
 | `run_all.py` | all of the above, in dependency order, with a report | either | yes |
@@ -73,7 +74,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 
 ```
 # ONE BRAHAM - content build report
-**21 steps succeeded, 0 failed.**
+**22 steps succeeded, 0 failed.**
 
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
@@ -87,6 +88,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | voice_lines | OK | 0.0 | 41 line references, all declared and documented |
 | input_actions | OK | 0.0 | 41 actions, 41 fields, 92 reads |
 | doc_numbers | OK | 0.0 | 12 documented numbers, all current |
+| test_names | OK | 0.0 | 20 automation tests, every one documented and resolvable |
 | materials | OK | 3.1 | 5 masters, 15 physicals, 28 instances |
 ...
 ```

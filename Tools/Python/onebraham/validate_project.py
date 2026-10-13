@@ -1515,6 +1515,31 @@ def check_doc_numbers(v, _config_only):
         v.fail("documented numbers", u"[{0}] {1}".format(kind, message))
 
 
+def check_test_names(v, _config_only):
+    """The automation tests the documentation lists are the ones that exist.
+
+    Docs/18 section 2 listed twelve suites for most of this project's life and
+    `grep -rn IMPLEMENT_SIMPLE_AUTOMATION_TEST` matched one file: the document.
+    The table is now written against twenty real tests, and this check keeps it
+    that way in both directions - a documented suite with no source, and a test
+    nobody documented.
+    """
+    try:
+        from onebraham import check_test_names
+    except Exception as exc:  # noqa: BLE001
+        v.warn("test names", u"checker unavailable: {0}".format(exc))
+        return
+
+    checked, problems = check_test_names.run()
+
+    if not problems:
+        v.pass_("test names", u"{0} automation tests agree with Docs/18".format(checked))
+        return
+
+    for message, kind in problems:
+        v.fail("test names", u"[{0}] {1}".format(kind, message))
+
+
 def check_input_actions(v, _config_only):
     """The input pipeline is one pipeline.
 
@@ -1642,6 +1667,7 @@ def build_all(config_only=False):
         ("voice lines", check_voice_lines),
         ("input actions", check_input_actions),
         ("documented numbers", check_doc_numbers),
+        ("test names", check_test_names),
     ]
 
     for label, fn in checks:

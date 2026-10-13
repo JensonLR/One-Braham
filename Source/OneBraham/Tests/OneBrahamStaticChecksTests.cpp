@@ -48,7 +48,8 @@ namespace
 		{ TEXT("check_building_layout"), TEXT("the building layout agrees with the map builder: floors, areas, anchors") },
 		{ TEXT("check_voice_lines"),   TEXT("every voice line id exists, is documented, and has a full variant set") },
 		{ TEXT("check_input_actions"), TEXT("the five lists of input actions are one list") },
-		{ TEXT("check_doc_numbers"),   TEXT("the numbers the documentation quotes are the numbers the build produces") }
+		{ TEXT("check_doc_numbers"),   TEXT("the numbers the documentation quotes are the numbers the build produces") },
+		{ TEXT("check_test_names"),    TEXT("every automation test the documentation lists exists, and every test that exists is listed") }
 
 		// Deliberately absent: validate_project.py, and check_soft_paths.py in its
 		// full (non-config) form. Both shell out to UnrealBuildTool or UnrealPak,
