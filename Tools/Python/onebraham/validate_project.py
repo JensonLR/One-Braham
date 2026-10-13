@@ -73,6 +73,11 @@ WHAT IT CHECKS, AND WHY EACH ONE HAS BITTEN SOMEONE
                                                         the most common compile
                                                         error in a codebase this
                                                         size.
+    23. Gameplay tags                                 - a tag requested but
+                                                        never declared returns an
+                                                        invalid tag, and every
+                                                        query on it falls through
+                                                        in silence.
 
     It writes Saved/Validation/ob_validation_<timestamp>.md and exits non-zero on
     any FAIL. Warnings do not fail the build; failures do.
@@ -1392,6 +1397,42 @@ def check_calls(v, _config_only):
         v.fail("call arity", u"{0}:{1} - {2}".format(rel, line_number, message))
 
 
+def check_gameplay_tags(v, _config_only):
+    """Every gameplay tag the code asks for must be one the project declares.
+
+    Gameplay tags fail silently. A request for an undeclared tag returns an
+    invalid tag, which is not an error - it is a tag no query matches, so every
+    branch keyed on it takes its fallback and the game carries on looking
+    slightly wrong. This check has already earned its place: it is the reason the
+    bot controller no longer asks for "OB.Character.Archetype.Intern", a tag that
+    has never existed next to a registry that calls that archetype Graduate.
+
+    Tags assembled at runtime from a literal or a local string table are checked
+    too - that is where the archetype names live. A tag assembled from a value
+    only known at runtime (a travel option, a profile) is counted as skipped and
+    reported as such, rather than counted as checked.
+    """
+    try:
+        from onebraham import check_gameplay_tags
+    except Exception as exc:  # noqa: BLE001
+        v.warn("gameplay tags", u"checker unavailable: {0}".format(exc))
+        return
+
+    checked, problems, warnings, skipped = check_gameplay_tags.run()
+
+    for message in warnings:
+        v.warn("gameplay tags", message)
+
+    if not problems:
+        v.pass_("gameplay tags", u"all {0} resolvable tag requests are declared ({1} skipped)".format(
+            checked, skipped))
+        return
+
+    for rel, line_number, message in problems:
+        where = u"{0}:{1}".format(rel, line_number) if line_number else rel
+        v.fail("gameplay tags", u"{0} - {1}".format(where, message))
+
+
 # ---------------------------------------------------------------------------
 #  Report
 # ---------------------------------------------------------------------------
@@ -1454,6 +1495,7 @@ def build_all(config_only=False):
         ("uht contracts", check_uht_contracts),
         ("soft paths", check_soft_paths),
         ("call arity", check_calls),
+        ("gameplay tags", check_gameplay_tags),
     ]
 
     for label, fn in checks:

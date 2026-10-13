@@ -322,52 +322,68 @@ namespace
 	 * they just killed, which archetype they were, and what they had access to -
 	 * three facts, from one line of text, without a UI panel. English, dry, and in
 	 * the exact register of a real corporate badge.
+	 *
+	 * The job title comes from a table, and the reason is a bug it replaced: the
+	 * previous version stripped the tag's leaf and inserted a space before each
+	 * capital, which turns "ITOperations" into "ITOPERATIONS". An acronym cannot
+	 * be recovered by a rule that inserts spaces - only by knowing the word. Six
+	 * archetypes, six strings, one place to change them.
+	 *
+	 * The tags come from OneBrahamTags, so a renamed tag is a compile error here
+	 * instead of a badge that reads "ONE BRAHAM" for the rest of the project's
+	 * life.
 	 */
+	FText ArchetypeDisplayName(const FGameplayTag& Archetype)
+	{
+		if (Archetype == OneBrahamTags::Character_Archetype_BusinessAnalyst)
+		{
+			return NSLOCTEXT("OneBraham", "ArchetypeAnalyst", "BUSINESS ANALYST");
+		}
+		if (Archetype == OneBrahamTags::Character_Archetype_Graduate)
+		{
+			return NSLOCTEXT("OneBraham", "ArchetypeGraduate", "GRADUATE");
+		}
+		if (Archetype == OneBrahamTags::Character_Archetype_FinanceBroker)
+		{
+			return NSLOCTEXT("OneBraham", "ArchetypeFinance", "FINANCE");
+		}
+		if (Archetype == OneBrahamTags::Character_Archetype_ITOperations)
+		{
+			return NSLOCTEXT("OneBraham", "ArchetypeIT", "IT OPERATIONS");
+		}
+		if (Archetype == OneBrahamTags::Character_Archetype_FacilitiesSecurity)
+		{
+			return NSLOCTEXT("OneBraham", "ArchetypeFacilities", "FACILITIES");
+		}
+		if (Archetype == OneBrahamTags::Character_Archetype_Consultant)
+		{
+			return NSLOCTEXT("OneBraham", "ArchetypeConsultant", "CONSULTANT");
+		}
+
+		// A card with no archetype is a contractor badge: the name is the
+		// company's own, which is what the ground-floor visitor passes say.
+		return NSLOCTEXT("OneBraham", "ArchetypeUnknown", "ONE BRAHAM");
+	}
+
 	FText BuildDroppedCardName(const AOneBrahamCharacter* Character, EOneBrahamAccessTier Tier)
 	{
-		FText Role = FText::FromString(TEXT("ONE BRAHAM"));
-		FText Rank = FText::FromString(TEXT("EMPLOYEE"));
+		FText Role = NSLOCTEXT("OneBraham", "ArchetypeUnknown", "ONE BRAHAM");
+		FText Rank;
 
 		if (const AOneBrahamPlayerState* State = Character != nullptr
 			? Character->GetPlayerState<AOneBrahamPlayerState>() : nullptr)
 		{
-			if (State->ArchetypeTag.IsValid())
-			{
-				// "OB.Character.Archetype.ITOps" -> "IT OPERATIONS".
-				FString Leaf = State->ArchetypeTag.GetTagName().ToString();
-				int32 Dot = INDEX_NONE;
-				if (Leaf.FindLastChar(TEXT('.'), Dot))
-				{
-					Leaf = Leaf.RightChop(Dot + 1);
-				}
-
-				Leaf = Leaf.Replace(TEXT("ITOps"), TEXT("IT OPERATIONS"));
-				Leaf = Leaf.Replace(TEXT("Facilities"), TEXT("FACILITIES"));
-
-				// Split the camel case into words: "BusinessAnalyst" -> "BUSINESS ANALYST".
-				FString Spaced;
-				for (int32 Index = 0; Index < Leaf.Len(); ++Index)
-				{
-					const TCHAR Ch = Leaf[Index];
-					if (Index > 0 && FChar::IsUpper(Ch) && !FChar::IsUpper(Leaf[Index - 1]))
-					{
-						Spaced.AppendChar(TEXT(' '));
-					}
-					Spaced.AppendChar(Ch);
-				}
-
-				Role = FText::FromString(Spaced.ToUpper());
-			}
+			Role = ArchetypeDisplayName(State->ArchetypeTag);
 		}
 
 		switch (Tier)
 		{
-		case EOneBrahamAccessTier::Staff:		Rank = FText::FromString(TEXT("STAFF"));		break;
-		case EOneBrahamAccessTier::Secure:		Rank = FText::FromString(TEXT("SECURE"));		break;
-		case EOneBrahamAccessTier::Executive:	Rank = FText::FromString(TEXT("EXECUTIVE"));	break;
-		case EOneBrahamAccessTier::Skydeck:	Rank = FText::FromString(TEXT("ROOF ACCESS"));	break;
-		case EOneBrahamAccessTier::Override:	Rank = FText::FromString(TEXT("CONTRACTOR"));	break;
-		default:								Rank = FText::FromString(TEXT("VISITOR"));		break;
+		case EOneBrahamAccessTier::Staff:		Rank = NSLOCTEXT("OneBraham", "RankStaff", "STAFF");				break;
+		case EOneBrahamAccessTier::Secure:		Rank = NSLOCTEXT("OneBraham", "RankSecure", "SECURE");			break;
+		case EOneBrahamAccessTier::Executive:	Rank = NSLOCTEXT("OneBraham", "RankExecutive", "EXECUTIVE");	break;
+		case EOneBrahamAccessTier::Skydeck:		Rank = NSLOCTEXT("OneBraham", "RankSkydeck", "ROOF ACCESS");	break;
+		case EOneBrahamAccessTier::Override:	Rank = NSLOCTEXT("OneBraham", "RankOverride", "CONTRACTOR");	break;
+		default:								Rank = NSLOCTEXT("OneBraham", "RankVisitor", "VISITOR");		break;
 		}
 
 		return FText::Format(NSLOCTEXT("OneBraham", "DroppedCardName", "{0} - {1}"), Role, Rank);

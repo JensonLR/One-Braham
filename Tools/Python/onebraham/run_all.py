@@ -27,8 +27,8 @@ USAGE
 
     Outside the editor, for the text-only steps:
         PYTHONPATH=Tools/Python python3 Tools/Python/onebraham/run_all.py --text-only
-        (input_ini, cpp_symbols, uht_contracts, soft_paths and calls: none
-         needs a running editor, so all five work on a fresh checkout and in CI)
+        (input_ini, cpp_symbols, uht_contracts, soft_paths, calls and tags: none
+         needs a running editor, so all six work on a fresh checkout and in CI)
 
     Useful switches:
         --only materials,weapons      run just these steps
@@ -65,6 +65,8 @@ STEPS = [
      "every /Game/ path the C++ loads by name, against the pipeline's naming contract"),
     ("calls", "onebraham.check_calls", False,
      "call sites whose argument count cannot match their declaration"),
+    ("tags", "onebraham.check_gameplay_tags", False,
+     "every gameplay tag the code asks for, declared natively or in the ini"),
     ("materials", "onebraham.build_materials", True,
      "master materials, physical materials, surface and brand instances"),
     ("environment", "onebraham.build_environment", True,

@@ -6,6 +6,7 @@
 #include "Characters/OneBrahamHealthComponent.h"
 #include "Core/OneBrahamGameMode.h"
 #include "Core/OneBrahamGameState.h"
+#include "Core/OneBrahamGameplayTags.h"
 #include "Core/OneBrahamPlayerState.h"
 #include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -163,7 +164,14 @@ void AOneBrahamBotController::SpawnBotPawn()
 		PS->Team = PreferredTeam;
 		PS->SquadId = PreferredSquadId;
 		PS->bIsSquadLeader = false;
-		PS->ArchetypeTag = FGameplayTag::RequestGameplayTag(FName(TEXT("OB.Character.Archetype.Intern")), false);
+		// The native tag constant, not a string: this line used to request
+		// "OB.Character.Archetype.Intern", which has never existed - the archetype
+		// is called Graduate in Docs/13 and in the character registry. Requested
+		// with ErrorIfNotFound = false, a wrong name produces no error at all, just
+		// an invalid tag on every bot's PlayerState, and any code keying on the
+		// archetype silently takes its fallback branch. The constant cannot go
+		// wrong: renaming the tag now breaks the build.
+		PS->ArchetypeTag = OneBrahamTags::Character_Archetype_Graduate;
 	}
 
 	if (GetPawn() == nullptr)

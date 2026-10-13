@@ -32,6 +32,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `check_uht_contracts.py` | UE reflection contracts: RPC bodies, RepNotify callbacks, replicated properties named in a `DOREPLIFETIME` | **no** | yes |
 | `check_soft_paths.py` | every `/Game/` path the C++ loads by name, against the directories and name prefixes the pipeline writes | **no** | yes |
 | `check_calls.py` | call sites whose argument count cannot match the project's own declaration (defaults honoured, qualified calls skipped) | **no** | yes |
+| `check_gameplay_tags.py` | every tag the code requests, declared natively or in `DefaultGame.ini`; also resolves `Printf`-assembled tags from local string tables | **no** | yes |
 | `validate_project.py` | the health check and a markdown report | either | yes |
 | `run_all.py` | all of the above, in dependency order, with a report | either | yes |
 
@@ -56,7 +57,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 
 ```
 # ONE BRAHAM - content build report
-**16 steps succeeded, 0 failed.**
+**17 steps succeeded, 0 failed.**
 
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
@@ -65,6 +66,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | uht_contracts | OK | 0.5 | 600 UE reflection contracts, all satisfied |
 | soft_paths | OK | 0.0 | 42 name-loaded asset paths, all conventional |
 | calls | OK | 0.1 | 823 call sites, all arities plausible |
+| tags | OK | 0.2 | 6 resolvable tag requests, all declared |
 | materials | OK | 3.1 | 5 masters, 15 physicals, 28 instances |
 ...
 ```
@@ -81,6 +83,7 @@ cpp_symbols               text only; a link error found in 0.1 s, not 4 minutes
 uht_contracts             text only; a property that silently never replicates
 soft_paths                text only; an asset path that silently loads nothing
 calls                     text only; a call that cannot compile: wrong argument count
+tags                      text only; a tag that silently matches nothing
       ↓
 materials                 everything references MI_* and PM_OB_*
       ↓
@@ -139,11 +142,11 @@ a header gets noticed before it becomes a runtime null reference.
 # because the project's pipeline runs on a self-hosted UE5 runner.
 stages:
   - lint      : python -m py_compile on every tool
-  - cpp       : PYTHONPATH=Tools/Python python3 run_all.py --only cpp_symbols,uht_contracts,soft_paths,calls
+  - cpp       : PYTHONPATH=Tools/Python python3 run_all.py --only cpp_symbols,uht_contracts,soft_paths,calls,tags
                 (declared-but-undefined members, UE reflection contracts, the
-                 naming contract for name-loaded assets, call arity, and the
-                 checks that need no engine install at all - so they run before a
-                 runner is ever allocated)
+                 naming contract for name-loaded assets, call arity, gameplay
+                 tags, and the checks that need no engine install at all - so they
+                 run before a runner is ever allocated)
   - config    : PYTHONPATH=Tools/Python python3 run_all.py --text-only
   - build     : UBT build of the Editor, Game, Server and Client targets
   - content   : UnrealEditor-Cmd -run=pythonscript run_all.py
