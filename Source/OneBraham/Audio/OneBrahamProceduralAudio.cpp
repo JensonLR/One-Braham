@@ -373,6 +373,35 @@ namespace OneBrahamProceduralAudio
 		return Bake(Buffer, 0.40f, true);
 	}
 
+	/**
+	 * True for the ids MakeUISound can synthesise.
+	 *
+	 * This list and MakeUISound's branches are the same list, and they have to
+	 * stay that way: this function is what HasSynthesisedSound answers with, and
+	 * that answer is what the audio bank's validator uses to decide whether a cue
+	 * with no asset is silent. When the two drifted, the bank reported twenty
+	 * three working UI cues as silent - the recipes were all there, under the
+	 * names the game plays (UI_HitMarker, UI_KillConfirm, UI_LowAmmo_Click), while
+	 * the whitelist still listed the addresses an older naming scheme used.
+	 */
+	bool IsSynthesisedUICue(const FString& Id)
+	{
+		static const TCHAR* const Substrings[] = {
+			TEXT("Hover"), TEXT("Accept"), TEXT("Confirm"), TEXT("Deny"), TEXT("Error"),
+			TEXT("ScoreTick"), TEXT("LowAmmo"), TEXT("HitMarker"), TEXT("Kill"), TEXT("Click")
+		};
+
+		for (const TCHAR* const Substring : Substrings)
+		{
+			if (Id.Contains(Substring))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	USoundWaveProcedural* MakeUISound(FName SoundId)
 	{
 		const FString Id = SoundId.ToString();
@@ -447,12 +476,27 @@ namespace OneBrahamProceduralAudio
 			TEXT("SFX_Extraction_Start"), TEXT("SFX_Override_Hum"), TEXT("SFX_Terminal_Accept"),
 			TEXT("SFX_Terminal_Deny"), TEXT("SFX_Keycard_Use"), TEXT("SFX_Footstep_Carpet"),
 			TEXT("SFX_Footstep_Hard"), TEXT("SFX_Footstep_Metal"), TEXT("SFX_Footstep_Water"),
-			TEXT("SFX_LowAmmo_Click"), TEXT("SFX_HitMarker"), TEXT("SFX_KillConfirm"),
 			TEXT("UI_Click"), TEXT("UI_Hover"), TEXT("UI_Accept"), TEXT("UI_Deny"),
 			TEXT("UI_ScoreTick")
 		};
 
-		return Known.Contains(SoundId);
+		if (Known.Contains(SoundId))
+		{
+			return true;
+		}
+
+		// The rest of the UI set is named by what it does rather than by an
+		// entry here: UI_HitMarker, UI_HitMarker_Headshot, UI_HitMarker_Armour,
+		// UI_KillConfirm, UI_LowAmmo_Click, UI_Damage_Taken, UI_Banner and the
+		// voice-channel blips all resolve through MakeUISound's substring
+		// branches, which is exactly what this asks.
+		//
+		// SFX_LowAmmo_Click, SFX_HitMarker and SFX_KillConfirm used to be listed
+		// here instead. Nothing in the project has ever asked for them - the UI
+		// feedback goes through the UI_ names - so three of the four sounds a
+		// player hears most often were reported as silent by the validator while
+		// being perfectly audible.
+		return IsSynthesisedUICue(SoundId.ToString());
 	}
 
 	USoundWaveProcedural* GetSynthesisedSound(FName SoundId)
