@@ -93,7 +93,16 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 ...
 ```
 
-Exit code 0 only if every step passed. CI reads the exit code, not the log.
+Exit code 0 only if no step failed. CI reads the exit code, not the log.
+
+A step that cannot run because there is no Unreal Editor on the machine is
+reported as **SKIPPED** and counted separately, not as a failure: the content
+builders raise `"... must run inside the Unreal Editor."`, which is a fact about
+the machine rather than about the project, and a CI box with no engine install
+should not report a broken build - it should report that it did not run the
+content steps, with their names. On a fresh clone the full run is therefore
+"12 steps succeeded, 0 failed, 10 skipped" and the same run with an editor
+installed is "22 steps succeeded, 0 failed".
 
 ---
 
@@ -168,7 +177,7 @@ a header gets noticed before it becomes a runtime null reference.
 # because the project's pipeline runs on a self-hosted UE5 runner.
 stages:
   - lint      : python -m py_compile on every tool
-  - cpp       : PYTHONPATH=Tools/Python python3 run_all.py --only cpp_symbols,uht_contracts,soft_paths,calls,tags,layout,voice_lines,input_actions,doc_numbers
+  - cpp       : PYTHONPATH=Tools/Python python3 run_all.py --only cpp_symbols,uht_contracts,soft_paths,calls,tags,layout,voice_lines,input_actions,doc_numbers,test_names
                 (declared-but-undefined members, UE reflection contracts, the
                  naming contract for name-loaded assets, call arity, gameplay
                  tags, the building layout, the voice script, the input pipeline,

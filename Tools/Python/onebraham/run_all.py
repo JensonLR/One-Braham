@@ -54,6 +54,11 @@ REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file
                                           "..", "..", ".."))
 REPORT_DIR = os.path.join(REPO_ROOT, "Saved", "Build")
 
+#: The sentence every content builder raises when it is run outside the editor.
+#: Matched on rather than caught by exception type: the builders deliberately
+#: raise a plain RuntimeError so they stay importable by the engine-free checks.
+EDITOR_REQUIRED_MESSAGE = u"must run inside the Unreal Editor"
+
 # step name, module, needs the editor, one-line purpose
 STEPS = [
     ("input_ini", "onebraham.generate_input_ini", False,
@@ -147,29 +152,37 @@ def _run_step(name, module_name, purpose):
     try:
         module = __import__(module_name, fromlist=["build_all"])
     except Exception as exc:  # noqa: BLE001
-        return False, time.time() - started, u"import failed: {0}".format(exc)
+        return u"failed", time.time() - started, u"import failed: {0}".format(exc)
 
     build_all = getattr(module, "build_all", None)
 
     if build_all is None:
-        return False, time.time() - started, u"{0} has no build_all()".format(module_name)
+        return u"failed", time.time() - started, u"{0} has no build_all()".format(module_name)
 
     try:
         report = build_all()
     except Exception as exc:  # noqa: BLE001
-        return False, time.time() - started, u"raised: {0}".format(exc)
+        # The content builders refuse to run outside the editor, and they say so
+        # in exactly those words. That is not a broken project - it is a machine
+        # without an Unreal install - and calling it a failure makes the exit code
+        # from a CI box with no engine mean nothing. It is reported as SKIPPED,
+        # it is counted as skipped, and the verdict line says how many.
+        if EDITOR_REQUIRED_MESSAGE in str(exc):
+            return u"skipped", time.time() - started, u"needs the Unreal Editor"
+
+        return u"failed", time.time() - started, u"raised: {0}".format(exc)
 
     elapsed = time.time() - started
 
     if report is None:
-        return True, elapsed, u"no report returned"
+        return u"ok", elapsed, u"no report returned"
 
     summary = report.summary() if hasattr(report, "summary") else u"ran"
 
     if hasattr(report, "ok"):
-        return bool(report.ok()), elapsed, summary
+        return (u"ok" if report.ok() else u"failed"), elapsed, summary
 
-    return True, elapsed, summary
+    return u"ok", elapsed, summary
 
 
 def _write_report(results, started_at, finished_at):
@@ -182,8 +195,9 @@ def _write_report(results, started_at, finished_at):
     stamp = started_at.strftime("%Y%m%d_%H%M%S")
     path = os.path.join(REPORT_DIR, u"ob_build_{0}.md".format(stamp))
 
-    succeeded = sum(1 for ok, _n, _s, _d in results if ok)
-    failed = len(results) - succeeded
+    succeeded = sum(1 for status, _n, _s, _d in results if status == u"ok")
+    failed = sum(1 for status, _n, _s, _d in results if status == u"failed")
+    skipped = sum(1 for status, _n, _s, _d in results if status == u"skipped")
 
     lines = []
     lines.append(u"# ONE BRAHAM - content build report")
@@ -192,15 +206,20 @@ def _write_report(results, started_at, finished_at):
     lines.append(u"Finished: {0}".format(finished_at.strftime("%Y-%m-%d %H:%M:%S")))
     lines.append(u"Duration: {0:.1f}s".format((finished_at - started_at).total_seconds()))
     lines.append(u"")
-    lines.append(u"**{0} steps succeeded, {1} failed.**".format(succeeded, failed))
+    if skipped:
+        lines.append(u"**{0} steps succeeded, {1} failed, {2} skipped - no Unreal "
+                     u"Editor on this machine, so the content steps did not run.**".format(
+                         succeeded, failed, skipped))
+    else:
+        lines.append(u"**{0} steps succeeded, {1} failed.**".format(succeeded, failed))
     lines.append(u"")
     lines.append(u"| Step | Result | Seconds | Detail |")
     lines.append(u"| --- | --- | --- | --- |")
 
-    for ok, name, seconds, detail in results:
+    for status, name, seconds, detail in results:
         safe_detail = str(detail).replace(u"|", u"\\|").replace(u"\n", u" ")[:180]
-        lines.append(u"| {0} | {1} | {2:.1f} | {3} |".format(
-            name, u"OK" if ok else u"**FAILED**", seconds, safe_detail))
+        shown = {u"ok": u"OK", u"skipped": u"SKIPPED", u"failed": u"**FAILED**"}[status]
+        lines.append(u"| {0} | {1} | {2:.1f} | {3} |".format(name, shown, seconds, safe_detail))
 
     lines.append(u"")
     lines.append(u"## Next steps")
@@ -233,13 +252,13 @@ def build_all(argv=None):
     results = []
 
     for name, module_name, _needs_editor, purpose in selected:
-        ok, seconds, detail = _run_step(name, module_name, purpose)
-        results.append((ok, name, seconds, detail))
+        status, seconds, detail = _run_step(name, module_name, purpose)
+        results.append((status, name, seconds, detail))
 
         C.log(u"--- {0}: {1} in {2:.1f}s ---".format(
-            name, u"OK" if ok else u"FAILED", seconds))
+            name, status.upper(), seconds))
 
-        if not ok and stop_on_fail:
+        if status == u"failed" and stop_on_fail:
             C.log(u"  stopping: --stop-on-fail")
             break
 
@@ -251,15 +270,16 @@ def build_all(argv=None):
             C.log(u"")
             C.log(u"--- dressing the level from the prop manifest ---")
             placed = build_props.spawn_props_from_manifest(dry_run=False)
-            results.append((True, "dress_level", 0.0,
+            results.append((u"ok", "dress_level", 0.0,
                             u"{0} prop instances placed".format(placed)))
         except Exception as exc:  # noqa: BLE001
-            results.append((False, "dress_level", 0.0, str(exc)))
+            results.append((u"failed", "dress_level", 0.0, str(exc)))
 
     finished_at = datetime.datetime.now()
     report_path = _write_report(results, started_at, finished_at)
 
-    failed = [name for ok, name, _s, _d in results if not ok]
+    failed = [name for status, name, _s, _d in results if status == u"failed"]
+    skipped = [name for status, name, _s, _d in results if status == u"skipped"]
 
     C.log(u"")
     C.log(u"================================================================")
@@ -267,7 +287,13 @@ def build_all(argv=None):
     if failed:
         C.log(u"  BUILD FAILED: {0} step(s) - {1}".format(len(failed), ", ".join(failed)))
     else:
-        C.log(u"  BUILD OK: all {0} step(s) succeeded".format(len(results)))
+        C.log(u"  BUILD OK: {0} step(s) succeeded{1}".format(
+            len(results) - len(skipped),
+            u", {0} skipped (no Unreal Editor on this machine)".format(len(skipped))
+            if skipped else u""))
+
+    if skipped:
+        C.log(u"           skipped: {0}".format(", ".join(skipped)))
 
     if report_path:
         C.log(u"  report: {0}".format(report_path))

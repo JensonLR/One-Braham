@@ -30,6 +30,33 @@ The suites are in `Source/OneBraham/Tests/`, one file per category, entirely ins
 game module rather than in a plugin: `RunTests.bat` then finds them with no extra
 configuration, and the engine-free checks run inside the same command.
 
+They are written against the framework's own shape, which the network of C++-first
+tutorials and the engine header agree on:
+
+```cpp
+#include "Misc/AutomationTest.h"
+
+#if WITH_AUTOMATION_TESTS
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamCoreTest, "OneBraham.Core.AscentRules",
+    EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamCoreTest::RunTest(const FString& Parameters)
+{
+    TestEqual(TEXT("ASCENT squads"), Settings->TeamCount, 3);
+    return true;
+}
+
+#endif // WITH_AUTOMATION_TESTS
+```
+
+The macro takes no semicolon and declares a class the next line defines. The flags
+are a pair: exactly one context (`EditorContext`) and exactly one filter
+(`EngineFilter`), which the framework's own `static_assert` enforces - a missing
+filter is a compile error, and a missing context is a test that never runs.
+`check_test_names.py` holds both halves, plus the declaration-to-`RunTest` pairing
+that is otherwise a link error.
+
 ### 2.1 The suites
 
 | Category | Tests | What they assert |

@@ -31,6 +31,21 @@ WHAT IT CHECKS
        what `RunTests.bat smoke` and the batch scripts' comments rely on.
     5. Every test file declares at least one test, and every file is named
        `OneBraham<Something>Tests.cpp`.
+    6. Every `IMPLEMENT_SIMPLE_AUTOMATION_TEST` has a matching `RunTest` body.
+       The macro's first argument is a class name it does not check; a typo there
+       is a link error, or - worse - a test the framework never registers because
+       its `RunTest` belongs to a class nobody instantiated.
+    7. Every test file includes `Misc/AutomationTest.h`, is wrapped in
+       `WITH_AUTOMATION_TESTS`, and gives its tests a context flag. A test with no
+       context flag never runs, which looks exactly like a test that passes.
+
+    Four more rules come from the same three failures seen from the compiler's
+    side: a test whose `RunTest` body belongs to a differently spelled class (a
+    link error, or a test the framework never registers), a file without
+    `Misc/AutomationTest.h`, a file not wrapped in `WITH_AUTOMATION_TESTS`, and a
+    declaration with no context flag. The last two fail silently in opposite
+    directions - a suite that ships inside a shipping build, and a suite that never
+    runs and therefore always passes.
 
 USAGE
     PYTHONPATH=Tools/Python python3 Tools/Python/onebraham/check_test_names.py
@@ -56,6 +71,14 @@ SCRIPTS_DIR = os.path.join(python_root, "Scripts")
 IMPLEMENTED = re.compile(
     r'IMPLEMENT_SIMPLE_AUTOMATION_TEST\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s*,\s*"([^"]+)"')
 
+#: The filter flags: UnrealHeaderTool's static_assert wants exactly one of these,
+#: alongside exactly one context flag.
+FILTER_FLAGS = ("EngineFilter", "ProductFilter", "SmokeFilter", "PerfFilter",
+                "StressFilter", "NegativeFilter")
+
+#: bool FOneBrahamCoreTest::RunTest(const FString& Parameters)
+RUN_TEST = re.compile(r'bool\s+([A-Za-z_][A-Za-z0-9_]*)::RunTest\s*\(')
+
 #: A "what runs today" table row: | `OneBraham.Core` | `A`, `B`, `C` | prose |
 CATEGORY_ROW = re.compile(
     r'^\|\s*`(OneBraham\.[A-Za-z]+)`\s*\|\s*([^|]*?)\s*\|', re.MULTILINE)
@@ -75,6 +98,28 @@ SCRIPT_NAME = re.compile(r'^OneBraham(?:\.[A-Z][A-Za-z0-9_]*)+$')
 FILE_NAME = re.compile(r'^OneBraham[A-Za-z0-9]*Tests\.cpp$')
 
 
+#: IMPLEMENT_SIMPLE_AUTOMATION_TEST(FClass, "Name", FLAGS)
+#:
+#: The flags argument holds no parentheses, so it can be captured up to the
+#: closing bracket. There is deliberately no trailing semicolon in the pattern:
+#: the macro does not take one, and requiring it made this matcher skip the
+#: declaration and then match a `)` and `;` from a statement further down the
+#: file - so it counted tests while reading the wrong text.
+IMPLEMENTED_FULL = re.compile(
+    r'IMPLEMENT_SIMPLE_AUTOMATION_TEST\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*"([^"]+)"\s*,'
+    r'\s*([^)]*)\)')
+
+#: The flags argument of every declaration, for the context check.
+IMPLEMENTED_FLAGS = re.compile(
+    r'IMPLEMENT_SIMPLE_AUTOMATION_TEST\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s*,\s*"[^"]+"\s*,'
+    r'\s*([^)]*)\)')
+
+
+def _class_and_name(raw):
+    """[(class name, test name)] for one file's declarations."""
+    return [(m.group(1), m.group(2)) for m in IMPLEMENTED_FULL.finditer(raw)]
+
+
 def implemented_tests():
     """[(relative path, full test name)] for every test declared in Source."""
     found = []
@@ -87,9 +132,9 @@ def implemented_tests():
             continue
 
         path = os.path.join(TESTS_DIR, name)
-        names = IMPLEMENTED.findall(io.open(path, encoding="utf-8", errors="ignore").read())
+        raw = io.open(path, encoding="utf-8", errors="ignore").read()
 
-        for test in names:
+        for _class_name, test in _class_and_name(raw):
             found.append((name, test))
 
     return found
@@ -204,6 +249,64 @@ def run(source_root=None, docs_root=None):
         if name.endswith(".cpp") and name not in by_file:
             problems.append((u"Tests/{0} declares no automation test.".format(name),
                              u"empty"))
+
+    # 6 and 7: every test has a body, and the file can actually be compiled out.
+    for path in sorted(os.listdir(TESTS_DIR)):
+        if not path.endswith(".cpp"):
+            continue
+
+        raw = io.open(os.path.join(TESTS_DIR, path), encoding="utf-8", errors="ignore").read()
+        code = C.strip_comments(raw)
+
+        declared_here = IMPLEMENTED.findall(raw)
+        bodies_here = set(RUN_TEST.findall(code))
+
+        if not declared_here:
+            continue
+
+        if '#include "Misc/AutomationTest.h"' not in raw:
+            problems.append((u"Tests/{0}: no Misc/AutomationTest.h include - the macro "
+                             u"and Test* helpers come from there.".format(path),
+                             u"include"))
+
+        if "WITH_AUTOMATION_TESTS" not in code:
+            problems.append((u"Tests/{0}: not wrapped in WITH_AUTOMATION_TESTS - the "
+                             u"suite would be compiled into shipping builds.".format(path),
+                             u"wrapper"))
+
+        for class_name, test_name in _class_and_name(raw):
+            if class_name in bodies_here:
+                continue
+
+            # The class may be defined in the same file under a different macro
+            # spelling, so look for the name at all before reporting.
+            if u"::RunTest" in code:
+                problems.append((u"Tests/{0}: '{1}' is implemented for class '{2}', which "
+                                 u"has no RunTest body in this file - a link error if the "
+                                 u"class is used, a silently unregistered test if it is "
+                                 u"not.".format(path, test_name, class_name),
+                                 u"body"))
+            else:
+                problems.append((u"Tests/{0}: '{1}' has no RunTest body at all.".format(
+                    path, test_name), u"body"))
+
+        # A test with no context flag never runs, and never running looks exactly
+        # like passing. A test with no filter flag fails UnrealHeaderTool's own
+        # static_assert - the framework insists on exactly one of each - so the
+        # context half is the one worth checking here.
+        for flags in IMPLEMENTED_FLAGS.findall(raw):
+            compact = " ".join(flags.split())
+
+            if "Context" not in compact:
+                problems.append((u"Tests/{0}: a test is declared with '{1}', which names no "
+                                 u"context - it would never run.".format(path, compact),
+                                 u"flags"))
+
+            if not any(filter_name in compact for filter_name in FILTER_FLAGS):
+                problems.append((u"Tests/{0}: a test is declared with '{1}', which names no "
+                                 u"filter (EngineFilter, ProductFilter, SmokeFilter, ...). "
+                                 u"UnrealHeaderTool asserts on this.".format(path, compact),
+                                 u"flags"))
 
     # 4: the scripts name tests and categories that exist.
     for script, mention in script_names():
