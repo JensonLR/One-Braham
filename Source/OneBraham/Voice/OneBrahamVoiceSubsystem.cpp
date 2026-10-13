@@ -694,35 +694,36 @@ float UOneBrahamVoiceSubsystem::GetLineCooldownRemaining(const AActor* Speaker, 
 
 void UOneBrahamVoiceSubsystem::GetQuickLineWheel(FName& OutLineId, FText& OutLabel, int32 SegmentIndex)
 {
-	// Eight segments, clockwise from the top. The order is the design: the first
-	// is the one that keeps people alive, the last is the one that ends a
-	// conversation, and the ones in between are what a squad says while it moves.
+	// Eight segments, clockwise from the top, every one of them a line the script
+	// already had. The wheel was built by reading Docs/14 rather than by inventing
+	// ids and hoping: seven of the eight existed before the wheel did, and the
+	// eighth - a bystander calling out a downed squadmate - was the one genuine
+	// hole in the script, so it was written rather than worked around.
 	//
-	// The ids are checked against the voice script by the tags checker and by
-	// Docs/14; a missing id means the segment is dropped from the wheel rather
-	// than drawn empty, so a content fault is visible rather than decorative.
+	// A segment whose line is missing is dropped from the wheel rather than drawn
+	// empty, so a content fault is visible instead of decorative.
 	static const FName WheelIds[] =
 	{
-		TEXT("V_CONTACT_ENEMY"),
-		TEXT("V_PUSHING"),
-		TEXT("V_HOLDING"),
-		TEXT("V_RELOADING_COVER"),
-		TEXT("V_MOVING_UP"),
-		TEXT("V_MAN_DOWN_ONE"),
-		TEXT("V_GOING_QUIET"),
-		TEXT("V_NEVER_MIND")
+		TEXT("V_CONTACT_ENEMY"),     // "Contact. One."
+		TEXT("V_PUSH_NOW"),          // "Now. Go now."
+		TEXT("V_HOLD_POSITION"),     // "Hold here. Let them come to us."
+		TEXT("V_RELOADING"),         // "Reloading - cover me."
+		TEXT("V_PING_MOVE"),         // "Move up."
+		TEXT("V_MAN_DOWN"),          // "Somebody's down - nearest one, get to him."
+		TEXT("V_QUIET"),             // "Quiet - I heard something in the ceiling."
+		TEXT("V_ACK_NEGATIVE")       // "No. Not that way."
 	};
 
 	static const FText WheelLabels[] =
 	{
 		NSLOCTEXT("OneBraham", "Wheel_Contact", "CONTACT"),
-		NSLOCTEXT("OneBraham", "Wheel_Pushing", "PUSHING"),
-		NSLOCTEXT("OneBraham", "Wheel_Holding", "HOLDING"),
+		NSLOCTEXT("OneBraham", "Wheel_Push", "PUSH"),
+		NSLOCTEXT("OneBraham", "Wheel_Hold", "HOLD"),
 		NSLOCTEXT("OneBraham", "Wheel_Reloading", "RELOADING"),
 		NSLOCTEXT("OneBraham", "Wheel_MovingUp", "MOVING UP"),
 		NSLOCTEXT("OneBraham", "Wheel_ManDown", "MAN DOWN"),
-		NSLOCTEXT("OneBraham", "Wheel_GoingQuiet", "GOING QUIET"),
-		NSLOCTEXT("OneBraham", "Wheel_NeverMind", "NEVER MIND")
+		NSLOCTEXT("OneBraham", "Wheel_Quiet", "QUIET"),
+		NSLOCTEXT("OneBraham", "Wheel_Negative", "NEGATIVE")
 	};
 
 	static_assert(UE_ARRAY_COUNT(WheelIds) == UE_ARRAY_COUNT(WheelLabels),

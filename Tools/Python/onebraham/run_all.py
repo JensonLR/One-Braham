@@ -27,9 +27,9 @@ USAGE
 
     Outside the editor, for the text-only steps:
         PYTHONPATH=Tools/Python python3 Tools/Python/onebraham/run_all.py --text-only
-        (input_ini, cpp_symbols, uht_contracts, soft_paths, calls, tags and
-         layout: none needs a running editor, so all seven work on a fresh
-         checkout and in CI)
+        (input_ini, cpp_symbols, uht_contracts, soft_paths, calls, tags, layout
+         and voice_lines: none needs a running editor, so all eight work on a
+         fresh checkout and in CI)
 
     Useful switches:
         --only materials,weapons      run just these steps
@@ -70,6 +70,8 @@ STEPS = [
      "every gameplay tag the code asks for, declared natively or in the ini"),
     ("layout", "onebraham.check_building_layout", False,
      "the building the map authors against the building the game describes"),
+    ("voice_lines", "onebraham.check_voice_lines", False,
+     "every voice line the code asks for, against the script and the recording brief"),
     ("materials", "onebraham.build_materials", True,
      "master materials, physical materials, surface and brand instances"),
     ("environment", "onebraham.build_environment", True,

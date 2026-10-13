@@ -44,7 +44,46 @@ shortcut a player can take without somebody knowing.
 
 ---
 
-## 2. Area by area
+## 2. The floor table, and why it is an asset
+
+Every floor in this document has a number, an area and a name. The level is built
+from one table of those (`common.AREAS` in the content pipeline) and the game
+describes the level from another (`UOneBrahamBuildingLayoutAsset`). That is two
+tables, two languages, one building, and the failure mode when they drift is
+specific and silent: the floor plan tells a player they are on the executive floor
+while they are standing in the server hall, the lockdown seals the wrong room, and
+the audio director scores a boardroom with a data-centre hum.
+
+So the numbers live in one place, and `check_building_layout.py` compares the
+game's table against the map's table floor by floor and fails the build if they
+disagree. The table:
+
+| Floor | Area id | The lift says | The plan says | Notes |
+| --- | --- | --- | --- | --- |
+| 0 | `Ground_Plaza` | Ground plaza and reception | PLAZA | spawn, turnstiles |
+| 1 | `Lobby` | Lobby | LOBBY | reception island, lift bank |
+| 2 | `Mezzanine` | Mezzanine and lift lobby | MEZZANINE | atrium bridge |
+| 3–8 | `OpenPlan` | Open plan office | OFFICES | breachable on 5 |
+| 9–11 | `ServerComms` | Server and comms | SERVER / COMMS | breachable on 9 |
+| 12 | `Executive` | Executive wing and boardroom | EXECUTIVE | breachable on 12 |
+| 13–14 | `Canteen` | Canteen and terrace | CANTEEN | breachable on 14 |
+| 15 | `Skydeck` | Skydeck and extraction | SKYDECK | the winch |
+
+`/Game/OneBraham/Data/DA_BuildingLayout` is the authored asset. It is optional by
+design: the compiled-in default on the class is the shipping building, so a clean
+checkout with no content still describes the tower correctly, and the asset exists
+so a designer can move a floor without a programmer. The asset also carries the
+breachable-wall flags, which is why the plan's breach warnings cannot point at a
+wall the map does not have.
+
+What reads it: the floor plan (`UOneBrahamFloorPlanWidget`), the lift
+announcements, the spawn selector, the lockdown director's floor names, the audio
+director's zone mapping, and the QA console. Anything that used to invent its own
+floor-name table now asks this one.
+
+---
+
+### Area by area
 
 ### 2.1 Ground Plaza and Entrance — floor 0
 

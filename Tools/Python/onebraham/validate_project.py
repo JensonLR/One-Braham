@@ -85,6 +85,11 @@ WHAT IT CHECKS, AND WHY EACH ONE HAS BITTEN SOMEONE
                                                         names floors wrongly, in
                                                         every direction, without
                                                         an error.
+    25. Voice lines                                   - a line the code asks for
+                                                        that the script does not
+                                                        have is a character who
+                                                        says nothing, silently,
+                                                        forever.
 
     It writes Saved/Validation/ob_validation_<timestamp>.md and exits non-zero on
     any FAIL. Warnings do not fail the build; failures do.
@@ -1470,6 +1475,38 @@ def check_building_layout(v, _config_only):
         v.fail("building layout", message)
 
 
+def check_voice_lines(v, _config_only):
+    """Every voice line the code asks for exists, and every line is in the brief.
+
+    A voice line id is a string. The subsystem looks it up, does not find it,
+    logs at Verbose and returns false: nothing is said, nothing is shown, and no
+    test fails. The comms wheel's first draft named eight ids, seven of which had
+    been invented - which would have produced a wheel where seven of the eight
+    segments did nothing and every screenshot looked correct.
+
+    The second half of the check matters as much as the first: a line in the code
+    and not in Docs/14_Voice_Script.md is a line nobody will ever record.
+    """
+    try:
+        from onebraham import check_voice_lines
+    except Exception as exc:  # noqa: BLE001
+        v.warn("voice lines", u"checker unavailable: {0}".format(exc))
+        return
+
+    checked, problems = check_voice_lines.run()
+
+    if checked == 0:
+        v.warn("voice lines", u"no voice line references found")
+        return
+
+    if not problems:
+        v.pass_("voice lines", u"all {0} line references are declared and documented".format(checked))
+        return
+
+    for message, kind in problems:
+        v.fail("voice lines", u"[{0}] {1}".format(kind, message))
+
+
 # ---------------------------------------------------------------------------
 #  Report
 # ---------------------------------------------------------------------------
@@ -1534,6 +1571,7 @@ def build_all(config_only=False):
         ("call arity", check_calls),
         ("gameplay tags", check_gameplay_tags),
         ("building layout", check_building_layout),
+        ("voice lines", check_voice_lines),
     ]
 
     for label, fn in checks:

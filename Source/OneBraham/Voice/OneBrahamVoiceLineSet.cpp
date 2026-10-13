@@ -92,6 +92,12 @@ void UOneBrahamVoiceLineSet::EnsureCoreLines()
 		Line(TEXT("V_OVERRIDE_IN_PROGRESS"),		TEXT("Still going. Ten more seconds."), EOneBrahamVoicePriority::Tactical, 6.f),
 		Line(TEXT("V_OVERRIDE_DENIED"),				TEXT("It's refused. Card's not high enough."), EOneBrahamVoicePriority::Tactical, 5.f),
 		Line(TEXT("V_OVERRIDE_COMPLETE"),			TEXT("Override's done. Floors opening up."), EOneBrahamVoicePriority::Critical, 3.f),
+		// The building's own announcement, not a character's: fifteen seconds before
+		// each lockdown stage, delivered 2D through the PA. The wording is the
+		// building's, which is to say the wording of a fire drill - the horror of
+		// this game is that the tower locks down politely and exactly as designed,
+		// and a line that broke register to sound dramatic would lose that.
+		Line(TEXT("V_LOCKDOWN_WARNING"),			TEXT("Attention: the lower floors are closing. Please move up."), EOneBrahamVoicePriority::Critical, 5.f),
 		Line(TEXT("V_LOCKDOWN_START"),				TEXT("That's the alarms - they're shutting the floors down."), EOneBrahamVoicePriority::Critical, 4.f),
 		Line(TEXT("V_SHUTTERS_CLOSED"),				TEXT("Shutters are down behind us. No way back."), EOneBrahamVoicePriority::Critical, 5.f),
 		Line(TEXT("V_FLOOR_SECURED"),				TEXT("This floor's sealed. We're committed."), EOneBrahamVoicePriority::Tactical, 6.f),
@@ -122,6 +128,10 @@ void UOneBrahamVoiceLineSet::EnsureCoreLines()
 		Line(TEXT("V_ACK_NEGATIVE"),				TEXT("No. Not that way."), EOneBrahamVoicePriority::Tactical, 3.f),
 		Line(TEXT("V_GOOD_KILL"),					TEXT("Nice one."), EOneBrahamVoicePriority::Flavour, 12.f, 0.35f),
 		Line(TEXT("V_BAD_LUCK"),					TEXT("Hard lines. He was waiting for you."), EOneBrahamVoicePriority::Flavour, 12.f, 0.35f),
+		// Spoken by a bystander, not by the downed player: the wheel's "man down"
+		// segment needs somebody to say it, and before this line existed the only
+		// way to tell a squadmate was to hope they noticed the panel.
+		Line(TEXT("V_MAN_DOWN"),					TEXT("Somebody's down - nearest one, get to him."), EOneBrahamVoicePriority::Critical, 4.f),
 		Line(TEXT("V_SQUAD_WIPED"),					TEXT("That's the squad. It's on me now."), EOneBrahamVoicePriority::Critical, 4.f),
 		Line(TEXT("V_LAST_MAN_STANDING"),			TEXT("Last one up. Fine."), EOneBrahamVoicePriority::Critical, 4.f),
 

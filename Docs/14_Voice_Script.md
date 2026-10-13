@@ -117,6 +117,7 @@ Priority and cooldown are the runtime's, not the actor's. They are here so the w
 | `V_OVERRIDE_IN_PROGRESS` | "Still going. Ten more seconds." | tactical - plays at the next natural break | 6s | always |
 | `V_OVERRIDE_DENIED` | "It's refused. Card's not high enough." | tactical - plays at the next natural break | 5s | always |
 | `V_OVERRIDE_COMPLETE` | "Override's done. Floors opening up." | critical - ducks everything, plays immediately | 3s | always |
+| `V_LOCKDOWN_WARNING` | "Attention: the lower floors are closing. Please move up." | **the building's own announcement voice**, not an archetype - 2D, through the PA, ducks everything | 5s | announcement only |
 | `V_LOCKDOWN_START` | "That's the alarms - they're shutting the floors down." | critical - ducks everything, plays immediately | 4s | always |
 | `V_SHUTTERS_CLOSED` | "Shutters are down behind us. No way back." | critical - ducks everything, plays immediately | 5s | always |
 | `V_FLOOR_SECURED` | "This floor's sealed. We're committed." | tactical - plays at the next natural break | 6s | always |
@@ -153,6 +154,7 @@ Priority and cooldown are the runtime's, not the actor's. They are here so the w
 | `V_ACK_NEGATIVE` | "No. Not that way." | tactical - plays at the next natural break | 3s | always |
 | `V_GOOD_KILL` | "Nice one." | flavour - only if nothing else is talking and never twice in a minute | 12s | 35% |
 | `V_BAD_LUCK` | "Hard lines. He was waiting for you." | flavour - only if nothing else is talking and never twice in a minute | 12s | 35% |
+| `V_MAN_DOWN` | "Somebody's down - nearest one, get to him." | critical - ducks everything, plays immediately | 4s | always |
 | `V_SQUAD_WIPED` | "That's the squad. It's on me now." | critical - ducks everything, plays immediately | 4s | always |
 | `V_LAST_MAN_STANDING` | "Last one up. Fine." | critical - ducks everything, plays immediately | 4s | always |
 
@@ -186,7 +188,44 @@ Priority and cooldown are the runtime's, not the actor's. They are here so the w
 
 ---
 
-## 3. Archetype variants
+
+---
+
+## 3. The comms wheel
+
+Eight lines the player says on purpose, mapped to the eight segments of the
+in-game comms wheel (`Docs/08_UI.md`, "The three overlays"). Seven of these
+already existed in the script; the wheel was designed by reading the table above,
+not the other way round. `V_MAN_DOWN` and `V_LOCKDOWN_WARNING` were written
+because the wheel exposed two genuine holes.
+
+| # | Segment | Line id | Says | Why this one |
+| --- | --- | --- | --- | --- |
+| 1 | CONTACT | `V_CONTACT_ENEMY` | "Contact. One." | the line that keeps people alive |
+| 2 | PUSH | `V_PUSH_NOW` | "Now. Go now." | the shortest thing in the script, deliberately |
+| 3 | HOLD | `V_HOLD_POSITION` | "Hold here. Let them come to us." | the counter to PUSH, and the reason both exist |
+| 4 | RELOADING | `V_RELOADING` | "Reloading - cover me." | the most-used line in any match |
+| 5 | MOVING UP | `V_PING_MOVE` | "Move up." | the vertical game, in two words |
+| 6 | MAN DOWN | `V_MAN_DOWN` | "Somebody's down - nearest one, get to him." | written for the wheel: a bystander's callout, which the script did not have |
+| 7 | QUIET | `V_QUIET` | "Quiet - I heard something in the ceiling." | going silent, said out loud |
+| 8 | NEGATIVE | `V_ACK_NEGATIVE` | "No. Not that way." | cancels the last callout |
+
+**Rules the wheel follows**
+
+1. **Every segment speaks an existing line.** A wheel that invents ids produces
+   seven segments that do nothing and look fine in a screenshot, which is exactly
+   what the first draft of it did.
+2. **A segment never invents delivery.** The line is spoken the way the archetype
+   speaks it (`§4`), at the priority in its own row, with its own cooldown
+   enforced on the server. The wheel chooses *which* line, never *how*.
+3. **Nothing is spoken locally.** Pressing a segment asks the server; the server
+   resolves the line and multicasts it. A modified client can ask faster and
+   nothing more.
+4. **A line on cooldown is drawn greyed** with its remaining seconds, so a player
+   is told before they commit rather than after. The numbers come from the same
+   table the server enforces.
+
+## 4. Archetype variants
 
 Eleven lines, six times each. These are the lines a player hears most, and the reason two squads sound like two squads. Read the intent column, then say it the way your archetype would - not the way the row above says it.
 
@@ -200,6 +239,8 @@ Eleven lines, six times each. These are the lines a player hears most, and the r
 | `V_KEYCARD_FOUND` | picked up a card. This is the line that changes the match |
 | `V_OVERRIDE_COMPLETE` | the override finished. Relief, immediately suppressed |
 | `V_EXTRACTION_CALLED` | the winch is called - the loudest thing anyone says all match |
+| `V_LOCKDOWN_WARNING` | **the building, not a person.** This is a fire-drill announcement read by whoever records the PA at Pinewood: pleasant, unhurried, mid-Atlantic corporate, entirely without irony. It should sound exactly like the lift. That is the joke, and it is also the threat |
+| `V_MAN_DOWN` | a bystander, not the downed player, and the tone is practical rather than distressed: somebody has a problem and somebody else is nearest. It is the only line on the comms wheel that is a request for a specific person to do a specific thing |
 | `V_LOCKDOWN_START` | shutters coming down. Understated: the building did it, not them |
 | `V_VICTORY` | on the deck. No celebration, just breathing and one line |
 | `V_AMBIENT_SKYDECK` | the idle line on the roof: ground level to 15th floor, done |
@@ -277,7 +318,7 @@ Eleven lines, six times each. These are the lines a player hears most, and the r
 
 ---
 
-## 4. Things nobody says
+## 5. Things nobody says
 
 Written down because the first take of a line is always the wrong one, and these are the wrong ones:
 
@@ -287,14 +328,20 @@ Written down because the first take of a line is always the wrong one, and these
 * Any line that explains the game to the player ("the extraction is on the roof!") - the HUD does that, and the character is not a tutorial.
 * Any line that is funny on purpose. If it is funny, it is because the situation is, and the actor is playing it straight.
 
-## 5. Line count and coverage
+## 6. Line count and coverage
 
 | Group | Lines |
 | --- | --- |
-| Core lines in the runtime table above | 95 |
+| Core lines in the runtime table above | 97 |
 | Archetype variants (11 lines x 6 archetypes) | 66 |
-| **Total rows to record** | **161** |
+| **Total rows to record** | **163** |
 
-Eleven of the core lines are recorded six times each; the other 84 are recorded once and used unpitched by every archetype, because a grenade warning does not need six readings and the radio channel is narrow.
+The 97 is not a claim, it is a count: `OneBrahamVoiceLineSet.cpp` contains 97
+`Line(...)` rows, every one of them is listed above, and
+`check_voice_lines.py` fails the build if those two stop agreeing in either
+direction. The two lines added for the comms wheel - `V_MAN_DOWN` and
+`V_LOCKDOWN_WARNING` - are included.
+
+Eleven of the core lines are recorded six times each; the other 86 are recorded once and used unpitched by every archetype, because a grenade warning does not need six readings and the radio channel is narrow.
 
 Coverage: every gameplay event that a player must communicate has a line - 12 combat, 8 downed/revive, 13 weapons and utility, 6 access and lockdown, 7 objective and extraction, 9 social and team, 9 ambient, 6 match, plus the deaths and the objective calls. A squad that never uses a microphone can still play ASCENT properly, which is the actual design goal of the voice system.
