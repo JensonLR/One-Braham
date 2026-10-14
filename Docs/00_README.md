@@ -36,6 +36,7 @@ validator fails the build if the two disagree.
 | 19 | [Steam, marketing, trailer](19_Steam_Marketing_Trailer.md) | the store page, the capsule art, the 96-second trailer |
 | 20 | [Release checklists](20_Release_Checklists.md) | everything that must pass before a build goes out |
 | 21 | [Xbox](21_Xbox.md) | ID@Xbox, what the code already does for consoles, and what needs the GDK |
+| 22 | [First day on a Mac](22_First_Day_Mac.md) | Xcode, the engine, the code, the first compile, the content build, playing |
 | — | [Licences](LICENCES.md) | every third-party asset and its licence |
 
 ---

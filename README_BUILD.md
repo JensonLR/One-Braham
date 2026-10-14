@@ -48,6 +48,8 @@ Each step proves something the next one relies on:
 
 ## Working on a Mac
 
+Step by step, from an empty Mac to playing in the editor: `Docs/22_First_Day_Mac.md`.
+
 A Mac can run the editor, compile the game module, build the content and play
 in the editor. It cannot package the shipped builds: the client is packaged on
 Windows and the server on Windows or Linux. Requirements for UE 5.5, from
