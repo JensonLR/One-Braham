@@ -7,6 +7,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "GameFramework/Actor.h"
 #include "OneBraham.h"
+#include "Core/OneBrahamGameSettings.h"
 
 // ===========================================================================
 //  Lookups
@@ -43,6 +44,17 @@ const FOneBrahamArchetypeDefinition* UOneBrahamCharacterDataAsset::FindArchetype
 const FOneBrahamArchetypeDefinition* UOneBrahamCharacterDataAsset::FindArchetypeByIndex(int32 Index) const
 {
 	return Archetypes.IsValidIndex(Index) ? &Archetypes[Index] : nullptr;
+}
+
+UOneBrahamCharacterDataAsset* UOneBrahamCharacterDataAsset::LoadRegistry()
+{
+	if (UOneBrahamCharacterDataAsset* Configured = UOneBrahamGameSettings::Get().CharacterRegistry.LoadSynchronous())
+	{
+		return Configured;
+	}
+
+	return LoadObject<UOneBrahamCharacterDataAsset>(
+		nullptr, TEXT("/Game/OneBraham/Characters/DA_CharacterRegistry.DA_CharacterRegistry"));
 }
 
 const FOneBrahamCosmeticSlot* UOneBrahamCharacterDataAsset::FindCosmeticSlot(FName SlotName) const
@@ -357,7 +369,7 @@ void UOneBrahamCharacterDataAsset::PostEditChangeProperty(FPropertyChangedEvent&
 		Jacket.SlotName = TEXT("Jacket");
 		Jacket.DisplayName = NSLOCTEXT("OneBraham", "Slot_Jacket", "Jacket");
 		Jacket.ParentBone = TEXT("spine_03");
-		Jacket.RelativeOffset = FVector(0f, 0f, 0f);
+		Jacket.RelativeOffset = FVector(0.f, 0.f, 0.f);
 		Jacket.bHiddenWhenArmed = false;
 		CosmeticSlots.Add(Jacket);
 
@@ -365,7 +377,7 @@ void UOneBrahamCharacterDataAsset::PostEditChangeProperty(FPropertyChangedEvent&
 		Fleece.SlotName = TEXT("Fleece");
 		Fleece.DisplayName = NSLOCTEXT("OneBraham", "Slot_Fleece", "Fleece");
 		Fleece.ParentBone = TEXT("spine_03");
-		Fleece.RelativeOffset = FVector(0f, 0f, 0f);
+		Fleece.RelativeOffset = FVector(0.f, 0.f, 0.f);
 		Fleece.bHiddenWhenArmed = false;
 		CosmeticSlots.Add(Fleece);
 
@@ -373,7 +385,7 @@ void UOneBrahamCharacterDataAsset::PostEditChangeProperty(FPropertyChangedEvent&
 		HiVis.SlotName = TEXT("HiVis");
 		HiVis.DisplayName = NSLOCTEXT("OneBraham", "Slot_HiVis", "Hi-Vis Vest");
 		HiVis.ParentBone = TEXT("spine_03");
-		HiVis.RelativeOffset = FVector(0f, 0f, 2f);
+		HiVis.RelativeOffset = FVector(0.f, 0.f, 2.f);
 		HiVis.bHiddenWhenArmed = false;
 		CosmeticSlots.Add(HiVis);
 
@@ -381,7 +393,7 @@ void UOneBrahamCharacterDataAsset::PostEditChangeProperty(FPropertyChangedEvent&
 		Trousers.SlotName = TEXT("Trousers");
 		Trousers.DisplayName = NSLOCTEXT("OneBraham", "Slot_Trousers", "Trousers");
 		Trousers.ParentBone = TEXT("pelvis");
-		Trousers.RelativeOffset = FVector(0f, 0f, 0f);
+		Trousers.RelativeOffset = FVector(0.f, 0.f, 0.f);
 		Trousers.bHiddenWhenArmed = false;
 		CosmeticSlots.Add(Trousers);
 
@@ -389,7 +401,7 @@ void UOneBrahamCharacterDataAsset::PostEditChangeProperty(FPropertyChangedEvent&
 		Shoes.SlotName = TEXT("Shoes");
 		Shoes.DisplayName = NSLOCTEXT("OneBraham", "Slot_Shoes", "Shoes");
 		Shoes.ParentBone = TEXT("foot_l");
-		Shoes.RelativeOffset = FVector(0f, 0f, 0f);
+		Shoes.RelativeOffset = FVector(0.f, 0.f, 0.f);
 		Shoes.bHiddenWhenArmed = false;
 		CosmeticSlots.Add(Shoes);
 
@@ -397,7 +409,7 @@ void UOneBrahamCharacterDataAsset::PostEditChangeProperty(FPropertyChangedEvent&
 		Lanyard.SlotName = TEXT("Lanyard");
 		Lanyard.DisplayName = NSLOCTEXT("OneBraham", "Slot_Lanyard", "Lanyard");
 		Lanyard.ParentBone = TEXT("spine_03");
-		Lanyard.RelativeOffset = FVector(-4f, 0f, 12f);
+		Lanyard.RelativeOffset = FVector(-4.f, 0.f, 12.f);
 		Lanyard.bHiddenWhenArmed = false;
 		CosmeticSlots.Add(Lanyard);
 
@@ -405,7 +417,7 @@ void UOneBrahamCharacterDataAsset::PostEditChangeProperty(FPropertyChangedEvent&
 		Badge.SlotName = TEXT("Badge");
 		Badge.DisplayName = NSLOCTEXT("OneBraham", "Slot_Badge", "Access Badge");
 		Badge.ParentBone = TEXT("spine_03");
-		Badge.RelativeOffset = FVector(-4f, 0f, 10f);
+		Badge.RelativeOffset = FVector(-4.f, 0.f, 10.f);
 		Badge.bHiddenWhenArmed = false;
 		CosmeticSlots.Add(Badge);
 
@@ -413,7 +425,7 @@ void UOneBrahamCharacterDataAsset::PostEditChangeProperty(FPropertyChangedEvent&
 		Bag.SlotName = TEXT("Bag");
 		Bag.DisplayName = NSLOCTEXT("OneBraham", "Slot_Bag", "Bag");
 		Bag.ParentBone = TEXT("spine_03");
-		Bag.RelativeOffset = FVector(0f, -8f, 0f);
+		Bag.RelativeOffset = FVector(0.f, -8.f, 0.f);
 		Bag.bHiddenWhenArmed = false;
 		CosmeticSlots.Add(Bag);
 
@@ -421,7 +433,7 @@ void UOneBrahamCharacterDataAsset::PostEditChangeProperty(FPropertyChangedEvent&
 		Headwear.SlotName = TEXT("Headwear");
 		Headwear.DisplayName = NSLOCTEXT("OneBraham", "Slot_Headwear", "Headwear");
 		Headwear.ParentBone = TEXT("head");
-		Headwear.RelativeOffset = FVector(0f, 0f, 0f);
+		Headwear.RelativeOffset = FVector(0.f, 0.f, 0.f);
 		Headwear.bHiddenWhenArmed = false;
 		CosmeticSlots.Add(Headwear);
 
@@ -429,7 +441,7 @@ void UOneBrahamCharacterDataAsset::PostEditChangeProperty(FPropertyChangedEvent&
 		Gloves.SlotName = TEXT("Gloves");
 		Gloves.DisplayName = NSLOCTEXT("OneBraham", "Slot_Gloves", "Gloves");
 		Gloves.ParentBone = TEXT("hand_r");
-		Gloves.RelativeOffset = FVector(0f, 0f, 0f);
+		Gloves.RelativeOffset = FVector(0.f, 0.f, 0.f);
 		Gloves.bHiddenWhenArmed = false;
 		CosmeticSlots.Add(Gloves);
 
@@ -437,7 +449,7 @@ void UOneBrahamCharacterDataAsset::PostEditChangeProperty(FPropertyChangedEvent&
 		Watch.SlotName = TEXT("Watch");
 		Watch.DisplayName = NSLOCTEXT("OneBraham", "Slot_Watch", "Watch");
 		Watch.ParentBone = TEXT("hand_l");
-		Watch.RelativeOffset = FVector(0f, 0f, 0f);
+		Watch.RelativeOffset = FVector(0.f, 0.f, 0.f);
 		Watch.bHiddenWhenArmed = false;
 		CosmeticSlots.Add(Watch);
 
@@ -445,7 +457,7 @@ void UOneBrahamCharacterDataAsset::PostEditChangeProperty(FPropertyChangedEvent&
 		BagTag.SlotName = TEXT("BagTag");
 		BagTag.DisplayName = NSLOCTEXT("OneBraham", "Slot_BagTag", "Bag Tag");
 		BagTag.ParentBone = TEXT("spine_03");
-		BagTag.RelativeOffset = FVector(0f, -9f, 4f);
+		BagTag.RelativeOffset = FVector(0.f, -9.f, 4.f);
 		BagTag.bHiddenWhenArmed = false;
 		CosmeticSlots.Add(BagTag);
 	}

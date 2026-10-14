@@ -29,7 +29,7 @@
 			"Enabled": true
 		},
 		{
-			"Name": "ChaosClothPlugin",
+			"Name": "ChaosCloth",
 			"Enabled": true
 		},
 		{
@@ -61,6 +61,7 @@
 			"Enabled": true,
 			"SupportedTargetPlatforms": [
 				"Win64",
+				"Mac",
 				"Linux"
 			]
 		},
@@ -72,7 +73,21 @@
 			]
 		},
 		{
+			"Name": "PythonScriptPlugin",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
 			"Name": "EditorScriptingUtilities",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
+			"Name": "DataValidation",
 			"Enabled": true,
 			"TargetAllowList": [
 				"Editor"
@@ -81,6 +96,7 @@
 	],
 	"TargetPlatforms": [
 		"Windows",
+		"Mac",
 		"Linux"
 	],
 	"EpicSampleNameHash": "",

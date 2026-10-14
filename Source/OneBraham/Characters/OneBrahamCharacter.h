@@ -49,9 +49,10 @@ struct FOneBrahamCharacterAppearance
 	UPROPERTY(BlueprintReadOnly, Category = "Appearance")
 	FGameplayTag ArchetypeTag;
 
-	/** Slot -> cosmetic asset id. */
+	/** Slot -> cosmetic asset id, as an array: a TMap in a replicated struct
+	 *  never reaches a client. */
 	UPROPERTY(BlueprintReadOnly, Category = "Appearance")
-	TMap<FName, FName> EquippedCosmetics;
+	TArray<FOneBrahamCosmeticEntry> EquippedCosmetics;
 
 	/** Which MetaHuman/body mesh variant (0-3) this archetype uses. */
 	UPROPERTY(BlueprintReadOnly, Category = "Appearance")
@@ -185,13 +186,13 @@ public:
 	void SetSprintRequested(bool bSprint);
 
 	UFUNCTION(BlueprintPure, Category = "One Braham|Character")
-	bool IsSprintRequested() const { return bSprintRequested; }
+	bool IsSprintRequested() const;
 
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Character")
 	void ToggleWalkState();
 
 	UFUNCTION(BlueprintPure, Category = "One Braham|Character")
-	bool IsWalking() const { return bWalking; }
+	bool IsWalking() const;
 
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Character")
 	void ToggleCrouchState();
@@ -282,25 +283,15 @@ public:
 	FOneBrahamDamaged OnDamageReported;
 
 	// ======================================================================
-	//  Server RPCs (all rate limited through AOneBrahamPlayerController)
+	//  Server RPCs (all rate limited through AOneBrahamPlayerController).
+	//  Sprint, walk, slide and mantle are not here: they ride in the movement
+	//  component's saved moves (UOneBrahamCharacterMovementComponent).
 	// ======================================================================
-	UFUNCTION(Server, Reliable, Category = "One Braham|Character")
-	void ServerSetSprint(bool bSprint);
-
-	UFUNCTION(Server, Reliable, Category = "One Braham|Character")
-	void ServerSetWalk(bool bWalk);
-
 	UFUNCTION(Server, Reliable, Category = "One Braham|Character")
 	void ServerSetCrouch(bool bCrouch);
 
 	UFUNCTION(Server, Unreliable, Category = "One Braham|Character")
 	void ServerSetLean(float Lean);
-
-	UFUNCTION(Server, Reliable, Category = "One Braham|Character")
-	void ServerRequestMantle(FVector_NetQuantize LedgeLocation);
-
-	UFUNCTION(Server, Reliable, Category = "One Braham|Character")
-	void ServerRequestSlide();
 
 	/** Client tells the server its floor so the HUD/audio can update without a full trace. */
 	UFUNCTION(Server, Unreliable, Category = "One Braham|Character")
@@ -340,6 +331,14 @@ protected:
 
 	/** Cheap 2 Hz floor detection: floor index from world Z, cached. */
 	void UpdateFloorIndex(float DeltaSeconds);
+
+	/**
+	 * Every machine with a listener, every character: hands this frame's speed
+	 * and the surface underfoot to the listener's audio manager, which owns the
+	 * stride. Footsteps were silent - nothing called TickFootstepAudio - in a
+	 * game whose stealth layer is "carpet is quiet, metal stairs are not".
+	 */
+	void TickFootsteps(float DeltaSeconds);
 
 	/** Handles the animation-relevant state (sprint/ADS/crouch) for the ABP. */
 	void UpdateAnimationState();
@@ -442,6 +441,10 @@ private:
 	/** Accumulators for the 2 Hz/10 Hz subsystems. */
 	float FloorCheckAccumulator = 0.f;
 
+	/** The ground under this character, re-classified at 4 Hz by a short trace. */
+	EOneBrahamFootstepSurface FootstepSurface = EOneBrahamFootstepSurface::Concrete;
+	float FootstepSurfaceAccumulator = 0.f;
+
 	/** Server: the accumulator for the 4 Hz authoritative movement check. */
 	float SpeedReportAccumulator = 0.f;
 
@@ -455,4 +458,7 @@ private:
 	 * stale.
 	 */
 	float LastClientSpeedReportTime = -1.f;
+
+	/** Speed reports closer together than this are dropped (they are sent every 0.25 s). */
+	static constexpr float MinSpeedReportGapSeconds = 0.1f;
 };

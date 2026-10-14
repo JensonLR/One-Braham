@@ -90,11 +90,20 @@ bool FOneBrahamVoiceLineSetTest::RunTest(const FString& Parameters)
 
 	Set->EnsureCoreLines();
 
-	// 97 core lines plus 66 archetype variants. The count is documentation the
+	// 105 core lines plus 66 archetype variants. The count is documentation the
 	// checker also enforces (check_voice_lines.py), so a change here is a change
 	// to the script, not to the test.
 	TestTrue(TEXT("the core table filled the set"), Set->Lines.Num() >= 160);
-	TestEqual(TEXT("97 core lines and 66 variants"), Set->Lines.Num(), 97 + 66);
+	TestEqual(TEXT("105 core lines and 66 variants"), Set->Lines.Num(), 105 + 66);
+
+	// Every row is a different line: the variants are the six archetypes' own
+	// words, not six recordings of the same sentence.
+	TSet<FString> Subtitles;
+	for (const FOneBrahamVoiceLine& Line : Set->Lines)
+	{
+		Subtitles.Add(Line.Subtitle.ToString());
+	}
+	TestTrue(TEXT("at least 120 distinct lines"), Subtitles.Num() >= 120);
 
 	TSet<FName> Seen;
 	int32 Subtitleless = 0;

@@ -168,9 +168,17 @@ public:
 	// ======================================================================
 	//  Cosmetics (replicated so other clients render the correct outfit)
 	// ======================================================================
-	/** Slot tag name -> cosmetic id. Populated from UOneBrahamSaveSettings on login. */
-	UPROPERTY(ReplicatedUsing = OnRep_Cosmetics, BlueprintReadOnly, Category = "One Braham|Cosmetics")
+	/** Slot name -> cosmetic id. Sent by the player's own machine and validated in
+	 *  AOneBrahamPlayerController::ServerSetAppearance (Docs/13 section 3). */
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Cosmetics")
 	TMap<FName, FName> EquippedCosmetics;
+
+	/** The outfit on the wire; OnRep_Cosmetics rebuilds EquippedCosmetics from it. */
+	UPROPERTY(ReplicatedUsing = OnRep_Cosmetics)
+	TArray<FOneBrahamCosmeticEntry> ReplicatedCosmetics;
+
+	/** Server: the one way to change the outfit, so the map and the wire agree. */
+	void SetEquippedCosmetics(const TMap<FName, FName>& InCosmetics);
 
 	// ======================================================================
 	//  API
@@ -223,6 +231,13 @@ public:
 
 	/** Snapshot used by the end-of-match screen. */
 	FOneBrahamPlayerSummary MakeSummary() const;
+
+	/**
+	 * Server: puts the archetype and the outfit on this player's pawn here, as the
+	 * RepNotifies do on every client. A RepNotify never runs where the value was
+	 * set, so without this a listen host saw nobody's appearance change.
+	 */
+	void ApplyAppearanceLocally();
 
 protected:
 	UFUNCTION() void OnRep_Team();

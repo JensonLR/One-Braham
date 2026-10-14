@@ -214,6 +214,16 @@ protected:
 	/** Local: strobe + chime, then the move. */
 	void PlayWarning();
 
+	/**
+	 * Server: the warning on every machine. ServerSetClosed called PlayWarning
+	 * directly, so the strobe and the chime - the only notice a player gets that
+	 * a steel shutter is about to drop in front of them - happened on the server
+	 * and nowhere a player was sitting, except a listen host, who heard the
+	 * chime once per player.
+	 */
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastPlayWarning();
+
 	/** Local: the thump, the dust, and the floor announcement. */
 	void PlayMovementEffects(bool bNowClosed);
 

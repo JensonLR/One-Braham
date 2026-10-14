@@ -168,4 +168,24 @@ namespace OneBrahamConstants
 
 	/** Half a storey: the threshold for "that sound came from another floor". */
 	static constexpr float HalfFloorHeightCm = FloorHeightCm * 0.5f;
+
+	/**
+	 * The building's datum (Docs/09 section 1): floor N's finished floor level is
+	 * (N - 1) x 400 cm. The lobby (1) is Z = 0, the plaza (0) is -400, the
+	 * Skydeck (15) is 5600. The map builder places every slab from the same rule.
+	 *
+	 * Four places used to compute the floor as Z / 400, which reads the lobby
+	 * as floor 0 and every floor one low: the lockdown purged the storey above
+	 * the one it announced. These two are the only conversions.
+	 */
+	inline float FloorZ(int32 FloorIndex)
+	{
+		return static_cast<float>(FloorIndex - 1) * FloorHeightCm;
+	}
+
+	/** The floor a point stands on, clamped to the plaza..Skydeck range. */
+	inline int32 FloorIndexForZ(float Z)
+	{
+		return FMath::Clamp(FMath::FloorToInt(Z / FloorHeightCm) + 1, 0, static_cast<int32>(FloorSkydeck));
+	}
 }

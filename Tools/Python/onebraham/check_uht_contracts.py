@@ -26,7 +26,18 @@ WHY THIS EXISTS
          C++, which UHT rejects and which is always a leftover.
 
       5. `ReplicatedUsing = OnRep_Thing` naming something that is not a
-         UFUNCTION, or is nothing at all.
+         UFUNCTION, or is nothing at all - or a RepNotify that takes a
+         parameter of any type but the property's own (the previous value),
+         which UHT rejects. `TObjectPtr<T>` is passed as `T*`.
+
+      8. **A replicated TMap or TSet**, or a replicated property whose struct
+         (or array of structs) has a TMap or TSet member. UHT rejects the
+         first outright; the second compiles and the map never reaches a
+         client. Four maps - a weapon's attachments, a player's reserve ammo
+         and owned weapons, and everyone's outfit - were declared Replicated,
+         so the module could not build, and the character's appearance struct
+         carried a fifth inside it. Replicate an array of entries and rebuild
+         the map in the RepNotify (FOneBrahamCosmeticEntry and friends).
 
       6. **A Replicated specifier on a struct member.** A struct is not a
          replication unit; it travels as one property on the object that
@@ -167,6 +178,28 @@ def _property_name(declaration):
     return match.group(1) if match else None
 
 
+def _normalised_type(text):
+    """A C++ type for comparison: no const, no reference, no spaces; TObjectPtr<T> is T*."""
+    text = re.sub(r'\bconst\b', "", text).replace("&", "")
+    text = re.sub(r'TObjectPtr\s*<\s*([^>]+?)\s*>', r'\1*', text)
+    return re.sub(r'\s+', "", text)
+
+
+def _declared_type(statement, name):
+    """The type in front of a member's name: `FOneBrahamCharacterAppearance` for
+    `Appearance`, found as a whole word and the last one, since the name can
+    also be the tail of the type's name."""
+    matches = list(re.finditer(r'\b' + re.escape(name) + r'\b', statement))
+    return statement[:matches[-1].start()].strip() if matches else ""
+
+
+def _parameter_list(declaration):
+    """The text between a declaration's outermost parentheses."""
+    start = declaration.find("(")
+    end = declaration.rfind(")")
+    return declaration[start + 1:end].strip() if 0 <= start < end else ""
+
+
 def _function_name(declaration):
     """The name of a function declaration, or None."""
     open_index = declaration.find("(")
@@ -216,6 +249,7 @@ def run(source_root=None):
     # Every function declared with UFUNCTION, anywhere in the module. Used for
     # RepNotify callbacks, which may legitimately live on a base class.
     ufunction_names = set()
+    ufunction_params = {}
 
     for text in (header_text,):
         for _class_name, body, _is_interface in class_bodies(text):
@@ -225,6 +259,26 @@ def run(source_root=None):
                 name = _function_name(statement)
                 if name:
                     ufunction_names.add(name)
+                    ufunction_params.setdefault(name, []).append(
+                        _parameter_list(" ".join(statement.split())))
+
+    # USTRUCTs that carry a map or set, which never replicates.
+    structs_with_maps = set()
+    for match in re.finditer(r'USTRUCT\s*\([^)]*\)\s*struct\s+(?:[A-Z_]+_API\s+)?(F[A-Za-z0-9_]+)[^{;]*\{', header_text):
+        start = match.end() - 1
+        depth = 0
+        end = start
+        for index in range(start, len(header_text)):
+            if header_text[index] == "{":
+                depth += 1
+            elif header_text[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    end = index
+                    break
+        body = header_text[start:end]
+        if re.search(r'UPROPERTY\s*\((?![^)]*NotReplicated)[^)]*\)\s*T(?:Map|Set)\s*<', body):
+            structs_with_maps.add(match.group(1))
 
     # --- two names, one type ------------------------------------------------
     # UHT rejects a second UCLASS/USTRUCT/UENUM with a name that is already
@@ -390,6 +444,20 @@ def run(source_root=None):
                     if "Replicated" in specs or any(s.startswith("Replicated") for s in specs):
                         checked += 1
 
+                        declared_type = _declared_type(text, property_name)
+                        if re.search(r'\bT(?:Map|Set)\s*<', declared_type):
+                            problems.append((rel, class_name,
+                                             u"'{0}' is a replicated TMap/TSet - UHT rejects it. Replicate "
+                                             u"an array of entries and rebuild the map in the RepNotify".format(
+                                                 property_name)))
+                        else:
+                            for struct_name in structs_with_maps:
+                                if re.search(r'\b' + re.escape(struct_name) + r'\b', declared_type):
+                                    problems.append((rel, class_name,
+                                                     u"'{0}' replicates {1}, which has a TMap/TSet member: "
+                                                     u"the map never reaches a client".format(
+                                                         property_name, struct_name)))
+
                         if is_struct:
                             problems.append((rel, class_name,
                                              u"'{0}' is marked Replicated inside a struct: a struct "
@@ -421,6 +489,26 @@ def run(source_root=None):
                             problems.append((rel, class_name,
                                              u"ReplicatedUsing = {0}, which is not declared as a "
                                              u"UFUNCTION anywhere in the module".format(callback)))
+                            continue
+
+                        # A RepNotify may take the previous value, and only as
+                        # the property's own type.
+                        prop_type = _normalised_type(_declared_type(text, property_name))
+
+                        def _accepts(params):
+                            if not params or params == "void":
+                                return True
+                            if "," in params:
+                                return False
+                            param_type = re.sub(r'\b[A-Za-z_][A-Za-z0-9_]*\s*$', "", params)
+                            return _normalised_type(param_type) == prop_type
+
+                        if prop_type and not any(_accepts(p) for p in ufunction_params.get(callback, [])):
+                            problems.append((rel, class_name,
+                                             u"{0} is the RepNotify for '{1}' ({2}) but its parameter "
+                                             u"is not that type - UHT only passes the previous value "
+                                             u"of the property itself".format(
+                                                 callback, property_name, prop_type)))
 
                 # ---------------------------------------------------------
                 #  UFUNCTION contracts

@@ -167,6 +167,7 @@ public:
 	// --- Movement ---------------------------------------------------------
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement") TObjectPtr<UInputAction> Move;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement") TObjectPtr<UInputAction> Look;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement") TObjectPtr<UInputAction> LookGamepad;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement") TObjectPtr<UInputAction> Jump;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement") TObjectPtr<UInputAction> Sprint;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement") TObjectPtr<UInputAction> Walk;

@@ -43,22 +43,6 @@ class UOneBrahamInventoryComponent;
 class USkeletalMeshComponent;
 class UAnimMontage;
 
-/** One entry in the lag-compensation history: where everyone's hitboxes were. */
-USTRUCT()
-struct FOneBrahamHitboxSnapshot
-{
-	GENERATED_BODY()
-
-	UPROPERTY() float ServerTime = 0.f;
-
-	/** Player id -> world-space head/chest/pelvis positions + capsule of each. */
-	UPROPERTY() TMap<int32, FTransform> HeadTransforms;
-	UPROPERTY() TMap<int32, FTransform> ChestTransforms;
-	UPROPERTY() TMap<int32, FTransform> PelvisTransforms;
-	/** Per-player full body pose: bone name -> world transform (used for limb hits). */
-	UPROPERTY() TMap<int32, TMap<FName, FTransform>> BoneTransforms;
-};
-
 /** Fired on the shooter's machine when the server confirms one of their hits. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOneBrahamHitConfirmed, bool, bHeadshot, bool, bKill, float, DistanceCm);
 
@@ -99,13 +83,6 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Weapons")
 	TObjectPtr<UOneBrahamWeaponDataAsset> WeaponRegistry;
 
-	/** How long the server remembers hitbox positions, seconds. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Weapons")
-	float LagCompensationHistorySeconds = 1.f;
-
-	/** Hard cap; players above this are not compensated further. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Weapons")
-	float MaxLagCompensationMs = 250.f;
 
 	/** How far the client's claimed eye position may differ from the server's. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Weapons")
@@ -173,6 +150,13 @@ public:
 	 * Called by AOneBrahamPickupBase when a player interacts with a dropped
 	 * weapon. Returns the taken weapon, or null when the pickup is illegal.
 	 */
+	/**
+	 * Server: adds Share (0-1) of each carried weapon's maximum reserve to its
+	 * pool, capped at the maximum. Returns the rounds added in total; zero means
+	 * the pouches were full and an ammo box should stay where it is.
+	 */
+	int32 ServerAddReserveShare(float Share);
+
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Weapons")
 	AOneBrahamWeaponBase* ServerPickupFromWorld(AOneBrahamWeaponBase* WorldWeapon);
 
@@ -333,6 +317,10 @@ public:
 	UFUNCTION(Server, Reliable, Category = "One Braham|Weapons")
 	void ServerRequestReload();
 
+	/** Stops a shell-by-shell reload so the loaded shells can be fired. */
+	UFUNCTION(Server, Reliable, Category = "One Braham|Weapons")
+	void ServerInterruptReload();
+
 	UFUNCTION(Server, Reliable, Category = "One Braham|Weapons")
 	void ServerRequestEquipSlot(EOneBrahamWeaponSlot Slot);
 
@@ -341,6 +329,11 @@ public:
 
 	UFUNCTION(Server, Reliable, Category = "One Braham|Weapons")
 	void ServerRequestFireMode();
+
+	/** The owning client's ADS state. Spread, recoil and the aim walk speed are all
+	 *  computed on the server from bAimingDownSights, so it has to be told. */
+	UFUNCTION(Server, Reliable, Category = "One Braham|Weapons")
+	void ServerSetAimingDownSights(bool bAiming);
 
 	UFUNCTION(Server, Reliable, Category = "One Braham|Weapons")
 	void ServerRequestMelee();
@@ -388,16 +381,37 @@ public:
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Weapons")
 	bool bMeleeOnCooldown = false;
 
-	/** Reserve ammo per weapon id (the pool the reload pulls from). */
-	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Weapons")
+	/** Reserve ammo per weapon id (the pool the reload pulls from). Local
+	 *  lookup: the wire is ReplicatedReserveAmmo. */
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Weapons")
 	TMap<FName, int32> ReserveAmmoByWeapon;
 
-	/** All weapons this player owns, by slot. */
-	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Weapons")
+	/** All weapons this player owns, by slot. Local lookup: the wire is
+	 *  ReplicatedOwnedWeapons. */
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Weapons")
 	TMap<EOneBrahamWeaponSlot, TObjectPtr<AOneBrahamWeaponBase>> OwnedWeapons;
 
+	/** The two maps above on the wire: a Replicated TMap does not build. */
+	UPROPERTY(ReplicatedUsing = OnRep_ReserveAmmo)
+	TArray<FOneBrahamReserveAmmoEntry> ReplicatedReserveAmmo;
+
+	UPROPERTY(ReplicatedUsing = OnRep_OwnedWeapons)
+	TArray<FOneBrahamOwnedWeaponEntry> ReplicatedOwnedWeapons;
+
+	/** Server: copies both maps to the wire. Called after every change to them. */
+	void SyncReplicatedInventory();
+
+	UFUNCTION() void OnRep_ReserveAmmo();
+	UFUNCTION() void OnRep_OwnedWeapons();
+
 protected:
-	UFUNCTION() void OnRep_CurrentWeapon();
+	/**
+	 * Clients: equip and unequip exactly as the server did. OnEquippedBy used to
+	 * run only on the server, so on every client the weapon never knew its owner
+	 * (OwningCharacter stayed null), never moved to the owner's first-person
+	 * hands, kept its pickup mesh, and drew silently.
+	 */
+	UFUNCTION() void OnRep_CurrentWeapon(AOneBrahamWeaponBase* PreviousWeapon);
 	UFUNCTION() void OnRep_Reloading();
 
 	/** Server: hands this player what they carry this life, from the player state
@@ -413,20 +427,11 @@ protected:
 	/** Builds the local player's aim ray from the camera. */
 	void GetLocalAim(FVector& OutOrigin, FVector& OutDirection) const;
 
+	/** The client half of a shot: the aim from GetLocalAim, sent with this shot's index. */
+	void SendFireRequest();
+
 	/** Applies a view kick from the recoil pattern + random yaw jitter. */
 	void ApplyRecoilKick(int32 ShotIndex);
-
-	/** Server: records this frame's hitbox snapshot for lag compensation. */
-	void CaptureHitboxSnapshot();
-
-	/**
-	 * Server: rewinds every other player's body to the pose they had at
-	 * ServerTime - (shooter ping / 2), for one trace. Returns the rewind time used.
-	 */
-	float RewindPlayersForLagCompensation(float ShooterPingMs);
-
-	/** Server: restores the rewound bodies. */
-	void RestorePlayersAfterLagCompensation();
 
 	/** Server: ensures the current fire mode is legal for the weapon. */
 	void SanitiseFireMode();
@@ -456,10 +461,6 @@ protected:
 	/** --- ADS --- */
 	float ADSAlpha = 0.f;
 
-	/** --- Lag compensation --- */
-	TArray<FOneBrahamHitboxSnapshot> HitboxHistory;
-	float LastSnapshotTime = 0.f;
-
 	/** --- Utility --- */
 	/** Time of the last throw, for the anti-cheat rate limit. */
 	float LastUtilityTime = -1000.f;
@@ -467,14 +468,18 @@ protected:
 	bool bMedkitInProgress = false;
 	FTimerHandle MedkitTimerHandle;
 
+	/** Server: a hit during the medkit animation ends it and spends the kit. */
+	UFUNCTION()
+	void HandleDamageDuringMedkit(float Damage, AActor* DamageInstigator, FVector InstigatorLocation);
+
+	/** Server: unbinds the damage listener and clears the timer. */
+	void EndMedkit();
+
 	/** Random stream for spread, seeded per component. */
 	FRandomStream SpreadStream;
 
 	/** Timer handle for the melee cooldown. */
 	FTimerHandle SourceMeleeCooldownHandle;
-
-	/** The lag-compensation snapshot currently applied for a trace. */
-	struct FOneBrahamHitboxSnapshot ActiveRewindSnapshot;
 
 	/** Screen-shake-less "kick" applied to the first person weapon mesh. */
 	FVector2D WeaponKickOffset = FVector2D::ZeroVector;

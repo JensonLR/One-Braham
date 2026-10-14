@@ -13,8 +13,8 @@ One-Braham/
 ├── README.md                     build-from-clone instructions
 ├── .gitignore                    UE conventions: no Binaries/, no Intermediate/, no DerivedDataCache/
 ├── Config/                       every ini, all hand-authored, all commented
-│   ├── DefaultEngine.ini         renderer, collision, net, streaming, Steam
-│   ├── DefaultGame.ini           modes, branding, tags, anti-cheat, cook list
+│   ├── DefaultEngine.ini         renderer, collision, net, streaming, Steam, project settings (colours, anti-cheat)
+│   ├── DefaultGame.ini           project name, packaging and cook list, session size, tags
 │   ├── DefaultInput.ini          engine input + the generated [OneBraham.Input] block
 │   ├── DefaultEditor.ini         PIE defaults, Python import paths
 │   ├── DefaultGameUserSettings.ini
@@ -48,7 +48,7 @@ all. Each one is a system with a single owner:
 
 | Folder | Contents | Belongs to |
 | --- | --- | --- |
-| `Core/` | Types, tags, settings, game instance, game state, player state, controller, game mode, spawn points, save/settings, the console and its QA commands, the `ob.NetDebug` overlay and the `ob.Bench.Skydeck` flythrough | PART 3 |
+| `Core/` | Types, tags, settings, game instance, game state, player state, controller, game mode, spawn points, save/settings, the console and its QA commands, the `ob.NetDebug` overlay and the `ob.Bench.Skydeck` flythrough, the server's game session, `UOneBrahamGameplayStatics`, stick aim assist | PART 3 |
 | `Characters/` | Character, movement, health, downed, ragdoll | PART 4 |
 | `Weapons/` | Weapon base, weapon component, inventory, projectile | PART 5 |
 | `Access/` | Access zone (the door), keycard, override terminal, fire shutter, breach interface | PART 6 |
@@ -57,10 +57,12 @@ all. Each one is a system with a single owner:
 | `Interaction/` | the interaction interface and the interact component | PART 3 |
 | `Bots/` | the bot controller and behaviour | PART 3 |
 | `Voice/` | types, line set, codec, subsystem, proximity component | PART 7 |
-| `UI/` | HUD types, style, HUD component, HUD widget, crosshair, compass | PART 8 |
+| `UI/` | HUD types, style, HUD component, HUD widget, crosshair, compass, `UOneBrahamUILibrary` (achievements, wardrobe locks, ping bands, the overlay) | PART 8 |
 | `Audio/` | procedural audio, types, bank asset, audio manager component | PART 12 |
 | `VFX/` | VFX statics, camera shake | PART 11 |
-| `Data/` | weapon definition/registry, match settings, character data asset | PART 3 |
+| `Data/` | weapon definition/registry, match settings, character data asset, the cosmetic catalogue (earned items) | PART 3 |
+| `Match/` | FIRE DRILL control points | PART 6 |
+| `Online/` | the Steam subsystem: career record, achievements, stats, rich presence, overlay; the platform subsystem: privileges, crossplay, block list, controller disconnect, suspend, disconnect reasons (`Docs/21`) | PART 19 |
 | `Tests/` | the automation suite, one file per system it covers | PART 18 |
 
 Conventions that hold across all of it:

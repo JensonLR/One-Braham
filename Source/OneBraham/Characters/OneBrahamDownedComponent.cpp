@@ -3,6 +3,8 @@
 #include "Characters/OneBrahamDownedComponent.h"
 
 #include "OneBraham.h"
+#include "Voice/OneBrahamVoiceDirector.h"
+#include "Core/OneBrahamGameMode.h"
 #include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamPlayerController.h"
 #include "Core/OneBrahamPlayerState.h"
@@ -146,9 +148,17 @@ void UOneBrahamDownedComponent::EnterDownedState(AActor* Killer, const FOneBraha
 		State->LifeState = EOneBrahamLifeState::Downed;
 	}
 
+	// The squad panel and the end conditions read the roster, not the player state.
+	if (AOneBrahamGameMode* GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<AOneBrahamGameMode>() : nullptr)
+	{
+		GameMode->EvaluateMatchEndConditions();
+	}
+
 	// --- Feedback ---------------------------------------------------------
 	OnDownedStateChanged.Broadcast(true, BleedOutRemaining);
 	TriggerDownVoiceLine();
+	bFinalWordsSaid = false;
+	FOneBrahamVoiceDirector::OnDowned(Character);
 
 	if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(Character->GetController()))
 	{
@@ -201,6 +211,13 @@ void UOneBrahamDownedComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		{
 			Voice->SpeakContextualLine(GetOwner(), QuipsSpoken == 1 ? TEXT("V_DOWNED_CALL_HELP") : TEXT("V_DOWNED_QUIP"));
 		}
+	}
+
+	// The last five seconds: they know, and they say so.
+	if (!bFinalWordsSaid && BleedOutRemaining <= 5.f && BleedOutRemaining > 0.f)
+	{
+		bFinalWordsSaid = true;
+		FOneBrahamVoiceDirector::OnBleedingOut(CachedCharacter.Get());
 	}
 
 	// --- Bleed out --------------------------------------------------------
@@ -355,6 +372,11 @@ void UOneBrahamDownedComponent::ServerRevive(AController* ReviverController)
 	{
 		State->LifeState = EOneBrahamLifeState::Alive;
 		State->RemainingRevives = FMath::Max(0, State->RemainingRevives - 1);
+	}
+
+	if (AOneBrahamGameMode* GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<AOneBrahamGameMode>() : nullptr)
+	{
+		GameMode->EvaluateMatchEndConditions();
 	}
 
 	if (UOneBrahamHealthComponent* Health = Character->GetHealthComponent())

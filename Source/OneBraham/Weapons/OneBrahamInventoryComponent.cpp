@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Weapons/OneBrahamInventoryComponent.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 
 #include "OneBraham.h"
 #include "Access/OneBrahamKeycard.h"
@@ -197,9 +198,13 @@ AOneBrahamProjectileBase* UOneBrahamInventoryComponent::ServerConsumeAndSpawnUti
 			// Tells bots and other players where the grenade came from ("GRENADE!").
 			if (UOneBrahamVoiceSubsystem* Voice = UOneBrahamVoiceSubsystem::Get(GetOwner()))
 			{
-				Voice->SpeakContextualLine(GetOwner(), TEXT("V_GRENADE_OUT"));
+				if (UtilityId == TEXT("Utility_Frag"))
+				{
+					Voice->SpeakContextualLine(GetOwner(), TEXT("V_GRENADE_OUT"));
+				}
 			}
-			UE_UNUSED(PC);
+			FOneBrahamVoiceDirector::OnUtilityThrown(CachedCharacter.Get(), UtilityId);
+			(void)PC;
 		}
 	}
 

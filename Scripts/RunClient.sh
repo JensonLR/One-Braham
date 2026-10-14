@@ -2,9 +2,8 @@
 # ===========================================================================
 #  ONE BRAHAM - client (Linux, development)
 # ---------------------------------------------------------------------------
-#  Linux client development is supported for iteration and for the QA pass; the
-#  shipped PC client is Windows. Steam is the distribution target, so a Linux
-#  client build additionally needs Steam's Linux runtime.
+#  For iteration and the QA pass against a Linux server; the shipped client is
+#  Windows. Steam's Linux runtime is needed for the online subsystem.
 #
 #      ./RunClient.sh                    main menu
 #      ./RunClient.sh 127.0.0.1          connect to a local server
@@ -12,14 +11,14 @@
 set -euo pipefail
 
 GAME_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CLIENT_BIN="${GAME_DIR}/Build/LinuxClient/OneBraham.sh"
+CLIENT_BIN="${GAME_DIR}/Build/LinuxClient/Linux/OneBraham.sh"
 
 if [ ! -f "${CLIENT_BIN}" ]; then
     echo "  OneBraham.sh was not found at:"
     echo "    ${CLIENT_BIN}"
     echo ""
-    echo "  Package the Linux client first:"
-    echo "    Scripts/Package.sh Client Linux"
+    echo "  Package the Linux development client first:"
+    echo "    Scripts/Package.sh Client Development"
     exit 1
 fi
 

@@ -208,8 +208,16 @@ protected:
 	/** The paired terminal actor, if it is loaded. */
 	AOneBrahamOverrideTerminal* FindPairedTerminal() const;
 
-	static UOneBrahamAudioManagerComponent* GetAudioFor(const AOneBrahamPlayerController* PC);
-
-	/** Every machine: the audio for one panel event. */
+	/** Local: one panel sound through this machine's mix. */
 	void PlayTerminalEffects(FName SoundId, float Volume, float Pitch = 1.f);
+
+	/**
+	 * Server: plays one sound here on every machine, through each listener's own
+	 * mix. The server-side callers used to walk the player controllers and play
+	 * through each one's audio manager: on a listen host that is once per player
+	 * on the host's speakers, and on a client - which never runs the server code -
+	 * nothing at all.
+	 */
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastPlayTerminalEffects(FName SoundId, float Volume, float Pitch = 1.f);
 };

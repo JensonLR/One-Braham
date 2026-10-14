@@ -406,6 +406,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio")
 	TSoftObjectPtr<USoundBase> ShellDropSound;
 
+	/** Built quiet (the P99-S): fires as if a suppressor were fitted, with no
+	 *  attachment in the muzzle slot. Suppressed audio, no flash, no light. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio")
+	bool bIntegralSuppressor = false;
+
 	/** Metres at which this weapon's report is still clearly audible. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio")
 	float AudibleRadius = 9000.f;
@@ -453,6 +458,15 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot")
 	int32 MaxFloor = 15;
+
+	// --- Class ------------------------------------------------------------
+	/** This weapon's own Blueprint (BP_OB_Weapon_<Name>, an AOneBrahamPickupBase
+	 *  subclass), carrying its meshes and sockets. Null falls back to the
+	 *  registry's WeaponActorClass, then to AOneBrahamPickupBase. It has to be a
+	 *  pickup: a weapon that is not one cannot lie on the floor, and every death
+	 *  drop used to vanish after thirty seconds for that reason. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Classes")
+	TSoftClassPtr<AOneBrahamWeaponBase> WeaponActorClass;
 
 	// --- Helpers ----------------------------------------------------------
 	/** Seconds between shots, server-enforced. */

@@ -38,6 +38,25 @@ it into two sides pushing a line.
 | Match length | 10 minutes, or first to 200 points |
 | Why it exists | it is how a player learns the map, the weapons and the callouts without losing a 25-minute run to it |
 
+FIRE DRILL is played in its own arena (`L_FireDrill_Arena`), not the tower.
+Its three points stand in a line on the arena's platforms: A Reception, B Server
+Floor, C Canteen. Each is an `AOneBrahamControlPoint` that the game mode spawns
+from the match settings. The rules:
+
+* One team's living players on the point, and no enemy, build a claim over the
+  point's capture time (4, 6 and 5 s). At full, the point is theirs.
+* Both teams on it: contested, and nothing moves. Nobody on it: nothing moves,
+  and a half-built claim waits.
+* Taking the other team's point drains their claim to neutral first, so a flip
+  takes twice as long as a first capture.
+* An owned point pays its owner every second: 1 point for A and C, 1.5 for B,
+  the hardest to hold. Kills pay too, and the first team to 200 wins.
+
+Each point's ring and light take the owner's team colour, or the alarm colour
+while contested. The HUD's objective line shows all three and the score.
+`check_building_layout.py` holds the points' coordinates to the arena's
+platforms.
+
 ### NIGHT SHIFT — post-launch
 
 4-player co-op survival against the building's own systems: lockdowns, purge
@@ -142,6 +161,7 @@ Inactive ──call──► Broadcast (10 s) ──► Arriving (45 s) ──�
 | Hold time | 30 s |
 | Contested | a member of another squad inside the radius **freezes** the timer; it does not reset it |
 | Prerequisites | mode is ASCENT · ≥ 1 squadmate alive · the claiming pawn's Z ≥ 5600 |
+| Callers wiped | checked every server tick in Broadcast, Arriving **and** Holding: a claiming squad wiped before the helicopter lands loses the call there and then, and the pad re-arms for whoever is still standing (`IsClaimingSquadAlive`) |
 | Loiter | 75 s from the call; a squad that calls and does not come fails and the extraction is locked out for 60 s |
 | Fast mode | CVar `ob.Extraction.Fast 1` halves the durations for testing |
 
@@ -158,6 +178,12 @@ design.
 ---
 
 ## 5. Bot behaviour — FIRE DRILL and offline only
+
+**Smoke blinds bots.** A smoke grenade's cloud is recorded on every machine as
+well as drawn (`UOneBrahamSmokeSubsystem`: centre, a radius that reaches most of
+its size in the first second, an end time). A bot's sight check asks it after
+the visibility trace, so a bot cannot see or shoot through smoke, and smoke is
+worth throwing at them. The thin outer tenth of a cloud does not block.
 
 Bots are **not in ASCENT**. They exist so that FIRE DRILL, the offline mode and
 the tutorial work, and so the game can be tested without twelve people.
@@ -203,8 +229,12 @@ state, so a bot never walks into a door a player sealed five seconds ago.
 | `BotsEnabled` | false | true (filled to minimum) |
 | `MinPlayersToStart` | 6 | 4 |
 
-The values live in `Config/DefaultGame.ini` under `[OneBraham.Modes]` as well, so
-a server operator can retune a mode without an editor.
+The values live in each mode's `UOneBrahamMatchSettingsAsset`
+(`/Game/OneBraham/Data/DA_MatchSettings_<Mode>`). When that asset does not exist,
+they come from the C++ defaults (`EnsureDefaults`). There is no ini route: an
+earlier `[OneBraham.Modes]` section was read by nothing. To retune a cooked
+server, change the asset and re-cook, or point Project Settings → One Braham →
+`DefaultMatchSettings` at another asset.
 
 ---
 

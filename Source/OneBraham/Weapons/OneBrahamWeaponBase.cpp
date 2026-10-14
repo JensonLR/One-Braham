@@ -1,6 +1,8 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Weapons/OneBrahamWeaponBase.h"
+#include "Voice/OneBrahamVoiceDirector.h"
+#include "Weapons/OneBrahamLagCompensationSubsystem.h"
 
 #include "OneBraham.h"
 #include "Core/OneBrahamGameSettings.h"
@@ -93,7 +95,8 @@ void AOneBrahamWeaponBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 
 	DOREPLIFETIME(AOneBrahamWeaponBase, WeaponState);
 	DOREPLIFETIME(AOneBrahamWeaponBase, AmmoInMagazine);
-	DOREPLIFETIME(AOneBrahamWeaponBase, Attachments);
+	DOREPLIFETIME(AOneBrahamWeaponBase, ReplicatedAttachments);
+	DOREPLIFETIME(AOneBrahamWeaponBase, Definition);
 	DOREPLIFETIME(AOneBrahamWeaponBase, SkinId);
 	DOREPLIFETIME(AOneBrahamWeaponBase, bFlashlightEnabled);
 	DOREPLIFETIME(AOneBrahamWeaponBase, bLaserEnabled);
@@ -127,12 +130,12 @@ void AOneBrahamWeaponBase::ResolveFxFallbacks()
 
 	// Shell ejection and tracer are spawned ad hoc rather than from a component,
 	// so they are cached and read directly at fire time.
-	if (Definition == nullptr || !Definition->ShellEject.IsValid())
+	if (Definition == nullptr || Definition->ShellEject.IsNull())
 	{
 		CachedShellEject = UOneBrahamVFXStatics::LoadEffectSystem(EOneBrahamVFXEffect::ShellEject);
 	}
 
-	if (Definition == nullptr || !Definition->Tracer.IsValid())
+	if (Definition == nullptr || Definition->Tracer.IsNull())
 	{
 		CachedTracer = UOneBrahamVFXStatics::LoadEffectSystem(EOneBrahamVFXEffect::Tracer);
 	}
@@ -149,11 +152,30 @@ void AOneBrahamWeaponBase::InitialiseFromDefinition(UOneBrahamWeaponDefinition* 
 	AmmoInMagazine = InDefinition->MagazineSize;
 	WeaponState = bIsGroundPickup ? EOneBrahamWeaponState::Idle : EOneBrahamWeaponState::Ready;
 
+	ApplyDefinitionPresentation();
+
+	OB_WEAPON_LOG("Weapon '%s' initialised (%d rounds, %s).",
+		*InDefinition->WeaponId.ToString(), AmmoInMagazine, bIsGroundPickup ? TEXT("ground") : TEXT("held"));
+}
+
+void AOneBrahamWeaponBase::OnRep_Definition()
+{
+	ApplyDefinitionPresentation();
+}
+
+void AOneBrahamWeaponBase::ApplyDefinitionPresentation()
+{
+	const UOneBrahamWeaponDefinition* InDefinition = Definition;
+	if (InDefinition == nullptr)
+	{
+		return;
+	}
+
 	SpreadStream.Initialize(GetUniqueID());
 
 	// Meshes: the 3P mesh is on the actor root, the 1P mesh is swapped in by the
 	// weapon component when the local owner equips it.
-	if (InDefinition->ThirdPersonMesh.IsValid() && WeaponMesh != nullptr)
+	if (!InDefinition->ThirdPersonMesh.IsNull() && WeaponMesh != nullptr)
 	{
 		if (USkeletalMesh* Mesh = InDefinition->ThirdPersonMesh.LoadSynchronous())
 		{
@@ -161,7 +183,7 @@ void AOneBrahamWeaponBase::InitialiseFromDefinition(UOneBrahamWeaponDefinition* 
 		}
 	}
 
-	if (InDefinition->WorldPickupMesh.IsValid() && PickupMesh != nullptr)
+	if (!InDefinition->WorldPickupMesh.IsNull() && PickupMesh != nullptr)
 	{
 		if (UStaticMesh* Mesh = InDefinition->WorldPickupMesh.LoadSynchronous())
 		{
@@ -175,7 +197,7 @@ void AOneBrahamWeaponBase::InitialiseFromDefinition(UOneBrahamWeaponDefinition* 
 	}
 
 	// Muzzle flash system on the muzzle socket.
-	if (MuzzleFlashComponent != nullptr && InDefinition->MuzzleFlash.IsValid())
+	if (MuzzleFlashComponent != nullptr && !InDefinition->MuzzleFlash.IsNull())
 	{
 		if (UNiagaraSystem* System = InDefinition->MuzzleFlash.LoadSynchronous())
 		{
@@ -186,9 +208,6 @@ void AOneBrahamWeaponBase::InitialiseFromDefinition(UOneBrahamWeaponDefinition* 
 	ResolveFxFallbacks();
 
 	RefreshMaterialParameters();
-
-	OB_WEAPON_LOG("Weapon '%s' initialised (%d rounds, %s).",
-		*InDefinition->WeaponId.ToString(), AmmoInMagazine, bIsGroundPickup ? TEXT("ground") : TEXT("held"));
 }
 
 void AOneBrahamWeaponBase::Tick(float DeltaSeconds)
@@ -298,13 +317,36 @@ void AOneBrahamWeaponBase::OnEquippedBy(AOneBrahamCharacter* NewOwnerCharacter)
 		}
 	}
 
-	// Draw sound + animation.
-	if (Definition != nullptr && Definition->DrawSound.IsValid())
+	// The draw itself, on whichever mesh this machine shows: the arms for the
+	// player holding it, the body for everyone else. Timed to the weapon's own
+	// DrawTime, so the animation always ends when the weapon is ready to fire.
+	// DrawMontage was authored for every weapon and played by nothing.
+	if (NewOwnerCharacter != nullptr && Definition != nullptr && !Definition->DrawMontage.IsNull())
+	{
+		USkeletalMeshComponent* AnimMesh = NewOwnerCharacter->IsLocallyControlled()
+			? NewOwnerCharacter->GetFirstPersonMesh()
+			: NewOwnerCharacter->GetThirdPersonMesh();
+		UAnimInstance* AnimInstance = AnimMesh != nullptr ? AnimMesh->GetAnimInstance() : nullptr;
+		UAnimMontage* Montage = AnimInstance != nullptr ? Definition->DrawMontage.LoadSynchronous() : nullptr;
+		if (Montage != nullptr)
+		{
+			const float Length = Montage->GetPlayLength();
+			const float Rate = Definition->DrawTime > 0.05f && Length > 0.f ? Length / Definition->DrawTime : 1.f;
+			AnimInstance->Montage_Play(Montage, Rate);
+		}
+	}
+
+	// Draw sound: the authored one, else the bank's sling-and-holster foley.
+	if (Definition != nullptr && !Definition->DrawSound.IsNull())
 	{
 		if (USoundBase* Sound = Definition->DrawSound.LoadSynchronous())
 		{
 			UGameplayStatics::PlaySoundAtLocation(this, Sound, GetActorLocation(), 0.8f, FMath::FRandRange(0.95f, 1.05f));
 		}
+	}
+	else if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this))
+	{
+		Audio->PlayWeaponMechanics(FName(TEXT("SFX_Weapon_Draw")), NewOwnerCharacter);
 	}
 
 	ResetShotTracking();
@@ -432,7 +474,7 @@ float AOneBrahamWeaponBase::ServerFireShot(const FVector& StartLocation, const F
 		SetWeaponState(EOneBrahamWeaponState::Empty);
 	}
 
-	OnWeaponFired.Broadcast(this, bSuppressorFitted);
+	OnWeaponFired.Broadcast(this, IsSuppressed());
 
 	if (OwningWeaponComponent.IsValid())
 	{
@@ -441,7 +483,7 @@ float AOneBrahamWeaponBase::ServerFireShot(const FVector& StartLocation, const F
 
 	// FX go to every machine including the shooter (the shooter's own tracer is
 	// predicted locally too, but the multicast keeps them in step).
-	MulticastPlayFireFX(GetMuzzleLocation(), AimDirection, bSuppressorFitted);
+	MulticastPlayFireFX(GetMuzzleLocation(), AimDirection, IsSuppressed());
 	MulticastPlayImpactFX(OutImpacts);
 
 	return TotalDamage;
@@ -477,6 +519,14 @@ float AOneBrahamWeaponBase::TraceBullet(const FVector& Start, const FVector& Dir
 	if (AActor* Owner = GetOwner())
 	{
 		Params.AddIgnoredActor(Owner);
+	}
+
+	// While the hitboxes are rewound, their present-day capsules would stop the
+	// round where the target is now rather than where the shooter saw it.
+	const UOneBrahamLagCompensationSubsystem* LagComp = World->GetSubsystem<UOneBrahamLagCompensationSubsystem>();
+	if (LagComp != nullptr && LagComp->IsRewound())
+	{
+		LagComp->AddIgnoredComponents(Params);
 	}
 
 	FHitResult Hit;
@@ -579,6 +629,10 @@ float AOneBrahamWeaponBase::TraceBullet(const FVector& Start, const FVector& Dir
 			if (OwningCharacter.IsValid())
 			{
 				SecondParams.AddIgnoredActor(OwningCharacter.Get());
+			}
+			if (LagComp != nullptr && LagComp->IsRewound())
+			{
+				LagComp->AddIgnoredComponents(SecondParams);
 			}
 
 			FHitResult SecondHit;
@@ -708,7 +762,7 @@ int32 AOneBrahamWeaponBase::GetMagazineSize() const
 	{
 		// The delta comes from the attachment table, looked up by the component's
 		// registry, and is cached into the attachment map at attach time.
-		UE_UNUSED(ExtendedMag);
+		(void)ExtendedMag;
 	}
 	return Size;
 }
@@ -773,7 +827,7 @@ float AOneBrahamWeaponBase::ServerStartReload()
 	const float Duration = ComputeReloadDuration();
 
 	SetWeaponState(EOneBrahamWeaponState::Reloading);
-	MulticastPlayReloadFX(true);
+	MulticastPlayReloadFX(FName(TEXT("Start")));
 
 	GetWorldTimerManager().ClearTimer(ReloadTimerHandle);
 	GetWorldTimerManager().SetTimer(ReloadTimerHandle, this, &AOneBrahamWeaponBase::ServerFinishReload, Duration, false);
@@ -791,13 +845,30 @@ void AOneBrahamWeaponBase::ServerFinishReload()
 	SetWeaponState(EOneBrahamWeaponState::Ready);
 	ResetShotTracking();
 
-	MulticastPlayReloadFX(false);
+	// A shell-by-shell weapon plays a shell going in each cycle; the component
+	// calls ServerContinueShellReload while there is room, and the closing
+	// animation plays only when it stops.
+	MulticastPlayReloadFX(Definition->bPerShellReload ? FName(TEXT("Shell")) : FName(TEXT("Complete")));
 
 	// The component owns the reserve pool, so it does the actual ammo transfer.
 	if (OwningWeaponComponent.IsValid())
 	{
 		OwningWeaponComponent->ServerCompleteReload();
 	}
+}
+
+void AOneBrahamWeaponBase::ServerContinueShellReload()
+{
+	if (Definition == nullptr || !HasAuthority() || !Definition->bPerShellReload)
+	{
+		return;
+	}
+
+	SetWeaponState(EOneBrahamWeaponState::Reloading);
+
+	GetWorldTimerManager().ClearTimer(ReloadTimerHandle);
+	GetWorldTimerManager().SetTimer(ReloadTimerHandle, this, &AOneBrahamWeaponBase::ServerFinishReload,
+		FMath::Max(0.1f, Definition->PerShellReloadTime), false);
 }
 
 void AOneBrahamWeaponBase::ServerCancelReload()
@@ -809,7 +880,7 @@ void AOneBrahamWeaponBase::ServerCancelReload()
 
 	GetWorldTimerManager().ClearTimer(ReloadTimerHandle);
 	SetWeaponState(AmmoInMagazine > 0 ? EOneBrahamWeaponState::Ready : EOneBrahamWeaponState::Empty);
-	MulticastPlayReloadFX(false);
+	MulticastPlayReloadFX(FName(TEXT("Abort")));
 }
 
 float AOneBrahamWeaponBase::ServerMelee()
@@ -858,6 +929,10 @@ float AOneBrahamWeaponBase::ServerMelee()
 				Report.Distance = Hit.Distance;
 
 				Damage = Health->ApplyDamage(Report.BaseDamage, Character, Report, Character->GetController());
+				if (Damage > 0.f)
+				{
+					FOneBrahamVoiceDirector::OnMeleeHit(Character);
+				}
 			}
 		}
 	}
@@ -903,6 +978,7 @@ bool AOneBrahamWeaponBase::AttachAttachment(FName AttachmentId)
 	{
 		const EOneBrahamAttachmentSlot Slot = Component->GetSlotForAttachment(AttachmentId);
 		Attachments.Add(Slot, AttachmentId);
+		SyncReplicatedAttachments();
 
 		if (Slot == EOneBrahamAttachmentSlot::Muzzle && Component->IsSuppressorAttachment(AttachmentId))
 		{
@@ -931,6 +1007,7 @@ bool AOneBrahamWeaponBase::DetachAttachment(EOneBrahamAttachmentSlot Slot)
 	}
 
 	Attachments.Remove(Slot);
+	SyncReplicatedAttachments();
 	RebuildAttachmentMeshes();
 	ForceNetUpdate();
 	return true;
@@ -968,7 +1045,7 @@ void AOneBrahamWeaponBase::RebuildAttachmentMeshes()
 		for (const TPair<EOneBrahamAttachmentSlot, FName>& Pair : Attachments)
 		{
 			const FOneBrahamAttachmentDefinition* Attachment = Component->GetAttachmentDefinition(Pair.Value);
-			if (Attachment == nullptr || !Attachment->Mesh.IsValid())
+			if (Attachment == nullptr || Attachment->Mesh.IsNull())
 			{
 				continue;
 			}
@@ -1060,7 +1137,7 @@ void AOneBrahamWeaponBase::RefreshMaterialParameters()
 			MID->SetVectorParameterValue(TEXT("BaseTint"), Skin->Tint);
 			MID->SetScalarParameterValue(TEXT("Wear"), Skin->WearAmount);
 
-			if (Skin->PatternTexture.IsValid())
+			if (!Skin->PatternTexture.IsNull())
 			{
 				if (UTexture2D* Texture = Skin->PatternTexture.LoadSynchronous())
 				{
@@ -1172,6 +1249,13 @@ float AOneBrahamWeaponBase::GetEffectiveADSTime() const
 // ==========================================================================
 //  FX
 // ==========================================================================
+bool AOneBrahamWeaponBase::IsSuppressed() const
+{
+	// The P99-S has no muzzle attachment and was firing with a full flash, the
+	// muzzle light and the unsuppressed report: only a fitted suppressor counted.
+	return bSuppressorFitted || (Definition != nullptr && Definition->bIntegralSuppressor);
+}
+
 void AOneBrahamWeaponBase::MulticastPlayFireFX_Implementation(const FVector_NetQuantize& MuzzleLocation, const FVector_NetQuantizeNormal& Direction, bool bSuppressed)
 {
 	// --- Muzzle flash -----------------------------------------------------
@@ -1191,7 +1275,7 @@ void AOneBrahamWeaponBase::MulticastPlayFireFX_Implementation(const FVector_NetQ
 	// Authored system first, generated fallback second. A suppressed weapon still
 	// ejects brass; it just does not throw a flash.
 	{
-		UNiagaraSystem* System = (Definition != nullptr && Definition->ShellEject.IsValid())
+		UNiagaraSystem* System = (Definition != nullptr && !Definition->ShellEject.IsNull())
 			? Definition->ShellEject.LoadSynchronous()
 			: CachedShellEject.Get();
 
@@ -1203,12 +1287,9 @@ void AOneBrahamWeaponBase::MulticastPlayFireFX_Implementation(const FVector_NetQ
 	}
 
 	// --- Audio ------------------------------------------------------------
-	UOneBrahamAudioManagerComponent* AudioManager = nullptr;
-	if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(
-		OwningCharacter.IsValid() ? OwningCharacter->GetController() : nullptr))
-	{
-		AudioManager = PC->GetAudioManager();
-	}
+	// The listener's manager, not the shooter's: this runs on every machine, and
+	// on all of them but the shooter's own the shooter's pawn has no controller.
+	UOneBrahamAudioManagerComponent* AudioManager = UOneBrahamAudioManagerComponent::GetLocal(this);
 
 	if (AudioManager != nullptr && Definition != nullptr)
 	{
@@ -1216,11 +1297,11 @@ void AOneBrahamWeaponBase::MulticastPlayFireFX_Implementation(const FVector_NetQ
 	}
 	else if (Definition != nullptr && FireAudioComponent != nullptr)
 	{
-		const TSoftObjectPtr<USoundBase>& SoundPtr = bSuppressed && Definition->SuppressedFireSound.IsValid()
+		const TSoftObjectPtr<USoundBase>& SoundPtr = bSuppressed && !Definition->SuppressedFireSound.IsNull()
 			? Definition->SuppressedFireSound
 			: Definition->FireSoundClose;
 
-		if (SoundPtr.IsValid())
+		if (!SoundPtr.IsNull())
 		{
 			if (USoundBase* Sound = SoundPtr.LoadSynchronous())
 			{
@@ -1229,6 +1310,8 @@ void AOneBrahamWeaponBase::MulticastPlayFireFX_Implementation(const FVector_NetQ
 			}
 		}
 	}
+
+	PlayNearMissForLocalListener(MuzzleLocation, FVector(Direction));
 
 	// --- Tracer -----------------------------------------------------------
 	// Tracers are subtle: a thin, brief streak, not a laser beam. Suppressed
@@ -1246,10 +1329,23 @@ void AOneBrahamWeaponBase::MulticastPlayImpactFX_Implementation(const TArray<FOn
 	UOneBrahamVFXStatics::SpawnImpactsForHits(this, Impacts);
 }
 
-void AOneBrahamWeaponBase::MulticastPlayReloadFX_Implementation(bool bStarted)
+void AOneBrahamWeaponBase::MulticastPlayReloadFX_Implementation(FName Stage)
 {
 	if (Definition == nullptr)
 	{
+		return;
+	}
+
+	const bool bStarted = Stage == FName(TEXT("Start"));
+
+	// One shell into the tube: the insert sound, and nothing else changes. The
+	// montage keeps looping and the cue timers below are not touched.
+	if (Stage == FName(TEXT("Shell")))
+	{
+		if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this))
+		{
+			Audio->PlayReloadCue(EOneBrahamReloadCue::MagIn, OwningCharacter.Get());
+		}
 		return;
 	}
 
@@ -1257,7 +1353,7 @@ void AOneBrahamWeaponBase::MulticastPlayReloadFX_Implementation(bool bStarted)
 	{
 		if (UAnimInstance* AnimInstance = Mesh->GetAnimInstance())
 		{
-			if (Definition->ReloadMontage.IsValid())
+			if (!Definition->ReloadMontage.IsNull())
 			{
 				if (UAnimMontage* Montage = Definition->ReloadMontage.LoadSynchronous())
 				{
@@ -1274,27 +1370,143 @@ void AOneBrahamWeaponBase::MulticastPlayReloadFX_Implementation(bool bStarted)
 		}
 	}
 
-	// Reload sounds: magazine out, magazine in, bolt release. The audio manager
-	// handles the three-stage sequence with correct timing.
-	if (bStarted && Definition->ReloadSound.IsValid())
+	// Reload sounds. An authored ReloadSound is one take of the whole reload and
+	// plays once. Without one, the audio manager's three cues are scheduled
+	// against this reload's own length: magazine out now, magazine in a little
+	// past half way, and the bolt near the end of a reload from empty. Until
+	// this, a weapon with no authored take reloaded in silence, which in a game
+	// about hearing the other squad is the cue that says "now".
+	FTimerManager& Timers = GetWorldTimerManager();
+	Timers.ClearTimer(ReloadMagInCueHandle);
+	Timers.ClearTimer(ReloadChargeCueHandle);
+
+	if (!bStarted)
+	{
+		return;
+	}
+
+	if (!Definition->ReloadSound.IsNull())
 	{
 		if (USoundBase* Sound = Definition->ReloadSound.LoadSynchronous())
 		{
 			UGameplayStatics::PlaySoundAtLocation(this, Sound, GetActorLocation(), 0.9f);
 		}
+		return;
 	}
-}
 
-void AOneBrahamWeaponBase::MulticastPlayDryFire_Implementation()
-{
-	if (Definition == nullptr || !Definition->DryFireSound.IsValid())
+	UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this);
+	if (Audio == nullptr)
 	{
 		return;
 	}
 
-	if (USoundBase* Sound = Definition->DryFireSound.LoadSynchronous())
+	Audio->PlayReloadCue(EOneBrahamReloadCue::MagOut, OwningCharacter.Get());
+
+	// A shotgun loading shell by shell has no magazine to seat and no bolt to drop.
+	if (Definition->bPerShellReload)
 	{
-		UGameplayStatics::PlaySoundAtLocation(this, Sound, GetActorLocation(), 0.7f);
+		return;
+	}
+
+	const float Duration = ComputeReloadDuration();
+	const bool bFromEmpty = AmmoInMagazine <= 0;
+	TWeakObjectPtr<AOneBrahamWeaponBase> WeakThis(this);
+
+	Timers.SetTimer(ReloadMagInCueHandle, FTimerDelegate::CreateLambda([WeakThis]()
+	{
+		if (AOneBrahamWeaponBase* Weapon = WeakThis.Get())
+		{
+			if (UOneBrahamAudioManagerComponent* LocalAudio = UOneBrahamAudioManagerComponent::GetLocal(Weapon))
+			{
+				LocalAudio->PlayReloadCue(EOneBrahamReloadCue::MagIn, Weapon->OwningCharacter.Get());
+			}
+		}
+	}), FMath::Max(0.1f, Duration * 0.55f), false);
+
+	if (bFromEmpty)
+	{
+		Timers.SetTimer(ReloadChargeCueHandle, FTimerDelegate::CreateLambda([WeakThis]()
+		{
+			if (AOneBrahamWeaponBase* Weapon = WeakThis.Get())
+			{
+				if (UOneBrahamAudioManagerComponent* LocalAudio = UOneBrahamAudioManagerComponent::GetLocal(Weapon))
+				{
+					LocalAudio->PlayReloadCue(EOneBrahamReloadCue::Bolt, Weapon->OwningCharacter.Get());
+				}
+			}
+		}), FMath::Max(0.2f, Duration * 0.85f), false);
+	}
+}
+
+void AOneBrahamWeaponBase::PlayNearMissForLocalListener(const FVector& MuzzleLocation, const FVector& Direction) const
+{
+	// The cue's whole job: a shot you were not hit by, but should know about.
+	constexpr float NearMissRadiusCm = 200.f;
+
+	const UWorld* World = GetWorld();
+	const APlayerController* Listener = World != nullptr && GEngine != nullptr
+		? GEngine->GetFirstLocalPlayerController(World)
+		: nullptr;
+	const APawn* ListenerPawn = Listener != nullptr ? Listener->GetPawn() : nullptr;
+
+	// Your own shots do not whizz past you.
+	if (ListenerPawn == nullptr || ListenerPawn == OwningCharacter.Get() || Definition == nullptr)
+	{
+		return;
+	}
+
+	const FVector Head = ListenerPawn->GetPawnViewLocation();
+	const FVector Along = Direction.GetSafeNormal();
+	const float T = FVector::DotProduct(Head - MuzzleLocation, Along);
+
+	// Behind the muzzle, or beyond the range at which the round still matters.
+	if (T <= 0.f || T > Definition->Falloff.MinDamageRange)
+	{
+		return;
+	}
+
+	const FVector Passed = MuzzleLocation + Along * T;
+	if (FVector::DistSquared(Passed, Head) > FMath::Square(NearMissRadiusCm))
+	{
+		return;
+	}
+
+	// A round that stopped in a wall on the way never reached you. One trace, and
+	// only for the rare shot that got this far through the checks.
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(OneBrahamNearMiss), /*bTraceComplex*/ false);
+	Params.AddIgnoredActor(this);
+	Params.AddIgnoredActor(OwningCharacter.Get());
+	Params.AddIgnoredActor(ListenerPawn);
+
+	FHitResult Blocked;
+	if (World->LineTraceSingleByChannel(Blocked, MuzzleLocation, Passed, ECC_Visibility, Params))
+	{
+		return;
+	}
+
+	UOneBrahamVFXStatics::PlayNearMiss(const_cast<AOneBrahamWeaponBase*>(this), Passed);
+}
+
+void AOneBrahamWeaponBase::MulticastPlayDryFire_Implementation()
+{
+	if (Definition == nullptr)
+	{
+		return;
+	}
+
+	if (!Definition->DryFireSound.IsNull())
+	{
+		if (USoundBase* Sound = Definition->DryFireSound.LoadSynchronous())
+		{
+			UGameplayStatics::PlaySoundAtLocation(this, Sound, GetActorLocation(), 0.7f);
+			return;
+		}
+	}
+
+	// No authored click: the bank's, through the mix, so an empty gun is heard.
+	if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this))
+	{
+		Audio->PlayWeaponMechanics(FName(TEXT("SFX_DryFire")), OwningCharacter.Get());
 	}
 }
 
@@ -1306,7 +1518,7 @@ void AOneBrahamWeaponBase::PlayTracerLocal(const FVector& Start, const FVector& 
 	}
 
 	// Authored tracer, else the generated one. Suppressed weapons returned above.
-	UNiagaraSystem* System = Definition->Tracer.IsValid()
+	UNiagaraSystem* System = !Definition->Tracer.IsNull()
 		? Definition->Tracer.LoadSynchronous()
 		: CachedTracer.Get();
 
@@ -1358,8 +1570,25 @@ void AOneBrahamWeaponBase::OnRep_Ammo()
 	}
 }
 
+void AOneBrahamWeaponBase::SyncReplicatedAttachments()
+{
+	ReplicatedAttachments.Reset();
+	for (const TPair<EOneBrahamAttachmentSlot, FName>& Pair : Attachments)
+	{
+		FOneBrahamAttachmentEntry& Entry = ReplicatedAttachments.AddDefaulted_GetRef();
+		Entry.Slot = Pair.Key;
+		Entry.AttachmentId = Pair.Value;
+	}
+}
+
 void AOneBrahamWeaponBase::OnRep_Attachments()
 {
+	Attachments.Reset();
+	for (const FOneBrahamAttachmentEntry& Entry : ReplicatedAttachments)
+	{
+		Attachments.Add(Entry.Slot, Entry.AttachmentId);
+	}
+
 	RebuildAttachmentMeshes();
 
 	if (WeaponLight != nullptr)

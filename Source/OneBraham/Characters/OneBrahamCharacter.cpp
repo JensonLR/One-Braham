@@ -3,6 +3,7 @@
 #include "Characters/OneBrahamCharacter.h"
 
 #include "OneBraham.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 #include "Core/OneBrahamGameSettings.h"
 #include "Core/OneBrahamGameplayTags.h"
 #include "Core/OneBrahamPlayerController.h"
@@ -19,9 +20,11 @@
 #include "Weapons/OneBrahamWeaponComponent.h"
 #include "Voice/OneBrahamProximityVoiceComponent.h"
 #include "Audio/OneBrahamAudioManagerComponent.h"
+#include "VFX/OneBrahamCameraShake.h"
 
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Components/SpotLightComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
@@ -191,6 +194,7 @@ void AOneBrahamCharacter::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 
 	UpdateLean(DeltaSeconds);
+	TickFootsteps(DeltaSeconds);
 
 	// Floor detection at 2 Hz - it only changes when someone takes the stairs.
 	FloorCheckAccumulator += DeltaSeconds;
@@ -327,6 +331,49 @@ void AOneBrahamCharacter::HandleMoveInput(const FVector2D& Input)
 	AddMovementInput(Right, Input.X);
 }
 
+void AOneBrahamCharacter::TickFootsteps(float DeltaSeconds)
+{
+	// The listener's manager: null on a dedicated server, which has no ears.
+	UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this);
+	const UCharacterMovementComponent* Movement = GetCharacterMovement();
+
+	if (Audio == nullptr || Movement == nullptr || HealthComponent == nullptr || !HealthComponent->IsAlive())
+	{
+		return;
+	}
+
+	// The CMC's floor sweep does not ask for a physical material, so the surface
+	// is a trace of its own: 60 cm below the capsule, four times a second, and
+	// only while moving. A floor changes when somebody walks off it.
+	const float Speed2D = GetVelocity().Size2D();
+	FootstepSurfaceAccumulator += DeltaSeconds;
+
+	if (Speed2D > 40.f && FootstepSurfaceAccumulator >= 0.25f)
+	{
+		FootstepSurfaceAccumulator = 0.f;
+
+		const float HalfHeight = GetCapsuleComponent() != nullptr ? GetCapsuleComponent()->GetScaledCapsuleHalfHeight() : 90.f;
+		const FVector Start = GetActorLocation();
+		const FVector End = Start - FVector(0.f, 0.f, HalfHeight + 60.f);
+
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(OBFootstepSurface), /*bTraceComplex*/ false, this);
+		Params.bReturnPhysicalMaterial = true;
+
+		FHitResult Hit;
+		if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params))
+		{
+			FootstepSurface = UOneBrahamAudioManagerComponent::ClassifyGroundSurface(Hit.PhysMaterial.Get());
+		}
+	}
+
+	// bSprintRequested is local input and does not replicate; above jog speed is
+	// what a sprint sounds like from anywhere else.
+	const bool bSprinting = bSprintRequested || Speed2D > 440.f;
+
+	Audio->TickFootstepAudio(this, FootstepSurface, Speed2D, bIsCrouched, bSprinting,
+		Movement->IsFalling(), IsLocallyControlled());
+}
+
 void AOneBrahamCharacter::HandleJumpPressed()
 {
 	Jump();
@@ -335,6 +382,18 @@ void AOneBrahamCharacter::HandleJumpPressed()
 void AOneBrahamCharacter::HandleJumpReleased()
 {
 	StopJumping();
+}
+
+bool AOneBrahamCharacter::IsSprintRequested() const
+{
+	// The movement component holds the intent on every machine that simulates
+	// this pawn: the owner sets it, the server reads it from the saved moves.
+	return OBCharacterMovement != nullptr ? OBCharacterMovement->WantsToSprint() : bSprintRequested;
+}
+
+bool AOneBrahamCharacter::IsWalking() const
+{
+	return OBCharacterMovement != nullptr ? OBCharacterMovement->WantsToWalk() : bWalking;
 }
 
 void AOneBrahamCharacter::SetSprintRequested(bool bSprint)
@@ -346,15 +405,11 @@ void AOneBrahamCharacter::SetSprintRequested(bool bSprint)
 
 	bSprintRequested = bSprint;
 
-	// Movement caps are server-authoritative; the client forwards the intent.
-	if (!HasAuthority())
-	{
-		ServerSetSprint(bSprint);
-	}
-
+	// The intent rides in the next saved move; the movement component turns it
+	// into a sprint on this machine and on the server from the same move.
 	if (OBCharacterMovement != nullptr)
 	{
-		OBCharacterMovement->SetSprinting(bSprint && !bWalking);
+		OBCharacterMovement->RequestSprint(bSprint);
 	}
 
 	// Sprinting while aiming is not allowed: ADS forces the aim speed.
@@ -368,14 +423,9 @@ void AOneBrahamCharacter::ToggleWalkState()
 {
 	bWalking = !bWalking;
 
-	if (!HasAuthority())
+	if (OBCharacterMovement != nullptr)
 	{
-		ServerSetWalk(bWalking);
-	}
-
-	if (OBCharacterMovement != nullptr && bWalking)
-	{
-		OBCharacterMovement->SetSprinting(false);
+		OBCharacterMovement->RequestWalk(bWalking);
 	}
 }
 
@@ -449,13 +499,10 @@ void AOneBrahamCharacter::TryStartMantle()
 		return;
 	}
 
-	if (!HasAuthority())
-	{
-		ServerRequestMantle(GetActorLocation());
-		return;
-	}
-
-	OBCharacterMovement->TryStartMantle();
+	// Predicted: the request travels in the saved move and both machines run
+	// the same ledge traces. The server's own world decides; it never takes a
+	// ledge position from the client.
+	OBCharacterMovement->RequestMantle();
 }
 
 void AOneBrahamCharacter::TryStartSlide()
@@ -465,13 +512,7 @@ void AOneBrahamCharacter::TryStartSlide()
 		return;
 	}
 
-	if (!HasAuthority())
-	{
-		ServerRequestSlide();
-		return;
-	}
-
-	OBCharacterMovement->TryStartSlide();
+	OBCharacterMovement->RequestSlide();
 }
 
 // ==========================================================================
@@ -546,14 +587,10 @@ float AOneBrahamCharacter::GetSprintSpeedMultiplier() const
 // ==========================================================================
 void AOneBrahamCharacter::UpdateFloorIndex(float DeltaSeconds)
 {
-	// The tower is authored with a fixed 4.0 m floor-to-floor height (see
-	// Tools/Python/build_map.py, FLOOR_HEIGHT_M). Ground floor lobby floor is at
-	// Z = 0, the Skydeck at Z = 15 * 400 = 6000 cm.
-	// One number, defined once: see OneBrahamConstants in OneBraham.h.
-	constexpr float FloorHeightCm = OneBrahamConstants::FloorHeightCm;
-
-	const float ActorZ = GetActorLocation().Z;
-	const int32 ComputedFloor = FMath::Clamp(FMath::FloorToInt(ActorZ / FloorHeightCm), 0, ONE_BRAHAM_FLOORS);
+	// The building's datum, defined once in OneBraham.h: the lobby is floor 1 at
+	// Z = 0, the plaza floor 0, the Skydeck floor 15 at 5600 cm. The capsule's
+	// centre is under a metre above the slab, so it never reads the floor above.
+	const int32 ComputedFloor = OneBrahamConstants::FloorIndexForZ(GetActorLocation().Z);
 
 	if (ComputedFloor != CurrentFloorIndex)
 	{
@@ -592,16 +629,8 @@ UOneBrahamCharacterDataAsset* AOneBrahamCharacter::ResolveCharacterData()
 		return CharacterData;
 	}
 
-	// The config-declared registry, so a project can move its content without a
-	// code change.
-	CharacterData = UOneBrahamGameSettings::Get().CharacterRegistry.LoadSynchronous();
-
-	if (CharacterData == nullptr)
-	{
-		// The last resort: the path the content build always writes.
-		CharacterData = LoadObject<UOneBrahamCharacterDataAsset>(
-			nullptr, TEXT("/Game/OneBraham/Characters/DA_CharacterRegistry.DA_CharacterRegistry"));
-	}
+	// The config-declared registry, then the path the content build writes.
+	CharacterData = UOneBrahamCharacterDataAsset::LoadRegistry();
 
 	if (CharacterData == nullptr && !bLoggedMissingCharacterData)
 	{
@@ -638,9 +667,9 @@ void AOneBrahamCharacter::ApplyArchetype(FGameplayTag ArchetypeTag)
 	}
 
 	Appearance.BodyVariant = Definition->BodyVariant;
-	Appearance.SquadColorIndex = GetPlayerState<AOneBrahamPlayerState>() ? FMath::Abs(GetPlayerState<AOneBrahamPlayerState>()->PlayerId) % 4 : 0;
+	Appearance.SquadColorIndex = GetPlayerState<AOneBrahamPlayerState>() ? FMath::Abs(GetPlayerState<AOneBrahamPlayerState>()->GetPlayerId()) % 4 : 0;
 
-	if (Definition->BodyMesh.IsValid() && GetMesh() != nullptr)
+	if (!Definition->BodyMesh.IsNull() && GetMesh() != nullptr)
 	{
 		if (USkeletalMesh* Mesh = Definition->BodyMesh.LoadSynchronous())
 		{
@@ -653,7 +682,16 @@ void AOneBrahamCharacter::ApplyArchetype(FGameplayTag ArchetypeTag)
 		GetMesh()->SetAnimInstanceClass(Definition->AnimInstanceClass);
 	}
 
-	if (Definition->FirstPersonMesh.IsValid() && FirstPersonMesh != nullptr)
+	// Height: a cosmetic uniform scale on the body about its feet, from the
+	// archetype's offset on a 180 cm reference. The capsule does not change, so
+	// nobody is easier or harder to hit for being tall. Read by nothing until now.
+	if (GetMesh() != nullptr)
+	{
+		const float HeightScale = (180.f + FMath::Clamp(Definition->HeightOffsetCm, -8.f, 8.f)) / 180.f;
+		GetMesh()->SetRelativeScale3D(FVector(HeightScale));
+	}
+
+	if (!Definition->FirstPersonMesh.IsNull() && FirstPersonMesh != nullptr)
 	{
 		if (USkeletalMesh* ArmsMesh = Definition->FirstPersonMesh.LoadSynchronous())
 		{
@@ -672,7 +710,7 @@ void AOneBrahamCharacter::ApplyArchetype(FGameplayTag ArchetypeTag)
 
 void AOneBrahamCharacter::ApplyCosmetics(const TMap<FName, FName>& InCosmetics)
 {
-	Appearance.EquippedCosmetics = InCosmetics;
+	Appearance.EquippedCosmetics = OneBrahamReplication::CosmeticsToArray(InCosmetics);
 
 	// Cosmetic meshes are modular skeletal/static meshes parented to the body
 	// (jacket, fleece, hi-vis, lanyard, badge, backpack). They are looked up from
@@ -685,20 +723,28 @@ void AOneBrahamCharacter::ApplyCosmetics(const TMap<FName, FName>& InCosmetics)
 		return;
 	}
 
-	for (const TPair<FName, FName>& Pair : InCosmetics)
+	// Every slot, not every entry: a slot the new outfit leaves empty, or names an
+	// option with no mesh, is cleared. Applying only what was listed left the
+	// previous jacket on the body after it was taken off in the wardrobe.
+	for (const FOneBrahamCosmeticSlot& Slot : Registry->CosmeticSlots)
 	{
-		const FOneBrahamCosmeticSlot* Slot = Registry->FindCosmeticSlot(Pair.Key);
-		if (Slot == nullptr)
+		USkeletalMesh* CosmeticMesh = nullptr;
+
+		if (const FName* Option = InCosmetics.Find(Slot.SlotName))
 		{
-			continue;
+			if (const TSoftObjectPtr<USkeletalMesh>* MeshPtr = Slot.Options.Find(*Option))
+			{
+				CosmeticMesh = MeshPtr->LoadSynchronous();
+			}
 		}
 
-		if (const TSoftObjectPtr<USkeletalMesh>* MeshPtr = Slot->Options.Find(Pair.Value))
+		if (CosmeticMesh != nullptr)
 		{
-			if (USkeletalMesh* CosmeticMesh = MeshPtr->LoadSynchronous())
-			{
-				Registry->ApplyCosmeticToMesh(GetMesh(), Slot, CosmeticMesh);
-			}
+			Registry->ApplyCosmeticToMesh(GetMesh(), &Slot, CosmeticMesh);
+		}
+		else
+		{
+			Registry->ClearCosmeticFromMesh(GetMesh(), Slot.SlotName);
 		}
 	}
 }
@@ -738,10 +784,10 @@ FText AOneBrahamCharacter::GetInteractionPrompt_Implementation(const AOneBrahamP
 		// The prompt names them because you are deciding whose sixty seconds to
 		// spend four and a half of your own on, and because a squad that talks
 		// says "get Okonkwo up", not "revive the body".
-		return FText::Format(NSLOCTEXT("OneBraham", "Downed_Prompt_Revive", "Hold E - revive {0}"), Name);
+		return FText::Format(NSLOCTEXT("OneBraham", "Downed_Prompt_Revive", "Hold {Interact} - revive {0}"), Name);
 
 	case EOneBrahamDownedInteraction::Execute:
-		return FText::Format(NSLOCTEXT("OneBraham", "Downed_Prompt_Execute", "Hold E - finish {0}"), Name);
+		return FText::Format(NSLOCTEXT("OneBraham", "Downed_Prompt_Execute", "Hold {Interact} - finish {0}"), Name);
 
 	default:
 		// An empty prompt draws nothing at all: a standing colleague, a body seen
@@ -812,6 +858,11 @@ bool AOneBrahamCharacter::OnInteractionStart_Implementation(AOneBrahamPlayerCont
 	if (Verb == EOneBrahamDownedInteraction::Revive)
 	{
 		Downed->SetReviveProgress(0.f, Interactor->GetPawn());
+		FOneBrahamVoiceDirector::OnReviveStarted(Cast<AOneBrahamCharacter>(Interactor->GetPawn()), this);
+	}
+	else if (Verb == EOneBrahamDownedInteraction::Execute)
+	{
+		FOneBrahamVoiceDirector::OnExecuteStarted(Cast<AOneBrahamCharacter>(Interactor->GetPawn()), this);
 	}
 
 	return true;
@@ -829,7 +880,13 @@ void AOneBrahamCharacter::OnInteractionHold_Implementation(AOneBrahamPlayerContr
 	// feedback is the animation of the person doing it.
 	if (Downed->GetInteractionFor(Interactor) == EOneBrahamDownedInteraction::Revive)
 	{
+		// Half way through, the reviver says something to the person on the floor.
+		const float Previous = Downed->GetReviveProgress();
 		Downed->SetReviveProgress(Progress01, Interactor->GetPawn());
+		if (HasAuthority() && Previous < 0.5f && Progress01 >= 0.5f)
+		{
+			FOneBrahamVoiceDirector::OnReviveHalfway(Cast<AOneBrahamCharacter>(Interactor->GetPawn()));
+		}
 	}
 }
 
@@ -938,7 +995,7 @@ void AOneBrahamCharacter::ApplyLifeStateVisuals(EOneBrahamLifeState NewState)
 void AOneBrahamCharacter::OnRep_Appearance()
 {
 	ApplyArchetype(Appearance.ArchetypeTag);
-	ApplyCosmetics(Appearance.EquippedCosmetics);
+	ApplyCosmetics(OneBrahamReplication::CosmeticsToMap(Appearance.EquippedCosmetics));
 }
 
 void AOneBrahamCharacter::ApplyMatchSettings(UOneBrahamMatchSettingsAsset* Settings)
@@ -1072,6 +1129,8 @@ void AOneBrahamCharacter::ServerOnDied(AController* Killer, const FOneBrahamDama
 		KillEntry = GameMode->RegisterKill(this, Killer, Report);
 	}
 
+	FOneBrahamVoiceDirector::OnKilled(this, Killer != nullptr ? Cast<AOneBrahamCharacter>(Killer->GetPawn()) : nullptr);
+
 	// Notify the controller so the death screen + spectate flow starts. This is a
 	// Client RPC: the death was detected here, on the server, and the player who
 	// died is usually on another machine.
@@ -1153,12 +1212,17 @@ void AOneBrahamCharacter::ServerOnRespawned()
 	if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(GetController()))
 	{
 		PC->ClientShowDeathScreen(false, FText::GetEmpty());
-		PC->bIsSpectating = false;
+		PC->SetSpectating(false);
 	}
 
 	bSprintRequested = false;
 	bCrouchRequested = false;
 	bWalking = false;
+	if (OBCharacterMovement != nullptr)
+	{
+		OBCharacterMovement->RequestSprint(false);
+		OBCharacterMovement->RequestWalk(false);
+	}
 	LeanInput = 0.f;
 
 	if (OBCharacterMovement != nullptr)
@@ -1189,6 +1253,21 @@ void AOneBrahamCharacter::Landed(const FHitResult& Hit)
 	static constexpr float SafeFallSpeed = 1150.f;      // ~4 m fall: fine
 	static constexpr float LethalFallSpeed = 2100.f;    // ~12 m fall: fatal
 
+	// The camera feels a landing long before it hurts: from a desk-height drop
+	// (700 cm/s) a nudge, rising to the full shake at the speed that starts to
+	// do damage. Landed runs on the owning client as well as the server, and
+	// only the player whose legs these are feels it.
+	static constexpr float LandingShakeSpeed = 700.f;
+	if (IsLocallyControlled() && EffectiveFallSpeed > LandingShakeSpeed)
+	{
+		if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(GetController()))
+		{
+			PC->PlayCameraShakeLocally(UOneBrahamCameraShake::GetLandingShakeClass(),
+				FMath::GetMappedRangeValueClamped(FVector2D(LandingShakeSpeed, SafeFallSpeed),
+					FVector2D(0.25f, 1.f), EffectiveFallSpeed));
+		}
+	}
+
 	if (EffectiveFallSpeed <= SafeFallSpeed || HealthComponent == nullptr || !HealthComponent->IsAlive())
 	{
 		return;
@@ -1201,6 +1280,7 @@ void AOneBrahamCharacter::Landed(const FHitResult& Hit)
 	Report.BaseDamage = Damage;
 	Report.FinalDamage = Damage;
 	Report.HitZone = EOneBrahamHitZone::LowerLeg;
+	Report.CauseId = TEXT("Fall");
 	Report.HitLocation = GetActorLocation();
 	Report.ShotDirection = FVector(0.f, 0.f, -1.f);
 	Report.bLethal = Damage >= HealthComponent->GetHealth();
@@ -1239,46 +1319,6 @@ void AOneBrahamCharacter::FellOutOfWorld(const UDamageType& DamageType)
 // ==========================================================================
 //  Server RPCs
 // ==========================================================================
-void AOneBrahamCharacter::ServerSetSprint_Implementation(bool bSprint)
-{
-	if (!HasAuthority())
-	{
-		return;
-	}
-
-	AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(GetController());
-	if (PC != nullptr && !PC->CheckRPCBudget(TEXT("ServerSetSprint")))
-	{
-		return;
-	}
-
-	bSprintRequested = bSprint;
-	if (OBCharacterMovement != nullptr)
-	{
-		OBCharacterMovement->SetSprinting(bSprint && !bWalking);
-	}
-}
-
-void AOneBrahamCharacter::ServerSetWalk_Implementation(bool bWalk)
-{
-	if (!HasAuthority())
-	{
-		return;
-	}
-
-	AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(GetController());
-	if (PC != nullptr && !PC->CheckRPCBudget(TEXT("ServerSetWalk")))
-	{
-		return;
-	}
-
-	bWalking = bWalk;
-	if (OBCharacterMovement != nullptr && bWalk)
-	{
-		OBCharacterMovement->SetSprinting(false);
-	}
-}
-
 void AOneBrahamCharacter::ServerSetCrouch_Implementation(bool bCrouch)
 {
 	if (!HasAuthority())
@@ -1301,6 +1341,11 @@ void AOneBrahamCharacter::ServerSetCrouch_Implementation(bool bCrouch)
 
 void AOneBrahamCharacter::ServerSetLean_Implementation(float Lean)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerSetLean")))
+	{
+		return;
+	}
+
 	if (!HasAuthority())
 	{
 		return;
@@ -1313,67 +1358,20 @@ void AOneBrahamCharacter::ServerSetLean_Implementation(float Lean)
 	LeanAmount = LeanInput;
 }
 
-void AOneBrahamCharacter::ServerRequestMantle_Implementation(FVector_NetQuantize LedgeLocation)
-{
-	if (!HasAuthority())
-	{
-		return;
-	}
-
-	AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(GetController());
-	if (PC != nullptr && !PC->CheckRPCBudget(TEXT("ServerRequestMantle")))
-	{
-		return;
-	}
-
-	// Anti-cheat: trust the server's own ledge detection, never the client's
-	// reported ledge location. The client value is only used for logging.
-	const FVector ClientClaim = LedgeLocation;
-	if (FVector::DistSquared(ClientClaim, GetActorLocation()) > FMath::Square(400.f))
-	{
-		if (PC != nullptr)
-		{
-			PC->ReportViolation(TEXT("Mantle claim far from pawn"), 2.f);
-		}
-		return;
-	}
-
-	if (OBCharacterMovement != nullptr)
-	{
-		OBCharacterMovement->TryStartMantle();
-	}
-}
-
-void AOneBrahamCharacter::ServerRequestSlide_Implementation()
-{
-	if (!HasAuthority())
-	{
-		return;
-	}
-
-	AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(GetController());
-	if (PC != nullptr && !PC->CheckRPCBudget(TEXT("ServerRequestSlide")))
-	{
-		return;
-	}
-
-	if (OBCharacterMovement != nullptr)
-	{
-		OBCharacterMovement->TryStartSlide();
-	}
-}
-
 void AOneBrahamCharacter::ServerReportFloor_Implementation(int32 FloorIndex)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerReportFloor")))
+	{
+		return;
+	}
+
 	if (!HasAuthority())
 	{
 		return;
 	}
 
 	// Sanity check against the server's own view of the pawn's Z.
-	// One number, defined once: see OneBrahamConstants in OneBraham.h.
-	constexpr float FloorHeightCm = OneBrahamConstants::FloorHeightCm;
-	const int32 ServerFloor = FMath::Clamp(FMath::FloorToInt(GetActorLocation().Z / FloorHeightCm), 0, ONE_BRAHAM_FLOORS);
+	const int32 ServerFloor = OneBrahamConstants::FloorIndexForZ(GetActorLocation().Z);
 
 	if (FMath::Abs(ServerFloor - FloorIndex) > 1)
 	{
@@ -1401,9 +1399,18 @@ void AOneBrahamCharacter::ServerReportSpeed_Implementation(float ClientSpeed)
 	// silence check on the server's tick watches: a pawn whose owner stopped
 	// sending these is flagged on the server's own clock rather than on anything
 	// the client says.
+	//
+	// RPC budget: own limit (one report per MinSpeedReportGapSeconds). The
+	// reports are a heartbeat at four a second; anything faster is dropped
+	// before it costs the shared budget.
 	if (const UWorld* World = GetWorld())
 	{
-		LastClientSpeedReportTime = World->GetTimeSeconds();
+		const float ReportTime = World->GetTimeSeconds();
+		if (LastClientSpeedReportTime >= 0.f && ReportTime - LastClientSpeedReportTime < MinSpeedReportGapSeconds)
+		{
+			return;
+		}
+		LastClientSpeedReportTime = ReportTime;
 	}
 
 	if (OBCharacterMovement == nullptr)

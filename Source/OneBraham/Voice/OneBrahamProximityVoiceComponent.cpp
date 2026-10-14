@@ -9,6 +9,8 @@
 #include "Core/OneBrahamPlayerController.h"
 #include "Core/OneBrahamPlayerState.h"
 #include "Voice/OneBrahamVoiceSubsystem.h"
+#include "Online/OneBrahamPlatformSubsystem.h"
+#include "GameFramework/GameStateBase.h"
 #include "Voice/OneBrahamVoiceTypes.h"
 #include "Components/AudioComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -451,6 +453,30 @@ void UOneBrahamProximityVoiceComponent::ServerPushVoiceFrame_Implementation(cons
 		return;
 	}
 
+	// RPC budget: own limit (MaxVoiceFramesPerSecond per speaker). Voice runs at
+	// fifty frames a second, far above the shared per-controller budget, so it
+	// has its own: a client that sends faster is dropped, and every listener is
+	// spared the flood.
+	{
+		const double FrameTime = World->GetTimeSeconds();
+		if (FrameTime - VoiceWindowStart >= 1.0)
+		{
+			VoiceWindowStart = FrameTime;
+			VoiceFramesInWindow = 0;
+		}
+		if (++VoiceFramesInWindow > MaxVoiceFramesPerSecond)
+		{
+			if (VoiceFramesInWindow == MaxVoiceFramesPerSecond + 1)
+			{
+				if (AOneBrahamPlayerController* Flooder = Cast<AOneBrahamPlayerController>(SpeakerState->GetOwningController()))
+				{
+					Flooder->ReportViolation(TEXT("Voice frame flood"), 1.f);
+				}
+			}
+			return;
+		}
+	}
+
 	// 2. Size sanity, before anything touches the buffer.
 	if (Frame.Num() == 0 || Frame.Num() > MAX_VOICE_FRAME_BYTES)
 	{
@@ -541,6 +567,30 @@ void UOneBrahamProximityVoiceComponent::ClientReceiveVoiceFrame_Implementation(i
 	if (World == nullptr || Frame.Num() == 0 || Frame.Num() > MAX_VOICE_FRAME_BYTES)
 	{
 		return;
+	}
+
+	// The platform's rules for this listener: no voice at all when the account
+	// may not communicate online, and none from a player it has blocked.
+	if (const UOneBrahamPlatformSubsystem* Platform = UOneBrahamPlatformSubsystem::Get(this))
+	{
+		if (!Platform->CanCommunicate())
+		{
+			return;
+		}
+		if (const AGameStateBase* GameState = World->GetGameState())
+		{
+			for (const APlayerState* Speaker : GameState->PlayerArray)
+			{
+				if (Speaker != nullptr && Speaker->GetPlayerId() == SpeakerPlayerId)
+				{
+					if (Platform->IsBlocked(Speaker))
+					{
+						return;
+					}
+					break;
+				}
+			}
+		}
 	}
 
 	const EOneBrahamVoiceChannel Channel = static_cast<EOneBrahamVoiceChannel>(ChannelByte);
@@ -853,10 +903,15 @@ USoundAttenuation* UOneBrahamProximityVoiceComponent::GetVoiceAttenuation()
 
 float UOneBrahamProximityVoiceComponent::GetBusVolumeForVoice() const
 {
-	// Local helper: the audio manager owns bus volumes, but voice playback is
-	// driven from this component, so we resolve the shared value from the same
-	// settings object the manager reads. Reading the settings directly avoids a
-	// dependency loop between the two components.
+	// The listener's audio manager owns the voice bus: the Voice and Master
+	// faders, the voice output gain and the voice chat switch. Reading the two
+	// faders here directly is how the other two never reached a speaker.
+	if (const UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this))
+	{
+		return Audio->GetBusVolume(EOneBrahamAudioBus::Voice);
+	}
+
+	// No listener yet (the first frame of a level): the faders alone.
 	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
 	if (Settings == nullptr)
 	{

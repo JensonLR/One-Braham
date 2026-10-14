@@ -146,6 +146,18 @@ without. A recorded wave at
 `/Game/OneBraham/Audio/Ambience/<Id>` replaces the synthesis the moment it
 exists.
 
+**Rain** is a second bed over the zone's own, not a zone. A match is wet or
+dry (`AOneBrahamGameState::bRaining`), and while the listener is outdoors in a
+wet match (the plaza or the Skydeck) `UOneBrahamWorldEffectsComponent` holds
+`AMB_Plaza_Rain` on the weather bed, so the street keeps its traffic and the
+deck keeps its wind with the rain over both.
+
+**The Tube.** The Circle line runs under Aldgate. Every 70 to 150 seconds a
+train passes under the building (`SFX_Tube_Rumble`, seven seconds of sub-bass
+with the wheels fluttering on top). It plays at full level on the plaza and in
+the lobby, at half on the mezzanine, and not at all higher up. Nobody needs it;
+it is the sort of thing that makes a building a place.
+
 The fire alarm is not a bed of its own. It is `SFX_FireAlarm`, held on the
 lockdown bed by the manager for as long as the stage lasts, at a level that makes
 speech uncomfortable — which is the point of an alarm.
@@ -219,12 +231,37 @@ architecture between them. Firing a rifle into a stairwell should sound like
 firing a rifle into a stairwell; the two-sample approach is what does that
 without fifty wave assets.
 
+**Whose mix plays a sound - every sound.** One rule for the whole game: a sound
+plays through `UOneBrahamAudioManagerComponent::GetLocal()`, the listener's own
+manager, from code that runs on every machine - a multicast, an OnRep, or a local
+tick. A server-side event that makes a noise (a terminal accepting a card, a door
+refusing one, a shutter's warning) reaches the clients through one unreliable
+multicast on its actor (`MulticastPlayTerminalEffects`, `MulticastPlayZoneSound`,
+`MulticastPlayWarning`). Six actors used to walk the player controllers and play
+through each one's manager, which is the sound once per player on a listen host
+and silence on every client; `check_cpp_symbols.py` now fails the build on that
+shape.
+
+**Whose mix plays a weapon.** Every weapon cue is played by the *listener's*
+audio manager (`UOneBrahamAudioManagerComponent::GetLocal`), never the shooter's:
+the cues arrive by multicast on every machine, and on every machine but the
+shooter's own the shooter's pawn has no controller. An authored per-weapon sound
+plays as authored; without one, the bank's cue plays through the mix:
+`SFX_Weapon_Draw` on equip, `SFX_DryFire` on an empty trigger, and the reload as
+three cues timed against that reload's own length - `SFX_Reload_Mag_Out` at the
+start, `SFX_Reload_Mag_In` at 55 %, and `SFX_Reload_Bolt` at 85 % when the
+magazine was empty. A shell-by-shell shotgun reload plays only the first.
+
 ---
 
 ## 7. Footsteps
 
 Fifteen surfaces, one cue each, scheduled by the audio manager from the physical
-material of the surface the character is standing on. There is no per-character
+material of the surface the character is standing on. Every character calls
+`TickFootstepAudio` on the listener's manager every frame
+(`AOneBrahamCharacter::TickFootsteps`), with the surface re-classified at 4 Hz by
+a 60 cm trace below the capsule while it moves, because the movement
+component's floor sweep does not return a physical material. There is no per-character
 step animation event driving audio — the stride length is calculated from speed
 in `TickFootstepAudio`, so a slow walk produces quiet, widely-spaced steps and a
 sprint produces loud, close ones, with no asset duplication.
@@ -252,7 +289,11 @@ they come out of the table rather than out of a designer's memory.
 | Ducking | `SM_OneBraham_VoiceDuck` | 0.45× beds while anyone transmits, 250 ms release |
 | Flashbang | `SetTinnitusState` | 400 Hz low-pass + ringing bed, 1.4–6 s by distance and line of sight |
 | Downed | `SetDownedAudioState` | 900 Hz low-pass, world −12 dB, heartbeat at 110 bpm rising to 150 |
-| Deafened (spectating) | `SetDeafened` | everything distant, music leads |
+| Deafened (spectating) | `SetDeafened`, from `AOneBrahamPlayerController::OnRep_Spectating` | everything distant, music leads; lifted on the respawn |
+| Damage taken | `PlayDamageTakenCue`, from `ClientDamageTaken` | `UI_Damage_Taken`, pitched up for a head hit and down when the armour took it; `SFX_Bullet_Impact_Flesh` as well only when health was lost. A hit the armour absorbed whole still plays the thud |
+| Voice output | `SetVoiceBusGain`, from the settings | the voice output slider and the voice chat switch, applied to every speaker through `GetBusVolume(Voice)`. Voice chat mode `Muted` is the microphone only |
+| Announcements | `PlayAnnouncementChime`, from `UOneBrahamVoiceSubsystem::SpeakAnnouncement` | the Tannoy two-tone, then the line 0.9 s later; the chime plays even for a line with no recording, because the subtitle still needs announcing |
+| Grenades | `AOneBrahamProjectileBase::MulticastDetonationFeedback` | frag and breach charge through `PlayExplosion` (with its ear-ring inside the radius), flashbang bang and smoke pop as one-shots. A breached wall adds `SFX_Wall_Collapse`; the blast is the charge's |
 | Low health | `GetBusVolume` consumers | heartbeat and breathing scale from 40 HP down |
 | Purge | `SetLockdownAudio` | alarm bed + sprinkler, and the purge tick tone every 0.2 s |
 | Extraction | `SetExtractionAudio` | rotor bed, 2D sub-layer, positioned on the pad, speeding up from `Broadcast` to `Arriving` |
@@ -265,15 +306,25 @@ they come out of the table rather than out of a designer's memory.
 
 ## 9. Cue ids and the recording brief
 
-`DA_AudioBank` names every cue the code plays. Three categories exist in the
-build today:
+`DA_AudioBank` names every cue the code plays, and every one of them is audible
+on a clean clone:
 
-1. **Present as assets** — recorded or licensed, referenced from the bank.
-2. **Synthesised fallback** — the audio manager generates the wave at runtime
-   (per-calibre gunshot bodies, impacts, UI blips). A build with zero audio
-   content still plays a match that sounds like a match.
-3. **Recording briefs** — cues that are neither recorded nor synthesised and are
-   listed in the build report with exactly what to record.
+1. **Present as assets** — recorded or licensed, referenced from the bank. An
+   asset always wins.
+2. **Synthesised fallback** — `OneBrahamProceduralAudio.cpp` makes the wave at
+   runtime when no asset exists. There are three kinds: hand-written recipes
+   (the gunshots per calibre, the fuse beep, the alarm, the rotor), the eleven
+   ambience beds, and the **layered cues**. A layered cue is a table row of a
+   shaped noise burst, a tone that may sweep or carry a chord, a later second
+   note and an amplitude pulse. That covers movement, bullet impacts per
+   surface, doors, the lifts (chime, doors, motor), the winch, the UI set and
+   the eight music beds, each a chord on a pulse at its state's tempo.
+   `HasSynthesisedSound` answers from the same table the dispatch uses, and
+   `check_audio_ids.py` fails the build if any bank row has neither.
+
+The fallbacks are placeholders that carry the information, not the shipping
+sound: a door that thuds, a lift that chimes two floors away. The briefs below
+say what the recording must do instead.
 
 The briefs are the shopping list. Each one specifies duration, character,
 frequency target, and what it must *communicate* — because "record a shutter
@@ -282,11 +333,12 @@ sound" produces a shutter sound nobody can locate in a building.
 
 ### The rest of the shipping list
 
-Every other cue in `DA_AudioBank` that has neither a wave nor a synthesis. These
+Every other cue in `DA_AudioBank` that has no recorded wave yet (each plays
+its layered fallback until it has one). These
 are one line each because the first twenty above are the ones worth a
 conversation; the point of listing them is that no cue in the bank is
-undocumented. `check_audio_ids.py` enforces exactly that: every row is either
-synthesised or named in this document.
+undocumented. `check_audio_ids.py` enforces that every row is synthesised or
+named in this document; today every row is synthesised.
 
 | Cue | Brief |
 | --- | --- |
@@ -311,7 +363,7 @@ synthesised or named in this document.
 | `SFX_Bullet_Impact_Glass` | 0.6 s. Crack, then a scatter of fragments on a hard floor |
 | `SFX_Bullet_Impact_Carpet` | 0.25 s. Almost nothing: fibre and a thud. The quietest surface to be shot into |
 | `SFX_Bullet_Impact_Flesh` | 0.3 s. Wet, close, and unpleasant. It should be instantly distinguishable from armour |
-| `SFX_Bullet_Whizz` | 0.2 s. A near-miss. Doppler a little, so direction is readable |
+| `SFX_Bullet_Whizz` | 0.2 s. A near-miss. Doppler a little, so direction is readable. Plays where another player's shot passed within 2 m of your head with nothing solid in between (`AOneBrahamWeaponBase::PlayNearMissForLocalListener`) |
 | `SFX_Helmet_Ping` | 0.25 s. A round glancing off a hard hat. Dryly comic, played completely straight |
 | `SFX_Utility_Throw` | 0.2 s. A full-body throw: cloth, a grunt, the object released |
 | `SFX_Medkit_Use` | 0.6 s. Zip, tape, a breath. The meal-deal wrapper is this cue |

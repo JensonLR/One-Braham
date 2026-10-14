@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Weapons/OneBrahamWeaponComponent.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 
 #include "OneBraham.h"
 #include "Core/OneBrahamGameSettings.h"
@@ -10,6 +11,7 @@
 #include "Core/OneBrahamPlayerState.h"
 #include "Characters/OneBrahamCharacter.h"
 #include "Characters/OneBrahamHealthComponent.h"
+#include "Weapons/OneBrahamLagCompensationSubsystem.h"
 #include "Weapons/OneBrahamInventoryComponent.h"
 #include "Weapons/OneBrahamPickupBase.h"
 #include "Weapons/OneBrahamProjectileBase.h"
@@ -55,8 +57,8 @@ void UOneBrahamWeaponComponent::GetLifetimeReplicatedProps(TArray<FLifetimePrope
 	DOREPLIFETIME(UOneBrahamWeaponComponent, CurrentFireMode);
 	DOREPLIFETIME(UOneBrahamWeaponComponent, SelectedUtilityIndex);
 	DOREPLIFETIME(UOneBrahamWeaponComponent, bMeleeOnCooldown);
-	DOREPLIFETIME(UOneBrahamWeaponComponent, ReserveAmmoByWeapon);
-	DOREPLIFETIME(UOneBrahamWeaponComponent, OwnedWeapons);
+	DOREPLIFETIME(UOneBrahamWeaponComponent, ReplicatedReserveAmmo);
+	DOREPLIFETIME(UOneBrahamWeaponComponent, ReplicatedOwnedWeapons);
 }
 
 void UOneBrahamWeaponComponent::BeginPlay()
@@ -85,8 +87,6 @@ void UOneBrahamWeaponComponent::BeginPlay()
 		OB_ERROR("No weapon registry on '%s'. Weapons will not function. "
 			"Run Tools/Python/create_data_assets.py and assign DA_WeaponRegistry.", *GetOwner()->GetName());
 	}
-
-	HitboxHistory.Reserve(64);
 }
 
 AOneBrahamCharacter* UOneBrahamWeaponComponent::GetCharacter() const
@@ -114,7 +114,6 @@ void UOneBrahamWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	}
 
 	const bool bLocallyControlled = Character->IsLocallyControlled();
-	const bool bAuthority = GetOwner()->HasAuthority();
 
 	// --- ADS blend --------------------------------------------------------
 	const float TargetADS = bAimingDownSights ? 1.f : 0.f;
@@ -191,7 +190,7 @@ void UOneBrahamWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 						LastLocalFireTime = Now;
 						--ServerBurstRemaining;
 						PredictLocalShot();
-						ServerRequestFire(Character->GetEyeLocation(), Character->GetEyeRotation().Vector(), ClientShotIndex);
+						SendFireRequest();
 					}
 				}
 				else
@@ -199,7 +198,7 @@ void UOneBrahamWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 					++ClientShotIndex;
 					LastLocalFireTime = Now;
 					PredictLocalShot();
-					ServerRequestFire(Character->GetEyeLocation(), Character->GetEyeRotation().Vector(), ClientShotIndex);
+					SendFireRequest();
 				}
 			}
 		}
@@ -207,17 +206,6 @@ void UOneBrahamWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 
 	// --- Weapon visual kick decay ----------------------------------------
 	WeaponKickOffset = FMath::Vector2DInterpTo(WeaponKickOffset, FVector2D::ZeroVector, DeltaTime, 9.f);
-
-	// --- Lag compensation snapshots (server only) -------------------------
-	if (bAuthority)
-	{
-		const float Now = GetWorld()->GetTimeSeconds();
-		if (Now - LastSnapshotTime >= (1.f / 30.f))
-		{
-			LastSnapshotTime = Now;
-			CaptureHitboxSnapshot();
-		}
-	}
 }
 
 // ==========================================================================
@@ -246,9 +234,27 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerGiveWeapon(FName WeaponId
 	UWorld* World = GetWorld();
 	const FTransform SpawnTransform = Character->GetActorTransform();
 
-	TSubclassOf<AOneBrahamWeaponBase> SpawnClass = WeaponRegistry->WeaponActorClass.IsValid()
-		? WeaponRegistry->WeaponActorClass.LoadSynchronous()
-		: AOneBrahamWeaponBase::StaticClass();
+	// The weapon's own Blueprint, then the registry's default, then the C++
+	// pickup. Whatever is chosen must be a pickup, so that it can be dropped at
+	// a body or on a swap: a plain AOneBrahamWeaponBase cannot lie on the floor.
+	TSubclassOf<AOneBrahamWeaponBase> SpawnClass = nullptr;
+	if (!Definition->WeaponActorClass.IsNull())
+	{
+		SpawnClass = Definition->WeaponActorClass.LoadSynchronous();
+	}
+	if (SpawnClass == nullptr && !WeaponRegistry->WeaponActorClass.IsNull())
+	{
+		SpawnClass = WeaponRegistry->WeaponActorClass.LoadSynchronous();
+	}
+	if (SpawnClass == nullptr || !SpawnClass->IsChildOf(AOneBrahamPickupBase::StaticClass()))
+	{
+		if (SpawnClass != nullptr)
+		{
+			OB_WARN("Weapon '%s' spawns as %s, which is not an AOneBrahamPickupBase; using the C++ pickup so it "
+				"can be dropped. Re-run build_weapons to reparent the Blueprint.", *WeaponId.ToString(), *SpawnClass->GetName());
+		}
+		SpawnClass = AOneBrahamPickupBase::StaticClass();
+	}
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.Owner = Character;
@@ -274,10 +280,12 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerGiveWeapon(FName WeaponId
 	if (ReserveAmmo >= 0)
 	{
 		ReserveAmmoByWeapon.Add(WeaponId, FMath::Clamp(ReserveAmmo, 0, Definition->MaxReserve));
+		SyncReplicatedInventory();
 	}
 	else if (!ReserveAmmoByWeapon.Contains(WeaponId))
 	{
 		ReserveAmmoByWeapon.Add(WeaponId, Definition->StartingReserve);
+		SyncReplicatedInventory();
 	}
 
 	// Slot management: the new weapon replaces whatever was in its slot.
@@ -302,6 +310,7 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerGiveWeapon(FName WeaponId
 	}
 
 	OwnedWeapons.Add(Slot, NewWeapon);
+	SyncReplicatedInventory();
 
 	if (bEquip)
 	{
@@ -324,6 +333,7 @@ void UOneBrahamWeaponComponent::ServerRemoveCurrentWeapon()
 	}
 
 	OwnedWeapons.Remove(CurrentSlot);
+	SyncReplicatedInventory();
 	CurrentWeapon->SetOwningWeaponComponent(nullptr);
 	CurrentWeapon->Destroy();
 	CurrentWeapon = nullptr;
@@ -353,6 +363,7 @@ void UOneBrahamWeaponComponent::ResetOnRespawn()
 
 	OwnedWeapons.Reset();
 	ReserveAmmoByWeapon.Reset();
+	SyncReplicatedInventory();
 	CurrentWeapon = nullptr;
 	CurrentSlot = EOneBrahamWeaponSlot::Melee;
 
@@ -449,6 +460,7 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::DropCurrentWeapon()
 
 	AOneBrahamWeaponBase* Dropped = CurrentWeapon;
 	OwnedWeapons.Remove(CurrentSlot);
+	SyncReplicatedInventory();
 	Dropped->SetOwningWeaponComponent(nullptr);
 	Dropped->OnUnequipped();
 
@@ -537,10 +549,12 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerPickupFromWorld(AOneBraha
 	{
 		const int32 Carried = FMath::Clamp(Pickup->GetGroundReserveAmmo(), 0, WorldWeapon->Definition->MaxReserve);
 		ReserveAmmoByWeapon.Add(WorldWeapon->Definition->WeaponId, Carried);
+		SyncReplicatedInventory();
 	}
 	else if (!ReserveAmmoByWeapon.Contains(WorldWeapon->Definition->WeaponId))
 	{
 		ReserveAmmoByWeapon.Add(WorldWeapon->Definition->WeaponId, WorldWeapon->Definition->StartingReserve);
+		SyncReplicatedInventory();
 	}
 
 	WorldWeapon->SetOwningWeaponComponent(this);
@@ -554,6 +568,7 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerPickupFromWorld(AOneBraha
 	}
 
 	OwnedWeapons.Add(Slot, WorldWeapon);
+	SyncReplicatedInventory();
 
 	// Equip it immediately: a player who pressed the pickup key wants the weapon
 	// in their hands, not in a bag they then have to open.
@@ -568,6 +583,50 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerPickupFromWorld(AOneBraha
 		ReserveAmmoByWeapon.FindRef(WorldWeapon->Definition->WeaponId));
 
 	return WorldWeapon;
+}
+
+int32 UOneBrahamWeaponComponent::ServerAddReserveShare(float Share)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || Share <= 0.f)
+	{
+		return 0;
+	}
+
+	int32 Added = 0;
+
+	for (const TPair<EOneBrahamWeaponSlot, TObjectPtr<AOneBrahamWeaponBase>>& Pair : OwnedWeapons)
+	{
+		const AOneBrahamWeaponBase* Weapon = Pair.Value;
+		if (Weapon == nullptr || Weapon->Definition == nullptr || Weapon->Definition->MaxReserve <= 0)
+		{
+			continue;
+		}
+
+		const FName WeaponId = Weapon->Definition->WeaponId;
+		const int32 MaxReserve = Weapon->Definition->MaxReserve;
+		int32& Reserve = ReserveAmmoByWeapon.FindOrAdd(WeaponId, 0);
+
+		const int32 Grant = FMath::Min(FMath::Max(1, FMath::RoundToInt(MaxReserve * Share)), MaxReserve - Reserve);
+		if (Grant > 0)
+		{
+			Reserve += Grant;
+			Added += Grant;
+		}
+	}
+
+	if (Added > 0)
+	{
+		SyncReplicatedInventory();
+
+		if (CurrentWeapon != nullptr)
+		{
+			OnWeaponAmmoChanged(CurrentWeapon->GetAmmoInMagazine());
+		}
+
+		ForceNetUpdate();
+	}
+
+	return Added;
 }
 
 void UOneBrahamWeaponComponent::DropAllOnDeath()
@@ -601,6 +660,7 @@ void UOneBrahamWeaponComponent::DropAllOnDeath()
 	}
 
 	OwnedWeapons.Reset();
+	SyncReplicatedInventory();
 	CurrentWeapon = nullptr;
 	CurrentSlot = EOneBrahamWeaponSlot::Melee;
 	ForceNetUpdate();
@@ -621,9 +681,10 @@ void UOneBrahamWeaponComponent::EquipSlot(EOneBrahamWeaponSlot Slot)
 		// not feel laggy at 100 ms ping.
 		if (TObjectPtr<AOneBrahamWeaponBase>* Found = OwnedWeapons.Find(Slot))
 		{
+			AOneBrahamWeaponBase* Predicted = CurrentWeapon;
 			CurrentWeapon = *Found;
 			CurrentSlot = Slot;
-			OnRep_CurrentWeapon();
+			OnRep_CurrentWeapon(Predicted);
 		}
 		return;
 	}
@@ -645,6 +706,11 @@ void UOneBrahamWeaponComponent::EquipSlot(EOneBrahamWeaponSlot Slot)
 	}
 
 	CurrentSlot = Slot;
+
+	if (Slot == EOneBrahamWeaponSlot::Sidearm && Previous != nullptr && CurrentWeapon != nullptr)
+	{
+		FOneBrahamVoiceDirector::OnSidearmDrawn(GetCharacter());
+	}
 
 	if (Previous != nullptr)
 	{
@@ -734,6 +800,11 @@ bool UOneBrahamWeaponComponent::HasWeapon(FName WeaponId) const
 
 void UOneBrahamWeaponComponent::ServerGiveWeaponDebug_Implementation(FName WeaponId)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerGiveWeaponDebug")))
+	{
+		return;
+	}
+
 	ServerGiveWeapon(WeaponId, true);
 }
 
@@ -745,6 +816,22 @@ void UOneBrahamWeaponComponent::SetTriggerHeld(bool bHeld)
 	const AOneBrahamCharacter* Character = GetCharacter();
 	if (Character == nullptr || CurrentWeapon == nullptr)
 	{
+		return;
+	}
+
+	// A press during a shell-by-shell reload with shells already in stops the
+	// loading; the next press fires. Every other reload has to finish.
+	if (bHeld && bIsReloading && CurrentWeapon->Definition != nullptr &&
+		CurrentWeapon->Definition->bPerShellReload && CurrentWeapon->GetAmmoInMagazine() > 0)
+	{
+		if (GetOwner()->HasAuthority())
+		{
+			ServerInterruptReload_Implementation();
+		}
+		else
+		{
+			ServerInterruptReload();
+		}
 		return;
 	}
 
@@ -784,13 +871,14 @@ void UOneBrahamWeaponComponent::SetTriggerHeld(bool bHeld)
 	if (CurrentWeapon->IsMagazineEmpty())
 	{
 		CurrentWeapon->MulticastPlayDryFire();
+		FOneBrahamVoiceDirector::OnDryFire(GetCharacter());
 		return;
 	}
 
 	++ClientShotIndex;
 	LastLocalFireTime = GetWorld()->GetTimeSeconds();
 	PredictLocalShot();
-	ServerRequestFire(Character->GetEyeLocation(), Character->GetEyeRotation().Vector(), ClientShotIndex);
+	SendFireRequest();
 }
 
 // ==========================================================================
@@ -798,6 +886,9 @@ void UOneBrahamWeaponComponent::SetTriggerHeld(bool bHeld)
 // ==========================================================================
 void UOneBrahamWeaponComponent::ServerRequestFire_Implementation(FVector_NetQuantize AimOrigin, FVector_NetQuantizeNormal AimDirection, int32 InClientShotIndex)
 {
+	// RPC budget: own limit (the weapon's rate of fire, validation 2 below).
+	// A full-auto SMG is fifteen shots a second, which would spend the shared
+	// budget on its own; a shot faster than the weapon allows is refused there.
 	AOneBrahamCharacter* Character = GetCharacter();
 	if (Character == nullptr || !GetOwner()->HasAuthority() || CurrentWeapon == nullptr)
 	{
@@ -877,20 +968,27 @@ void UOneBrahamWeaponComponent::ServerRequestFire_Implementation(FVector_NetQuan
 		return;
 	}
 
-	// --- Rewind for lag compensation --------------------------------------
-	const float ShooterPingMs = PC->PlayerState != nullptr ? static_cast<float>(PC->PlayerState->GetPingInMilliseconds()) : 0.f;
-	const float RewindTime = RewindPlayersForLagCompensation(ShooterPingMs);
-
-	// --- Fire -------------------------------------------------------------
+	// --- Fire, against the world the shooter was looking at -----------------
+	// Every other character's hitboxes are put back where they were one round
+	// trip ago for the length of FireOnce, and restored when the scope closes
+	// (UOneBrahamLagCompensationSubsystem has the reasoning).
 	LastServerFireTime = Now;
 	++ServerShotIndex;
 
-	bool bFired = FireOnce(ClientEye, ClientDir);
+	const float ShooterPingMs = PC->PlayerState != nullptr ? PC->PlayerState->GetPingInMilliseconds() : 0.f;
 
-	RestorePlayersAfterLagCompensation();
+	{
+		const FOneBrahamScopedRewind Rewind(GetWorld(), Character, Character->IsLocallyControlled() ? 0.f : ShooterPingMs);
+		FireOnce(ClientEye, ClientDir);
+	}
+}
 
-	UE_UNUSED(RewindTime);
-	UE_UNUSED(bFired);
+void UOneBrahamWeaponComponent::SendFireRequest()
+{
+	FVector AimOrigin;
+	FVector AimDirection;
+	GetLocalAim(AimOrigin, AimDirection);
+	ServerRequestFire(AimOrigin, AimDirection, ClientShotIndex);
 }
 
 void UOneBrahamWeaponComponent::GetLocalAim(FVector& OutOrigin, FVector& OutDirection) const
@@ -967,7 +1065,7 @@ bool UOneBrahamWeaponComponent::FireOnce(const FVector& AimOrigin, const FVector
 	AActor* FirstHitActor = nullptr;
 
 	const float Damage = CurrentWeapon->ServerFireShot(AimOrigin, AimDirection, Impacts, FirstHitActor);
-	UE_UNUSED(Damage);
+	(void)Damage;
 
 	// Auto-reload when the magazine runs dry (player preference, default on).
 	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
@@ -1002,7 +1100,7 @@ void UOneBrahamWeaponComponent::PredictLocalShot()
 	// Muzzle flash + shell + tracer are all multicast by the server, so the local
 	// prediction only handles the *pose* change (kick) - which is what the player
 	// actually feels. Firing the FX twice would double the muzzle flash.
-	if (CurrentWeapon->Definition != nullptr && CurrentWeapon->Definition->FireMontage.IsValid())
+	if (CurrentWeapon->Definition != nullptr && !CurrentWeapon->Definition->FireMontage.IsNull())
 	{
 		if (USkeletalMeshComponent* Arms = GetCharacter() ? GetCharacter()->GetFirstPersonMesh() : nullptr)
 		{
@@ -1211,9 +1309,35 @@ void UOneBrahamWeaponComponent::RequestReload()
 	bIsReloading = true;
 	OnRep_Reloading();
 	OnReloadStateChanged.Broadcast(true);
+	FOneBrahamVoiceDirector::OnReload(GetCharacter(), CurrentWeapon->GetAmmoInMagazine() <= 0);
 
 	// The weapon actor drives the timer; we only mirror the state for the HUD.
 	CurrentWeapon->ServerStartReload();
+	ForceNetUpdate();
+}
+
+void UOneBrahamWeaponComponent::ServerInterruptReload_Implementation()
+{
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerInterruptReload")))
+	{
+		return;
+	}
+
+	if (!bIsReloading || CurrentWeapon == nullptr || CurrentWeapon->Definition == nullptr)
+	{
+		return;
+	}
+
+	// Only a shell-by-shell reload can be stopped part way: a magazine that is
+	// half seated is not a state the weapon has. And only with something loaded.
+	if (!CurrentWeapon->Definition->bPerShellReload || CurrentWeapon->GetAmmoInMagazine() <= 0)
+	{
+		return;
+	}
+
+	CurrentWeapon->ServerCancelReload();
+	bIsReloading = false;
+	OnRep_Reloading();
 	ForceNetUpdate();
 }
 
@@ -1238,10 +1362,28 @@ void UOneBrahamWeaponComponent::ServerCompleteReload()
 		Needed = MagazineSize - CurrentWeapon->GetAmmoInMagazine();
 	}
 
-	const int32 Transferred = FMath::Min(Needed, Reserve);
+	// A pump shotgun loads one shell per cycle. This used to move a whole tube
+	// at the end of the first 0.55 s cycle: eight shells in about half a second.
+	const bool bPerShell = CurrentWeapon->Definition->bPerShellReload;
+	const int32 Transferred = FMath::Min(bPerShell ? FMath::Min(1, Needed) : Needed, Reserve);
 
 	Reserve -= Transferred;
+	SyncReplicatedInventory();
 	CurrentWeapon->SetAmmoInMagazine(CurrentWeapon->GetAmmoInMagazine() + Transferred);
+
+	if (bPerShell && Transferred > 0 && Reserve > 0 && CurrentWeapon->GetAmmoInMagazine() < MagazineSize)
+	{
+		OnAmmoChanged.Broadcast(CurrentWeapon->GetAmmoInMagazine(), Reserve);
+		CurrentWeapon->ServerContinueShellReload();
+		ForceNetUpdate();
+		return;
+	}
+
+	if (bPerShell)
+	{
+		// The tube is full or the pouch is empty: the closing pump.
+		CurrentWeapon->MulticastPlayReloadFX(FName(TEXT("Complete")));
+	}
 
 	bIsReloading = false;
 	OnRep_Reloading();
@@ -1304,7 +1446,7 @@ void UOneBrahamWeaponComponent::ClientHitConfirmed_Implementation(bool bHeadshot
 		}
 	}
 
-	UE_UNUSED(DistanceCm);
+	(void)DistanceCm;
 }
 
 void UOneBrahamWeaponComponent::OnServerShotFired(int32 ShotIndex)
@@ -1317,7 +1459,7 @@ void UOneBrahamWeaponComponent::OnServerShotFired(int32 ShotIndex)
 			CurrentWeapon->Definition->Spread.MaxBloom);
 	}
 
-	UE_UNUSED(ShotIndex);
+	(void)ShotIndex;
 }
 
 // ==========================================================================
@@ -1395,9 +1537,9 @@ void UOneBrahamWeaponComponent::MeleeAttack()
 	bMeleeOnCooldown = true;
 
 	const float Damage = CurrentWeapon->ServerMelee();
-	UE_UNUSED(Damage);
+	(void)Damage;
 
-	if (CurrentWeapon->Definition != nullptr && CurrentWeapon->Definition->MeleeMontage.IsValid())
+	if (CurrentWeapon->Definition != nullptr && !CurrentWeapon->Definition->MeleeMontage.IsNull())
 	{
 		if (USkeletalMeshComponent* Arms = GetCharacter() ? GetCharacter()->GetFirstPersonMesh() : nullptr)
 		{
@@ -1427,7 +1569,7 @@ void UOneBrahamWeaponComponent::PlayInspect()
 		return;
 	}
 
-	if (!CurrentWeapon->Definition->InspectMontage.IsValid())
+	if (CurrentWeapon->Definition->InspectMontage.IsNull())
 	{
 		return;
 	}
@@ -1513,7 +1655,10 @@ void UOneBrahamWeaponComponent::ThrowUtility()
 
 	if (!GetOwner()->HasAuthority())
 	{
-		ServerRequestThrowUtility(SelectedUtilityIndex, Character->GetEyeLocation(), Character->GetEyeRotation().Vector());
+		FVector AimOrigin;
+		FVector AimDirection;
+		GetLocalAim(AimOrigin, AimDirection);
+		ServerRequestThrowUtility(SelectedUtilityIndex, AimOrigin, AimDirection);
 		return;
 	}
 
@@ -1524,7 +1669,7 @@ void UOneBrahamWeaponComponent::ThrowUtility()
 	}
 
 	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
-	UE_UNUSED(Settings);
+	(void)Settings;
 
 	// Rate limit: a player cannot throw four frags in one second.
 	const float Now = GetWorld()->GetTimeSeconds();
@@ -1605,12 +1750,20 @@ void UOneBrahamWeaponComponent::UseMedkit()
 
 	if (!Inventory->ServerHasMedkit())
 	{
+		FOneBrahamVoiceDirector::OnMedkitEmpty(GetCharacter());
 		return;
 	}
 
+	if (UOneBrahamVoiceSubsystem* Voice = UOneBrahamVoiceSubsystem::Get(GetOwner()))
+	{
+		Voice->SpeakContextualLine(GetOwner(), TEXT("V_MEDKIT"));
+	}
+
 	// Health is restored at the END of the animation: being shot mid-medkit
-	// cancels it and costs the kit. This is the "no free healing" rule.
+	// cancels it and costs the kit. This is the "no free healing" rule, which
+	// until HandleDamageDuringMedkit was only this comment.
 	bMedkitInProgress = true;
+	Health->OnDamageTaken.AddUniqueDynamic(this, &UOneBrahamWeaponComponent::HandleDamageDuringMedkit);
 
 	const UOneBrahamMatchSettingsAsset* Settings = nullptr;
 	if (const AOneBrahamGameState* GameState = GetWorld()->GetGameState<AOneBrahamGameState>())
@@ -1623,7 +1776,7 @@ void UOneBrahamWeaponComponent::UseMedkit()
 
 	GetWorld()->GetTimerManager().SetTimer(MedkitTimerHandle, FTimerDelegate::CreateWeakLambda(this, [this, HealAmount, Inventory]()
 	{
-		bMedkitInProgress = false;
+		EndMedkit();
 
 		AOneBrahamCharacter* MedCharacter = GetCharacter();
 		if (MedCharacter == nullptr || Inventory == nullptr)
@@ -1640,115 +1793,46 @@ void UOneBrahamWeaponComponent::UseMedkit()
 		if (Inventory->ServerConsumeMedkit())
 		{
 			MedHealth->Heal(HealAmount);
-
-			if (UOneBrahamVoiceSubsystem* Voice = UOneBrahamVoiceSubsystem::Get(GetOwner()))
-			{
-				Voice->SpeakContextualLine(GetOwner(), TEXT("V_MEDKIT"));
-			}
+			FOneBrahamVoiceDirector::OnMedkitFinished(MedCharacter);
 		}
 	}), UseSeconds, false);
 }
 
-// ==========================================================================
-//  Lag compensation
-// ==========================================================================
-void UOneBrahamWeaponComponent::CaptureHitboxSnapshot()
+void UOneBrahamWeaponComponent::EndMedkit()
 {
-	UWorld* World = GetWorld();
-	if (World == nullptr || !GetOwner()->HasAuthority())
+	bMedkitInProgress = false;
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(MedkitTimerHandle);
+	}
+
+	if (AOneBrahamCharacter* Character = GetCharacter())
+	{
+		if (UOneBrahamHealthComponent* Health = Character->GetHealthComponent())
+		{
+			Health->OnDamageTaken.RemoveDynamic(this, &UOneBrahamWeaponComponent::HandleDamageDuringMedkit);
+		}
+	}
+}
+
+void UOneBrahamWeaponComponent::HandleDamageDuringMedkit(float Damage, AActor* DamageInstigator, FVector InstigatorLocation)
+{
+	if (!bMedkitInProgress || Damage <= 0.f || !GetOwner() || !GetOwner()->HasAuthority())
 	{
 		return;
 	}
 
-	FOneBrahamHitboxSnapshot Snapshot;
-	Snapshot.ServerTime = World->GetTimeSeconds();
+	EndMedkit();
 
-	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	// The kit was open: it is spent, and nothing is healed.
+	if (AOneBrahamCharacter* Character = GetCharacter())
 	{
-		const AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(It->Get());
-		if (PC == nullptr)
+		if (UOneBrahamInventoryComponent* Inventory = Character->GetInventoryComponent())
 		{
-			continue;
-		}
-
-		const AOneBrahamCharacter* Character = Cast<AOneBrahamCharacter>(PC->GetPawn());
-		const AOneBrahamPlayerState* State = PC->GetPlayerState<AOneBrahamPlayerState>();
-		if (Character == nullptr || State == nullptr)
-		{
-			continue;
-		}
-
-		const int32 PlayerId = State->PlayerId;
-		const USkeletalMeshComponent* Body = Character->GetMesh();
-
-		if (Body != nullptr)
-		{
-			// Three anchors are enough for capsule-level compensation; per-bone
-			// transforms are stored too but only used for limb-accurate rewinds.
-			Snapshot.HeadTransforms.Add(PlayerId, Body->GetSocketTransform(TEXT("head"), RTS_World));
-			Snapshot.ChestTransforms.Add(PlayerId, Body->GetSocketTransform(TEXT("spine_03"), RTS_World));
-			Snapshot.PelvisTransforms.Add(PlayerId, Body->GetSocketTransform(TEXT("pelvis"), RTS_World));
-
-			TMap<FName, FTransform>& Bones = Snapshot.BoneTransforms.Add(PlayerId);
-			Bones.Add(TEXT("head"), Snapshot.HeadTransforms[PlayerId]);
-			Bones.Add(TEXT("spine_03"), Snapshot.ChestTransforms[PlayerId]);
-			Bones.Add(TEXT("pelvis"), Snapshot.PelvisTransforms[PlayerId]);
+			Inventory->ServerConsumeMedkit();
 		}
 	}
-
-	HitboxHistory.Add(MoveTemp(Snapshot));
-
-	// Trim to the sliding window.
-	const float Oldest = World->GetTimeSeconds() - LagCompensationHistorySeconds;
-	while (HitboxHistory.Num() > 0 && HitboxHistory[0].ServerTime < Oldest)
-	{
-		HitboxHistory.RemoveAt(0, 1, EAllowShrinking::No);
-	}
-}
-
-float UOneBrahamWeaponComponent::RewindPlayersForLagCompensation(float ShooterPingMs)
-{
-	// The rewind target: half the shooter's round trip, capped.
-	const float ClampedPingMs = FMath::Min(ShooterPingMs, MaxLagCompensationMs);
-	const float RewindSeconds = (ClampedPingMs * 0.5f) / 1000.f;
-
-	if (HitboxHistory.Num() == 0 || RewindSeconds <= 0.f)
-	{
-		return 0.f;
-	}
-
-	const float TargetTime = GetWorld()->GetTimeSeconds() - RewindSeconds;
-
-	// Find the closest snapshot at or before the target time.
-	const FOneBrahamHitboxSnapshot* Best = &HitboxHistory[0];
-	for (const FOneBrahamHitboxSnapshot& Snapshot : HitboxHistory)
-	{
-		if (Snapshot.ServerTime <= TargetTime)
-		{
-			Best = &Snapshot;
-		}
-		else
-		{
-			break;
-		}
-	}
-
-	// The rewind itself is applied by moving the *hit-testing* bodies: rather than
-	// teleporting the real (visible) characters - which would look catastrophic -
-	// we move the per-bone hitbox volumes used by the Weapon channel and restore
-	// them after the trace. The visible mesh is never touched.
-	//
-	// (See Docs/07_Networking.md, "Hitbox rewind": the hitboxes are separate
-	// USkeletalMeshComponents on the OneBrahamHitbox collision profile, so this
-	// swap is invisible to players and costs one component transform per bone.)
-	ActiveRewindSnapshot = Best != nullptr ? *Best : FOneBrahamHitboxSnapshot();
-
-	return Best != nullptr ? Best->ServerTime : 0.f;
-}
-
-void UOneBrahamWeaponComponent::RestorePlayersAfterLagCompensation()
-{
-	ActiveRewindSnapshot = FOneBrahamHitboxSnapshot();
 }
 
 // ==========================================================================
@@ -1789,48 +1873,93 @@ bool UOneBrahamWeaponComponent::IsSuppressorAttachment(FName AttachmentId) const
 // ==========================================================================
 void UOneBrahamWeaponComponent::ServerRequestReload_Implementation()
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestReload")))
+	{
+		return;
+	}
+
 	RequestReload();
 }
 
 void UOneBrahamWeaponComponent::ServerRequestEquipSlot_Implementation(EOneBrahamWeaponSlot Slot)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestEquipSlot")))
+	{
+		return;
+	}
+
 	EquipSlot(Slot);
 }
 
 void UOneBrahamWeaponComponent::ServerRequestCycleWeapon_Implementation(int32 Direction)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestCycleWeapon")))
+	{
+		return;
+	}
+
 	CycleWeapon(Direction);
 }
 
 void UOneBrahamWeaponComponent::ServerRequestFireMode_Implementation()
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestFireMode")))
+	{
+		return;
+	}
+
 	CycleFireMode();
 }
 
 void UOneBrahamWeaponComponent::ServerRequestMelee_Implementation()
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestMelee")))
+	{
+		return;
+	}
+
 	MeleeAttack();
 }
 
 void UOneBrahamWeaponComponent::ServerRequestThrowUtility_Implementation(int32 UtilityIndex, FVector_NetQuantize AimOrigin, FVector_NetQuantizeNormal AimDirection)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestThrowUtility")))
+	{
+		return;
+	}
+
 	SelectUtilityIndex(UtilityIndex);
 	ThrowUtility();
 }
 
 void UOneBrahamWeaponComponent::ServerRequestUseUtility_Implementation(int32 UtilityIndex, FVector_NetQuantize TargetLocation)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestUseUtility")))
+	{
+		return;
+	}
+
 	SelectUtilityIndex(UtilityIndex);
 	UseUtilityItem();
 }
 
 void UOneBrahamWeaponComponent::ServerRequestMedkit_Implementation()
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestMedkit")))
+	{
+		return;
+	}
+
 	UseMedkit();
 }
 
 void UOneBrahamWeaponComponent::ServerRequestToggleAttachment_Implementation(bool bFlashlight, bool bEnabled)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestToggleAttachment")))
+	{
+		return;
+	}
+
 	if (CurrentWeapon == nullptr)
 	{
 		return;
@@ -1849,18 +1978,73 @@ void UOneBrahamWeaponComponent::ServerRequestToggleAttachment_Implementation(boo
 // ==========================================================================
 //  Replication
 // ==========================================================================
-void UOneBrahamWeaponComponent::OnRep_CurrentWeapon()
+void UOneBrahamWeaponComponent::OnRep_CurrentWeapon(AOneBrahamWeaponBase* PreviousWeapon)
 {
-	AOneBrahamWeaponBase* Previous = nullptr;
-	UE_UNUSED(Previous);
+	// The predicted switch already did this, and the server's value has now
+	// arrived and agrees: a second equip would play the draw twice.
+	if (PreviousWeapon == CurrentWeapon)
+	{
+		return;
+	}
+
+	if (PreviousWeapon != nullptr)
+	{
+		PreviousWeapon->OnUnequipped();
+	}
 
 	if (CurrentWeapon != nullptr)
 	{
 		CurrentWeapon->SetOwningWeaponComponent(this);
+		CurrentWeapon->OnEquippedBy(GetCharacter());
 		SanitiseFireMode();
 	}
 
-	OnWeaponChanged.Broadcast(CurrentWeapon, nullptr);
+	OnWeaponChanged.Broadcast(CurrentWeapon, PreviousWeapon);
+}
+
+void UOneBrahamWeaponComponent::SyncReplicatedInventory()
+{
+	ReplicatedOwnedWeapons.Reset();
+	for (const TPair<EOneBrahamWeaponSlot, TObjectPtr<AOneBrahamWeaponBase>>& Pair : OwnedWeapons)
+	{
+		FOneBrahamOwnedWeaponEntry& Entry = ReplicatedOwnedWeapons.AddDefaulted_GetRef();
+		Entry.Slot = Pair.Key;
+		Entry.Weapon = Pair.Value;
+	}
+
+	ReplicatedReserveAmmo.Reset();
+	for (const TPair<FName, int32>& Pair : ReserveAmmoByWeapon)
+	{
+		FOneBrahamReserveAmmoEntry& Entry = ReplicatedReserveAmmo.AddDefaulted_GetRef();
+		Entry.WeaponId = Pair.Key;
+		Entry.Rounds = Pair.Value;
+	}
+}
+
+void UOneBrahamWeaponComponent::OnRep_OwnedWeapons()
+{
+	OwnedWeapons.Reset();
+	for (const FOneBrahamOwnedWeaponEntry& Entry : ReplicatedOwnedWeapons)
+	{
+		// A weapon actor can arrive after the array that names it: the entry is
+		// kept as a null and filled by the next update, not dropped.
+		OwnedWeapons.Add(Entry.Slot, Entry.Weapon);
+	}
+}
+
+void UOneBrahamWeaponComponent::OnRep_ReserveAmmo()
+{
+	ReserveAmmoByWeapon.Reset();
+	for (const FOneBrahamReserveAmmoEntry& Entry : ReplicatedReserveAmmo)
+	{
+		ReserveAmmoByWeapon.Add(Entry.WeaponId, Entry.Rounds);
+	}
+
+	if (CurrentWeapon != nullptr && CurrentWeapon->Definition != nullptr)
+	{
+		const int32* Reserve = ReserveAmmoByWeapon.Find(CurrentWeapon->Definition->WeaponId);
+		OnAmmoChanged.Broadcast(CurrentWeapon->GetAmmoInMagazine(), Reserve != nullptr ? *Reserve : 0);
+	}
 }
 
 void UOneBrahamWeaponComponent::OnRep_Reloading()
@@ -1870,9 +2054,17 @@ void UOneBrahamWeaponComponent::OnRep_Reloading()
 
 void UOneBrahamWeaponComponent::SetAimingDownSights(bool bAiming)
 {
-	// ADS is a pure presentation + spread change; the spread change is applied
-	// server-side from the replicated flag, so a modified client cannot get the
-	// ADS accuracy benefit without the movement penalty.
+	// Spread, recoil and the aim walk speed are computed on the server from the
+	// replicated flag, so a modified client cannot get the ADS accuracy without
+	// the movement penalty. The owning client applies it at once for the camera
+	// and tells the server; until this RPC existed the server never heard, so
+	// every shot was scored as hip fire and the next replication snapped the
+	// owner's sight back down.
+	if (bAimingDownSights == bAiming)
+	{
+		return;
+	}
+
 	bAimingDownSights = bAiming;
 
 	// Sprinting overrides ADS: you drop the sight to run.
@@ -1881,5 +2073,45 @@ void UOneBrahamWeaponComponent::SetAimingDownSights(bool bAiming)
 		GetCharacter()->SetSprintRequested(false);
 	}
 
+	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
+	{
+		const APawn* Pawn = Cast<APawn>(GetOwner());
+		if (Pawn != nullptr && Pawn->IsLocallyControlled())
+		{
+			ServerSetAimingDownSights(bAiming);
+		}
+		return;
+	}
+
 	ForceNetUpdate();
+}
+
+void UOneBrahamWeaponComponent::ServerSetAimingDownSights_Implementation(bool bAiming)
+{
+	AOneBrahamCharacter* Character = GetCharacter();
+	if (Character == nullptr)
+	{
+		return;
+	}
+
+	if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(Character->GetController()))
+	{
+		if (!PC->CheckRPCBudget(TEXT("ServerSetAimingDownSights")))
+		{
+			return;
+		}
+	}
+
+	// Raising the sight is refused where the server says it is impossible; the
+	// replicated false then puts the client right. Lowering is always allowed.
+	if (bAiming)
+	{
+		if (CurrentWeapon == nullptr || Character->LifeState != EOneBrahamLifeState::Alive)
+		{
+			ForceNetUpdate();
+			return;
+		}
+	}
+
+	SetAimingDownSights(bAiming);
 }

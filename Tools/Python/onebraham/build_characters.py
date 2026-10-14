@@ -319,9 +319,24 @@ def build_animation_blueprint(report):
     at once.
     """
     path = u"{0}/ABP_OneBrahamCharacter".format(C.CHARACTERS)
+    parent = getattr(unreal, "OneBrahamAnimInstance", None)
+    if parent is None:
+        report.failed(path, "UOneBrahamAnimInstance is not reflected; compile the module first")
+        return None
+
     if unreal.EditorAssetLibrary.does_asset_exist(path):
+        existing = unreal.EditorAssetLibrary.load_asset(path)
+        # An ABP made before the C++ instance existed has no parent to read its
+        # values from: reparent it, which keeps the graph an animator built.
+        try:
+            if existing is not None and existing.get_editor_property("parent_class") != parent:
+                unreal.BlueprintEditorLibrary.reparent_blueprint(existing, parent)
+                unreal.BlueprintEditorLibrary.compile_blueprint(existing)
+                unreal.EditorAssetLibrary.save_loaded_asset(existing)
+        except Exception as exc:  # noqa: BLE001
+            report.failed(path, u"could not reparent onto UOneBrahamAnimInstance: {0}".format(exc))
         report.updated_asset(path)
-        return unreal.EditorAssetLibrary.load_asset(path)
+        return existing
 
     skeleton = unreal.EditorAssetLibrary.load_asset(
         C.CHARACTERS + "/Meshes/SK_OB_Body_0_Skeleton")
@@ -335,6 +350,7 @@ def build_animation_blueprint(report):
 
     factory = unreal.AnimBlueprintFactory()
     factory.set_editor_property("TargetSkeleton", skeleton)
+    factory.set_editor_property("ParentClass", parent)
     factory.set_editor_property("PreviewSkeletalMesh",
                                 unreal.EditorAssetLibrary.load_asset(C.CHARACTERS + "/Meshes/SK_OB_Body_0"))
 
@@ -345,17 +361,43 @@ def build_animation_blueprint(report):
         report.failed(path, "could not create the animation blueprint")
         return None
 
-    # The personality parameters the data asset drives. Declared here so the anim
-    # graph can be built against names that are already guaranteed to exist.
-    for param_name, default in (("WalkRateScale", 1.0), ("ArmSwingScale", 1.0),
-                                ("WeaponHandlingScale", 1.0), ("IdleLeanScale", 0.5),
-                                ("SprintHunch", 0.0), ("CrouchComposure", 0.5),
-                                ("ArchetypeIndex", 0.0), ("bIsDowned", 0.0),
-                                ("bIsAiming", 0.0), ("bIsSprinting", 0.0),
-                                ("Speed", 0.0), ("Lean", 0.0)):
-        C.log(u"  anim parameter {0} = {1}".format(param_name, default))
+    # Every value the graph reads (Speed, Direction, GaitPlayRate, AimPitch,
+    # AimYaw, ADSAlpha, Lean, bIsDowned, WeaponPose, the personality...) is a
+    # UPROPERTY on the parent, UOneBrahamAnimInstance, computed in C++ each
+    # frame. This loop used to "declare" them by printing their names.
 
     unreal.EditorAssetLibrary.save_asset(path)
+    report.created_asset(path)
+    return asset
+
+
+def build_cosmetic_catalogue(report):
+    """Creates DA_CosmeticCatalogue: the earned-cosmetic rows, for designers.
+
+    A new UOneBrahamCosmeticDataAsset carries the shipping rows from its
+    constructor, so the asset is created and left alone: an existing one keeps
+    whatever a designer has changed. The game falls back to the class defaults
+    when the asset does not exist, so this is never what makes unlocks work.
+    """
+    path = u"{0}/DA_CosmeticCatalogue".format(C.CHARACTERS)
+    catalogue_class = getattr(unreal, "OneBrahamCosmeticDataAsset", None)
+    if catalogue_class is None:
+        report.failed("DA_CosmeticCatalogue", "UOneBrahamCosmeticDataAsset is not available; "
+                      "compile the project before running the character build.")
+        return None
+
+    if unreal.EditorAssetLibrary.does_asset_exist(path):
+        report.updated_asset(path)
+        return unreal.EditorAssetLibrary.load_asset(path)
+
+    factory = unreal.DataAssetFactory()
+    factory.set_editor_property("DataAssetClass", catalogue_class)
+    asset = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
+        "DA_CosmeticCatalogue", C.CHARACTERS, catalogue_class, factory)
+    if asset is None:
+        report.failed("DA_CosmeticCatalogue", "could not create the asset")
+        return None
+    unreal.EditorAssetLibrary.save_loaded_asset(asset)
     report.created_asset(path)
     return asset
 
@@ -392,6 +434,7 @@ def build_all():
 
     C.guard(report, "directories", _ensure_dirs)
     C.guard(report, "character registry", build_registry, report)
+    C.guard(report, "cosmetic catalogue", build_cosmetic_catalogue, report)
     C.guard(report, "animation blueprint", build_animation_blueprint, report)
     C.guard(report, "voice casting", build_voice_casting, report)
 

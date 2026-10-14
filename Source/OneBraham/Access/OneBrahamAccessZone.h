@@ -283,8 +283,15 @@ protected:
 	/** True when the player behind this controller is dead or spectating. */
 	static bool IsInteractorEliminated(const AOneBrahamPlayerController* Interactor);
 
-	/** Every local machine: the audio director of this player, if any. */
-	static UOneBrahamAudioManagerComponent* GetAudioFor(const AOneBrahamPlayerController* PC);
+	/**
+	 * Server: plays one sound here on every machine, through each listener's own
+	 * mix. The server-side callers used to walk the player controllers and play
+	 * through each one's audio manager: on a listen host that is once per player
+	 * on the host's speakers, and on a client - which never runs the server code -
+	 * nothing at all.
+	 */
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastPlayZoneSound(FName SoundId, float Volume);
 
 	/** Local: the world-space point the sound and the breach VFX come from. */
 	FVector GetBarrierCentre() const;

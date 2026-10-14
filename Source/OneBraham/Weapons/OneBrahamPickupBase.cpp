@@ -1,6 +1,8 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Weapons/OneBrahamPickupBase.h"
+#include "Voice/OneBrahamVoiceDirector.h"
+#include "Data/OneBrahamWeaponDataAsset.h"
 
 #include "Characters/OneBrahamCharacter.h"
 #include "Components/PointLightComponent.h"
@@ -56,6 +58,7 @@ void AOneBrahamPickupBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(AOneBrahamPickupBase, bIsOnGround);
 	DOREPLIFETIME(AOneBrahamPickupBase, GroundReserveAmmo);
 	DOREPLIFETIME(AOneBrahamPickupBase, bDroppedFromCorpse);
+	DOREPLIFETIME(AOneBrahamPickupBase, bPermanentLoot);
 }
 
 void AOneBrahamPickupBase::Tick(float DeltaSeconds)
@@ -69,9 +72,15 @@ void AOneBrahamPickupBase::Tick(float DeltaSeconds)
 
 	TimeOnGround += DeltaSeconds;
 
+	// Level loot neither ages nor fades; nothing below applies to it.
+	if (bPermanentLoot)
+	{
+		return;
+	}
+
 	// Age out: a floor covered in unclaimed weapons is a performance problem and
 	// an information problem (the player cannot tell what is actually there).
-	if (HasAuthority() && GroundLifetimeSeconds > 0.f)
+	if (HasAuthority() && GroundLifetimeSeconds > 0.f && !bPermanentLoot)
 	{
 		if (TimeOnGround >= GroundLifetimeSeconds + OBDropFadeSeconds)
 		{
@@ -81,7 +90,7 @@ void AOneBrahamPickupBase::Tick(float DeltaSeconds)
 	}
 
 	// Fade during the last few seconds so the weapon leaving is readable.
-	if (GroundLifetimeSeconds > 0.f)
+	if (GroundLifetimeSeconds > 0.f && !bPermanentLoot)
 	{
 		const float FadeStart = GroundLifetimeSeconds;
 		if (TimeOnGround >= FadeStart)
@@ -121,6 +130,12 @@ void AOneBrahamPickupBase::ServerDropAt(const FVector& Location, bool bScatter)
 	bIsOnGround = true;
 	TimeOnGround = 0.f;
 	bDroppedFromCorpse = true;
+
+	// A drop is a drop, whatever the gun's history: a rifle first found on a
+	// desk and dropped by its dead owner ages out and is locked to the body
+	// like any other. (bPermanentLoot used to stick, so it was neither.)
+	// ServerPlaceAsLoot sets it again after calling this.
+	bPermanentLoot = false;
 
 	// Ground collides with the world so the player can walk up to it, and with
 	// nothing else: a dropped gun should never body-block a doorway.
@@ -196,7 +211,71 @@ void AOneBrahamPickupBase::ServerTakeOffGround()
 
 bool AOneBrahamPickupBase::IsPickupLocked() const
 {
-	return bIsOnGround && TimeOnGround < PickupLockSeconds;
+	// The lock stops a killer's squad mate looting the body in the same frame;
+	// loot that was lying on a desk before anyone arrived has no body to protect.
+	return bIsOnGround && !bPermanentLoot && TimeOnGround < PickupLockSeconds;
+}
+
+void AOneBrahamPickupBase::ServerPlaceAsLoot(const FVector& Location, float Yaw)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	bPermanentLoot = true;
+	SetActorRotation(FRotator(0.f, Yaw, 0.f));
+	ServerDropAt(Location, /*bScatter*/ false);
+	bDroppedFromCorpse = false;
+	ApplyGroundVisuals();
+}
+
+AOneBrahamPickupBase* AOneBrahamPickupBase::SpawnLoot(UWorld* World, UOneBrahamWeaponDataAsset* Registry, FName WeaponId,
+	const FVector& Location, float Yaw)
+{
+	if (World == nullptr || Registry == nullptr || World->GetNetMode() == NM_Client)
+	{
+		return nullptr;
+	}
+
+	UOneBrahamWeaponDefinition* WeaponDefinition = Registry->FindWeapon(WeaponId);
+	if (WeaponDefinition == nullptr)
+	{
+		OB_WARN("Loot: unknown weapon '%s'.", *WeaponId.ToString());
+		return nullptr;
+	}
+
+	// The same class rule as a weapon given to a player, so a looted rifle is the
+	// same actor with the same meshes as one carried in.
+	TSubclassOf<AOneBrahamWeaponBase> SpawnClass = nullptr;
+	if (!WeaponDefinition->WeaponActorClass.IsNull())
+	{
+		SpawnClass = WeaponDefinition->WeaponActorClass.LoadSynchronous();
+	}
+	if (SpawnClass == nullptr && !Registry->WeaponActorClass.IsNull())
+	{
+		SpawnClass = Registry->WeaponActorClass.LoadSynchronous();
+	}
+	if (SpawnClass == nullptr || !SpawnClass->IsChildOf(AOneBrahamPickupBase::StaticClass()))
+	{
+		SpawnClass = AOneBrahamPickupBase::StaticClass();
+	}
+
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	AOneBrahamPickupBase* Pickup = World->SpawnActor<AOneBrahamPickupBase>(SpawnClass,
+		FTransform(FRotator(0.f, Yaw, 0.f), Location), Params);
+	if (Pickup == nullptr)
+	{
+		return nullptr;
+	}
+
+	Pickup->InitialiseFromDefinition(WeaponDefinition);
+	Pickup->SetAmmoInMagazine(Pickup->GetMagazineSize());
+	Pickup->SetGroundReserveAmmo(WeaponDefinition->StartingReserve);
+	Pickup->ServerPlaceAsLoot(Location, Yaw);
+	return Pickup;
 }
 
 void AOneBrahamPickupBase::SetGroundReserveAmmo(int32 Reserve)
@@ -272,6 +351,7 @@ bool AOneBrahamPickupBase::ServerPickupBy(AOneBrahamCharacter* Character)
 	if (Weapons->ServerPickupFromWorld(this) != nullptr)
 	{
 		ServerTakeOffGround();
+		FOneBrahamVoiceDirector::OnLootTaken(Character, /*bWeapon*/ true);
 		return true;
 	}
 

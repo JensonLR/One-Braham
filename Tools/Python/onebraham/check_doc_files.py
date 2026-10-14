@@ -26,6 +26,12 @@ WHAT IT CHECKS
     4. Every module in `Tools/Python/onebraham/` is named in
        `Docs/17_Build_Automation.md`, so the pipeline table stays a complete index
        of the pipeline.
+    5. Every `key=value` line in an ```ini block of the documentation is in
+       Config/, under the same section. Docs/02 quoted a net-driver definition,
+       a Python search path and a play-in-editor mode that the real ini files
+       did not have; the reader copies the snippet, believes it, and the
+       project quietly does something else. Lines with `...` are elisions and
+       are skipped; values compare without quotes, and true/false without case.
 
     What it deliberately does not check: whether a documented command's switches
     are real. That is the scripts' own README and, where it matters,
@@ -55,9 +61,39 @@ TOOLS_DIR = os.path.join(python_root, "Tools", "Python")
 TOOLS_PACKAGE = os.path.join(TOOLS_DIR, "onebraham")
 DOCS_17 = os.path.join(python_root, "Docs", "17_Build_Automation.md")
 DOCS_DIR = os.path.join(python_root, "Docs")
+CONFIG_DIR = os.path.join(python_root, "Config")
+
+#: A fenced ini block in markdown.
+DOC_INI_BLOCK = re.compile(r'```ini\n(.*?)```', re.S)
+
+
+def _ini_line(line):
+    """key=value with the value's quotes and boolean case normalised."""
+    key, _sep, value = line.partition("=")
+    value = value.strip().strip('"')
+    if value.lower() in ("true", "false"):
+        value = value.lower()
+    return key.strip() + "=" + value
+
+
+def config_lines():
+    """{section: set of normalised lines} over every .ini under Config/."""
+    sections = {}
+    for root, _dirs, files in os.walk(CONFIG_DIR):
+        for name in files:
+            if not name.endswith(".ini"):
+                continue
+            current = None
+            for raw in io.open(os.path.join(root, name), encoding="utf-8", errors="ignore"):
+                line = raw.strip()
+                if line.startswith("[") and line.endswith("]"):
+                    current = line
+                elif current and line and not line.startswith(";") and "=" in line:
+                    sections.setdefault(current, set()).add(_ini_line(line))
+    return sections
 
 #: Every script extension the repository uses.
-SCRIPT_SUFFIXES = (".bat", ".sh", ".vdf")
+SCRIPT_SUFFIXES = (".bat", ".sh", ".vdf", ".ps1", ".psm1")
 
 #: A path in the documentation: Scripts\RunAll.bat or Scripts/RunAll.sh
 DOC_SCRIPT_PATH = re.compile(r'Scripts[\\/]([A-Za-z_][A-Za-z0-9_]*\.[A-Za-z0-9]+)')
@@ -148,6 +184,28 @@ def run():
                     u"Tools/Python/onebraham/{0} is not named in "
                     u"Docs/17_Build_Automation.md - the pipeline table is the index "
                     u"of the pipeline.".format(name), u"undocumented"))
+
+    # 5: every ini line the documentation quotes is the real one.
+    config = config_lines()
+    for path in docs:
+        text = io.open(path, encoding="utf-8", errors="ignore").read()
+        relative = os.path.relpath(path, python_root)
+        for block in DOC_INI_BLOCK.findall(text):
+            section = None
+            for raw in block.splitlines():
+                line = raw.split(";")[0].strip()
+                if not line:
+                    continue
+                if line.startswith("["):
+                    section = line
+                    continue
+                if section is None or "=" not in line or "..." in line:
+                    continue
+                checked += 1
+                if _ini_line(line) not in config.get(section, set()):
+                    problems.append((
+                        u"{0} quotes '{1}' under {2}, and no file in Config/ says that "
+                        u"there".format(relative, line, section), u"ini"))
 
     return checked, problems
 

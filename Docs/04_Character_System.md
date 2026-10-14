@@ -274,6 +274,27 @@ Base locomotion (blend space: speed × direction, 8-way)
   └ Foot IK + hand IK     (traces, 2 per frame max)
 ```
 
+**Where the values come from.** The ABP's parent is `UOneBrahamAnimInstance`.
+The graph only reads; the C++ instance computes every value each frame:
+
+* **Locomotion:** `Speed`, `Direction` (movement against facing, −180 to 180),
+  `GaitPlayRate` (speed-matched to the walk and run clips, times the
+  personality's `WalkRateScale`), `bIsInAir`, `bIsCrouched`, `bIsSprinting`,
+  `bIsSliding`, `bIsMantling`.
+* **Life state:** `bIsDowned`, `bIsDead`.
+* **Aim and weapon:** `AimPitch` and `AimYaw` from the replicated base aim
+  rotation, so other players' bodies look where those players look;
+  `ADSAlpha`; `Lean`; `bIsReloading`; and `WeaponPose`, the pose family from the
+  weapon category.
+* **Personality:** the archetype's `FOneBrahamAnimationPersonality`, plus the
+  derived `ArmSwing` (damped while aiming and armed) and `SprintHunchAlpha`.
+
+The archetype's `HeightOffsetCm` scales the body mesh about its feet on a
+180 cm reference. The capsule does not change, so height never changes how
+easy a player is to hit. A weapon's `DrawMontage` plays on equip, on the arms
+for the holder and on the body for everyone else, timed to the weapon's
+`DrawTime`.
+
 Rules that keep it performant: no full-body IK, IK traces at most every other
 frame and only for the local player and any character within 12 m, and no
 anim-notify-driven gameplay. Gameplay never lives in an animation notify, because

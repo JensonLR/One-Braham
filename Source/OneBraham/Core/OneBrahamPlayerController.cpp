@@ -9,8 +9,18 @@
 #include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamGameplayTags.h"
 #include "Core/OneBrahamGameUserSettings.h"
+#include "Core/OneBrahamInputBindings.h"
+#include "Core/OneBrahamAimAssist.h"
+#include "Core/OneBrahamGameplayStatics.h"
+#include "Match/OneBrahamSmokeSubsystem.h"
+#include "UI/OneBrahamSettingsWidget.h"
+#include "VFX/OneBrahamWorldEffectsComponent.h"
+#include "UI/OneBrahamResultsWidget.h"
+#include "Online/OneBrahamSteamSubsystem.h"
 #include "Core/OneBrahamPlayerState.h"
 #include "Core/OneBrahamSaveSettings.h"
+#include "Data/OneBrahamCosmeticDataAsset.h"
+#include "Data/OneBrahamCharacterDataAsset.h"
 #include "Characters/OneBrahamCharacter.h"
 #include "Characters/OneBrahamHealthComponent.h"
 #include "Characters/OneBrahamDownedComponent.h"
@@ -30,6 +40,9 @@
 #include "InputMappingContext.h"
 #include "InputAction.h"
 #include "InputActionValue.h"
+#include "InputModifiers.h"
+#include "Misc/ConfigCacheIni.h"
+#include "UObject/UnrealType.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
@@ -41,6 +54,8 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
+#include "GameFramework/GameModeBase.h"
+#include "GameFramework/GameSession.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformFileManager.h"
@@ -48,6 +63,8 @@
 AOneBrahamPlayerController::AOneBrahamPlayerController()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	SettingsWidgetClass = TSoftClassPtr<UUserWidget>(FSoftObjectPath(TEXT("/Game/OneBraham/UI/Menus/WBP_Settings.WBP_Settings_C")));
+	ResultsWidgetClass = TSoftClassPtr<UUserWidget>(FSoftObjectPath(TEXT("/Game/OneBraham/UI/Menus/WBP_Results.WBP_Results_C")));
 	bShowMouseCursor = false;
 	bEnableClickEvents = false;
 	bEnableMouseOverEvents = false;
@@ -57,6 +74,7 @@ AOneBrahamPlayerController::AOneBrahamPlayerController()
 	bAttachToPawn = false;
 
 	HUDComponent = CreateDefaultSubobject<UOneBrahamHUDComponent>(TEXT("HUDComponent"));
+	WorldEffects = CreateDefaultSubobject<UOneBrahamWorldEffectsComponent>(TEXT("WorldEffects"));
 	AudioManager = CreateDefaultSubobject<UOneBrahamAudioManagerComponent>(TEXT("AudioManager"));
 
 	// A 90 degree default FOV matches the weapon art and the HUD safe area.
@@ -78,10 +96,21 @@ void AOneBrahamPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// The results screen: bound here when the game state is already in, and
+	// from the game state's BeginPlay when it arrives after us.
+	if (IsLocalController())
+	{
+		if (AOneBrahamGameState* GS = GetWorld() ? GetWorld()->GetGameState<AOneBrahamGameState>() : nullptr)
+		{
+			GS->OnMatchResultReady.AddUniqueDynamic(this, &AOneBrahamPlayerController::HandleMatchResult);
+		}
+	}
+
 	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
 	if (Settings != nullptr)
 	{
 		EffectiveSensitivity = Settings->MouseSensitivityX;
+		EffectiveSensitivityY = Settings->MouseSensitivityY;
 		if (PlayerCameraManager != nullptr)
 		{
 			PlayerCameraManager->SetFOV(Settings->FOV);
@@ -118,6 +147,10 @@ void AOneBrahamPlayerController::BeginPlay()
 	{
 		GameplayMappingContext = UOneBrahamGameSettings::Get().DefaultMappingContext.LoadSynchronous();
 	}
+
+	// The keys first, at the bottom of the stack: an asset context a designer has
+	// authored keys into sits above it and wins.
+	RefreshBindingsContext();
 
 	// Install the local mapping contexts.
 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
@@ -160,37 +193,143 @@ void AOneBrahamPlayerController::InitPlayerState()
 {
 	Super::InitPlayerState();
 
+	// No profile here. InitPlayerState runs on the server only, for every player,
+	// and it read *the server's* profile: on a listen host every joining player
+	// was given the host's outfit, clan tag and loadout, and a remote player's
+	// own choices never left their machine. ReceivedPlayer sends them instead.
 	if (AOneBrahamPlayerState* OBState = GetPlayerState<AOneBrahamPlayerState>())
 	{
-		// Seed the archetype + cosmetics from the local profile so a listen host
-		// looks like what they chose in the locker. A dedicated server overwrites
-		// this in PostLogin from the travel options.
-		if (const UOneBrahamGameInstance* GameInstance = GetGameInstance<UOneBrahamGameInstance>())
-		{
-			if (const UOneBrahamSaveSettings* Profile = GameInstance->GetProfile())
-			{
-				if (Profile->Loadouts.IsValidIndex(Profile->SelectedLoadoutIndex))
-				{
-					const FOneBrahamSavedLoadout& Loadout = Profile->Loadouts[Profile->SelectedLoadoutIndex];
-					OBState->EquippedCosmetics = Profile->EquippedCosmetics;
-					OBState->ClanTag = Profile->ClanTag;
-
-					// The weapons travel with it. The profile is local, so this
-					// machine is the only place the choice exists; everything
-					// after this point reads the player state.
-					if (HasAuthority())
-					{
-						ServerSetLoadout(Loadout.PrimaryWeaponId, Loadout.SidearmWeaponId,
-							Loadout.UtilityIds, Loadout.WeaponSkinId);
-					}
-				}
-			}
-		}
-
 		OBState->SessionMode = GetWorld() && GetWorld()->GetGameState<AOneBrahamGameState>()
 			? GetWorld()->GetGameState<AOneBrahamGameState>()->MatchMode
 			: EOneBrahamMatchMode::Ascent;
 	}
+}
+
+void AOneBrahamPlayerController::ReceivedPlayer()
+{
+	Super::ReceivedPlayer();
+
+	if (IsLocalController())
+	{
+		SendProfileToServer();
+	}
+}
+
+void AOneBrahamPlayerController::SendProfileToServer()
+{
+	const UOneBrahamGameInstance* GameInstance = GetGameInstance<UOneBrahamGameInstance>();
+	const UOneBrahamSaveSettings* Profile = GameInstance != nullptr ? GameInstance->GetProfile() : nullptr;
+
+	if (!IsLocalController() || Profile == nullptr)
+	{
+		return;
+	}
+
+	// The engine's own name path (ServerChangeName), so a Steam name and a
+	// profile name go through the same validation.
+	if (!Profile->PlayerName.IsEmpty())
+	{
+		SetName(Profile->PlayerName);
+	}
+
+	FName ArchetypeId = NAME_None;
+
+	if (Profile->Loadouts.IsValidIndex(Profile->SelectedLoadoutIndex))
+	{
+		const FOneBrahamSavedLoadout& Loadout = Profile->Loadouts[Profile->SelectedLoadoutIndex];
+		ArchetypeId = Loadout.ArchetypeId;
+		ServerSetLoadout(Loadout.PrimaryWeaponId, Loadout.SidearmWeaponId, Loadout.UtilityIds, Loadout.WeaponSkinId);
+	}
+
+	// A locked item is not sent: its slot falls back to the archetype's default
+	// outfit. A profile edited by hand gets the same outfit as everyone else.
+	const UOneBrahamCosmeticDataAsset* Catalogue = UOneBrahamCosmeticDataAsset::LoadCatalogue();
+	TArray<FName> Slots;
+	TArray<FName> Options;
+	for (const TPair<FName, FName>& Pair : Profile->EquippedCosmetics)
+	{
+		if (!Catalogue->IsUnlockedFor(Profile, Pair.Value))
+		{
+			continue;
+		}
+		Slots.Add(Pair.Key);
+		Options.Add(Pair.Value);
+	}
+
+	ServerSetAppearance(ArchetypeId, Slots, Options, Profile->ClanTag);
+}
+
+void AOneBrahamPlayerController::ServerSetAppearance_Implementation(FName ArchetypeId,
+	const TArray<FName>& CosmeticSlots, const TArray<FName>& CosmeticOptions, const FString& InClanTag)
+{
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerSetAppearance")))
+	{
+		return;
+	}
+
+	AOneBrahamPlayerState* State = GetPlayerState<AOneBrahamPlayerState>();
+	const UOneBrahamCharacterDataAsset* Registry = UOneBrahamCharacterDataAsset::LoadRegistry();
+
+	if (State == nullptr)
+	{
+		return;
+	}
+
+	// Four letters and digits, upper case: it is drawn next to a name on a
+	// scoreboard, and it is the only free text a player can put in front of
+	// eleven strangers.
+	FString Clan;
+	for (const TCHAR Character : InClanTag)
+	{
+		if (FChar::IsAlnum(Character) && Clan.Len() < 4)
+		{
+			Clan.AppendChar(FChar::ToUpper(Character));
+		}
+	}
+	State->ClanTag = Clan;
+
+	if (Registry != nullptr)
+	{
+		// The archetype, only if the registry has it: an unknown id keeps the
+		// default the game mode gave this player on login.
+		if (!ArchetypeId.IsNone())
+		{
+			const FGameplayTag Requested = FGameplayTag::RequestGameplayTag(
+				FName(*FString::Printf(TEXT("OB.Character.Archetype.%s"), *ArchetypeId.ToString())), false);
+			const FOneBrahamArchetypeDefinition* Definition = Requested.IsValid() ? Registry->FindArchetype(Requested) : nullptr;
+
+			if (Definition != nullptr && Definition->ArchetypeTag == Requested)
+			{
+				State->ArchetypeTag = Requested;
+			}
+		}
+
+		// The outfit: a real option of the slot it claims, never banned, one per
+		// slot, and never more entries than there are slots.
+		TMap<FName, FName> Outfit;
+		const int32 Count = FMath::Min3(CosmeticSlots.Num(), CosmeticOptions.Num(), Registry->CosmeticSlots.Num());
+
+		for (int32 Index = 0; Index < Count; ++Index)
+		{
+			const FName Slot = CosmeticSlots[Index];
+			const FName Option = CosmeticOptions[Index];
+
+			if (Registry->IsValidCosmetic(Option)
+				&& Registry->FindSlotForCosmetic(Option) == Slot
+				&& !Registry->CompetitiveBannedCosmeticIds.Contains(Option))
+			{
+				Outfit.Add(Slot, Option);
+			}
+		}
+
+		State->SetEquippedCosmetics(Outfit);
+	}
+
+	State->ForceNetUpdate();
+
+	// The server's own copy of the pawn: RepNotifies do not run where the value
+	// was set, and a listen host has to see the outfit too.
+	State->ApplyAppearanceLocally();
 }
 
 void AOneBrahamPlayerController::OnPossess(APawn* InPawn)
@@ -250,9 +389,14 @@ void AOneBrahamPlayerController::BindInputActions()
 	if (InputConfig->Move)			EIC->BindAction(InputConfig->Move, ETriggerEvent::Triggered, this, &AOneBrahamPlayerController::Input_Move);
 	if (InputConfig->Look)
 	{
-		// Mouse and gamepad share the action but use different handlers so the
-		// aim-assist curve only applies to the stick.
+		// Mouse only. The stick has its own action below, because a mouse reports
+		// a distance and a stick reports a rate: one handler for both was right
+		// for one of them at exactly one frame rate.
 		EIC->BindAction(InputConfig->Look, ETriggerEvent::Triggered, this, &AOneBrahamPlayerController::Input_Look);
+	}
+	if (InputConfig->LookGamepad)
+	{
+		EIC->BindAction(InputConfig->LookGamepad, ETriggerEvent::Triggered, this, &AOneBrahamPlayerController::Input_LookGamepad);
 	}
 	if (InputConfig->Jump)
 	{
@@ -360,6 +504,220 @@ void AOneBrahamPlayerController::PushMappingContext(UInputMappingContext* Contex
 	}
 }
 
+namespace
+{
+	/** What a key may do while a menu is up: close it, and talk to the squad. */
+	const TSet<FName>& MenuActions()
+	{
+		static const TSet<FName> Actions = { FName(TEXT("IA_PauseMenu")), FName(TEXT("IA_PushToTalk")) };
+		return Actions;
+	}
+}
+
+void AOneBrahamPlayerController::RefreshBindingsContext()
+{
+	if (!IsLocalController())
+	{
+		return;
+	}
+
+	UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer());
+	if (Subsystem == nullptr)
+	{
+		return;
+	}
+
+	if (BindingsMappingContext != nullptr)
+	{
+		Subsystem->RemoveMappingContext(BindingsMappingContext);
+	}
+	if (MenuBindingsMappingContext != nullptr)
+	{
+		Subsystem->RemoveMappingContext(MenuBindingsMappingContext);
+	}
+
+	BindingsMappingContext = BuildBindingsContext(nullptr, TEXT("IMC_OneBraham_Bindings"));
+	MenuBindingsMappingContext = BuildBindingsContext(&MenuActions(), TEXT("IMC_OneBraham_MenuBindings"));
+
+	// A rebind made in the settings screen arrives here with the pause menu
+	// still open: the menu set goes back in, not the gameplay one.
+	if (UInputMappingContext* Active = bPauseMenuOpen ? MenuBindingsMappingContext.Get() : BindingsMappingContext.Get())
+	{
+		Subsystem->AddMappingContext(Active, 0);
+	}
+}
+
+void AOneBrahamPlayerController::SetMenuInput(bool bMenu)
+{
+	bShowMouseCursor = bMenu;
+
+	if (bMenu)
+	{
+		SetInputMode(FInputModeGameAndUI());
+	}
+	else
+	{
+		SetInputMode(FInputModeGameOnly());
+	}
+
+	UEnhancedInputLocalPlayerSubsystem* Subsystem = IsLocalController()
+		? ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer())
+		: nullptr;
+	if (Subsystem == nullptr)
+	{
+		return;
+	}
+
+	UInputMappingContext* const Gameplay[] = { BindingsMappingContext.Get(), CommonMappingContext.Get(), GameplayMappingContext.Get() };
+
+	if (bMenu)
+	{
+		for (UInputMappingContext* Context : Gameplay)
+		{
+			if (Context != nullptr)
+			{
+				Subsystem->RemoveMappingContext(Context);
+			}
+		}
+		if (MenuBindingsMappingContext != nullptr)
+		{
+			Subsystem->AddMappingContext(MenuBindingsMappingContext, 0);
+		}
+		return;
+	}
+
+	if (MenuBindingsMappingContext != nullptr)
+	{
+		Subsystem->RemoveMappingContext(MenuBindingsMappingContext);
+	}
+	if (BindingsMappingContext != nullptr)
+	{
+		Subsystem->AddMappingContext(BindingsMappingContext, 0);
+	}
+	if (CommonMappingContext != nullptr)
+	{
+		Subsystem->AddMappingContext(CommonMappingContext, 0);
+	}
+	if (GameplayMappingContext != nullptr)
+	{
+		Subsystem->AddMappingContext(GameplayMappingContext, 1);
+	}
+}
+
+UInputMappingContext* AOneBrahamPlayerController::BuildBindingsContext(const TSet<FName>* OnlyActions, const TCHAR* ContextName)
+{
+	if (InputConfig == nullptr)
+	{
+		return nullptr;
+	}
+
+	// The defaults and the player's rebinds, merged by the same reader the
+	// controls screen writes through (UOneBrahamInputBindings).
+	TArray<FOneBrahamKeyBinding> Bindings = UOneBrahamInputBindings::GetBindings(false);
+	Bindings.Append(UOneBrahamInputBindings::GetBindings(true));
+
+	// A unique name: the context is rebuilt on every rebind, and NewObject with a
+	// name already taken under the same outer replaces the live one in place.
+	UInputMappingContext* Context = NewObject<UInputMappingContext>(this,
+		MakeUniqueObjectName(this, UInputMappingContext::StaticClass(), FName(ContextName)), RF_Transient);
+	int32 Mapped = 0;
+
+	for (const FOneBrahamKeyBinding& Binding : Bindings)
+	{
+		if (OnlyActions != nullptr && !OnlyActions->Contains(Binding.Action))
+		{
+			continue;
+		}
+
+		// IA_Move -> the Move field: the naming rule build_input.py assigns by,
+		// read through reflection so a new action needs no new line here.
+		const FString ActionName = Binding.Action.ToString();
+		const FObjectProperty* Property = ActionName.StartsWith(TEXT("IA_"))
+			? FindFProperty<FObjectProperty>(UOneBrahamInputConfig::StaticClass(), FName(*ActionName.RightChop(3)))
+			: nullptr;
+		const UInputAction* Action = Property != nullptr
+			? Cast<UInputAction>(Property->GetObjectPropertyValue_InContainer(InputConfig))
+			: nullptr;
+
+		if (Action == nullptr)
+		{
+			OB_WARN("[OneBraham.Input] binds %s to %s, and %s has no such action; skipped.",
+				*Binding.Key.ToString(), *ActionName, *InputConfig->GetName());
+			continue;
+		}
+
+		FEnhancedActionKeyMapping& Mapping = Context->MapKey(Action, Binding.Key);
+
+		for (const FString& Modifier : Binding.Modifiers)
+		{
+			if (Modifier == TEXT("Swizzle"))
+			{
+				// Default order YXZ: a one-dimensional key press lands on Y, which
+				// is what makes W "forward" on the same 2D action as A and D.
+				Mapping.Modifiers.Add(NewObject<UInputModifierSwizzleAxis>(Context));
+			}
+			else if (Modifier == TEXT("Negate"))
+			{
+				Mapping.Modifiers.Add(NewObject<UInputModifierNegate>(Context));
+			}
+			else
+			{
+				OB_WARN("[OneBraham.Input] %s on %s asks for modifier '%s', which is not built; the key is bound without it.",
+					*ActionName, *Binding.Key.ToString(), *Modifier);
+			}
+		}
+
+		++Mapped;
+	}
+
+	OB_LOG("Input: %s carries %d key binding(s) from [OneBraham.Input].", ContextName, Mapped);
+	return Context;
+}
+
+FText AOneBrahamPlayerController::ResolvePromptKeys(const FText& Prompt) const
+{
+	static const FString Token = TEXT("{Interact}");
+	const FString Text = Prompt.ToString();
+
+	if (!Text.Contains(Token))
+	{
+		return Prompt;
+	}
+
+	FKey Preferred;
+	FKey Fallback;
+
+	if (BindingsMappingContext != nullptr && InputConfig != nullptr && InputConfig->Interact != nullptr)
+	{
+		for (const FEnhancedActionKeyMapping& Mapping : BindingsMappingContext->GetMappings())
+		{
+			if (Mapping.Action != InputConfig->Interact || !Mapping.Key.IsValid())
+			{
+				continue;
+			}
+
+			if (Mapping.Key.IsGamepadKey() == bPromptsShowGamepad && !Preferred.IsValid())
+			{
+				Preferred = Mapping.Key;
+			}
+			else if (!Fallback.IsValid())
+			{
+				Fallback = Mapping.Key;
+			}
+		}
+	}
+
+	const FKey Key = Preferred.IsValid() ? Preferred : Fallback;
+	const FText Label = Key.IsValid()
+		? UOneBrahamInputBindings::GetKeyLabel(Key)
+		: NSLOCTEXT("OneBraham", "Prompt_UnboundInteract", "Interact");
+
+	// A string replace, not FText::FormatNamed: the prompt has already been
+	// formatted with a zone or a player name, and a name with a brace in it must
+	// not be read as an argument.
+	return FText::FromString(Text.Replace(*Token, *Label.ToString()));
+}
+
 void AOneBrahamPlayerController::PopMappingContext(UInputMappingContext* Context)
 {
 	if (Context == nullptr)
@@ -394,7 +752,14 @@ void AOneBrahamPlayerController::PlayerTick(float DeltaTime)
 	{
 		const AOneBrahamCharacter* Character = GetOneBrahamCharacter();
 		const bool bAiming = Character != nullptr && Character->GetWeaponComponent() != nullptr && Character->GetWeaponComponent()->IsAimingDownSights();
-		EffectiveSensitivity = Settings->MouseSensitivityX * (bAiming ? Settings->MouseSensitivityADSMultiplier : 1.f);
+		const float ADSScale = bAiming ? Settings->MouseSensitivityADSMultiplier : 1.f;
+		EffectiveSensitivity = Settings->MouseSensitivityX * ADSScale;
+		EffectiveSensitivityY = Settings->MouseSensitivityY * ADSScale;
+	}
+
+	if (IsLocalController())
+	{
+		TickAimAssist(DeltaTime);
 	}
 
 	if (bIsSpectating)
@@ -417,6 +782,10 @@ void AOneBrahamPlayerController::Input_Move(const FInputActionValue& Value)
 	}
 
 	const FVector2D Axis = Value.Get<FVector2D>();
+	if (!Axis.IsNearlyZero() && GetWorld() != nullptr)
+	{
+		LastMoveInputTime = GetWorld()->GetTimeSeconds();
+	}
 	Character->HandleMoveInput(Axis);
 }
 
@@ -430,11 +799,15 @@ void AOneBrahamPlayerController::Input_Look(const FInputActionValue& Value)
 
 	const FVector2D Axis = Value.Get<FVector2D>();
 	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
-	const float Scale = Settings != nullptr ? EffectiveSensitivity : 0.07f;
+	const float ScaleX = Settings != nullptr ? EffectiveSensitivity : 0.07f;
+	const float ScaleY = Settings != nullptr ? EffectiveSensitivityY : 0.07f;
+
+	bPromptsShowGamepad = false;
 
 	// Mouse: direct 1:1 rotation, no acceleration (bViewAccelerationEnabled=False).
-	AddYawInput(Axis.X * Scale * 20.f);
-	AddPitchInput((Settings != nullptr && Settings->bInvertMouseY ? Axis.Y : -Axis.Y) * Scale * 20.f);
+	// No aim assist on a mouse, ever.
+	AddYawInput(Axis.X * ScaleX * 20.f);
+	AddPitchInput((Settings != nullptr && Settings->bInvertMouseY ? Axis.Y : -Axis.Y) * ScaleY * 20.f);
 }
 
 void AOneBrahamPlayerController::Input_LookGamepad(const FInputActionValue& Value)
@@ -444,6 +817,8 @@ void AOneBrahamPlayerController::Input_LookGamepad(const FInputActionValue& Valu
 	{
 		return;
 	}
+
+	bPromptsShowGamepad = true;
 
 	const FVector2D Axis = Value.Get<FVector2D>();
 	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
@@ -455,8 +830,127 @@ void AOneBrahamPlayerController::Input_LookGamepad(const FInputActionValue& Valu
 	// which gives the "smooth in the middle, fast at the edges" feel players
 	// expect from a pad without any extra code here.
 	const float DeltaTime = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.016f;
-	AddYawInput(Axis.X * SensX * 300.f * DeltaTime);
-	AddPitchInput((bInvertY ? Axis.Y : -Axis.Y) * SensY * 220.f * DeltaTime);
+	if (!Axis.IsNearlyZero() && GetWorld() != nullptr)
+	{
+		LastPadLookTime = GetWorld()->GetTimeSeconds();
+	}
+
+	// Slowdown: AimAssistLookScale is 1 unless the crosshair is over an enemy.
+	const float Assist = AimAssistLookScale;
+	AddYawInput(Axis.X * SensX * 300.f * DeltaTime * Assist);
+	AddPitchInput((bInvertY ? Axis.Y : -Axis.Y) * SensY * 220.f * DeltaTime * Assist);
+}
+
+void AOneBrahamPlayerController::TickAimAssist(float DeltaTime)
+{
+	AimAssistLookScale = 1.f;
+
+	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
+	AOneBrahamCharacter* Character = GetOneBrahamCharacter();
+	UWorld* World = GetWorld();
+	if (Settings == nullptr || !Settings->bAimAssistEnabled || Settings->AimAssistStrength <= 0.f
+		|| !bPromptsShowGamepad || bPauseMenuOpen || bIsSpectating || Character == nullptr || World == nullptr)
+	{
+		return;
+	}
+
+	const UOneBrahamHealthComponent* Health = Character->GetHealthComponent();
+	const UOneBrahamDownedComponent* Downed = Character->GetDownedComponent();
+	if ((Health != nullptr && !Health->IsAlive()) || (Downed != nullptr && Downed->IsDowned()))
+	{
+		return;
+	}
+
+	const AGameStateBase* GameState = World->GetGameState();
+	if (GameState == nullptr)
+	{
+		return;
+	}
+
+	// Enemies standing up: a downed player is not a target worth helping onto,
+	// and a teammate never is.
+	TArray<FOneBrahamAimAssistTarget> Targets;
+	TArray<const AOneBrahamCharacter*> TargetActors;
+	for (const APlayerState* Other : GameState->PlayerArray)
+	{
+		const AOneBrahamCharacter* Enemy = Other != nullptr ? Cast<AOneBrahamCharacter>(Other->GetPawn()) : nullptr;
+		if (Enemy == nullptr || Enemy == Character || UOneBrahamGameplayStatics::AreFriendly(Character, Enemy))
+		{
+			continue;
+		}
+		const UOneBrahamHealthComponent* EnemyHealth = Enemy->GetHealthComponent();
+		const UOneBrahamDownedComponent* EnemyDowned = Enemy->GetDownedComponent();
+		if ((EnemyHealth != nullptr && !EnemyHealth->IsAlive()) || (EnemyDowned != nullptr && EnemyDowned->IsDowned()))
+		{
+			continue;
+		}
+
+		FOneBrahamAimAssistTarget& Target = Targets.AddDefaulted_GetRef();
+		Target.Location = Enemy->GetActorLocation() + FVector(0.f, 0.f, ChestHeightAboveCentreCm);
+		Target.Velocity = Enemy->GetVelocity();
+		TargetActors.Add(Enemy);
+	}
+	if (Targets.Num() == 0)
+	{
+		return;
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	const UOneBrahamWeaponComponent* Weapons = Character->GetWeaponComponent();
+	const bool bAiming = Weapons != nullptr && Weapons->IsAimingDownSights();
+	const UOneBrahamSmokeSubsystem* Smoke = World->GetSubsystem<UOneBrahamSmokeSubsystem>();
+
+	// The math picks a candidate; the world gets the last word. A target behind
+	// a wall or inside smoke is dropped and the next best is tried. Three tries
+	// bounds the traces at three a frame, local player only.
+	TArray<int32, TInlineAllocator<4>> Excluded;
+	FOneBrahamAimAssistResult Result;
+	for (int32 Attempt = 0; Attempt < 3; ++Attempt)
+	{
+		Result = FOneBrahamAimAssist::Evaluate(ViewLocation, ViewRotation, Character->GetVelocity(), Targets,
+			Settings->AimAssistStrength, bAiming, DeltaTime, Excluded);
+		if (Result.TargetIndex == INDEX_NONE)
+		{
+			return;
+		}
+
+		const FVector TargetPoint = Targets[Result.TargetIndex].Location;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(OneBrahamAimAssist), false, Character);
+		Params.AddIgnoredActor(TargetActors[Result.TargetIndex]);
+		const bool bWallBlocks = World->LineTraceTestByChannel(ViewLocation, TargetPoint, ECC_Visibility, Params);
+		const bool bSmokeBlocks = Smoke != nullptr && Smoke->IsSightBlocked(ViewLocation, TargetPoint);
+		if (!bWallBlocks && !bSmokeBlocks)
+		{
+			break;
+		}
+
+		Excluded.Add(Result.TargetIndex);
+		Result = FOneBrahamAimAssistResult();
+	}
+	if (Result.TargetIndex == INDEX_NONE)
+	{
+		return;
+	}
+
+	AimAssistLookScale = Result.LookScale;
+
+	// Follow only while the player is driving: a pad left on the desk is never
+	// steered, and neither is someone standing still waiting for a target to
+	// walk into the crosshair.
+	const double Now = World->GetTimeSeconds();
+	const bool bDriving = (Now - LastPadLookTime) <= AimAssistInputWindowSeconds || (Now - LastMoveInputTime) <= AimAssistInputWindowSeconds;
+	if (bDriving && !Result.Follow.IsNearlyZero())
+	{
+		FRotator Control = GetControlRotation();
+		Control.Yaw += Result.Follow.Yaw;
+		const float PitchMin = PlayerCameraManager != nullptr ? PlayerCameraManager->ViewPitchMin : -89.f;
+		const float PitchMax = PlayerCameraManager != nullptr ? PlayerCameraManager->ViewPitchMax : 89.f;
+		Control.Pitch = FMath::ClampAngle(FRotator::NormalizeAxis(Control.Pitch + Result.Follow.Pitch), PitchMin, PitchMax);
+		SetControlRotation(Control);
+	}
 }
 
 void AOneBrahamPlayerController::Input_JumpStarted(const FInputActionValue& Value)
@@ -477,22 +971,33 @@ void AOneBrahamPlayerController::Input_JumpCompleted(const FInputActionValue& Va
 
 void AOneBrahamPlayerController::Input_SprintStarted(const FInputActionValue& Value)
 {
+	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
+	const bool bHoldToSprint = Settings != nullptr && Settings->bHoldToSprint;
+
 	if (AOneBrahamCharacter* Character = GetOneBrahamCharacter())
 	{
-		Character->SetSprintRequested(true);
+		// Hold: the press starts it. Toggle: each press flips it, so a second
+		// tap is how a latched sprint is dropped without stopping.
+		Character->SetSprintRequested(bHoldToSprint ? true : !Character->IsSprintRequested());
 	}
 }
 
 void AOneBrahamPlayerController::Input_SprintCompleted(const FInputActionValue& Value)
 {
 	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
-	const bool bIsHold = Settings == nullptr || !Settings->bHoldToSprint;
+	const bool bHoldToSprint = Settings != nullptr && Settings->bHoldToSprint;
+
+	// Hold: releasing ends the sprint. Toggle: the release means nothing; the
+	// latch ends on the next press, on stopping, or on firing. This was the
+	// other way round, so "hold to sprint" latched and "toggle" needed holding.
+	if (!bHoldToSprint)
+	{
+		return;
+	}
 
 	if (AOneBrahamCharacter* Character = GetOneBrahamCharacter())
 	{
-		// With "hold to sprint" off, tapping the key latches sprint until the
-		// player stops or shoots; with it on, releasing ends the sprint.
-		Character->SetSprintRequested(!bIsHold ? Character->IsSprintRequested() : false);
+		Character->SetSprintRequested(false);
 	}
 }
 
@@ -922,6 +1427,13 @@ void AOneBrahamPlayerController::NotifyInteractionStarted()
 		return;
 	}
 
+	// Interact and InteractHold share a key: one press, one begin.
+	if (LastInteractionStartFrame == GFrameCounter)
+	{
+		return;
+	}
+	LastInteractionStartFrame = GFrameCounter;
+
 	if (UOneBrahamInteractComponent* Interactor = Character->GetInteractComponent())
 	{
 		Interactor->BeginInteraction(CurrentInteractionTarget.Actor, CurrentInteractionTarget.InteractionTag, /*bIsHold*/ true);
@@ -1055,6 +1567,11 @@ void AOneBrahamPlayerController::RequestQuickLine(FName LineId)
 void AOneBrahamPlayerController::ServerSetLoadout_Implementation(FName PrimaryWeaponId, FName SidearmWeaponId,
 	const TArray<FName>& UtilityIds, FName WeaponSkinId)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerSetLoadout")))
+	{
+		return;
+	}
+
 	AOneBrahamPlayerState* State = GetPlayerState<AOneBrahamPlayerState>();
 	if (State == nullptr)
 	{
@@ -1085,6 +1602,11 @@ void AOneBrahamPlayerController::ServerSetLoadout_Implementation(FName PrimaryWe
 
 void AOneBrahamPlayerController::ServerRequestQuickLine_Implementation(FName LineId)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestQuickLine")))
+	{
+		return;
+	}
+
 	if (LineId.IsNone())
 	{
 		return;
@@ -1214,39 +1736,134 @@ void AOneBrahamPlayerController::Input_ClipMarker(const FInputActionValue& Value
 // ==========================================================================
 void AOneBrahamPlayerController::TogglePauseMenu()
 {
+	if (!IsLocalController())
+	{
+		return;
+	}
+
 	bPauseMenuOpen = !bPauseMenuOpen;
 
 	if (bPauseMenuOpen)
 	{
-		if (PauseMenuWidgetClass != nullptr)
+		// One instance for the life of the controller: Escape twice used to stack
+		// a second authored menu over the first, and nothing ever removed either.
+		if (PauseMenuWidgetClass != nullptr && PauseMenuWidget == nullptr)
 		{
-			if (UUserWidget* Widget = CreateWidget<UUserWidget>(this, PauseMenuWidgetClass))
+			PauseMenuWidget = CreateWidget<UUserWidget>(this, PauseMenuWidgetClass);
+		}
+
+		if (PauseMenuWidget != nullptr)
+		{
+			if (!PauseMenuWidget->IsInViewport())
 			{
-				Widget->AddToViewport(50);
-				bShowMouseCursor = true;
-				SetInputMode(FInputModeGameAndUI());
+				PauseMenuWidget->AddToViewport(50);
 			}
 		}
-		else
+		else if (HUDComponent != nullptr)
 		{
-			// No widget authored yet: fall back to the engine pause so QA can at
-			// least halt the game from a code-only checkout.
-			SetPause(true);
+			HUDComponent->SetPauseMenuVisible(true);
 		}
 	}
 	else
 	{
-		// The pause widget removes itself on close; here we only restore input.
-		if (!IsRunningDedicatedServer())
+		if (PauseMenuWidget != nullptr)
 		{
-			if (UOneBrahamHUDWidget* HudWidget = Cast<UOneBrahamHUDWidget>(HUDComponent ? HUDComponent->GetRootWidget() : nullptr))
-			{
-				HudWidget->TogglePauseMenu(false);
-			}
+			PauseMenuWidget->RemoveFromParent();
 		}
-		bShowMouseCursor = false;
-		SetInputMode(FInputModeGameOnly());
-		SetPause(false);
+		if (SettingsWidget != nullptr)
+		{
+			SettingsWidget->RemoveFromParent();
+		}
+		if (HUDComponent != nullptr)
+		{
+			HUDComponent->SetPauseMenuVisible(false);
+		}
+	}
+
+	SetMenuInput(bPauseMenuOpen);
+}
+
+void AOneBrahamPlayerController::OpenSettingsMenu()
+{
+	if (!IsLocalController())
+	{
+		return;
+	}
+
+	if (SettingsWidget == nullptr)
+	{
+		// WBP_Settings when the UI build has made it; the C++ screen it subclasses
+		// when it has not, so a clean checkout has working settings.
+		UClass* WidgetClass = SettingsWidgetClass.IsNull() ? nullptr : SettingsWidgetClass.LoadSynchronous();
+		SettingsWidget = CreateWidget<UUserWidget>(this, WidgetClass != nullptr ? WidgetClass : UOneBrahamSettingsWidget::StaticClass());
+	}
+
+	if (SettingsWidget == nullptr)
+	{
+		return;
+	}
+
+	if (!SettingsWidget->IsInViewport())
+	{
+		SettingsWidget->AddToViewport(60);
+	}
+}
+
+void AOneBrahamPlayerController::HandleMatchResult(const FOneBrahamMatchResult& Result)
+{
+	if (!IsLocalController())
+	{
+		return;
+	}
+
+	// The career record and achievements first (once per match, whichever
+	// delegate ran first), so the screen can list what this match earned.
+	if (UOneBrahamSteamSubsystem* Steam = GetGameInstance() ? GetGameInstance()->GetSubsystem<UOneBrahamSteamSubsystem>() : nullptr)
+	{
+		Steam->HandleMatchResult(Result);
+	}
+
+	if (bPauseMenuOpen)
+	{
+		TogglePauseMenu();
+	}
+
+	if (ResultsWidget == nullptr)
+	{
+		UClass* WidgetClass = ResultsWidgetClass.IsNull() ? nullptr : ResultsWidgetClass.LoadSynchronous();
+		ResultsWidget = CreateWidget<UUserWidget>(this, WidgetClass != nullptr ? WidgetClass : UOneBrahamResultsWidget::StaticClass());
+	}
+	UOneBrahamResultsWidget* Results = Cast<UOneBrahamResultsWidget>(ResultsWidget);
+	if (Results == nullptr)
+	{
+		return;
+	}
+
+	if (!Results->IsInViewport())
+	{
+		Results->AddToViewport(50);
+	}
+	Results->SetResult(Result, PlayerState != nullptr ? PlayerState->GetPlayerId() : INDEX_NONE);
+
+	// The world keeps running behind it; the player needs the cursor.
+	SetMenuInput(true);
+}
+
+void AOneBrahamPlayerController::LeaveMatch()
+{
+	if (!IsLocalController())
+	{
+		return;
+	}
+
+	if (bPauseMenuOpen)
+	{
+		TogglePauseMenu();
+	}
+
+	if (UOneBrahamGameInstance* GameInstance = GetGameInstance<UOneBrahamGameInstance>())
+	{
+		GameInstance->TravelToMainMenu();
 	}
 }
 
@@ -1276,7 +1893,7 @@ void AOneBrahamPlayerController::ClientShowBanner_Implementation(const FText& Te
 	}
 }
 
-void AOneBrahamPlayerController::ClientDamageTaken_Implementation(float Damage, FVector_NetQuantize InstigatorLocation)
+void AOneBrahamPlayerController::ClientDamageTaken_Implementation(float Damage, FVector_NetQuantize InstigatorLocation, bool bHeadshot, bool bArmourAbsorbed)
 {
 	// The screen-edge arc. The HUD converts the world position into a bearing
 	// against the character's own facing, so a player who has already turned
@@ -1292,9 +1909,17 @@ void AOneBrahamPlayerController::ClientDamageTaken_Implementation(float Damage, 
 	// player's mix, their hearing-damage setting and the impact category's limits
 	// - and it is the flesh-impact cue, played flat, because it happened to the
 	// person listening.
+	//
+	// Then the thud in the head (UI_Damage_Taken), pitched by what happened:
+	// higher for a head hit, lower when the vest took it. A hit the armour
+	// absorbed whole draws no flesh impact, because no flesh was involved.
 	if (UOneBrahamAudioManagerComponent* Audio = GetAudioManager())
 	{
-		Audio->PlayLocalUISound(TEXT("SFX_Bullet_Impact_Flesh"));
+		if (Damage > 0.f)
+		{
+			Audio->PlayLocalUISound(TEXT("SFX_Bullet_Impact_Flesh"));
+		}
+		Audio->PlayDamageTakenCue(bArmourAbsorbed, bHeadshot);
 	}
 }
 
@@ -1313,6 +1938,10 @@ void AOneBrahamPlayerController::HandleSettingsChanged()
 	{
 		HUDComponent->ApplyAccessibilitySettings();
 	}
+
+	// The rebind screen writes [OneBraham.Input] to GameUserSettings.ini and
+	// then broadcasts; rebuilding here is what makes the new key work now.
+	RefreshBindingsContext();
 }
 
 // ==========================================================================
@@ -1374,8 +2003,20 @@ void AOneBrahamPlayerController::ApplyExplosionShakeLocally(const FVector& Origi
 		return;
 	}
 
-	PlayerCameraManager->StartCameraShake(UOneBrahamCameraShake::GetExplosionShakeClass(),
-		Falloff * Magnitude * Settings->CameraShakeIntensity);
+	PlayCameraShakeLocally(UOneBrahamCameraShake::GetExplosionShakeClass(), Falloff * Magnitude);
+}
+
+UCameraShakeBase* AOneBrahamPlayerController::PlayCameraShakeLocally(TSubclassOf<UCameraShakeBase> ShakeClass, float Scale)
+{
+	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
+
+	if (!IsLocalController() || PlayerCameraManager == nullptr || ShakeClass == nullptr
+		|| Settings == nullptr || !Settings->bCameraShake || Scale <= 0.f)
+	{
+		return nullptr;
+	}
+
+	return PlayerCameraManager->StartCameraShake(ShakeClass, Scale * Settings->CameraShakeIntensity);
 }
 
 void AOneBrahamPlayerController::TickFlash(float DeltaTime)
@@ -1432,12 +2073,53 @@ void AOneBrahamPlayerController::TickFlash(float DeltaTime)
 // ==========================================================================
 //  Spectating
 // ==========================================================================
+void AOneBrahamPlayerController::SetSpectating(bool bSpectating)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	const bool bChanged = bIsSpectating != bSpectating;
+	bIsSpectating = bSpectating;
+	ForceNetUpdate();
+
+	if (bChanged && IsLocalController())
+	{
+		OnRep_Spectating();
+	}
+}
+
 void AOneBrahamPlayerController::OnRep_Spectating()
 {
 	if (bIsSpectating)
 	{
 		ApplySpectatorView();
 	}
+
+	// Watching is not being there: the world goes distant, the music leads
+	// (Docs/12, "Deafened (spectating)"), and comes back on the respawn.
+	if (UOneBrahamAudioManagerComponent* Audio = GetAudioManager())
+	{
+		Audio->SetDeafened(bIsSpectating);
+	}
+}
+
+const AOneBrahamPlayerState* AOneBrahamPlayerController::GetSpectatedPlayerState() const
+{
+	const AOneBrahamGameState* GS = GetWorld() ? GetWorld()->GetGameState<AOneBrahamGameState>() : nullptr;
+	if (GS == nullptr || SpectatedPlayerId == INDEX_NONE || bFreeCamActive)
+	{
+		return nullptr;
+	}
+	for (const APlayerState* State : GS->PlayerArray)
+	{
+		if (State != nullptr && State->GetPlayerId() == SpectatedPlayerId)
+		{
+			return Cast<AOneBrahamPlayerState>(State);
+		}
+	}
+	return nullptr;
 }
 
 void AOneBrahamPlayerController::ApplySpectatorView()
@@ -1450,38 +2132,23 @@ void AOneBrahamPlayerController::ApplySpectatorView()
 		return;
 	}
 
+	// Resolved through the player states, which every machine has. This walked
+	// the player controllers, and a client has exactly one - its own - so on
+	// every remote client the target was never found and spectating fell
+	// through to the free camera every time.
 	AOneBrahamCharacter* Target = nullptr;
-	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	for (APlayerState* State : GS->PlayerArray)
 	{
-		if (AOneBrahamPlayerController* OtherPC = Cast<AOneBrahamPlayerController>(It->Get()))
+		const AOneBrahamPlayerState* OtherState = Cast<AOneBrahamPlayerState>(State);
+		if (OtherState == nullptr || OtherState == GetPlayerState<AOneBrahamPlayerState>())
 		{
-			if (OtherPC != this && OtherPC->SpectatedPlayerId == SpectatedPlayerId)
-			{
-				Target = OtherPC->GetOneBrahamCharacter();
-				break;
-			}
+			continue;
 		}
-	}
 
-	if (Target == nullptr)
-	{
-		// Fall back to any living pawn matching the id via PlayerState lookup.
-		for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+		if (OtherState->GetPlayerId() == SpectatedPlayerId && !OtherState->IsEliminated())
 		{
-			AOneBrahamPlayerController* OtherPC = Cast<AOneBrahamPlayerController>(It->Get());
-			if (OtherPC == nullptr || OtherPC == this)
-			{
-				continue;
-			}
-
-			if (AOneBrahamPlayerState* OtherState = OtherPC->GetPlayerState<AOneBrahamPlayerState>())
-			{
-				if (OtherState->PlayerId == SpectatedPlayerId && !OtherState->IsEliminated())
-				{
-					Target = OtherPC->GetOneBrahamCharacter();
-					break;
-				}
-			}
+			Target = Cast<AOneBrahamCharacter>(OtherState->GetPawn());
+			break;
 		}
 	}
 
@@ -1555,6 +2222,11 @@ void AOneBrahamPlayerController::ToggleFreeCamera()
 
 void AOneBrahamPlayerController::ServerBeginSpectating_Implementation(int32 PreferredTargetPlayerId)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerBeginSpectating")))
+	{
+		return;
+	}
+
 	AOneBrahamGameState* GS = GetWorld() ? GetWorld()->GetGameState<AOneBrahamGameState>() : nullptr;
 	if (GS == nullptr)
 	{
@@ -1574,7 +2246,7 @@ void AOneBrahamPlayerController::ServerBeginSpectating_Implementation(int32 Pref
 		{
 			if (OtherState->LifeState == EOneBrahamLifeState::Alive || OtherState->LifeState == EOneBrahamLifeState::Downed)
 			{
-				Candidates.Add(OtherState->PlayerId);
+				Candidates.Add(OtherState->GetPlayerId());
 			}
 		}
 	}
@@ -1583,9 +2255,8 @@ void AOneBrahamPlayerController::ServerBeginSpectating_Implementation(int32 Pref
 	{
 		// Everyone is dead: watch the Skydeck cameras. -2 is the "no survivors"
 		// sentinel the spectator HUD renders as a locked-off security feed.
-		bIsSpectating = true;
 		SpectatedPlayerId = -2;
-		ForceNetUpdate();
+		SetSpectating(true);
 		return;
 	}
 
@@ -1610,9 +2281,8 @@ void AOneBrahamPlayerController::ServerBeginSpectating_Implementation(int32 Pref
 		NewTarget = Candidates.IsValidIndex(CurrentIndex + 1) ? Candidates[CurrentIndex + 1] : Candidates[0];
 	}
 
-	bIsSpectating = true;
 	SpectatedPlayerId = NewTarget;
-	ForceNetUpdate();
+	SetSpectating(true);
 }
 
 void AOneBrahamPlayerController::PingLookDirection()
@@ -1642,6 +2312,11 @@ void AOneBrahamPlayerController::PingLookDirection()
 
 void AOneBrahamPlayerController::ServerPingLocation_Implementation(FVector_NetQuantize Location)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerPingLocation")))
+	{
+		return;
+	}
+
 	// Sanity: a ping must be within the tower envelope (roughly 120 m around the
 	// building origin, 0-100 m up). Anything else is a forged ping and is dropped.
 	const FVector Ping = Location;
@@ -1736,6 +2411,35 @@ void AOneBrahamPlayerController::MarkClipMoment(const FString& Label)
 // ==========================================================================
 //  Anti-cheat: RPC budget
 // ==========================================================================
+bool AOneBrahamPlayerController::CheckRPCBudgetFor(const UObject* Context, const TCHAR* RPCLabel)
+{
+	const AActor* Actor = Cast<AActor>(Context);
+	if (Actor == nullptr)
+	{
+		if (const UActorComponent* Component = Cast<UActorComponent>(Context))
+		{
+			Actor = Component->GetOwner();
+		}
+	}
+
+	AController* Controller = nullptr;
+	if (const APawn* Pawn = Cast<APawn>(Actor))
+	{
+		Controller = Pawn->GetController();
+	}
+	else if (const APlayerState* State = Cast<APlayerState>(Actor))
+	{
+		Controller = State->GetOwningController();
+	}
+	else
+	{
+		Controller = Cast<AController>(const_cast<AActor*>(Actor));
+	}
+
+	AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(Controller);
+	return PC == nullptr || PC->CheckRPCBudget(RPCLabel);
+}
+
 bool AOneBrahamPlayerController::CheckRPCBudget(const TCHAR* RPCLabel)
 {
 	const UWorld* World = GetWorld();
@@ -1787,7 +2491,7 @@ void AOneBrahamPlayerController::ReportViolation(const FString& Reason, float Se
 		const AOneBrahamPlayerState* State = GetPlayerState<AOneBrahamPlayerState>();
 		OB_AUDIT_LOG("SECURITY: player='%s' id=%d reason='%s' severity=%.1f score=%d",
 			State ? *State->GetPlayerName() : *GetName(),
-			State ? State->PlayerId : -1,
+			State ? State->GetPlayerId() : -1,
 			*Reason,
 			Severity,
 			ViolationScore);
@@ -1796,6 +2500,20 @@ void AOneBrahamPlayerController::ReportViolation(const FString& Reason, float Se
 	if (GameSettings.bKickOnRepeatedViolations && ViolationScore >= GameSettings.ViolationsBeforeKick)
 	{
 		OB_AUDIT_LOG("SECURITY: kicking '%s' after violation score reached %d.", *GetName(), ViolationScore);
-		ClientReturnToMainMenuWithTextReason(NSLOCTEXT("OneBraham", "Kicked", "Disconnected by the server."));
+		const FText Reason = NSLOCTEXT("OneBraham", "Kicked", "Disconnected by the server.");
+
+		// KickPlayer tells the client why and then closes the connection from
+		// this end. ClientReturnToMainMenuWithTextReason alone only asked the
+		// client to leave, and the clients worth kicking are the ones that
+		// do not do as they are asked.
+		AGameModeBase* GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode() : nullptr;
+		if (GameMode != nullptr && GameMode->GameSession != nullptr && !IsLocalController())
+		{
+			GameMode->GameSession->KickPlayer(this, Reason);
+		}
+		else if (!IsLocalController())
+		{
+			ClientReturnToMainMenuWithTextReason(Reason);
+		}
 	}
 }

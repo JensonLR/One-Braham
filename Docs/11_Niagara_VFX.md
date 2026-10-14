@@ -1,6 +1,6 @@
 # ONE BRAHAM — Niagara and VFX
 
-The 17 systems, 3 camera shakes and 6 decal materials the game asks for, what each
+The 18 systems, 3 camera shakes and 6 decal materials the game asks for, what each
 one has to do, and the budget it has to do it in.
 
 Everything here is created as an asset by
@@ -25,7 +25,7 @@ per effect:
 Do not rename a system. A rename is not a compile error and not a crash: it is a
 silent fallback to a sprite actor, logged once per effect. That is the correct
 behaviour for a build in progress and the wrong behaviour for a shipping build,
-which is exactly why `validate_project.py` asserts all 17 exist.
+which is exactly why `validate_project.py` asserts all 18 exist.
 
 | Effect enum | Asset stem | Spawned by | Cull (cm) | Max concurrent |
 | --- | --- | --- | --- | --- |
@@ -46,12 +46,13 @@ which is exactly why `validate_project.py` asserts all 17 exist.
 | `DustPuff` | `NS_OB_Dust` | `SpawnEffect` | 7000 | 16 |
 | `BreachDebris` | `NS_OB_BreachDebris` | `SpawnBreachDebris` | 9000 | 12 |
 | `CorpseImpact` | `NS_OB_CorpseImpact` | `SpawnEffect` | 5000 | 8 |
+| `Rain` | `NS_OB_Rain` | `UOneBrahamWorldEffectsComponent` (local camera, outdoors, wet matches) | 3000 | 1 |
 
 ---
 
 ## 2. User parameters every system declares
 
-Declared in all 17, set by the spawner, so a single system can serve a whole
+Declared in all 18, set by the spawner, so a single system can serve a whole
 class of events without a second asset:
 
 | Parameter | Type | Default | Set by |
@@ -197,6 +198,21 @@ plus a 0.15 s cloth ripple. Bodies are the most-read object on a floor — a pla
 learns more from one body than from any HUD marker — so this system is small but
 it is not optional.
 
+### 3.16 `NS_OB_Rain` — 3000 cm, 1 instance
+
+Rain in a 24 m box round the local camera, outdoors only: the plaza (floor 0)
+and the Skydeck (floor 15), in a match the game mode rolled wet
+(`AOneBrahamGameState::bRaining`, `RainChance` on the match settings, 0.6 by
+default, never in FIRE DRILL). The spec is 2,000 GPU sprites stretched along
+velocity, falling at 9 m/s with a westerly drift, plus depth-buffer splashes.
+`UOneBrahamWorldEffectsComponent` moves it with the camera and lays the rain bed
+(`AMB_Plaza_Rain`) over the zone's ambience at the same moment.
+
+Until the system has emitters the component draws its own rain: 220 streaks
+built from the engine cylinder (0.4 cm by 35 cm), tinted through the basic
+shape material's `Color` parameter. They fall through the box and wrap to the
+top, so a wet Skydeck looks wet on a clean clone.
+
 ---
 
 ## 4. Camera shakes
@@ -204,11 +220,13 @@ it is not optional.
 | Blueprint | Trigger | Amplitude | Duration | Notes |
 | --- | --- | --- | --- | --- |
 | `BP_OBCameraShake_Explosion` | any explosion within its radius | 0.55 | 0.42 s | Perlin 26 Hz, plus a 0.1 s rotational pop on the first frame |
-| `BP_OBCameraShake_Landing` | landing hard | 0.18 | 0.20 s | amplitude scaled by impact speed in the character's landing code |
-| `BP_OBCameraShake_Extraction` | while the rotor is at the pad | 0.90 | continuous | 11 Hz sine with a 0.35 s wobble every 2.2 s as the blades pass the deck edge |
+| `BP_OBCameraShake_Landing` | landing hard | 0.18 | 0.20 s | `AOneBrahamCharacter::Landed`, owning player only: scale 0.25 at 700 cm/s rising to 1.0 at 1150 cm/s, the speed fall damage starts |
+| `BP_OBCameraShake_Extraction` | while the rotor is at the pad | 0.90 | continuous | 11 Hz sine with a 0.35 s wobble every 2.2 s as the blades pass the deck edge. Started on each machine when the extraction enters HOLDING, scaled 1.0 at the pad to 0 at 30 m, stopped when it leaves HOLDING (`UOneBrahamExtractionComponent::ApplyLocalExtractionAudio`) |
 
 Parent class is `UOneBrahamCameraShake`, which is a `UCameraShakeBase` with the
 amplitude/scale parameters that `AOneBrahamCharacter` sets when it plays them.
+Every shake plays through `AOneBrahamPlayerController::PlayCameraShakeLocally`,
+which applies the player's screen-shake switch and intensity.
 The extraction shake is the reason a player physically wants to get on the
 helicopter rather than stand next to it.
 
@@ -262,7 +280,11 @@ Rules that come out of shipping games and are cheap now and expensive later:
 If a system is missing — asset deleted, cook list wrong, a designer renaming
 something at 2 a.m. — the game does this:
 
-1. `LoadEffectSystem` logs once per effect, then remembers it is missing.
+1. `LoadEffectSystem` logs once per effect, then remembers it is missing. A
+   system that exists but has **no emitters** counts as missing. `build_vfx.py`
+   creates all eighteen so the paths resolve, and each is empty until an artist
+   builds its stack. Before this rule, running the content build made every
+   impact invisible, because an empty system was preferred to the fallback.
 2. `SpawnImpact` spawns `AOneBrahamImpactFallbackActor`: a camera-facing sprite
    with a surface-tinted colour, 0.4 s life, no collision.
 3. `PlayNearMiss`, `SpawnExplosion` and the rest degrade to audio only, which is
@@ -270,7 +292,7 @@ something at 2 a.m. — the game does this:
    the shake and the damage all still happen.
 
 This is a development convenience. `validate_project.py` fails the build if any
-of the 17 systems is missing from the content, because "it works without VFX" is
+of the 18 systems is missing from the content, because "it works without VFX" is
 a statement about development builds only.
 
 ---

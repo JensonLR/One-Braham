@@ -23,6 +23,10 @@
 #include "UObject/UnrealType.h"
 
 #include "Core/OneBrahamGameSettings.h"
+#include "Core/OneBrahamInputBindings.h"
+#include "Core/OneBrahamAimAssist.h"
+#include "Misc/ConfigCacheIni.h"
+#include "Misc/ScopeExit.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "OneBraham.h"
@@ -32,7 +36,7 @@
 namespace
 {
 	/** The number of Input Actions the shipped game binds. */
-	constexpr int32 ExpectedActionCount = 41;
+	constexpr int32 ExpectedActionCount = 42;
 
 	/**
 	 * Every reflected UInputAction property on the config class, in declaration
@@ -223,6 +227,176 @@ bool FOneBrahamInputContextsTest::RunTest(const FString& Parameters)
 		UOneBrahamInputConfig::StaticClass(), TEXT("ClipMarker"));
 	TestNotNull(TEXT("ClipMarker exists"), ClipMarker);
 
+	return true;
+}
+
+// ===========================================================================
+//  Rebinding: the write path the controls screen uses
+// ===========================================================================
+namespace
+{
+	TArray<FKey> KeysOf(const TArray<FOneBrahamKeyBinding>& Bindings, const TCHAR* Action)
+	{
+		TArray<FKey> Keys;
+		for (const FOneBrahamKeyBinding& Binding : Bindings)
+		{
+			if (Binding.Action == FName(Action))
+			{
+				Keys.Add(Binding.Key);
+			}
+		}
+		return Keys;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamInputRebindTest, "OneBraham.Input.Rebind",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamInputRebindTest::RunTest(const FString& Parameters)
+{
+	// The player's own keyboard rows are put back afterwards, whatever happens.
+	TArray<FString> Saved;
+	GConfig->GetArray(TEXT("OneBraham.Input"), TEXT("KeyboardBinding"), Saved, GGameUserSettingsIni);
+	ON_SCOPE_EXIT
+	{
+		if (Saved.Num() > 0)
+		{
+			GConfig->SetArray(TEXT("OneBraham.Input"), TEXT("KeyboardBinding"), Saved, GGameUserSettingsIni);
+		}
+		else
+		{
+			GConfig->RemoveKey(TEXT("OneBraham.Input"), TEXT("KeyboardBinding"), GGameUserSettingsIni);
+		}
+	};
+
+	UOneBrahamInputBindings::ResetBindings(false);
+	TestTrue(TEXT("defaults: Reload is R"), KeysOf(UOneBrahamInputBindings::GetBindings(false), TEXT("IA_Reload")) == TArray<FKey>{ EKeys::R });
+
+	// A plain rebind replaces the key and nothing else.
+	FName Swapped;
+	TestTrue(TEXT("R -> T"), UOneBrahamInputBindings::Rebind(TEXT("IA_Reload"), EKeys::R, EKeys::T, false, Swapped));
+	TestTrue(TEXT("nothing swapped"), Swapped.IsNone());
+	TestTrue(TEXT("Reload is T"), KeysOf(UOneBrahamInputBindings::GetBindings(false), TEXT("IA_Reload")) == TArray<FKey>{ EKeys::T });
+
+	// Taking another action's key swaps: Interact gets the key Reload gave up.
+	TestTrue(TEXT("T -> F"), UOneBrahamInputBindings::Rebind(TEXT("IA_Reload"), EKeys::T, EKeys::F, false, Swapped));
+	TestTrue(TEXT("swapped with Interact"), Swapped == FName(TEXT("IA_Interact")));
+	const TArray<FOneBrahamKeyBinding> AfterSwap = UOneBrahamInputBindings::GetBindings(false);
+	TestTrue(TEXT("Reload is F"), KeysOf(AfterSwap, TEXT("IA_Reload")) == TArray<FKey>{ EKeys::F });
+	TestTrue(TEXT("Interact is T"), KeysOf(AfterSwap, TEXT("IA_Interact")) == TArray<FKey>{ EKeys::T });
+	TestTrue(TEXT("nothing else holds F"), UOneBrahamInputBindings::FindConflict(EKeys::F, false, TEXT("IA_Reload")).IsNone());
+
+	// Rebinding one key of Move writes all four, modifiers intact.
+	TestTrue(TEXT("W -> Up"), UOneBrahamInputBindings::Rebind(TEXT("IA_Move"), EKeys::W, EKeys::Up, false, Swapped));
+	int32 MoveRows = 0;
+	for (const FOneBrahamKeyBinding& Binding : UOneBrahamInputBindings::GetBindings(false))
+	{
+		if (Binding.Action == FName(TEXT("IA_Move")))
+		{
+			++MoveRows;
+			TestTrue(TEXT("W no longer moves"), Binding.Key != EKeys::W);
+			if (Binding.Key == EKeys::Up)
+			{
+				TestTrue(TEXT("Up keeps W's swizzle"), Binding.Modifiers == TArray<FString>{ TEXT("Swizzle") });
+			}
+		}
+	}
+	TestEqual(TEXT("Move keeps four keys"), MoveRows, 4);
+
+	// Keys a device cannot bind are refused, and the look axes are fixed.
+	TestFalse(TEXT("a pad button is not a keyboard key"), UOneBrahamInputBindings::Rebind(TEXT("IA_Jump"), EKeys::SpaceBar, EKeys::Gamepad_FaceButton_Bottom, false, Swapped));
+	TestFalse(TEXT("the console key is the console's"), UOneBrahamInputBindings::IsKeyBindable(EKeys::Tilde, false));
+	TestFalse(TEXT("look is not rebindable"), UOneBrahamInputBindings::GetRebindableActions().Contains(FName(TEXT("IA_Look"))));
+
+	// Reset gives the defaults back.
+	UOneBrahamInputBindings::ResetBindings(false);
+	TestTrue(TEXT("reset: Interact is F"), KeysOf(UOneBrahamInputBindings::GetBindings(false), TEXT("IA_Interact")) == TArray<FKey>{ EKeys::F });
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamAimAssistTest, "OneBraham.Input.AimAssist",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamAimAssistTest::RunTest(const FString& Parameters)
+{
+	const FVector Eye = FVector::ZeroVector;
+	const FRotator Ahead = FRotator::ZeroRotator; // looking down +X
+	const float Dt = 1.f / 60.f;
+
+	auto One = [](const FVector& Location, const FVector& Velocity = FVector::ZeroVector)
+	{
+		FOneBrahamAimAssistTarget Target;
+		Target.Location = Location;
+		Target.Velocity = Velocity;
+		return TArray<FOneBrahamAimAssistTarget>{ Target };
+	};
+
+	// Dead ahead, standing still: full slowdown for the strength, no follow.
+	FOneBrahamAimAssistResult R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector::ZeroVector, One(FVector(1000.f, 0.f, 0.f)), 0.6f, false, Dt);
+	TestEqual(TEXT("ahead: target chosen"), R.TargetIndex, 0);
+	TestEqual(TEXT("ahead: slowdown is strength x hip maximum"), R.LookScale, 1.f - FOneBrahamAimAssist::MaxSlowdownHip * 0.6f, 0.001f);
+	TestTrue(TEXT("ahead, still: no follow"), R.Follow.IsNearlyZero());
+
+	// Strength zero is off.
+	R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector::ZeroVector, One(FVector(1000.f, 0.f, 0.f)), 0.f, false, Dt);
+	TestEqual(TEXT("strength 0: nothing"), R.TargetIndex, static_cast<int32>(INDEX_NONE));
+	TestEqual(TEXT("strength 0: full speed"), R.LookScale, 1.f);
+
+	// Twenty degrees off is outside every cone.
+	const FVector Wide = FRotator(0.f, 20.f, 0.f).Vector() * 1000.f;
+	R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector::ZeroVector, One(Wide), 1.f, true, Dt);
+	TestEqual(TEXT("20 degrees off: nothing"), R.TargetIndex, static_cast<int32>(INDEX_NONE));
+
+	// Cone: shrinks with distance, inside its floor and ceiling.
+	TestEqual(TEXT("cone ceiling up close"), FOneBrahamAimAssist::ConeHalfAngleDegrees(100.f, false), FOneBrahamAimAssist::MaxConeDegrees);
+	TestEqual(TEXT("cone floor far away"), FOneBrahamAimAssist::ConeHalfAngleDegrees(100000.f, false), FOneBrahamAimAssist::MinConeDegrees);
+	TestTrue(TEXT("cone shrinks with distance"),
+		FOneBrahamAimAssist::ConeHalfAngleDegrees(1500.f, false) < FOneBrahamAimAssist::ConeHalfAngleDegrees(900.f, false));
+
+	// Range: 45 m is past hip range and inside ADS range.
+	R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector::ZeroVector, One(FVector(4500.f, 0.f, 0.f)), 1.f, false, Dt);
+	TestEqual(TEXT("45 m from the hip: nothing"), R.TargetIndex, static_cast<int32>(INDEX_NONE));
+	R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector::ZeroVector, One(FVector(4500.f, 0.f, 0.f)), 1.f, true, Dt);
+	TestEqual(TEXT("45 m down sights: assisted"), R.TargetIndex, 0);
+
+	// A target running to the player's right pulls the view right, and no
+	// faster than the cap however fast it runs.
+	R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector::ZeroVector, One(FVector(1000.f, 0.f, 0.f), FVector(0.f, 400.f, 0.f)), 1.f, false, Dt);
+	TestTrue(TEXT("strafing right: follow turns right"), R.Follow.Yaw > 0.f);
+	R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector::ZeroVector, One(FVector(300.f, 0.f, 0.f), FVector(0.f, 100000.f, 0.f)), 1.f, true, Dt);
+	TestTrue(TEXT("follow capped"), R.Follow.Yaw <= FOneBrahamAimAssist::MaxFollowDegreesPerSecond * Dt + KINDA_SMALL_NUMBER);
+
+	// The player strafing with the target cancels the follow: it is relative motion.
+	R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector(0.f, 400.f, 0.f), One(FVector(1000.f, 0.f, 0.f), FVector(0.f, 400.f, 0.f)), 1.f, false, Dt);
+	TestTrue(TEXT("moving together: no follow"), R.Follow.IsNearlyZero());
+
+	// Two targets: the one nearer the crosshair for its cone wins, and an
+	// excluded one (sight line blocked) hands over to the other.
+	TArray<FOneBrahamAimAssistTarget> Two;
+	Two.Add(One(FRotator(0.f, 3.f, 0.f).Vector() * 800.f)[0]);
+	Two.Add(One(FRotator(0.f, 0.5f, 0.f).Vector() * 2000.f)[0]);
+	R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector::ZeroVector, Two, 1.f, false, Dt);
+	TestEqual(TEXT("nearer the crosshair wins"), R.TargetIndex, 1);
+	const TArray<int32> Blocked = { 1 };
+	R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector::ZeroVector, Two, 1.f, false, Dt, Blocked);
+	TestEqual(TEXT("blocked target skipped"), R.TargetIndex, 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamKeyLabelTest, "OneBraham.Input.KeyLabels",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamKeyLabelTest::RunTest(const FString& Parameters)
+{
+	// Pad buttons read the way they are printed on the controller.
+	TestEqual(TEXT("bottom face button is A"), UOneBrahamInputBindings::GetKeyLabel(EKeys::Gamepad_FaceButton_Bottom).ToString(), FString(TEXT("A")));
+	TestEqual(TEXT("right shoulder is RB"), UOneBrahamInputBindings::GetKeyLabel(EKeys::Gamepad_RightShoulder).ToString(), FString(TEXT("RB")));
+	TestEqual(TEXT("left trigger is LT"), UOneBrahamInputBindings::GetKeyLabel(EKeys::Gamepad_LeftTrigger).ToString(), FString(TEXT("LT")));
+	TestEqual(TEXT("right special is Menu"), UOneBrahamInputBindings::GetKeyLabel(EKeys::Gamepad_Special_Right).ToString(), FString(TEXT("Menu")));
+
+	// Everything else keeps the engine's short name.
+	TestTrue(TEXT("keyboard keys are the engine's name"),
+		UOneBrahamInputBindings::GetKeyLabel(EKeys::F).EqualTo(EKeys::F.GetDisplayName(false)));
 	return true;
 }
 

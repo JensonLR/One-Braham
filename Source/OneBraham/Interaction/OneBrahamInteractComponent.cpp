@@ -1,6 +1,11 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Interaction/OneBrahamInteractComponent.h"
+#include "Weapons/OneBrahamInventoryComponent.h"
+#include "Access/OneBrahamLift.h"
+#include "Access/OneBrahamOverrideTerminal.h"
+#include "Access/OneBrahamAccessZone.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 
 #include "OneBraham.h"
 #include "Core/OneBrahamGameSettings.h"
@@ -185,8 +190,33 @@ void UOneBrahamInteractComponent::ServerBeginInteraction_Implementation(AActor* 
 	if (!Interface->CanInteract_Implementation(PC))
 	{
 		// Legitimate failure (locked door without a badge): no violation, just a
-		// negative response so the HUD can shake the prompt.
+		// negative response so the HUD can shake the prompt, and the character
+		// says what the problem is.
 		OnPromptChanged.Broadcast(Interface->GetInteractionPrompt_Implementation(PC));
+
+		const UOneBrahamInventoryComponent* Inventory = Character->GetInventoryComponent();
+		const bool bHoldsAnyCard = Inventory != nullptr && Inventory->HighestKeycardTier != EOneBrahamAccessTier::Public;
+		if (Target->IsA<AOneBrahamAccessZone>())
+		{
+			FOneBrahamVoiceDirector::OnAccessRefused(Character, bHoldsAnyCard);
+		}
+		else if (Target->IsA<AOneBrahamOverrideTerminal>())
+		{
+			FOneBrahamVoiceDirector::OnOverrideRefused(Character);
+		}
+		else if (const AOneBrahamLift* Lift = Cast<AOneBrahamLift>(Target))
+		{
+			// Only from inside the car, and only for the refusals worth saying:
+			// "in transit" is the car doing its job.
+			if (Lift->IsInsideCar(Character) && Lift->IsOutOfService())
+			{
+				FOneBrahamVoiceDirector::OnLiftOutOfService(Character);
+			}
+			else if (Lift->IsInsideCar(Character) && !Lift->IsMoving())
+			{
+				FOneBrahamVoiceDirector::OnAccessRefused(Character, bHoldsAnyCard);
+			}
+		}
 		return;
 	}
 
@@ -198,8 +228,17 @@ void UOneBrahamInteractComponent::ServerBeginInteraction_Implementation(AActor* 
 
 	CurrentTarget = Target;
 	ActiveInteractionTag = InteractionTag;
+	// Whether this is a hold, and how long it takes, is the target's answer, never
+	// the client's: a client that sent bIsHold=false for a revive would otherwise
+	// get a zero-second hold, which the branch below completes on the spot.
 	bIsHoldInteraction = Interface->RequiresHold_Implementation(PC);
-	RequiredHoldSeconds = bIsHold ? Interface->GetHoldDuration_Implementation(PC) : 0.f;
+	RequiredHoldSeconds = bIsHoldInteraction ? Interface->GetHoldDuration_Implementation(PC) : 0.f;
+
+	if (bIsHold != bIsHoldInteraction)
+	{
+		UE_LOG(LogOneBraham, Verbose, TEXT("Interaction with %s: client said hold=%d, target says %d; using the target."),
+			*Target->GetName(), bIsHold ? 1 : 0, bIsHoldInteraction ? 1 : 0);
+	}
 	HoldStartTime = GetWorld()->GetTimeSeconds();
 	HoldProgress = 0.f;
 
@@ -230,6 +269,11 @@ void UOneBrahamInteractComponent::ServerBeginInteraction_Implementation(AActor* 
 
 void UOneBrahamInteractComponent::ServerEndInteraction_Implementation(bool bCompleted)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerEndInteraction")))
+	{
+		return;
+	}
+
 	AOneBrahamCharacter* Character = CachedCharacter.Get();
 	if (Character == nullptr || !Character->HasAuthority())
 	{
@@ -246,9 +290,26 @@ void UOneBrahamInteractComponent::ServerEndInteraction_Implementation(bool bComp
 	IOneBrahamInteractionInterface* Interface = Cast<IOneBrahamInteractionInterface>(CurrentTarget);
 	if (Interface != nullptr && bTargetNotified)
 	{
-		// For a tap interaction, "end of press" IS the completion. For a hold, the
-		// tick has already set HoldProgress to 1 when it succeeded.
-		const bool bActuallyCompleted = bCompleted || (!bIsHoldInteraction && Interface->CanInteract_Implementation(PC));
+		// The client's bCompleted is only what its own HUD believed. For a tap,
+		// release IS completion, if the target still allows it. A hold completes
+		// in TickHoldProgress on the server's clock, so reaching this point with
+		// a hold still running means it was let go early: a cancel, whatever the
+		// client claims. Trusting the flag here was an instant revive, an instant
+		// extraction and an instant hack from one forged RPC.
+		const bool bActuallyCompleted = !bIsHoldInteraction && Interface->CanInteract_Implementation(PC);
+
+		if (bCompleted && bIsHoldInteraction && PC != nullptr)
+		{
+			const float Held = HoldStartTime >= 0.f ? GetWorld()->GetTimeSeconds() - HoldStartTime : 0.f;
+
+			// A real client can report completion a frame or a round trip before the
+			// server's tick gets there; only a claim well short of the hold is a lie.
+			if (Held + 0.5f < RequiredHoldSeconds)
+			{
+				PC->ReportViolation(FString::Printf(TEXT("Claimed a %.1f s hold on %s after %.1f s"),
+					RequiredHoldSeconds, *CurrentTarget->GetName(), Held), 1.f);
+			}
+		}
 
 		if (!bIsHoldInteraction && bActuallyCompleted && !ValidateInteractionStillLegal())
 		{
@@ -466,6 +527,9 @@ void UOneBrahamInteractComponent::PlayInteractionMontage(FGameplayTag Interactio
 	else if (TagString.Contains(TEXT("Execute")))  { MontageName = TEXT("AM_OB_Interact_Execute"); }
 	else if (TagString.Contains(TEXT("Keycard")))  { MontageName = TEXT("AM_OB_Interact_Keycard"); }
 	else if (TagString.Contains(TEXT("Body")))     { MontageName = TEXT("AM_OB_Interact_Loot"); }
+	else if (TagString.Contains(TEXT("Ammo")))     { MontageName = TEXT("AM_OB_Interact_Loot"); }
+	else if (TagString.Contains(TEXT("Utility")))  { MontageName = TEXT("AM_OB_Interact_Loot"); }
+	else if (TagString.Contains(TEXT("Medkit")))   { MontageName = TEXT("AM_OB_Interact_Loot"); }
 	else if (TagString.Contains(TEXT("Extraction"))) { MontageName = TEXT("AM_OB_Interact_Radio"); }
 	else                                           { MontageName = TEXT("AM_OB_Interact_Door"); }
 

@@ -170,7 +170,7 @@ public:
 	//  Bots (practice mode only - ASCENT ships with no AI opponents)
 	// ======================================================================
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Bots")
-	void PopulateWithBots(int32 BotsPerTeam);
+	void PopulateWithBots(int32 TotalBots);
 
 	UFUNCTION(BlueprintPure, Category = "One Braham|Bots")
 	bool IsBotPracticeMode() const { return bBotPracticeMode; }
@@ -186,8 +186,29 @@ protected:
 	//  Internal flow
 	// ======================================================================
 	void StartWarmup();
+
+	/** Stocks the building from the match settings' loot profiles, once. */
+	void SpawnMatchLoot();
+
+	/** FIRE DRILL: spawns the control points from the match settings. */
+	void SpawnControlPoints();
+
+	/** The warmup's tannoy, one announcement at a time. */
+	void PlayNextLobbyAnnouncement();
+
+public:
+	/** The five lobby announcements, in the order the warmup plays them. */
+	static int32 LobbyAnnouncementCount();
+	static FText GetLobbyAnnouncement(int32 Index);
+
+protected:
+	int32 LobbyAnnouncementIndex = 0;
+	FTimerHandle LobbyAnnouncementHandle;
+
+	/** The squad that won, set just before FinishMatch, for the last words. */
+	int32 PendingWinningSquadId = INDEX_NONE;
 	void StartActiveMatch();
-	void FinishMatch(EOneBrahamTeam WinningTeam, const FString& WinningSquadName, bool bNoSurvivors, int32 ExtractedCount, EOneBrahamExtractionFailReason FailReason);
+	void FinishMatch(EOneBrahamMatchEnding Ending, EOneBrahamTeam WinningTeam, const FString& WinningSquadName, int32 ExtractedCount, EOneBrahamExtractionFailReason FailReason);
 
 	/** Applies the settings-derived defaults to the GameMode's player classes. */
 	void ConfigureClassesFromSettings();
@@ -196,6 +217,9 @@ protected:
 	void ParseTravelOptions(const FString& Options);
 
 	/** Builds the replicated match result payload for the end screen. */
+	/** After the post-match window: remote players to their menus, then the server's own next step. */
+	void ReturnPlayersToMenu();
+
 	FOneBrahamMatchResult BuildMatchResult(EOneBrahamTeam WinningTeam, const FString& WinningSquadName, bool bNoSurvivors, int32 ExtractedCount) const;
 
 	/** Broadcasts a Tannoy announcement to everyone (lobby speaker + HUD banner). */
@@ -252,10 +276,11 @@ protected:
 	float WarmupEndTime = 0.f;
 
 	bool bBotPracticeMode = false;
+
+	/** `?Bots=N` from the travel options: the total, dealt round the squads. */
+	int32 RequestedBotCount = 0;
 	bool bMatchFinished = false;
 
 	/** Parsed from the travel options. */
 	FString PendingModeString;
-	FString PendingPlayerName;
-	FString PendingArchetype;
 };

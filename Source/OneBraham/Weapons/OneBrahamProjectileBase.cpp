@@ -1,6 +1,10 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Weapons/OneBrahamProjectileBase.h"
+#include "Match/OneBrahamSmokeSubsystem.h"
+#include "Voice/OneBrahamVoiceDirector.h"
+#include "Access/OneBrahamDestructibleProp.h"
+#include "EngineUtils.h"
 
 #include "OneBraham.h"
 #include "Core/OneBrahamGameState.h"
@@ -21,6 +25,7 @@
 #include "NiagaraFunctionLibrary.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
+#include "Engine/OverlapResult.h"
 #include "EngineUtils.h"
 #include "DrawDebugHelpers.h"
 #include "Net/UnrealNetwork.h"
@@ -203,6 +208,13 @@ void AOneBrahamProjectileBase::ServerPlantAsBreachCharge(AActor* HostActor, cons
 	GetWorldTimerManager().ClearTimer(FuseTimerHandle);
 	GetWorldTimerManager().SetTimer(FuseTimerHandle, this, &AOneBrahamProjectileBase::Detonate, FuseSeconds, false);
 
+	// "Two, one -": the planter counts the squad in, a second and a half out.
+	FTimerHandle CountdownHandle;
+	GetWorldTimerManager().SetTimer(CountdownHandle, FTimerDelegate::CreateWeakLambda(this, [this]()
+	{
+		FOneBrahamVoiceDirector::OnBreachImminent(Thrower.Get());
+	}), FMath::Max(0.1f, FuseSeconds - 1.5f), false);
+
 	OB_WEAPON_LOG("Breach charge planted on '%s' by '%s' (%.1fs fuse).",
 		HostActor ? *HostActor->GetName() : TEXT("world"), *ThrowerName, FuseSeconds);
 }
@@ -273,7 +285,7 @@ void AOneBrahamProjectileBase::OnProjectileBounce(const FHitResult& ImpactResult
 		{
 			// Grenades do not damage on impact - the design forbids "cooking" and
 			// ricochet kills because they are unreadable in a tactical shooter.
-			UE_UNUSED(Character);
+			(void)Character;
 		}
 	}
 }
@@ -357,12 +369,52 @@ void AOneBrahamProjectileBase::MulticastDetonationFeedback_Implementation(FVecto
 
 	case EOneBrahamUtilityType::Smoke:
 		UOneBrahamVFXStatics::SpawnSmokeCloud(this, DetonationLocation, SmokeRadius, SmokeDuration);
+		// The cloud as a fact as well as a picture: sight lines through it are
+		// blocked for anything that asks (the bots, before they shoot).
+		if (UOneBrahamSmokeSubsystem* Smoke = GetWorld() ? GetWorld()->GetSubsystem<UOneBrahamSmokeSubsystem>() : nullptr)
+		{
+			Smoke->AddCloud(DetonationLocation, SmokeRadius, SmokeDuration);
+		}
 		break;
 
 	default:
 		// Frag and breach: the burst is the projectile's own detonation system,
 		// activated on every machine by `OnRep_Detonated` with the authored
 		// Blueprint able to override it (`Docs/11` section 6).
+		break;
+	}
+
+	// The bang. Nothing played one: every grenade in the game went off in
+	// silence. This multicast is the one place that runs on every machine with
+	// the type and the position, and the listener's manager owns the mix. The
+	// frag and the charge go through PlayExplosion, which also rings the ears of
+	// a player inside the radius; the flashbang's ringing is the flash effect's
+	// own, decided by line of sight, so it gets the bang alone.
+	UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this);
+	if (Audio == nullptr)
+	{
+		return;
+	}
+
+	switch (UtilityType)
+	{
+	case EOneBrahamUtilityType::Frag:
+		Audio->PlayExplosion(DetonationLocation, BlastRadius, FName(TEXT("SFX_Frag_Explosion")));
+		break;
+
+	case EOneBrahamUtilityType::BreachCharge:
+		Audio->PlayExplosion(DetonationLocation, BreachRadius, FName(TEXT("SFX_Breach_Explosion")));
+		break;
+
+	case EOneBrahamUtilityType::Flashbang:
+		Audio->PlaySoundAtLocation(FName(TEXT("SFX_Flashbang_Bang")), DetonationLocation, 1.f, 1.f, this);
+		break;
+
+	case EOneBrahamUtilityType::Smoke:
+		Audio->PlaySoundAtLocation(FName(TEXT("SFX_Smoke_Deploy")), DetonationLocation, 1.f, 1.f, this);
+		break;
+
+	default:
 		break;
 	}
 }
@@ -380,6 +432,11 @@ void AOneBrahamProjectileBase::Detonate()
 	}
 
 	bDetonated = true;
+
+	// A charge set off early (shot, or by another blast) still has a fuse
+	// running; bDetonated stops a second blast, and this stops the call.
+	ClearTimers();
+
 	OnRep_Detonated();
 
 	switch (UtilityType)
@@ -515,24 +572,30 @@ void AOneBrahamProjectileBase::ApplyFragDamage()
 	// --- Physical push ----------------------------------------------------
 	// Grenades shove desks, trays, mugs and chairs around. This is a huge part of
 	// how the game feels, and it is Chaos doing it, not bespoke code.
-	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
+	// A sphere query, not a walk over every actor: the tower holds thousands of
+	// props, and a grenade only reaches the ones within its push radius.
+	const float PushRadius = BlastRadius * 1.4f;
+	FCollisionObjectQueryParams PushObjects;
+	PushObjects.AddObjectTypesToQuery(ECC_PhysicsBody);
+	PushObjects.AddObjectTypesToQuery(ECC_WorldDynamic);
+	FCollisionQueryParams PushParams(SCENE_QUERY_STAT(OneBrahamGrenadePush), false, this);
+
+	TArray<FOverlapResult> Overlaps;
+	World->OverlapMultiByObjectType(Overlaps, Origin, FQuat::Identity, PushObjects,
+		FCollisionShape::MakeSphere(PushRadius), PushParams);
+
+	TSet<UPrimitiveComponent*> Pushed;
+	for (const FOverlapResult& Overlap : Overlaps)
 	{
-		AActor* Actor = *ActorIt;
-		if (Actor == nullptr || Actor == this || Actor->IsA(AOneBrahamCharacter::StaticClass()))
+		UPrimitiveComponent* Primitive = Overlap.GetComponent();
+		if (Primitive == nullptr || !Primitive->IsSimulatingPhysics() || Pushed.Contains(Primitive)
+			|| Cast<AOneBrahamCharacter>(Primitive->GetOwner()) != nullptr)
 		{
 			continue;
 		}
+		Pushed.Add(Primitive);
 
-		UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
-		if (Primitive == nullptr || !Primitive->IsSimulatingPhysics())
-		{
-			continue;
-		}
-
-		const FVector ToActor = Actor->GetActorLocation() - Origin;
-		const float Distance = ToActor.Size();
-		const float PushRadius = BlastRadius * 1.4f;
-
+		const float Distance = FVector::Dist(Primitive->GetComponentLocation(), Origin);
 		if (Distance > PushRadius || Distance < KINDA_SMALL_NUMBER)
 		{
 			continue;
@@ -617,6 +680,7 @@ void AOneBrahamProjectileBase::ApplyFlashEffect()
 		if (Duration > 0.15f)
 		{
 			PC->ClientApplyFlash(Duration, Facing > 0.85f);
+			FOneBrahamVoiceDirector::OnFlashed(Character, DistanceAlpha * FacingAlpha);
 		}
 	}
 }
@@ -644,10 +708,10 @@ void AOneBrahamProjectileBase::ApplyBlastToGlass(const FVector& Origin, float Ra
 		return;
 	}
 
-	// There are eight panes in the building and no registry of them, so this
-	// walks the class list. That is the right cost: a detonation is once per
-	// grenade, the list is short, and an index would be one more thing to keep in
-	// step with the map builder.
+	// The panes (the Skydeck balustrade is most of them) and the destructible
+	// props have no registry, so this walks the class lists. That is the right
+	// cost: a detonation is once per grenade, the lists are a few hundred long,
+	// and an index would be one more thing to keep in step with the map builder.
 	TArray<AActor*> Panes;
 	UGameplayStatics::GetAllActorsOfClass(World, AOneBrahamBreakableGlass::StaticClass(), Panes);
 
@@ -683,6 +747,33 @@ void AOneBrahamProjectileBase::ApplyBlastToGlass(const FVector& Origin, float Ra
 		// the far corner of the floor does not.
 		const float Alpha = 1.f - FMath::Clamp(Distance / RadiusCm, 0.f, 1.f);
 		Pane->TakeDamage(RadiusCm * 1.2f * Alpha, FDamageEvent(), Thrower.IsValid() ? Thrower->GetController() : nullptr, this);
+	}
+
+	// Furniture in the blast: a grenade in the print room takes the printer with
+	// it. Same line-of-sight rule as the glass, and the prop's own health decides.
+	for (TActorIterator<AOneBrahamDestructibleProp> It(World); It; ++It)
+	{
+		AOneBrahamDestructibleProp* Prop = *It;
+		if (Prop == nullptr || Prop->IsDestroyed())
+		{
+			continue;
+		}
+
+		const float Distance = FVector::Dist(Prop->GetActorLocation(), Origin);
+		if (Distance > RadiusCm)
+		{
+			continue;
+		}
+
+		FHitResult Hit;
+		if (World->LineTraceSingleByChannel(Hit, Origin, Prop->GetActorLocation(), ECollisionChannel::ECC_Visibility, Params) &&
+			Hit.GetActor() != Prop)
+		{
+			continue;
+		}
+
+		const float Alpha = 1.f - FMath::Clamp(Distance / RadiusCm, 0.f, 1.f);
+		Prop->TakeDamage(RadiusCm * 0.6f * Alpha, FDamageEvent(), Thrower.IsValid() ? Thrower->GetController() : nullptr, this);
 	}
 }
 
@@ -797,5 +888,4 @@ void AOneBrahamProjectileBase::OnRep_FuseRemaining()
 void AOneBrahamProjectileBase::ClearTimers()
 {
 	GetWorldTimerManager().ClearTimer(FuseTimerHandle);
-	GetWorldTimerManager().ClearTimer(CleanupTimerHandle);
 }

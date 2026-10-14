@@ -1,6 +1,8 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Voice/OneBrahamVoiceSubsystem.h"
+#include "Online/OneBrahamPlatformSubsystem.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 #include "UI/OneBrahamHUDStringTable.h"
 
 #include "OneBraham.h"
@@ -204,6 +206,9 @@ bool UOneBrahamVoiceSubsystem::SpeakContextualLine(AActor* Speaker, FName LineId
 	{
 		LineCooldowns.Add(CooldownKey, Now);
 		LastSpokenTime.Add(State, Now);
+
+		// A squadmate may answer it: "reloading" gets "I've got you".
+		FOneBrahamVoiceDirector::OnLineSpoken(Character, LineId);
 	}
 
 	return bSpoken;
@@ -330,7 +335,7 @@ void UOneBrahamVoiceSubsystem::HandleAmbientLineTimer()
 			TEXT("V_AMBIENT_ELEVATOR"), TEXT("V_AMBIENT_CANTEEN"), TEXT("V_AMBIENT_SERVER_ROOM"),
 			TEXT("V_AMBIENT_RAIN"), TEXT("V_AMBIENT_STAIRS"), TEXT("V_AMBIENT_EXEC"),
 			TEXT("V_AMBIENT_TIRED"), TEXT("V_AMBIENT_COFFEE"), TEXT("V_AMBIENT_MEETING"),
-			TEXT("V_AMBIENT_SKYDECK"), TEXT("V_AMBIENT_PLAZA")
+			TEXT("V_AMBIENT_SKYDECK"), TEXT("V_AMBIENT_PLAZA"), TEXT("V_STEP_GRATING")
 		};
 
 		const FName LineId = AmbientLines[Random.RandRange(0, UE_ARRAY_COUNT(AmbientLines) - 1)];
@@ -380,7 +385,17 @@ void UOneBrahamVoiceSubsystem::SetTransmitting(const AActor* Context, bool bTran
 
 	// Self-muted or the channel is Off: push-to-talk does nothing, and the HUD
 	// shows the mic-muted icon rather than the transmitting one.
+	// The platform's say comes first for the local player: a user whose account
+	// may not talk online does not transmit, whatever the game settings say.
+	// Checked only for a local player; a listen host's own privilege says
+	// nothing about its clients.
+	const APlayerController* OwnerController = Cast<APlayerController>(State->GetOwner());
+	const UOneBrahamPlatformSubsystem* Platform = OwnerController != nullptr && OwnerController->IsLocalController()
+		? UOneBrahamPlatformSubsystem::Get(OwnerController) : nullptr;
+	const bool bPlatformAllows = Platform == nullptr || Platform->CanCommunicate();
+
 	const bool bAllowed = bTransmitting
+		&& bPlatformAllows
 		&& !State->bSelfMuted
 		&& State->VoiceChannel != EOneBrahamVoiceChannel::None;
 
@@ -626,18 +641,36 @@ void UOneBrahamVoiceSubsystem::SpeakAnnouncement(FName LineId)
 	OnVoiceLineSpoken.Broadcast(nullptr, LineId, Line->Subtitle, Duration);
 
 	// Play the announcement 2D on the local machine. Every machine receives the
-	// same replicated trigger from the match director, so no RPC is needed, but
-	// only the two nearest floors actually hear a building announcement.
+	// same replicated trigger from the match director, so no RPC is needed.
+	//
+	// The Tannoy's two-tone chime goes first, through the mix, and the voice
+	// follows it: that is how a building announcement sounds in every office in
+	// London, and the chime is what makes a player stop and listen. The chime
+	// plays even when the line has no recording yet, because the subtitle still
+	// needs announcing.
 	if (UWorld* World = GetWorld())
 	{
-		const bool bNearby = true;
+		constexpr float ChimeLeadSeconds = 0.9f;
+
+		if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(World))
+		{
+			Audio->PlayAnnouncementChime();
+		}
 
 		if (USoundBase* LineSound = Line->Sound.LoadSynchronous())
 		{
-			if (bNearby)
+			FTimerHandle Unused;
+			TWeakObjectPtr<UWorld> WeakWorld(World);
+			TWeakObjectPtr<USoundBase> WeakSound(LineSound);
+			World->GetTimerManager().SetTimer(Unused, FTimerDelegate::CreateLambda([WeakWorld, WeakSound]()
 			{
-				UGameplayStatics::SpawnSound2D(World, LineSound, 1.f, 1.f, 0.f, nullptr, false, true);
-			}
+				UWorld* LiveWorld = WeakWorld.Get();
+				USoundBase* Sound = WeakSound.Get();
+				if (LiveWorld != nullptr && Sound != nullptr)
+				{
+					UGameplayStatics::SpawnSound2D(LiveWorld, Sound, 1.f, 1.f, 0.f, nullptr, false, true);
+				}
+			}), ChimeLeadSeconds, false);
 		}
 		else
 		{

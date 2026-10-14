@@ -1,6 +1,8 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Core/OneBrahamGameState.h"
+#include "Audio/OneBrahamAudioManagerComponent.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 
 #include "OneBraham.h"
 #include "Core/OneBrahamGameplayTags.h"
@@ -9,6 +11,9 @@
 #include "Lockdown/OneBrahamLockdownComponent.h"
 #include "Extraction/OneBrahamExtractionComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "Online/OneBrahamSteamSubsystem.h"
+#include "Core/OneBrahamPlayerController.h"
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerState.h"
 
@@ -28,6 +33,7 @@ void AOneBrahamGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 	DOREPLIFETIME(AOneBrahamGameState, MatchMode);
 	DOREPLIFETIME(AOneBrahamGameState, MatchPhase);
 	DOREPLIFETIME(AOneBrahamGameState, ServerName);
+	DOREPLIFETIME(AOneBrahamGameState, bRaining);
 	DOREPLIFETIME(AOneBrahamGameState, bIsDedicatedServerMatch);
 	DOREPLIFETIME(AOneBrahamGameState, PhaseElapsedSeconds);
 	DOREPLIFETIME(AOneBrahamGameState, MatchTimeLimitSeconds);
@@ -119,6 +125,35 @@ void AOneBrahamGameState::OnRep_KillFeed()
 	}
 
 	LastAcknowledgedKillFeedCount = KillFeed.Num();
+}
+
+void AOneBrahamGameState::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// The player's career record, achievements and Steam stats are written from
+	// the result, on the player's own machine: a client hears it through
+	// OnRep_MatchResult, a listen host from the game mode's broadcast. Both
+	// arrive here. A dedicated server has no Steam subsystem.
+	if (const UGameInstance* GameInstance = GetGameInstance())
+	{
+		if (UOneBrahamSteamSubsystem* Steam = GameInstance->GetSubsystem<UOneBrahamSteamSubsystem>())
+		{
+			OnMatchResultReady.AddUniqueDynamic(Steam, &UOneBrahamSteamSubsystem::HandleMatchResult);
+		}
+	}
+
+	// The local player's results screen, when the controller arrived first.
+	if (const UWorld* World = GetWorld())
+	{
+		if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(World->GetFirstPlayerController()))
+		{
+			if (PC->IsLocalController())
+			{
+				OnMatchResultReady.AddUniqueDynamic(PC, &AOneBrahamPlayerController::HandleMatchResult);
+			}
+		}
+	}
 }
 
 void AOneBrahamGameState::OnRep_MatchResult()
@@ -215,6 +250,17 @@ void AOneBrahamGameState::AddKillFeedEntry(const FOneBrahamKillFeedEntry& Entry)
 void AOneBrahamGameState::MulticastAnnounce_Implementation(const FText& Announcement, bool bPlayTannoySound)
 {
 	OnAnnouncement.Broadcast(Announcement);
+
+	// The chime before the voice: the building clearing its throat. The flag
+	// arrived here and was only written to the log, so every announcement in
+	// the game was silent text.
+	if (bPlayTannoySound)
+	{
+		if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this))
+		{
+			Audio->PlayAnnouncementChime();
+		}
+	}
 
 	// The Tannoy itself is driven by the audio manager on each client so the
 	// announcement pans from the correct ceiling speaker near the listener.

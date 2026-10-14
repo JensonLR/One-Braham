@@ -170,7 +170,7 @@ FText AOneBrahamExtractionTerminal::GetInteractionPrompt_Implementation(const AO
 	switch (Extraction->GetExtractionState())
 	{
 	case EOneBrahamExtractionState::Inactive:
-		return NSLOCTEXT("OneBraham", "Winch_Ready", "Hold E - call the winch");
+		return NSLOCTEXT("OneBraham", "Winch_Ready", "Hold {Interact} - call the winch");
 
 	case EOneBrahamExtractionState::Broadcast:
 		return NSLOCTEXT("OneBraham", "Winch_Called", "Called - ten seconds");
@@ -257,7 +257,7 @@ bool AOneBrahamExtractionTerminal::OnInteractionStart_Implementation(AOneBrahamP
 	HoldInteractor = Interactor;
 	LastProgressSecond = -1;
 
-	PlayTerminalEffects(FName(TEXT("SFX_Terminal_Hum")), 0.7f);
+	MulticastPlayTerminalEffects(FName(TEXT("SFX_Terminal_Hum")), 0.7f);
 
 	OB_EXTRACT_LOG("Winch console '%s': call started by %s.", *TerminalId.ToString(),
 		*Interactor->GetName());
@@ -280,7 +280,7 @@ void AOneBrahamExtractionTerminal::OnInteractionHold_Implementation(AOneBrahamPl
 	if (WholeSecond > LastProgressSecond)
 	{
 		LastProgressSecond = WholeSecond;
-		PlayTerminalEffects(FName(TEXT("SFX_Terminal_Progress")), 0.6f);
+		MulticastPlayTerminalEffects(FName(TEXT("SFX_Terminal_Progress")), 0.6f);
 	}
 }
 
@@ -308,7 +308,7 @@ void AOneBrahamExtractionTerminal::OnInteractionEnd_Implementation(AOneBrahamPla
 		// The component's own sentence, on the caller's banner. A refusal the
 		// player can read is the difference between "the button is broken" and
 		// "the winch is already taken".
-		PlayTerminalEffects(FName(TEXT("SFX_Terminal_Deny")), 0.7f);
+		MulticastPlayTerminalEffects(FName(TEXT("SFX_Terminal_Deny")), 0.7f);
 
 		Interactor->ClientShowBanner(
 			Refusal.IsEmpty()
@@ -321,7 +321,7 @@ void AOneBrahamExtractionTerminal::OnInteractionEnd_Implementation(AOneBrahamPla
 	}
 	else
 	{
-		PlayTerminalEffects(FName(TEXT("SFX_Terminal_Accept")), 1.f);
+		MulticastPlayTerminalEffects(FName(TEXT("SFX_Terminal_Accept")), 1.f);
 	}
 
 	ApplyScreenState();
@@ -437,22 +437,12 @@ void AOneBrahamExtractionTerminal::ApplyScreenState()
 	}
 }
 
-void AOneBrahamExtractionTerminal::PlayTerminalEffects(FName SoundId, float Volume, float Pitch)
+void AOneBrahamExtractionTerminal::MulticastPlayTerminalEffects_Implementation(FName SoundId, float Volume, float Pitch)
 {
-	UWorld* World = GetWorld();
-	if (World == nullptr)
+	if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this))
 	{
-		return;
-	}
-
-	const FVector Location = ScreenMesh != nullptr ? ScreenMesh->GetComponentLocation() : GetActorLocation();
-
-	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-	{
-		if (UOneBrahamAudioManagerComponent* Audio = GetAudioFor(Cast<AOneBrahamPlayerController>(It->Get())))
-		{
-			Audio->PlaySoundAtLocation(SoundId, Location, Volume, Pitch, this);
-		}
+		const FVector Location = ScreenMesh != nullptr ? ScreenMesh->GetComponentLocation() : GetActorLocation();
+		Audio->PlaySoundAtLocation(SoundId, Location, Volume, Pitch, this);
 	}
 }
 
@@ -475,9 +465,3 @@ int32 AOneBrahamExtractionTerminal::ResolveCallingSquadId(const AOneBrahamPlayer
 	return GS != nullptr ? GS->GetSquadIdForPlayer(PS->GetPlayerId()) : INDEX_NONE;
 }
 
-UOneBrahamAudioManagerComponent* AOneBrahamExtractionTerminal::GetAudioFor(const AOneBrahamPlayerController* PC)
-{
-	return PC != nullptr
-		? PC->FindComponentByClass<UOneBrahamAudioManagerComponent>()
-		: nullptr;
-}

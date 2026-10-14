@@ -1,79 +1,37 @@
 @echo off
 REM ===========================================================================
-REM  ONE BRAHAM - package
+REM  ONE BRAHAM - package (the short form)
 REM ---------------------------------------------------------------------------
-REM  Cooks and packages a build with Unreal Automation Tool. Every artifact the
-REM  release checklist expects is produced here; nothing is packaged by hand.
+REM      Package.bat Client                 Windows shipping client
+REM      Package.bat Client Development     Windows development client, for QA
+REM      Package.bat Server                 Windows shipping dedicated server
+REM      Package.bat LinuxServer            Linux dedicated server (cross-compiled)
 REM
-REM      Package.bat Client           Windows shipping client
-REM      Package.bat Server           Windows shipping dedicated server
-REM      Package.bat LinuxServer      Linux dedicated server (the rented boxes)
-REM      Package.bat Client Development   dev build, for QA
-REM
-REM  The cooked build is written to Build\<target>. The content cook list lives
-REM  in Config/DefaultGame.ini, so a map added to the project but not to the
-REM  cook list is a map that does not ship - add it there first.
+REM  It calls PackageClient.ps1 / PackageServer.ps1, which hold the BuildCookRun
+REM  command lines. This file used to hold its own, and its "Server" packaged a
+REM  client: it never passed -server -noclient.
 REM ===========================================================================
-
 setlocal
+set OB_PS=powershell
+where pwsh >nul 2>&1 && set OB_PS=pwsh
 
-set GAME_DIR=%~dp0..
-set PROJECT=%GAME_DIR%\OneBraham.uproject
-set UAT=%UE_UAT%
-
-if "%UAT%"=="" (
-    if exist "%ProgramFiles%\Epic Games\UE_5.5\Engine\Build\BatchFiles\RunUAT.bat" (
-        set UAT=%ProgramFiles%\Epic Games\UE_5.5\Engine\Build\BatchFiles\RunUAT.bat
-    )
-)
-
-if "%UAT%"=="" (
-    echo [OB] Set UE_UAT to your RunUAT.bat path.
-    exit /b 1
-)
-
-set TARGET=%1
+set TARGET=%~1
 if "%TARGET%"=="" set TARGET=Client
-set CONFIG=%2
+set CONFIG=%~2
 if "%CONFIG%"=="" set CONFIG=Shipping
 
+if /I "%TARGET%"=="Client" (
+    %OB_PS% -NoProfile -ExecutionPolicy Bypass -File "%~dp0PackageClient.ps1" -Platform Win64 -Configuration %CONFIG%
+    exit /b %errorlevel%
+)
 if /I "%TARGET%"=="Server" (
-    set PLATFORM=Win64
-    set OUNAME=OneBrahamServer
-    set OUTDIR=%GAME_DIR%\Build\WindowsServer
-) else if /I "%TARGET%"=="LinuxServer" (
-    set PLATFORM=Linux
-    set OUNAME=OneBrahamServer
-    set OUTDIR=%GAME_DIR%\Build\LinuxServer
-) else (
-    set PLATFORM=Win64
-    set OUNAME=OneBraham
-    set OUTDIR=%GAME_DIR%\Build\WindowsClient
+    %OB_PS% -NoProfile -ExecutionPolicy Bypass -File "%~dp0PackageServer.ps1" -Platform Win64 -Configuration %CONFIG%
+    exit /b %errorlevel%
+)
+if /I "%TARGET%"=="LinuxServer" (
+    %OB_PS% -NoProfile -ExecutionPolicy Bypass -File "%~dp0PackageServer.ps1" -Platform Linux -Configuration %CONFIG%
+    exit /b %errorlevel%
 )
 
-echo [OB] packaging %OUNAME% for %PLATFORM% (%CONFIG%)
-
-"%UAT%" BuildCookRun ^
-    -project="%PROJECT%" ^
-    -noP4 ^
-    -platform=%PLATFORM% ^
-    -clientconfig=%CONFIG% ^
-    -serverconfig=%CONFIG% ^
-    -cook ^
-    -allmaps ^
-    -build ^
-    -stage ^
-    -pak ^
-    -iostore ^
-    -compressed ^
-    -prereqs ^
-    -archive ^
-    -archivedirectory="%OUTDIR%"
-
-if errorlevel 1 (
-    echo [OB] packaging FAILED
-    exit /b 1
-)
-
-echo [OB] packaged to %OUTDIR%
-endlocal
+echo [OB] Unknown target "%TARGET%". Use Client, Server or LinuxServer.
+exit /b 1

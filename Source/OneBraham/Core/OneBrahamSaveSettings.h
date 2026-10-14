@@ -137,18 +137,28 @@ public:
 	UPROPERTY(BlueprintReadWrite, Category = "Progress")
 	float BestAscentTimeSeconds = 0.f;
 
+	/** Extracted from an ASCENT match having dealt no damage at all (Milestone.NoDamageExtract). */
 	UPROPERTY(BlueprintReadWrite, Category = "Progress")
-	bool bExtractedWithoutDamagingSquad = false;
+	bool bExtractedWithoutDealingDamage = false;
 
-	// --- Bindings ---------------------------------------------------------
-	/** Key overrides applied on top of the default mapping context, keyed by "IA_Name.Action". */
-	UPROPERTY(BlueprintReadWrite, Category = "Controls")
-	TMap<FName, FString> KeyOverrides;
+	/** Won an ASCENT match as the last squad standing, on the Server & Comms floors (Milestone.ServerFloorWin). */
+	UPROPERTY(BlueprintReadWrite, Category = "Progress")
+	bool bWonOnServerFloors = false;
 
-	UPROPERTY(BlueprintReadWrite, Category = "Controls")
-	TMap<FName, FKey> GamepadOverrides;
+	/** Achievement API names this profile has earned, Steam or not. */
+	UPROPERTY(BlueprintReadWrite, Category = "Progress")
+	TArray<FName> UnlockedAchievements;
 
-	/** Raw mouse/gamepad sensitivity, duplicated here so the custom controls screen owns them. */
+	/** Cosmetic unlock tags earned through achievements (OB.Cosmetic.Unlock.*). */
+	UPROPERTY(BlueprintReadWrite, Category = "Progress")
+	TArray<FName> EarnedUnlockTags;
+
+	// --- Controls ---------------------------------------------------------
+	// Key bindings are not here: a rebind is [OneBraham.Input] in
+	// GameUserSettings.ini, written by UOneBrahamInputBindings, so it belongs to
+	// the machine and the controls, like the rest of the input settings.
+
+	/** The first-run screen (sensitivity, subtitles, colour-blind mode) has been shown. */
 	UPROPERTY(BlueprintReadWrite, Category = "Controls")
 	bool bHasSeenFirstRunSetup = false;
 

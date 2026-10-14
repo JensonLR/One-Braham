@@ -73,6 +73,13 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void InitPlayerState() override;
 
+	/**
+	 * The local player is attached to this controller: on a client when it joins,
+	 * on a listen host for the host. This machine's profile is the only place a
+	 * player's choices exist, so this is where they leave for the server.
+	 */
+	virtual void ReceivedPlayer() override;
+
 	// ======================================================================
 	//  Components
 	// ======================================================================
@@ -101,9 +108,17 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Input")
 	TObjectPtr<UInputMappingContext> CommonMappingContext;
 
-	/** Runtime sensitivity multiplier, refreshed from settings each tick. */
+	/** Runtime mouse sensitivity (horizontal), refreshed from settings each tick; includes the ADS multiplier. */
 	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Input")
 	float EffectiveSensitivity = 0.07f;
+
+	/** The vertical counterpart: Settings -> Controls has separate X and Y sliders. */
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Input")
+	float EffectiveSensitivityY = 0.07f;
+
+	/** The right-stick multiplier aim assist set this frame (1 = none). */
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Input")
+	float AimAssistLookScale = 1.f;
 
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Input")
 	void PushMappingContext(UInputMappingContext* Context, int32 Priority = 0);
@@ -137,8 +152,21 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|UI")
 	TSubclassOf<class UOneBrahamHUDWidget> HUDWidgetClass;
 
+	/** An authored pause screen. Empty uses the HUD's own panel (resume, settings, leave). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|UI")
 	TSubclassOf<UUserWidget> PauseMenuWidgetClass;
+
+	/** WBP_Settings, opened over the pause menu. Defaults to the pipeline's path. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|UI")
+	TSoftClassPtr<UUserWidget> SettingsWidgetClass;
+
+	/** WBP_Results, shown when the match result arrives. Defaults to the pipeline's path. */
+	UPROPERTY(EditDefaultsOnly, Category = "One Braham|UI")
+	TSoftClassPtr<UUserWidget> ResultsWidgetClass;
+
+	/** Shows the results screen. Bound to the game state's OnMatchResultReady on a local controller. */
+	UFUNCTION()
+	void HandleMatchResult(const FOneBrahamMatchResult& Result);
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|UI")
 	TSubclassOf<UUserWidget> DeathScreenWidgetClass;
@@ -149,8 +177,33 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "One Braham|UI")
 	TObjectPtr<class UOneBrahamHUDWidget> HUDWidget;
 
+	/**
+	 * Opens or closes the pause menu. It never pauses the world: this is a PvP
+	 * match with eleven other people in it, and SetPause on a listen host froze
+	 * all of them. While it is open the gameplay keys are swapped out for the
+	 * menu bindings (pause and push to talk), so a stick nudge or a trigger
+	 * cannot move or fire the body standing in the corridor.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|UI")
 	void TogglePauseMenu();
+
+	UFUNCTION(BlueprintPure, Category = "One Braham|UI")
+	bool IsPauseMenuOpen() const { return bPauseMenuOpen; }
+
+	/** True when the player last looked with a stick: prompts show pad glyphs, aim assist may act. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Input")
+	bool IsUsingGamepad() const { return bPromptsShowGamepad; }
+
+	/** WBP_Settings over the pause menu; closed with it. */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|UI")
+	void OpenSettingsMenu();
+
+	/**
+	 * Back to the main menu. On a listen host that ends the match for everyone,
+	 * which is what leaving a match you are hosting means.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|UI")
+	void LeaveMatch();
 
 	UFUNCTION(BlueprintCallable, Category = "One Braham|UI")
 	void SetScoreboardVisible(bool bVisible);
@@ -188,7 +241,7 @@ public:
 	 * bullet that follows it, and this fires on every hit that lands.
 	 */
 	UFUNCTION(BlueprintCallable, Client, Unreliable, Category = "One Braham|UI")
-	void ClientDamageTaken(float Damage, FVector_NetQuantize InstigatorLocation);
+	void ClientDamageTaken(float Damage, FVector_NetQuantize InstigatorLocation, bool bHeadshot, bool bArmourAbsorbed);
 
 	/** Blinds this client with a flashbang: white-out, tinnitus, temporary deafness. */
 	UFUNCTION(BlueprintCallable, Client, Reliable, Category = "One Braham|Effects")
@@ -206,9 +259,25 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Effects")
 	void ApplyExplosionShakeLocally(const FVector& Origin, float Magnitude);
 
+	/**
+	 * Local: one camera shake, through the player's screen-shake setting (off, or
+	 * an intensity). Every shake in the game goes through here so the
+	 * accessibility switch cannot be missed by the next one somebody adds.
+	 */
+	class UCameraShakeBase* PlayCameraShakeLocally(TSubclassOf<class UCameraShakeBase> ShakeClass, float Scale);
+
 	/** Remaining flash duration on this client (0 = not flashed). */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Effects")
 	float GetFlashRemaining() const { return FlashRemaining; }
+
+	/**
+	 * Server: enters or leaves spectating. Replicates bIsSpectating, and runs the
+	 * local half (view, deafened mix) at once on a listen host, whose own
+	 * controller never receives its own RepNotify. The respawn path used to
+	 * write the protected flag directly from the character, which does not
+	 * compile, and would have skipped the local half if it had.
+	 */
+	void SetSpectating(bool bSpectating);
 
 protected:
 	/** Per-tick flash decay, called from PlayerTick. */
@@ -225,6 +294,12 @@ protected:
 
 	UPROPERTY(BlueprintAssignable, Category = "One Braham|Spectator")
 	FOneBrahamSpectatorTargetChanged OnSpectatorTargetChanged;
+
+	/** The player state being watched, or null (free camera, or nobody left). */
+	const AOneBrahamPlayerState* GetSpectatedPlayerState() const;
+
+	UFUNCTION(BlueprintPure, Category = "One Braham|Spectator")
+	bool IsFreeCameraActive() const { return bFreeCamActive; }
 
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Spectator")
 	void SpectateNextPlayer();
@@ -267,6 +342,14 @@ protected:
 	/** Returns false (and logs) when this client has exceeded its RPC budget. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Security")
 	bool CheckRPCBudget(const TCHAR* RPCLabel);
+
+	/**
+	 * The budget check from anywhere a Server RPC lands: a controller, a pawn,
+	 * a player state or a component on any of them. Resolves the owning player's
+	 * controller and spends from its budget; true (allowed) when there is no
+	 * player behind the call - a bot, or the server calling its own handler.
+	 */
+	static bool CheckRPCBudgetFor(const UObject* Context, const TCHAR* RPCLabel);
 
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Security")
 	void ReportViolation(const FString& Reason, float Severity = 1.f);
@@ -312,6 +395,23 @@ protected:
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "One Braham|Controller|Loadout")
 	void ServerSetLoadout(FName PrimaryWeaponId, FName SidearmWeaponId,
 		const TArray<FName>& UtilityIds, FName WeaponSkinId);
+
+	/**
+	 * Client -> server: who this player is wearing. The archetype by id
+	 * ("BusinessAnalyst"), the outfit as parallel slot/option arrays (an RPC
+	 * cannot carry a TMap), and the clan tag. Every value is checked against the
+	 * character registry on the server: an unknown archetype is ignored, a
+	 * cosmetic is kept only if it is a real option of the slot it claims and is
+	 * not on the competitive ban list, and the clan tag is cut to four letters
+	 * and digits. The wardrobe and the deploy screen call it again on a change.
+	 */
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "One Braham|Controller|Loadout")
+	void ServerSetAppearance(FName ArchetypeId, const TArray<FName>& CosmeticSlots,
+		const TArray<FName>& CosmeticOptions, const FString& InClanTag);
+
+	/** Local: sends this machine's saved profile - name, loadout, appearance. */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Controller|Loadout")
+	void SendProfileToServer();
 
 	/** True while the comms wheel is open on this client. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Controller|Voice")
@@ -389,6 +489,36 @@ protected:
 	/** Binds every action in InputConfig to the handlers above. */
 	void BindInputActions();
 
+	/**
+	 * Installs the mapping context that carries the keys, replacing the previous
+	 * one. Local controllers only. Called at BeginPlay and again whenever the
+	 * settings change, so a rebind is live without a level load.
+	 */
+	void RefreshBindingsContext();
+
+public:
+	/**
+	 * The prompt with {Interact} replaced by the key that interacts on the device
+	 * the player last looked with: "Hold F - override" on a keyboard, "Hold
+	 * Gamepad Face Button Top" on a pad, and whatever they rebound it to. Prompts
+	 * used to say "Hold E", which was the lean key.
+	 */
+	FText ResolvePromptKeys(const FText& Prompt) const;
+
+protected:
+
+	/**
+	 * Builds that context from the [OneBraham.Input] section: the shipped defaults
+	 * in DefaultInput.ini, with the player's GameUserSettings.ini taking an action's
+	 * place device by device. The IMC_ assets the pipeline generates carry no keys
+	 * by design (keys are data, rebindable; shape is design), so without this
+	 * context no key in the game would do anything.
+	 */
+	UInputMappingContext* BuildBindingsContext(const TSet<FName>* OnlyActions, const TCHAR* ContextName);
+
+	/** Swaps the gameplay contexts for the menu bindings, or back. */
+	void SetMenuInput(bool bMenu);
+
 	UFUNCTION()
 	void OnRep_Spectating();
 
@@ -406,6 +536,10 @@ protected:
 	UPROPERTY()
 	TObjectPtr<UOneBrahamHUDComponent> HUDComponent = nullptr;
 
+	/** Rain outdoors and the Tube underneath, for the local player only. */
+	UPROPERTY()
+	TObjectPtr<class UOneBrahamWorldEffectsComponent> WorldEffects = nullptr;
+
 	UPROPERTY()
 	TObjectPtr<UOneBrahamAudioManagerComponent> AudioManager = nullptr;
 
@@ -417,6 +551,50 @@ protected:
 	int32 ViolationScore = 0;
 
 	float InteractionTraceAccumulator = 0.f;
+
+	/** The context RefreshBindingsContext last installed; transient, rebuilt on rebind. */
+	UPROPERTY(Transient)
+	TObjectPtr<UInputMappingContext> BindingsMappingContext;
+
+	/** The same section filtered to what works in a menu: pause, and push to talk. */
+	UPROPERTY(Transient)
+	TObjectPtr<UInputMappingContext> MenuBindingsMappingContext;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UUserWidget> PauseMenuWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UUserWidget> SettingsWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UUserWidget> ResultsWidget;
+
+	/**
+	 * GFrameCounter of the last interaction begin. Tap and hold share a key by
+	 * design, so one press fires both actions; the second begin in the same frame
+	 * is dropped, or a door would open and close again on a single press.
+	 */
+	uint64 LastInteractionStartFrame = 0;
+
+	/** Which device's key the prompts name: whichever the player last looked with. */
+	bool bPromptsShowGamepad = false;
+
+	/**
+	 * Local: works out this frame's aim assist (FOneBrahamAimAssist) from the
+	 * enemies in view, sets AimAssistLookScale, and applies the follow when the
+	 * player is moving or turning on the pad.
+	 */
+	void TickAimAssist(float DeltaTime);
+
+	/** World seconds of the last non-zero stick input; follow only acts just after one. */
+	double LastPadLookTime = -1.0;
+	double LastMoveInputTime = -1.0;
+
+	/** Follow acts for this long after the last stick input. */
+	static constexpr double AimAssistInputWindowSeconds = 0.15;
+
+	/** Where on an enemy aim assist aims: upper chest, above the capsule centre. */
+	static constexpr float ChestHeightAboveCentreCm = 35.f;
 	static constexpr float InteractionTraceInterval = 0.1f;
 
 	/** Whether the pause menu is currently up (blocks gameplay input). */

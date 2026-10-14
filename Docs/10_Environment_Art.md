@@ -73,6 +73,29 @@ lost an afternoon to that black normal.
 Shading: default lit, opaque, two-sided off, `bUseEmissiveForDynamicAreaLighting`
 on (the signage and screens must light their own alcoves).
 
+**Dirt and wetness.** Base colour and roughness run through two more layers
+before they reach the output. *Dirt* is world-aligned turbulent noise
+(`DirtScale`, 0.004 by default), so grime is continuous across a wall made of
+many boxes and never repeats with the UVs. It is faded in by `DirtAmount`, set
+per surface in `build_materials.py`: concrete 0.35, carpet 0.20, a server rack
+0.10, because racks are cleaned more than anything else in the building. It
+lerps the colour toward `DirtColour` and roughens the surface. *Wetness* is
+`MPC_OneBraham_Global.RainWetness` times the surface's own `WetnessResponse`.
+The world-effects component sets the first from the match's weather. Only the
+Skydeck decking answers it, so indoor concrete stays dry in a wet match. Wet
+darkens the colour to 55% and takes the roughness to 0.08.
+
+**Masked.** There is no masked master. No surface in the building is
+cut out: the gratings are walked on and must not show the floor below, and the
+balustrade is glass. A masked master would be an asset nothing uses.
+
+### 2.1a `MPC_OneBraham_Global`
+
+The values C++ sets for every material at once: `FlashAlpha` (the flashbang
+white-out), `ColourBlindMode` (so a world marker can follow the interface's
+palette) and `RainWetness`. The code always wrote to this collection, but no
+script made it until `build_materials.py` did, so those writes went nowhere.
+
 ### 2.2 `M_OB_Glass`
 
 Same as above, plus:
@@ -88,6 +111,13 @@ Blend mode `Translucent`, shading model default lit, two-sided off,
 per pane. Twelve panes of refraction is a frame-time conversation, so the master
 caps `Refraction` at 1.4 and the map uses `M_OB_Glass_Office` (opacity 0.30, no
 refraction) for anything seen in bulk.
+
+**Cracks.** `CrackAmount` fades in lines where world-aligned noise crosses
+zero (`CrackScale`, 0.03). A cracked pane is whiter, rougher (0.6) and harder
+to see through (opacity toward 0.85). `AOneBrahamBreakableGlass` replicates
+its damage as a byte (`CrackLevel`, a quarter at the first hit, full just
+before it breaks) and writes it to the pane's own material instance, so every
+machine sees the same shot window.
 
 ### 2.3 `M_OB_Emissive`
 
@@ -126,7 +156,7 @@ like carpet.
 
 The one master that is not a surface. It is a **post-process material**
 (`MD_POST_PROCESS`, unlit, opaque) applied as a blendable on every floor's
-unbound `PostProcessVolume` by `build_environment.py`.
+bounded `PostProcessVolume` by `build_environment.py`.
 
 ```
   SceneTexture:PostProcessInput0 ----------------.

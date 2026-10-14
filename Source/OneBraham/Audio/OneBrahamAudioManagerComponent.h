@@ -58,6 +58,14 @@ enum class EOneBrahamAudioPriority : uint8
 	Critical = 5
 };
 
+/** The three sounds of a magazine reload, in the order they happen. */
+enum class EOneBrahamReloadCue : uint8
+{
+	MagOut,
+	MagIn,
+	Bolt
+};
+
 UCLASS(ClassGroup = (OneBraham), meta = (BlueprintSpawnableComponent))
 class ONEBRAHAM_API UOneBrahamAudioManagerComponent : public UActorComponent
 {
@@ -65,6 +73,17 @@ class ONEBRAHAM_API UOneBrahamAudioManagerComponent : public UActorComponent
 
 public:
 	UOneBrahamAudioManagerComponent();
+
+	/**
+	 * The audio manager of this machine's listener: the first local player's.
+	 * Null on a dedicated server, which has nobody to play to.
+	 *
+	 * Use this from a multicast, never the shooter's controller: on every
+	 * machine but the shooter's own, a remote pawn has no controller, so a shot
+	 * looked up that way skipped the mix everywhere it mattered - and on a clean
+	 * checkout, with no authored sound to fall back on, it was silent.
+	 */
+	static UOneBrahamAudioManagerComponent* GetLocal(const UObject* WorldContextObject);
 
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -100,11 +119,12 @@ public:
 	/** Mechanical weapon foley: bolt, mag out, mag in, charge handle, dry fire, safety. */
 	void PlayWeaponMechanics(FName SoundId, AActor* Shooter, bool bLocalOnly = false);
 
-	/** Reload stage cue, keyed by "Start" / "MagIn" / "Charge" / "Complete" / "Abort". */
-	void PlayReloadCue(FName Stage, AActor* Shooter);
-
-	/** Impact foley resolved from the physical material of whatever was hit. */
-	void PlayImpact(FName SoundIdPrefix, const FHitResult& Hit, float VolumeScale = 1.f, AActor* IgnoredActor = nullptr);
+	/**
+	 * One reload sound: magazine out, magazine in, or the bolt after an empty
+	 * magazine. AOneBrahamWeaponBase schedules the three against the reload's own
+	 * length when the weapon has no authored single-take reload.
+	 */
+	void PlayReloadCue(EOneBrahamReloadCue Cue, AActor* Shooter);
 
 	/**
 	 * Impact cue from a replicated impact report. This is the single entry point
@@ -159,6 +179,9 @@ public:
 	/** Fire alarm / klaxon bed, faded in over the building announcement. */
 	void SetLockdownAudio(bool bActive, float FadeSeconds = 1.5f);
 
+	/** The rain bed, laid over the zone's own while the listener is outdoors in the rain. */
+	void SetWeatherAudio(bool bRainAudible, float FadeSeconds = 2.5f);
+
 	/** Helicopter rotor bed, positioned on the pad. `Approach01` speeds it up. */
 	void SetExtractionAudio(bool bActive, const FVector& PadLocation, float Approach01);
 
@@ -169,7 +192,7 @@ public:
 	void SetTinnitusState(bool bActive, float DurationSeconds);
 
 	/** Spectating after death: everything gets distant. */
-	void SetDeafened(bool bDeafened);
+	void SetDeafened(bool bInDeafened);
 
 	/** Ref-counted voice duck (0.45x on the beds while anyone is talking). */
 	void PushVoiceDuck();
@@ -181,8 +204,6 @@ public:
 	// ======================================================================
 	//  Queries
 	// ======================================================================
-	const FOneBrahamSoundBankEntry* FindBankEntry(FName SoundId) const;
-
 	/** True when a cue exists as an asset or as a synthesised fallback. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Audio")
 	bool HasCue(FName SoundId) const;

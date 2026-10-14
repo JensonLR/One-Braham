@@ -127,7 +127,7 @@ Three layers, each with one job:
 
 | Class | Stores | Persisted by |
 | --- | --- | --- |
-| `UOneBrahamGameSettings` | developer-tunable defaults: the seven UI colours, the interaction-distance tolerance, the voice occlusion, the default mode and tick rates | read from `DefaultGame.ini` `[OneBrahamGameSettings]` at startup |
+| `UOneBrahamGameSettings` | developer-tunable defaults: the seven UI colours, the interaction-distance tolerance, the voice occlusion, the default mode and tick rates | read from `DefaultEngine.ini` `[/Script/OneBraham.OneBrahamGameSettings]` at startup (the class is `config = Engine`) |
 | `UOneBrahamGameUserSettings` | player video/audio/gameplay/accessibility settings | `GameUserSettings.ini` (engine) |
 | `UOneBrahamSaveSettings` | keybinds (per device), sensitivity, HUD scale, last-used loadout | `Saved/SaveGames/OneBrahamSettings.sav` |
 
@@ -215,6 +215,43 @@ wants to do is a `Server*` RPC and the server decides.
 Input is routed through the mapping contexts on the input config; a controller in
 a menu swaps to `IMC_OneBraham_UI` and the gameplay contexts are removed, which is
 how the game avoids "I could still shoot while typing in the settings".
+
+**Where the keys come from.** The `IMC_` assets the pipeline generates carry no
+keys: keys are data and rebindable, the contexts are shape. At `BeginPlay`, and
+again on every settings change, the controller builds a transient
+`IMC_OneBraham_Bindings` from the `[OneBraham.Input]` section
+(`RefreshBindingsContext`): defaults from `DefaultInput.ini`, and for any action
+the player has rebound, *all* of that action's keys on that device from their
+`GameUserSettings.ini` instead. It sits at priority 0, under any asset context a
+designer authors keys into. A binding may carry modifiers, `S,Swizzle+Negate`,
+which is how W/A/S/D become one 2D `IA_Move` and Q/E one signed `IA_Lean`.
+
+Mouse and stick look are two actions, `IA_Look` (`Mouse2D`, a distance per frame)
+and `IA_LookGamepad` (`Gamepad_Right2D`, a turn rate, scaled by delta time).
+
+**Default controls.** One key, one verb, per device; `check_input_actions.py`
+fails the build on any key two actions share outside these five context pairs:
+Jump/Mantle/spectator free camera, Crouch/Slide, Fire/next spectate target,
+Aim/previous spectate target, Interact tap/hold (the controller drops the second
+interaction begin in a frame).
+
+| Verb | Keyboard and mouse | Controller |
+| --- | --- | --- |
+| Move / look | W A S D / mouse | left stick / right stick |
+| Jump, mantle | Space | A |
+| Sprint / walk | Left Shift / Left Alt | L3 / (stick deflection) |
+| Crouch, slide from a sprint | Left Ctrl, C | B |
+| Lean | Q / E | — |
+| Fire / aim | LMB / RMB | RT / LT |
+| Reload / melee / fire mode | R / V / B | X / R3 / d-pad up |
+| Interact (tap and hold) | F | Y |
+| Weapon slots / cycle | 1 2 3 / wheel | — / RB |
+| Throw / utility / medkit | G / H / 4 | LB / d-pad left / d-pad down |
+| Push to talk / channel / mute | Caps Lock / Z / N | d-pad right / — / — |
+| Scoreboard / pause / map | Tab / Esc / M | View / Menu / — |
+| Ping / voice lines / hide HUD | MMB / X / F1 | — |
+| Inspect / light / laser / drop | I / T / Y / Backspace | — |
+| Clip marker | unbound: the player chooses | — |
 
 ---
 

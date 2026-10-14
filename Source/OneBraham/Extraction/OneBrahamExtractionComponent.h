@@ -243,6 +243,12 @@ protected:
 	bool bPushedExtractionAudio = false;
 	float PushedApproach01 = -1.f;
 
+	/** The rotor-wash shake has been played for this hold on this machine. */
+	bool bShookForHold = false;
+
+	/** That shake, continuous while the rotor is at the pad, stopped when it leaves. */
+	TWeakObjectPtr<class UCameraShakeBase> HoldShake;
+
 	/** Cached for the loudest possible announcement. */
 	UPROPERTY(Transient)
 	mutable TWeakObjectPtr<AOneBrahamGameState> CachedGameState;

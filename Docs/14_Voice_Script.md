@@ -134,6 +134,22 @@ Priority and cooldown are the runtime's, not the actor's. They are here so the w
 | `V_EXTRACTION_LOST` | "They're on the winch - we lost it." | critical - ducks everything, plays immediately | 3s | always |
 | `V_LAST_SQUAD_WARNING` | "One squad left up here besides us." | critical - ducks everything, plays immediately | 6s | always |
 
+### The building's machinery
+
+The lifts, the loot, the glass edge and the helicopter: systems that arrived after
+the first draft of this script, each with the one thing a person in it would say.
+
+| Line id | Line | Priority | Cooldown | Chance |
+| --- | --- | --- | --- | --- |
+| `V_LIFT_CALLED` | "Lift's coming. Everyone on this floor heard that too." | tactical - plays at the next natural break | 10s | always |
+| `V_LIFT_DOORS` | "Mind the doors - they don't stop for anyone." | critical - ducks everything, plays immediately | 6s | always |
+| `V_LIFTS_DOWN` | "Lifts are dead. Stairs." | tactical - plays at the next natural break | 12s | always |
+| `V_WEAPON_FOUND` | "Better than what I had. Taking it." | tactical - plays at the next natural break | 10s | always |
+| `V_AMMO_FOUND` | "Rounds here. Take what you need." | tactical - plays at the next natural break | 10s | always |
+| `V_GLASS_GONE` | "The glass is out on the deck - watch the edge." | critical - ducks everything, plays immediately | 8s | always |
+| `V_HELI_SPOTTED` | "There - over the City. That's the helicopter." | tactical - plays at the next natural break | 30s | always |
+| `V_PROP_SHORT` | "That's shorting out - stay off it." | tactical - plays at the next natural break | 10s | always |
+
 ### Teamwork
 
 | Line id | Line | Priority | Cooldown | Chance |
@@ -227,109 +243,145 @@ because the wheel exposed two genuine holes.
 
 ## 4. Archetype variants
 
-Eleven lines, six times each. These are the lines a player hears most, and the reason two squads sound like two squads. Read the intent column, then say it the way your archetype would - not the way the row above says it.
+Eleven lines, six times each, and six sets of words. These are the lines a player
+hears most, and the reason two squads sound like two squads: the moment is the
+same, and each of the six says it the way they say everything (section 1). The
+analyst counts, the graduate apologises, Finance says as little as possible, IT
+names the system, Facilities gives instructions, and the consultant asks.
 
-**How the variants are wired.** Each of these eleven lines is eleven rows in the
-table, not one: the core row every archetype can use, plus six rows carrying the
-same words with an `ArchetypeFilter` naming the voice they were recorded in -
-sixty-six rows in `OneBrahamVoiceLineSet.cpp` under `ARCHETYPE VARIANT
-RECORDINGS`. `PickLine` resolves them in two tiers: lines recorded for the
-speaker's archetype if any exist, otherwise the generic recording. The obvious
-implementation - one pool of everything that is not filtered away - would have
-given a Business Analyst speaking `V_DOWNED` seven candidates and played their
-own performance one time in seven, which is a slow way to waste sixty-six
-recordings.
+**How the variants are wired.** Each of these eleven lines is seven rows in the
+table: the core row (section 2), which is the fallback for a voice with no
+recording of its own, plus six rows carrying an `ArchetypeFilter` naming the
+voice they were written for. That is sixty-six rows in `OneBrahamVoiceLineSet.cpp`
+under `ARCHETYPE VARIANT RECORDINGS`. `PickLine` resolves them in two tiers: the
+speaker's own row if it exists, otherwise the generic one. One pool of
+everything would have played a Business Analyst's own `V_DOWNED` one time in
+seven.
 
 `check_voice_lines.py` fails the build if a variant names an archetype tag that
 does not exist, if any of the eleven lines is missing a voice, or if the row
 count stops matching the number this document promises.
 
-| Line id | Intent |
+**`V_DOWNED`** - the down line, said as news rather than panic
+
+| Archetype | Line |
 | --- | --- |
-| `V_DOWNED` | the down line, said as news rather than panic |
-| `V_CONTACT_ENEMY` | first contact - the moment they decide how they sound for the match |
-| `V_RELOADING` | reload call, the one every squad hears six times a match |
-| `V_CONTACT_MULTIPLE` | two or more - the escalation in the voice is the information |
-| `V_LAST_MAG` | ammunition state. Flat delivery, that is the point |
-| `V_KEYCARD_FOUND` | picked up a card. This is the line that changes the match |
-| `V_OVERRIDE_COMPLETE` | the override finished. Relief, immediately suppressed |
-| `V_EXTRACTION_CALLED` | the winch is called - the loudest thing anyone says all match |
-| `V_LOCKDOWN_START` | shutters coming down. Understated: the building did it, not them |
-| `V_VICTORY` | on the deck. No celebration, just breathing and one line |
-| `V_AMBIENT_SKYDECK` | the idle line on the roof: ground level to 15th floor, done |
+| Business Analyst | "I'm down. Two hits, left side. I'm down." |
+| Graduate | "I'm down - sorry - I'm down." |
+| Finance | "Down." |
+| IT / Operations | "I'm down. Don't come the obvious way." |
+| Facilities / Security | "I'm down. Stay where you are, I'll talk you in." |
+| Consultant | "I'm down. Can somebody get to me?" |
 
-| Line | Archetype | Direction |
-| --- | --- | --- |
-| `V_DOWNED` | Business Analyst | level and precise, numbers on the front foot, slightly too fast; said as news, not as panic - the report is the priority |
-| `V_DOWNED` | Graduate / Intern | a beat behind and covering it, audible relief when someone else takes over; said as news, not as panic - the report is the priority |
-| `V_DOWNED` | Finance | short sentences, no filler, does not raise their voice; said as news, not as panic - the report is the priority |
-| `V_DOWNED` | IT / Operations | technically exact, tired of explaining it, names the system; said as news, not as panic - the report is the priority |
-| `V_DOWNED` | Facilities / Security | working - imperative instructions, the only one who carries a body out; said as news, not as panic - the report is the priority |
-| `V_DOWNED` | Consultant | friendly, detached, quietly the best person in the room; said as news, not as panic - the report is the priority |
-| `V_CONTACT_ENEMY` | Business Analyst | level and precise, numbers on the front foot, slightly too fast; the first thirty seconds decide how they sound for the whole match |
-| `V_CONTACT_ENEMY` | Graduate / Intern | a beat behind and covering it, audible relief when someone else takes over; the first thirty seconds decide how they sound for the whole match |
-| `V_CONTACT_ENEMY` | Finance | short sentences, no filler, does not raise their voice; the first thirty seconds decide how they sound for the whole match |
-| `V_CONTACT_ENEMY` | IT / Operations | technically exact, tired of explaining it, names the system; the first thirty seconds decide how they sound for the whole match |
-| `V_CONTACT_ENEMY` | Facilities / Security | working - imperative instructions, the only one who carries a body out; the first thirty seconds decide how they sound for the whole match |
-| `V_CONTACT_ENEMY` | Consultant | friendly, detached, quietly the best person in the room; the first thirty seconds decide how they sound for the whole match |
-| `V_RELOADING` | Business Analyst | level and precise, numbers on the front foot, slightly too fast; flat and functional; everyone already looks after their own ammo |
-| `V_RELOADING` | Graduate / Intern | a beat behind and covering it, audible relief when someone else takes over; flat and functional; everyone already looks after their own ammo |
-| `V_RELOADING` | Finance | short sentences, no filler, does not raise their voice; flat and functional; everyone already looks after their own ammo |
-| `V_RELOADING` | IT / Operations | technically exact, tired of explaining it, names the system; flat and functional; everyone already looks after their own ammo |
-| `V_RELOADING` | Facilities / Security | working - imperative instructions, the only one who carries a body out; flat and functional; everyone already looks after their own ammo |
-| `V_RELOADING` | Consultant | friendly, detached, quietly the best person in the room; flat and functional; everyone already looks after their own ammo |
-| `V_CONTACT_MULTIPLE` | Business Analyst | level and precise, numbers on the front foot, slightly too fast; the escalation carries the information, not the volume |
-| `V_CONTACT_MULTIPLE` | Graduate / Intern | a beat behind and covering it, audible relief when someone else takes over; the escalation carries the information, not the volume |
-| `V_CONTACT_MULTIPLE` | Finance | short sentences, no filler, does not raise their voice; the escalation carries the information, not the volume |
-| `V_CONTACT_MULTIPLE` | IT / Operations | technically exact, tired of explaining it, names the system; the escalation carries the information, not the volume |
-| `V_CONTACT_MULTIPLE` | Facilities / Security | working - imperative instructions, the only one who carries a body out; the escalation carries the information, not the volume |
-| `V_CONTACT_MULTIPLE` | Consultant | friendly, detached, quietly the best person in the room; the escalation carries the information, not the volume |
-| `V_LAST_MAG` | Business Analyst | level and precise, numbers on the front foot, slightly too fast; no drama - this is administration in the middle of a firefight |
-| `V_LAST_MAG` | Graduate / Intern | a beat behind and covering it, audible relief when someone else takes over; no drama - this is administration in the middle of a firefight |
-| `V_LAST_MAG` | Finance | short sentences, no filler, does not raise their voice; no drama - this is administration in the middle of a firefight |
-| `V_LAST_MAG` | IT / Operations | technically exact, tired of explaining it, names the system; no drama - this is administration in the middle of a firefight |
-| `V_LAST_MAG` | Facilities / Security | working - imperative instructions, the only one who carries a body out; no drama - this is administration in the middle of a firefight |
-| `V_LAST_MAG` | Consultant | friendly, detached, quietly the best person in the room; no drama - this is administration in the middle of a firefight |
-| `V_KEYCARD_FOUND` | Business Analyst | level and precise, numbers on the front foot, slightly too fast; a small, quick lift. Do not celebrate it |
-| `V_KEYCARD_FOUND` | Graduate / Intern | a beat behind and covering it, audible relief when someone else takes over; a small, quick lift. Do not celebrate it |
-| `V_KEYCARD_FOUND` | Finance | short sentences, no filler, does not raise their voice; a small, quick lift. Do not celebrate it |
-| `V_KEYCARD_FOUND` | IT / Operations | technically exact, tired of explaining it, names the system; a small, quick lift. Do not celebrate it |
-| `V_KEYCARD_FOUND` | Facilities / Security | working - imperative instructions, the only one who carries a body out; a small, quick lift. Do not celebrate it |
-| `V_KEYCARD_FOUND` | Consultant | friendly, detached, quietly the best person in the room; a small, quick lift. Do not celebrate it |
-| `V_OVERRIDE_COMPLETE` | Business Analyst | level and precise, numbers on the front foot, slightly too fast; relief, immediately suppressed and put back in a channel |
-| `V_OVERRIDE_COMPLETE` | Graduate / Intern | a beat behind and covering it, audible relief when someone else takes over; relief, immediately suppressed and put back in a channel |
-| `V_OVERRIDE_COMPLETE` | Finance | short sentences, no filler, does not raise their voice; relief, immediately suppressed and put back in a channel |
-| `V_OVERRIDE_COMPLETE` | IT / Operations | technically exact, tired of explaining it, names the system; relief, immediately suppressed and put back in a channel |
-| `V_OVERRIDE_COMPLETE` | Facilities / Security | working - imperative instructions, the only one who carries a body out; relief, immediately suppressed and put back in a channel |
-| `V_OVERRIDE_COMPLETE` | Consultant | friendly, detached, quietly the best person in the room; relief, immediately suppressed and put back in a channel |
-| `V_EXTRACTION_CALLED` | Business Analyst | level and precise, numbers on the front foot, slightly too fast; the loudest anyone gets all match, and still not shouted |
-| `V_EXTRACTION_CALLED` | Graduate / Intern | a beat behind and covering it, audible relief when someone else takes over; the loudest anyone gets all match, and still not shouted |
-| `V_EXTRACTION_CALLED` | Finance | short sentences, no filler, does not raise their voice; the loudest anyone gets all match, and still not shouted |
-| `V_EXTRACTION_CALLED` | IT / Operations | technically exact, tired of explaining it, names the system; the loudest anyone gets all match, and still not shouted |
-| `V_EXTRACTION_CALLED` | Facilities / Security | working - imperative instructions, the only one who carries a body out; the loudest anyone gets all match, and still not shouted |
-| `V_EXTRACTION_CALLED` | Consultant | friendly, detached, quietly the best person in the room; the loudest anyone gets all match, and still not shouted |
-| `V_LOCKDOWN_START` | Business Analyst | level and precise, numbers on the front foot, slightly too fast; understated: the building did this, not them |
-| `V_LOCKDOWN_START` | Graduate / Intern | a beat behind and covering it, audible relief when someone else takes over; understated: the building did this, not them |
-| `V_LOCKDOWN_START` | Finance | short sentences, no filler, does not raise their voice; understated: the building did this, not them |
-| `V_LOCKDOWN_START` | IT / Operations | technically exact, tired of explaining it, names the system; understated: the building did this, not them |
-| `V_LOCKDOWN_START` | Facilities / Security | working - imperative instructions, the only one who carries a body out; understated: the building did this, not them |
-| `V_LOCKDOWN_START` | Consultant | friendly, detached, quietly the best person in the room; understated: the building did this, not them |
-| `V_VICTORY` | Business Analyst | level and precise, numbers on the front foot, slightly too fast; breathing, then one line. No celebration |
-| `V_VICTORY` | Graduate / Intern | a beat behind and covering it, audible relief when someone else takes over; breathing, then one line. No celebration |
-| `V_VICTORY` | Finance | short sentences, no filler, does not raise their voice; breathing, then one line. No celebration |
-| `V_VICTORY` | IT / Operations | technically exact, tired of explaining it, names the system; breathing, then one line. No celebration |
-| `V_VICTORY` | Facilities / Security | working - imperative instructions, the only one who carries a body out; breathing, then one line. No celebration |
-| `V_VICTORY` | Consultant | friendly, detached, quietly the best person in the room; breathing, then one line. No celebration |
-| `V_AMBIENT_SKYDECK` | Business Analyst | level and precise, numbers on the front foot, slightly too fast; idle, on the roof, ground level to fifteenth floor, done |
-| `V_AMBIENT_SKYDECK` | Graduate / Intern | a beat behind and covering it, audible relief when someone else takes over; idle, on the roof, ground level to fifteenth floor, done |
-| `V_AMBIENT_SKYDECK` | Finance | short sentences, no filler, does not raise their voice; idle, on the roof, ground level to fifteenth floor, done |
-| `V_AMBIENT_SKYDECK` | IT / Operations | technically exact, tired of explaining it, names the system; idle, on the roof, ground level to fifteenth floor, done |
-| `V_AMBIENT_SKYDECK` | Facilities / Security | working - imperative instructions, the only one who carries a body out; idle, on the roof, ground level to fifteenth floor, done |
-| `V_AMBIENT_SKYDECK` | Consultant | friendly, detached, quietly the best person in the room; idle, on the roof, ground level to fifteenth floor, done |
+**`V_CONTACT_ENEMY`** - first contact - the moment they decide how they sound for the match
 
-(The cell text is the direction of voice for that archetype; the words are the same for all six, and that is deliberate. Six people reading the same sentence six ways is what makes a squad read as six people.)
+| Archetype | Line |
+| --- | --- |
+| Business Analyst | "Contact. One. Twenty metres, by the lifts." |
+| Graduate | "There's - one. There's one. Contact." |
+| Finance | "One. Ahead." |
+| IT / Operations | "Contact. One, and he knows we're here." |
+| Facilities / Security | "One of them. Everyone stop." |
+| Consultant | "Contact - one. Are you seeing him?" |
 
----
+**`V_RELOADING`** - reload call, the one every squad hears six times a match
+
+| Archetype | Line |
+| --- | --- |
+| Business Analyst | "Reloading. Four seconds." |
+| Graduate | "Reloading - sorry - reloading." |
+| Finance | "Changing magazine." |
+| IT / Operations | "Reloading. Watch the door for me." |
+| Facilities / Security | "Reloading. Hold that corner." |
+| Consultant | "Reloading - can you take this one?" |
+
+**`V_CONTACT_MULTIPLE`** - two or more - the escalation in the voice is the information
+
+| Archetype | Line |
+| --- | --- |
+| Business Analyst | "Two - no, three. Left of the lift." |
+| Graduate | "There's more than one. There's definitely more than one." |
+| Finance | "Several. Left." |
+| IT / Operations | "Two or more, coming off the stairwell." |
+| Facilities / Security | "More than one. Everyone back from the glass." |
+| Consultant | "Two of them at least. Shall we pull back?" |
+
+**`V_LAST_MAG`** - ammunition state. Flat delivery, that is the point
+
+| Archetype | Line |
+| --- | --- |
+| Business Analyst | "Last magazine. Thirty rounds, then nothing." |
+| Graduate | "This is my last one. Is that bad?" |
+| Finance | "Last magazine." |
+| IT / Operations | "Last mag. Don't make me waste it on doors." |
+| Facilities / Security | "On my last one. Anyone carrying?" |
+| Consultant | "Last magazine here - anyone got spare?" |
+
+**`V_KEYCARD_FOUND`** - picked up a card. This is the line that changes the match
+
+| Archetype | Line |
+| --- | --- |
+| Business Analyst | "Card. Blue stripe. That's floor nine." |
+| Graduate | "I've got a card! Sorry. I've got a card." |
+| Finance | "Card. Taking it." |
+| IT / Operations | "Got a card. Same badge system as the server floor." |
+| Facilities / Security | "That's a staff card. I know whose it is." |
+| Consultant | "Found a card. Who's going up first?" |
+
+**`V_OVERRIDE_COMPLETE`** - the override finished. Relief, immediately suppressed
+
+| Archetype | Line |
+| --- | --- |
+| Business Analyst | "Override done. Twelve seconds, as advertised." |
+| Graduate | "It worked. It actually worked." |
+| Finance | "Done. Move." |
+| IT / Operations | "Override's through. It'll have logged that." |
+| Facilities / Security | "Doors are released. Everyone through, quickly." |
+| Consultant | "That's open. Shall we?" |
+
+**`V_EXTRACTION_CALLED`** - the winch is called - the loudest thing anyone says all match
+
+| Archetype | Line |
+| --- | --- |
+| Business Analyst | "Winch is called. Forty-five seconds out." |
+| Graduate | "I called it - it's coming - it's actually coming." |
+| Finance | "Helicopter's called. Hold the deck." |
+| IT / Operations | "Winch is live. Every screen in the building just told them." |
+| Facilities / Security | "Called it in. Everyone to the pad, now." |
+| Consultant | "Helicopter's on its way. Where do you want me?" |
+
+**`V_LOCKDOWN_START`** - shutters coming down. Understated: the building did it, not them
+
+| Archetype | Line |
+| --- | --- |
+| Business Analyst | "Lockdown. Stage two, lower floors first." |
+| Graduate | "Are they - they're shutting the floors?" |
+| Finance | "Lockdown. Keep climbing." |
+| IT / Operations | "That's the building management system. It's locking us out." |
+| Facilities / Security | "That's the lockdown. Nobody goes back down." |
+| Consultant | "They've started the lockdown. Upwards, I think." |
+
+**`V_VICTORY`** - on the deck. No celebration, just breathing and one line
+
+| Archetype | Line |
+| --- | --- |
+| Business Analyst | "On the winch. That's - that's all of us." |
+| Graduate | "We made it. We actually made it." |
+| Finance | "Done." |
+| IT / Operations | "We're off the building. Someone else can file the incident report." |
+| Facilities / Security | "Everyone's on. Everyone. Right." |
+| Consultant | "Well. That went better than expected." |
+
+**`V_AMBIENT_SKYDECK`** - the idle line on the roof: ground level to 15th floor, done
+
+| Archetype | Line |
+| --- | --- |
+| Business Analyst | "Fifty-six metres. I always wondered." |
+| Graduate | "I've never been up here. Is it always this windy?" |
+| Finance | "Good view. Shame about everything else." |
+| IT / Operations | "Comms mast's still up. That's something." |
+| Facilities / Security | "Nobody's meant to be up here without a harness." |
+| Consultant | "You can see my old office from here." |
 
 ## 5. Things nobody says
 
@@ -345,16 +397,39 @@ Written down because the first take of a line is always the wrong one, and these
 
 | Group | Lines |
 | --- | --- |
-| Core lines in the runtime table above | 97 |
-| Archetype variants (11 lines x 6 archetypes) | 66 |
-| **Total rows to record** | **163** |
+| Core lines in the runtime table above | 105 |
+| Archetype variants (11 lines x 6 archetypes, each in its own words) | 66 |
+| **Total rows to record, every one a different line** | **171** |
 
-The 97 is not a claim, it is a count: `OneBrahamVoiceLineSet.cpp` contains 97
+The 105 is not a claim, it is a count: `OneBrahamVoiceLineSet.cpp` contains 105
 `Line(...)` rows, every one of them is listed above, and
 `check_voice_lines.py` fails the build if those two stop agreeing in either
 direction. The two lines added for the comms wheel - `V_MAN_DOWN` and
 `V_LOCKDOWN_WARNING` - are included.
 
-Eleven of the core lines are recorded six times each; the other 86 are recorded once and used unpitched by every archetype, because a grenade warning does not need six readings and the radio channel is narrow.
+Eleven of the core lines have six archetype versions; the other 94 are recorded once and used unpitched by every archetype, because a grenade warning does not need six readings and the radio channel is narrow.
+
+**Who says what, when.** `FOneBrahamVoiceDirector` (`Voice/OneBrahamVoiceDirector.cpp`)
+is where gameplay events become lines. Being hit, a kill, a down, a reload, a
+throw, a refused door, a lockdown stage and the match's start, middle and end
+each name a line and a speaker. The speaker is the person it happened to, the
+nearest squadmate who saw it, or an enemy who can see them. Some lines get an
+answer a beat later: "reloading" gets "I've got you covered", and an order gets
+"understood", or "wait" from somebody who is hurt. Every line in the table has a
+caller, through the director, a system that speaks directly, the comms wheel,
+or the ambient scheduler.
+
+### The lobby tannoy
+
+Five announcements play in order through the warmup, through the building's PA,
+with the chime first (`AOneBrahamGameMode::GetLobbyAnnouncement`). They are the
+building's voice, not a character's: polite, routine, and a few minutes from
+being the last ordinary things it says.
+
+1. "Good morning, and welcome to One Braham. Visitors, please sign in at reception."
+2. "Lanyards and passes must be worn and visible at all times inside the building."
+3. "The fire alarm will be tested later this morning. No action is required."
+4. "Would the owner of a grey estate in loading bay two please return to their vehicle."
+5. "The Skydeck remains closed to staff and visitors until further notice. Thank you."
 
 Coverage: every gameplay event that a player must communicate has a line - 12 combat, 8 downed/revive, 13 weapons and utility, 6 access and lockdown, 7 objective and extraction, 9 social and team, 9 ambient, 6 match, plus the deaths and the objective calls. A squad that never uses a microphone can still play ASCENT properly, which is the actual design goal of the voice system.

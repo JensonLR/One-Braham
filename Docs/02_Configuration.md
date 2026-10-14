@@ -18,13 +18,26 @@ DefaultEngine.ini → <Platform>/<Platform>Engine.ini → DefaultGame.ini → De
 
 ```ini
 [/Script/EngineSettings.GameMapsSettings]
-GameDefaultMap=/Game/OneBraham/Maps/L_Persistent_OneBraham.L_Persistent_OneBraham
+GameDefaultMap=/Game/OneBraham/Maps/L_MainMenu.L_MainMenu
 EditorStartupMap=/Game/OneBraham/Maps/L_Persistent_OneBraham.L_Persistent_OneBraham
+ServerDefaultMap=/Game/OneBraham/Maps/L_Persistent_OneBraham.L_Persistent_OneBraham
 GlobalDefaultGameMode=/Script/OneBraham.OneBrahamGameMode
 GameInstanceClass=/Script/OneBraham.OneBrahamGameInstance
+TransitionMap=/Game/OneBraham/Maps/L_Loading.L_Loading
 ```
 
+A client starts in the main menu; a dedicated server starts in the match map;
+the editor opens the building. `L_MainMenu` names its own game mode
+(`AOneBrahamMenuGameMode`) in its world settings, and so does `L_Loading` (the
+engine's base game mode), so the global default is the match's.
+
 If the game boots into an empty world, this is the block that broke.
+
+### Cook list (`DefaultGame.ini`)
+
+`+MapsToCook` lists the four maps `build_environment.py` makes. Every line needs
+its `+`. A plain `MapsToCook=` line replaces the value before it, and that is how
+this list once cooked only its last entry.
 
 ### Renderer
 
@@ -76,10 +89,9 @@ the only way this can fail, and it fails silently.
 ```ini
 [/Script/OnlineSubsystemUtils.IpNetDriver]
 NetServerMaxTickRate=60
-MaxClientRate=96000
-MaxInternetClientRate=96000
-[/Script/Engine.NetDriver]
-bReplicateUsingRegisteredSubObjectList=True
+MaxClientRate=100000
+MaxInternetClientRate=100000
+[ConsoleVariables]
 net.UseAdaptiveNetUpdateFrequency=1
 ```
 
@@ -87,30 +99,43 @@ net.UseAdaptiveNetUpdateFrequency=1
 
 ```ini
 [/Script/OnlineSubsystemSteam.SteamNetDriver]
-NetConnectionClassName=OnlineSubsystemSteam.SteamNetConnection
+NetConnectionClassName="OnlineSubsystemSteam.SteamNetConnection"
 [/Script/Engine.GameEngine]
-+NetDriverDefinitions=(...OnlineSubsystemSteam.SteamNetDriver...)
+!NetDriverDefinitions=ClearArray
++NetDriverDefinitions=(DefName="GameNetDriver",DriverClassName="OnlineSubsystemSteam.SteamNetDriver",DriverClassNameFallback="OnlineSubsystemUtils.IpNetDriver")
++NetDriverDefinitions=(DefName="DemoNetDriver",DriverClassName="/Script/Engine.DemoNetDriver",DriverClassNameFallback="/Script/Engine.DemoNetDriver")
 [OnlineSubsystemSteam]
-bEnabled=True
+bEnabled=true
 SteamDevAppId=480          ; replaced by the real AppID at release, see Scripts/steam_app_build.vdf
 ```
+
+The game driver is Steam's, falling back to IP when Steam is not running. A
+Steam lobby resolves to a `steam.<id>` P2P address that only the Steam driver can
+reach, so without these rows every lobby join fails. `ClearArray` comes first
+because the engine's own `GameNetDriver` row would otherwise be matched before
+this one. `validate_project.py` fails the build if any of this is missing.
+`Achievement_N_Id` lists every achievement; see `Docs/19`.
 
 `480` is Spacewar, the standard test AppID. It must be replaced before a public
 build, and the release checklist says so twice because a shipped build pointing
 at Spacewar is the mistake that cannot be undone.
 
-### World Partition
+### Levels, not World Partition
 
-On for the map, off for the FIRE DRILL arena (which fits in one cell and streams
-worse as a partitioned level than as a plain one).
+Off everywhere. `L_Persistent_OneBraham` holds the shell and every gameplay
+anchor, and each floor is an always-loaded sublevel. World Partition streams by a
+2D grid in XY; sixteen storeys stacked on one 52 × 44 m footprint all fall in the
+same cells, so a partitioned tower could only load all of itself or none of it,
+and a partitioned world cannot hold the per-floor sublevels the builder makes.
+The FIRE DRILL arena is a single plain level.
 
 ---
 
 ## 1b. Project Settings -> One Braham
 
 `UOneBrahamGameSettings` is a `UDeveloperSettings` class, so everything in it is
-editable in Project Settings and stored in `DefaultGame.ini` under
-`[/Script/OneBraham.OneBrahamGameSettings]`. It carries the brand colours, the
+editable in Project Settings and stored in `DefaultEngine.ini` (the class is
+`config = Engine`) under `[/Script/OneBraham.OneBrahamGameSettings]`. It carries the brand colours, the
 match and security tuning, and the content registries.
 
 **The content registries resolve in three steps.** Every one of them, in this
@@ -121,6 +146,11 @@ order:
 | 1 | the settings field (`WeaponRegistry`, `VoiceLineRegistry`, `CharacterRegistry`, `CommonMappingContext`, `DefaultMappingContext`, `DefaultMatchSettings`) | you are pointing the game at content somewhere else, or testing one asset |
 | 2 | the conventional path (`/Game/OneBraham/Data/DA_WeaponRegistry`, `/Game/OneBraham/Voice/DA_VoiceLines`, `DA_MatchSettings_<Mode>`) | the normal case: the pipeline writes there |
 | 3 | a compiled-in or runtime default with a warning in the log | a code-only checkout with no content built yet |
+
+The two mapping-context fields are the exception to step 2: there is no
+conventional path, because the generated `IMC_` assets carry no keys. Keys come
+from `[OneBraham.Input]` through the runtime bindings context the controller
+builds (`Docs/03` section 7), which is also step 3 for input.
 
 Step 3 is why the game is playable before anybody runs the content pipeline; step
 1 is why a designer never has to touch C++ to move an asset. Both existed here,
@@ -138,10 +168,20 @@ setting that does nothing looks exactly like a setting that works.
 | `[/Script/EngineSettings.GeneralProjectSettings]` | project name, `CompanyName`, `ProjectDisplayedTitle` = `ONE BRAHAM`, copyright line, project version 1.0.0 |
 | `[/Script/UnrealEd.ProjectPackagingSettings]` | shipping, IoStore on, compression, cook lists (5 maps), no editor content, `bSkipEditorContent=True` |
 | `[/Script/Engine.GameSession]` | `MaxPlayers=16`, `MaxSplitscreensPerConnection=1` |
-| `[OneBraham.Modes]` | ASCENT / FIRE DRILL / NIGHT SHIFT defaults |
-| `[OneBrahamAntiCheat]` | speed 1.15× / 0.4 s, fire-rate 1.20×, tolerance 12 cm, report-and-kick |
 | `[/Script/GameplayTags.GameplayTagsSettings]` | ~105 `+GameplayTagList=(Tag="OB...` entries |
-| `[/Script/OneBraham.OneBrahamGameSettings]` | the seven UI colours, interaction distance, default mode |
+
+There is no project section in this file, deliberately. Match rules are per-mode
+`UOneBrahamMatchSettingsAsset`s that fall back to their C++ defaults. The project
+settings (colours, anti-cheat thresholds, registries) are `config = Engine`, so they
+live in `DefaultEngine.ini`. An earlier version of this file carried a 31-line
+`[/Script/OneBraham.OneBrahamMatchSettings]` section for a class that does not
+exist, and the anti-cheat thresholds in a file their class never reads. The engine
+ignored both without a warning. `validate_project.py` now fails the build if any
+key under `[/Script/OneBraham.*]`:
+
+- names no config property of that class;
+- sits in a file the class does not read; or
+- gives an enum a value that is not one of its names.
 
 The gameplay tags in this file are **declarative and required**: a tag used in
 C++ that is not declared here fails at cook time on a shipping build and works
@@ -186,6 +226,11 @@ RunUnderOneProcess=True
 +AdditionalPaths=(Path="Tools/Python")
 ```
 
+The Python plugin itself is enabled in `OneBraham.uproject` (`PythonScriptPlugin`,
+editor only). Epic's docs say it must be enabled per project, and
+`-run=pythonscript`, which every content builder runs through, does nothing
+without it.
+
 `RunUnderOneProcess=True` matters: three clients in one process is the only way
 to iterate on the door and shutter logic without a second machine, and it makes
 the voice loopback CVar (`ob.VoiceLoopback 1`) usable.
@@ -214,7 +259,7 @@ maps, cloth, and the Skydeck's floodlight shadows.
 | File | Overrides |
 | --- | --- |
 | `Windows/WindowsEngine.ini` | DX12, SM6, hardware GPU scheduling, `r.GTSyncType=2` |
-| `LinuxServer/LinuxServerEngine.ini` | `-nullrhi`, no audio device, World Partition on, `bUseFixedFrameRate=1` |
+| `LinuxServer/LinuxServerEngine.ini` | the headless renderer and audio settings, a 60 Hz net tick, Steam server ports |
 
 The Linux server config is the one that must never be forgotten: a server that
 initialises an audio device is a server that leaks it over a 6-hour session.

@@ -42,6 +42,16 @@ WHAT IT CHECKS
        actions - it is what `ValidateAllActionsSet` checks at possession time and
        what the control-schema automation test reads - and it had drifted by
        eight rows while a comment above it claimed a test would catch that.
+    6. No key is bound to two actions on the same device unless every action on
+       it is in one of build_input.py's SHARED_KEY_GROUPS. E was lean-right and
+       interact at once, so peeking a corner beside a door opened the door; and
+       seven gamepad buttons each did two things.
+    7. Every modifier a binding names (`S,Swizzle+Negate`) is one the controller
+       knows how to build: it appears as TEXT("<name>") in the player controller.
+       A modifier the controller ignores turns S into a second W.
+    8. No prompt in C++ or in build_ui.py names a key ("Hold E - override"). A
+       prompt says {Interact} and the HUD names the key; every "Hold E" in the
+       game was wrong on a pad, wrong after a rebind, and E was the lean key.
 
     The ACTIONS table is read with `ast`, not by importing `build_input.py`: that
     module imports `unreal`, so importing it would tie a static check to a running
@@ -69,6 +79,7 @@ SETTINGS_HEADER = os.path.join(python_root, "Source", "OneBraham", "Core", "OneB
 SETTINGS_SOURCE = os.path.join(python_root, "Source", "OneBraham", "Core", "OneBrahamGameSettings.cpp")
 SOURCE_ROOT = os.path.join(python_root, "Source", "OneBraham")
 INPUT_INI = os.path.join(python_root, "Config", "DefaultInput.ini")
+CONTROLLER_SOURCE = os.path.join(python_root, "Source", "OneBraham", "Core", "OneBrahamPlayerController.cpp")
 
 #: `InputConfig->Field` in C++, with or without a call.
 CONFIG_READ = re.compile(r'InputConfig\s*->\s*([A-Za-z_][A-Za-z0-9_]*)\s*(\()?')
@@ -83,6 +94,11 @@ CONFIG_METHODS = {
 
 #: `+KeyboardBinding=IA_Jump,SpaceBar` and friends.
 INI_BINDING = re.compile(r'^\+[A-Za-z]*Binding\s*=\s*(IA_[A-Za-z0-9_]+)\s*,', re.MULTILINE)
+
+#: Device, action, key and optional modifiers of one shipped binding.
+INI_KEYED_BINDING = re.compile(
+    r'^\+(Keyboard|Gamepad)Binding\s*=\s*(IA_[A-Za-z0-9_]+)\s*,\s*([A-Za-z0-9_]+)\s*(?:,\s*([A-Za-z+]+))?\s*$',
+    re.MULTILINE)
 
 #: `+ActionPrompt=IA_Map=Floor plan overlay`.
 INI_PROMPT = re.compile(r'^\+ActionPrompt\s*=\s*(IA_[A-Za-z0-9_]+)\s*=', re.MULTILINE)
@@ -168,6 +184,70 @@ def ini_actions():
     found.extend((u"prompt", name[3:]) for name in INI_PROMPT.findall(text))
 
     return found
+
+
+def keyed_bindings():
+    """(device, action, key, [modifiers]) for every binding the ini ships."""
+    if not os.path.isfile(INPUT_INI):
+        return []
+
+    text = io.open(INPUT_INI, encoding="utf-8", errors="ignore").read()
+
+    return [(device, action, key, [m for m in (mods or u"").split("+") if m])
+            for device, action, key, mods in INI_KEYED_BINDING.findall(text)]
+
+
+#: A quoted prompt that names a single key: "Hold E - ...", "Press F to ...".
+LITERAL_KEY_PROMPT = re.compile(r'"(?:Hold|Press|Tap)\s+[A-Z0-9]\b[^"]*"')
+
+
+def literal_key_prompts(source_root=None):
+    """(file, line, text) for every prompt that hard-codes a key."""
+    root = source_root or SOURCE_ROOT
+    paths = [BUILD_INPUT.replace("build_input.py", "build_ui.py")]
+
+    for dirpath, _dirs, files in os.walk(root):
+        paths.extend(os.path.join(dirpath, n) for n in files if n.endswith((".cpp", ".h")))
+
+    found = []
+
+    for path in paths:
+        if not os.path.isfile(path):
+            continue
+
+        for number, line in enumerate(io.open(path, encoding="utf-8", errors="ignore"), 1):
+            # Prose about the old prompts is allowed; shipping one is not.
+            stripped = line.lstrip()
+            if stripped.startswith(("//", "*", "/*", "#")):
+                continue
+            code = line.split("//", 1)[0] if path.endswith((".cpp", ".h")) else line.split("#", 1)[0]
+
+            for match in LITERAL_KEY_PROMPT.findall(code):
+                found.append((os.path.relpath(path, python_root), number, match))
+
+    return found
+
+
+def key_conflicts(bindings, groups):
+    """Messages for every key that two actions share outside a declared group."""
+    by_key = {}
+
+    for device, action, key, _mods in bindings:
+        by_key.setdefault((device, key), set()).add(action)
+
+    messages = []
+
+    for (device, key), actions in sorted(by_key.items()):
+        if len(actions) < 2:
+            continue
+
+        if any(actions <= set(group) for group in groups):
+            continue
+
+        messages.append(u"{0} key {1} is bound to {2} - two verbs on one press".format(
+            device, key, u", ".join(sorted(actions))))
+
+    return messages
 
 
 def validated_fields():
@@ -310,6 +390,38 @@ def run(source_root=None):
                 u"{0}:{1} - InputConfig->{2} is not a field of UOneBrahamInputConfig "
                 u"(fields: {3})".format(rel, number, field, ", ".join(sorted(field_set))[:120]),
                 u"missing field"))
+
+    # 6. One key, one verb, per device, outside the declared shared groups.
+    bindings = keyed_bindings()
+    groups = _literal_assignment(BUILD_INPUT, "SHARED_KEY_GROUPS")
+
+    if groups is None:
+        problems.append((u"no SHARED_KEY_GROUPS table was parsed out of build_input.py",
+                         u"parse failure"))
+        groups = []
+
+    for message in key_conflicts(bindings, groups):
+        problems.append((message, u"key conflict"))
+
+    # 7. Every modifier is one the controller builds.
+    controller = u""
+    if os.path.isfile(CONTROLLER_SOURCE):
+        controller = io.open(CONTROLLER_SOURCE, encoding="utf-8", errors="ignore").read()
+
+    for device, action, key, mods in bindings:
+        for mod in mods:
+            if u'TEXT("{0}")'.format(mod) not in controller:
+                problems.append((
+                    u"{0} binding {1},{2} asks for modifier '{3}', which "
+                    u"OneBrahamPlayerController.cpp does not build".format(device, action, key, mod),
+                    u"unknown modifier"))
+
+    # 8. No prompt names a key.
+    for rel, number, text in literal_key_prompts(source_root):
+        problems.append((
+            u"{0}:{1} - prompt {2} names a key; write {{Interact}} and let the HUD "
+            u"name it".format(rel, number, text),
+            u"literal key prompt"))
 
     return len(reads), problems
 

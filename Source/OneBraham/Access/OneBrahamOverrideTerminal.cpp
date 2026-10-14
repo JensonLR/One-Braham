@@ -3,6 +3,9 @@
 // OneBrahamOverrideTerminal.cpp
 
 #include "Access/OneBrahamOverrideTerminal.h"
+#include "Core/OneBrahamLightUtils.h"
+#include "Characters/OneBrahamCharacter.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 
 #include "OneBraham.h"
 #include "Access/OneBrahamAccessZone.h"
@@ -180,8 +183,7 @@ void AOneBrahamOverrideTerminal::Tick(float DeltaSeconds)
 		Intensity = 380.f;
 	}
 
-	ScreenLight->SetLightColor(Desired);
-	ScreenLight->SetIntensity(FMath::FInterpTo(ScreenLight->Intensity, Intensity, DeltaSeconds, 12.f));
+	OneBrahamLights::Ease(ScreenLight, Desired, Intensity, DeltaSeconds, 12.f);
 }
 
 // ===========================================================================
@@ -295,7 +297,7 @@ FText AOneBrahamOverrideTerminal::GetInteractionPrompt_Implementation(const AOne
 
 	if (IsPairedPanelHeld())
 	{
-		return NSLOCTEXT("OneBraham", "Terminal_Paired", "Hold E - paired override (3s)");
+		return NSLOCTEXT("OneBraham", "Terminal_Paired", "Hold {Interact} - paired override (3s)");
 	}
 
 	return ZoneComponent->GetInteractionPrompt(Interactor);
@@ -371,8 +373,9 @@ bool AOneBrahamOverrideTerminal::OnInteractionStart_Implementation(AOneBrahamPla
 	HoldInteractor = Interactor;
 	HoldLastSeconds = 0.f;
 	bAlarmRaised = false;
+	FOneBrahamVoiceDirector::OnOverrideStarted(Cast<AOneBrahamCharacter>(Interactor->GetPawn()));
 
-	PlayTerminalEffects(FName(TEXT("SFX_Terminal_Hum")), 0.7f);
+	MulticastPlayTerminalEffects(FName(TEXT("SFX_Terminal_Hum")), 0.7f);
 
 	OB_ACCESS_LOG("Terminal '%s': override started by %s.",
 		*TerminalId.ToString(), *Interactor->GetName());
@@ -406,6 +409,13 @@ void AOneBrahamOverrideTerminal::OnInteractionHold_Implementation(AOneBrahamPlay
 		HoldInteractor = Interactor;
 	}
 
+	// Half way through a long hold, the one doing it says how long is left.
+	const float Halfway = GetHoldDuration_Implementation(Interactor) * 0.5f;
+	if (HoldLastSeconds < Halfway && HeldSeconds >= Halfway)
+	{
+		FOneBrahamVoiceDirector::OnOverrideProgress(Cast<AOneBrahamCharacter>(Interactor->GetPawn()));
+	}
+
 	HoldLastSeconds = HeldSeconds;
 
 	Target->GetZone()->ServerHoldOverride(Interactor, IsPairedPanelHeld(), Delta);
@@ -431,7 +441,7 @@ void AOneBrahamOverrideTerminal::OnInteractionEnd_Implementation(AOneBrahamPlaye
 
 	if (bOpened)
 	{
-		PlayTerminalEffects(FName(TEXT("SFX_Terminal_Accept")), 0.9f);
+		MulticastPlayTerminalEffects(FName(TEXT("SFX_Terminal_Accept")), 0.9f);
 
 		// Once it is open the alarm has done its job: it runs for its full
 		// duration anyway, because that is the price of the shortcut and everyone
@@ -444,7 +454,7 @@ void AOneBrahamOverrideTerminal::OnInteractionEnd_Implementation(AOneBrahamPlaye
 	else if (Target != nullptr && Target->GetZone() != nullptr)
 	{
 		Target->GetZone()->ServerCancelOverride(Interactor);
-		PlayTerminalEffects(FName(TEXT("SFX_Terminal_Deny")), 0.7f);
+		MulticastPlayTerminalEffects(FName(TEXT("SFX_Terminal_Deny")), 0.7f);
 	}
 
 	HoldInteractor.Reset();
@@ -578,26 +588,16 @@ AOneBrahamOverrideTerminal* AOneBrahamOverrideTerminal::FindPairedTerminal() con
 	return nullptr;
 }
 
-UOneBrahamAudioManagerComponent* AOneBrahamOverrideTerminal::GetAudioFor(const AOneBrahamPlayerController* PC)
-{
-	return PC != nullptr ? PC->GetAudioManager() : nullptr;
-}
-
 void AOneBrahamOverrideTerminal::PlayTerminalEffects(FName SoundId, float Volume, float Pitch)
 {
-	UWorld* World = GetWorld();
-	if (World == nullptr)
+	if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this))
 	{
-		return;
+		const FVector Location = ScreenMesh != nullptr ? ScreenMesh->GetComponentLocation() : GetActorLocation();
+		Audio->PlaySoundAtLocation(SoundId, Location, Volume, Pitch, this);
 	}
+}
 
-	const FVector Location = ScreenMesh != nullptr ? ScreenMesh->GetComponentLocation() : GetActorLocation();
-
-	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-	{
-		if (UOneBrahamAudioManagerComponent* Audio = GetAudioFor(Cast<AOneBrahamPlayerController>(It->Get())))
-		{
-			Audio->PlaySoundAtLocation(SoundId, Location, Volume, Pitch, this);
-		}
-	}
+void AOneBrahamOverrideTerminal::MulticastPlayTerminalEffects_Implementation(FName SoundId, float Volume, float Pitch)
+{
+	PlayTerminalEffects(SoundId, Volume, Pitch);
 }

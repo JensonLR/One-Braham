@@ -43,6 +43,37 @@ WHY THIS EXISTS
          not complete: it is a net for the properties a project like this one is
          likely to reach for, and it says so rather than implying it is a proof.
 
+    Two more, found the same way - by hand, in code that had been reviewed:
+
+      5. A read or write of an engine member that UE5 made private. PlayerId,
+         Score and the spectator flags on APlayerState, and bReplicates, bHidden,
+         bCanBeDamaged, Role and RemoteRole on AActor, are reached through
+         GetPlayerId(), GetScore(), GetIsReplicated(), IsHidden() and friends.
+         `State->PlayerId` reads like the obvious thing and does not compile;
+         there were six of them. The PlayerState names are only checked on a
+         receiver this file declares as a player state, because the project's
+         own structs have a PlayerId and a Score too.
+      6. A parameter or local that has the name of a member of its own class.
+         UE5 builds with shadow-variable warnings as errors, and even where it
+         compiled it was a bug: `SetDeafened(bool bDeafened)` assigned the
+         parameter to itself and the member never changed, and the HUD's
+         `OwningController` local hid the member it was named after.
+
+      8. `IsValid()` on a TSoftObjectPtr or TSoftClassPtr. On a soft pointer
+         IsValid() means "the asset is already in memory", not "a path is
+         set", so `if (Ptr.IsValid()) Ptr.LoadSynchronous()` never loads from
+         a cold start. The body and arms meshes, every weapon montage, the
+         weapon meshes, muzzle flash, shells, tracers and every authored weapon
+         sound were gated that way. IsNull() is the "is anything set" test.
+
+      7. Audio played from inside a walk over the player controllers. Six
+         actors played their sounds by iterating every controller and playing
+         through each one's audio manager. On a listen host that is the sound
+         once per connected player, on the host's own speakers; on a client,
+         when the code was server-only, it was nothing. A sound plays through
+         UOneBrahamAudioManagerComponent::GetLocal(), from code that runs on
+         every machine (a multicast, an OnRep, a local tick).
+
 HOW IT PARSES
     Not with a regex over the whole file, which is what the first version of this
     tool did and why it reported 177 "missing" functions of which 170 were macro
@@ -189,6 +220,10 @@ DEFINITION = re.compile(r'^[A-Za-z_][A-Za-z0-9_:<>,\s\*&]*?\b([A-Za-z_][A-Za-z0-
 #: before the first top-level parenthesis.
 DECL_LINE = re.compile(
     r'^(?P<return>(?:[\w:<>,*&\[\]\s]|::)+?)\s*'      # return type
+    r'(?<![A-Za-z0-9_])'                              # a whole identifier: a
+                                                      # constructor has no return
+                                                      # type, and without this the
+                                                      # F of FFoo(...) became one
     r'(?P<name>~?[A-Za-z_][A-Za-z0-9_]*)\s*'          # method name
     r'\((?P<params>.*)\)\s*'                          # parameters
     r'(?P<tail>(?:const\b|override\b|final\b|noexcept\b|virtual\b|\s)*)$',
@@ -482,6 +517,67 @@ def engine_ancestors(class_name, classes, seen=None):
     return out
 
 
+#: Engine members that are private in UE5, and the accessor to use instead.
+ENGINE_PRIVATE_PLAYER_STATE = {
+    "PlayerId": "GetPlayerId()", "Score": "GetScore()/SetScore()",
+    "bIsSpectator": "IsSpectator()", "bOnlySpectator": "IsOnlyASpectator()",
+    "bIsABot": "IsABot()", "bIsInactive": "IsInactive()",
+    "ExactPing": "GetPingInMilliseconds()", "CompressedPing": "GetCompressedPing()",
+    "PlayerNamePrivate": "GetPlayerName()",
+}
+ENGINE_PRIVATE_ACTOR = {
+    "bReplicates": "GetIsReplicated()/SetReplicates()", "bHidden": "IsHidden()",
+    "bCanBeDamaged": "CanBeDamaged()/SetCanBeDamaged()",
+    "RemoteRole": "GetRemoteRole()", "Role": "GetLocalRole()",
+    # Deprecated for direct access in 5.5; the accessors are the 5.5 API.
+    "NetUpdateFrequency": "GetNetUpdateFrequency()/SetNetUpdateFrequency()",
+    "MinNetUpdateFrequency": "GetMinNetUpdateFrequency()/SetMinNetUpdateFrequency()",
+}
+
+#: `AOneBrahamPlayerState* OtherState`, `const APlayerState* PS`.
+PLAYER_STATE_VARIABLE = re.compile(r'\b[A-Z][A-Za-z0-9_]*PlayerState\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)')
+
+#: A local declared at the start of a statement, or in an `if (Type* X = ...)`.
+LOCAL_DECLARATION = re.compile(
+    r'(?:^|[;{(]|\bif\s*\()\s*(?:const\s+)?'
+    r'(?:auto|bool|float|double|int32|uint8|uint32|int64|[AUFTE][A-Z][A-Za-z0-9_]*(?:\s*<[^;()=]*>)?)'
+    r'\s*[*&]?\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;|\{)', re.MULTILINE)
+
+
+def data_members(body):
+    """Names of the data members declared at the top level of a class body."""
+    names = set()
+
+    for statement in split_statements(body):
+        text = " ".join(statement.split())
+
+        if not text.endswith(";") or text.startswith(("using ", "friend ", "typedef ", "enum ")):
+            continue
+
+        # Drop UPROPERTY(...) and similar macro prefixes, then anything that is a
+        # function declaration: a '(' before any '=' is a parameter list.
+        text = re.sub(r'^(?:[A-Z_][A-Z0-9_]*\s*\([^()]*(?:\([^()]*\)[^()]*)*\)\s*)+', "", text)
+        head = text.split("=", 1)[0]
+
+        if "(" in head:
+            continue
+
+        match = re.search(r'([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*\d+\s*)?(?:\[[^\]]*\]\s*)?$', head.rstrip(";").strip())
+        if match and " " in head.strip():
+            names.add(match.group(1))
+
+    return names
+
+
+# A decimal integer followed directly by f: not after a digit, letter, dot or
+# underscore (so 0.5f, 1e3f, 0x1f and Name2f stay out).
+INTEGER_FLOAT_SUFFIX = re.compile(r'(?<![\w.])([0-9]+f)\b')
+
+
+#: A UFUNCTION declaration and the function it declares.
+SERVER_RPC = re.compile(r'UFUNCTION\(([^)]*)\)\s*(?:virtual\s+)?void\s+(\w+)\s*\(')
+
+
 def run_hygiene():
     """(checks, problems) for the rules that are not about linking.
 
@@ -514,6 +610,58 @@ def run_hygiene():
                     u"'{1} {2}::' cannot compile - compare against the values it can be"
                     .format(match.group(1), match.group(0)[:2].strip(), match.group(1))))
 
+    # --- an integer literal with a float suffix ---------------------------
+    # "0f" is not a C++ literal: the suffix needs a decimal point or exponent
+    # ("0.f", "1e3f"). MSVC and clang both reject it; Python and C# accept it,
+    # which is how it gets typed.
+    for rel, path in files:
+        text = strip_comments_and_strings(io.open(path, encoding="utf-8", errors="ignore").read())
+        checks += 1
+        for match in INTEGER_FLOAT_SUFFIX.finditer(text):
+            line = text[:match.start()].count("\n") + 1
+            problems.append((
+                rel, line,
+                u"'{0}' is not a C++ literal: a float suffix needs a decimal point - write '{1}.f'"
+                .format(match.group(1), match.group(1)[:-1])))
+
+    # --- every Server RPC is budgeted ------------------------------------
+    # A Server RPC is a door the client opens as often as it likes. Each one
+    # either spends from the per-controller budget (CheckRPCBudget /
+    # CheckRPCBudgetFor) or says in a comment, "RPC budget: own limit (...)",
+    # what bounds it instead - voice frames and fire run far above the shared
+    # budget and are limited by their own rules.
+    all_text = {}
+    for rel, path in files:
+        all_text[rel] = io.open(path, encoding="utf-8", errors="ignore").read()
+    implementations = u"\n".join(text for rel, text in all_text.items() if rel.endswith(".cpp"))
+    for rel, text in sorted(all_text.items()):
+        if not rel.endswith(".h"):
+            continue
+        for match in SERVER_RPC.finditer(text):
+            if not re.search(r'\bServer\b', match.group(1)):
+                continue
+            name = match.group(2)
+            checks += 1
+            impl = re.search(r'::' + re.escape(name) + r'_Implementation\s*\([^)]*\)[^{;]*\{', implementations)
+            if impl is None:
+                continue
+            depth = 1
+            index = impl.end()
+            while depth and index < len(implementations):
+                if implementations[index] == "{":
+                    depth += 1
+                elif implementations[index] == "}":
+                    depth -= 1
+                index += 1
+            body = implementations[impl.end():index]
+            if "CheckRPCBudget" not in body and "RPC budget: own limit" not in body:
+                line = text[:match.start()].count("\n") + 1
+                problems.append((
+                    rel, line,
+                    u"{0} is a Server RPC with no budget: call CheckRPCBudgetFor at the top of "
+                    u"{0}_Implementation, or say what limits it with an "
+                    u"'RPC budget: own limit (...)' comment".format(name)))
+
     # --- a member that shadows an engine property -------------------------
     for class_name in sorted(classes):
         ancestors = engine_ancestors(class_name, classes)
@@ -545,6 +693,132 @@ def run_hygiene():
                     u"and the tuning UI write the project's member and the engine never "
                     u"sees the value".format(class_name, member,
                                              u"/".join(sorted(ancestors)))))
+
+    # --- engine members UE5 made private ----------------------------------
+    for rel, path in files:
+        if not rel.endswith(".cpp"):
+            continue
+
+        text = strip_comments_and_strings(io.open(path, encoding="utf-8", errors="ignore").read())
+        receivers = set(PLAYER_STATE_VARIABLE.findall(text))
+        checks += 1
+
+        receiver_pattern = r'(?:\b(?:%s)|GetPlayerState\s*<[^>]*>\s*\(\s*\))' % u"|".join(
+            re.escape(name) for name in sorted(receivers)) if receivers else r'GetPlayerState\s*<[^>]*>\s*\(\s*\)'
+
+        for match in re.finditer(receiver_pattern + r'\s*->\s*(%s)\b(?!\s*\()' % u"|".join(ENGINE_PRIVATE_PLAYER_STATE), text):
+            field = match.group(1)
+            problems.append((
+                rel, text[:match.start()].count("\n") + 1,
+                u"APlayerState::{0} is private in UE5 - use {1}".format(field, ENGINE_PRIVATE_PLAYER_STATE[field])))
+
+        for match in re.finditer(r'->\s*(%s)\b(?!\s*\()' % u"|".join(ENGINE_PRIVATE_ACTOR), text):
+            field = match.group(1)
+            problems.append((
+                rel, text[:match.start()].count("\n") + 1,
+                u"AActor::{0} is private in UE5 - use {1}".format(field, ENGINE_PRIVATE_ACTOR[field])))
+
+    # --- a parameter or local named like a member of its own class --------
+    members = {}
+
+    def _members_of(class_name, seen=None):
+        seen = seen or set()
+        if class_name in seen or class_name not in classes:
+            return set()
+        seen.add(class_name)
+        if class_name not in members:
+            bases, body, _rel = classes[class_name]
+            own = data_members(body)
+            for base in re.findall(r'[AUIF][A-Za-z0-9_]+', bases):
+                own |= _members_of(base, seen)
+            members[class_name] = own
+        return members[class_name]
+
+    for rel, path in files:
+        if not rel.endswith(".cpp"):
+            continue
+
+        text = strip_comments_and_strings(io.open(path, encoding="utf-8", errors="ignore").read())
+
+        for match in DEFINITION.finditer(text):
+            class_name = match.group(1)
+            if class_name not in classes:
+                continue
+
+            own = _members_of(class_name)
+            if not own:
+                continue
+
+            close = text.find(")", match.end())
+            brace = text.find("{", close)
+            semicolon = text.find(";", close)
+            if close == -1 or brace == -1 or (semicolon != -1 and semicolon < brace):
+                continue
+
+            checks += 1
+            params = text[match.end():close]
+            line = text[:match.start()].count("\n") + 1
+            found = []
+
+            for param in params.split(","):
+                name = re.search(r'([A-Za-z_][A-Za-z0-9_]*)\s*(?:=[^,]*)?$', param.strip())
+                if name and name.group(1) in own and len(param.split()) > 1:
+                    found.append((u"parameter", name.group(1)))
+
+            body = _braced_body(text, brace)
+            for local in LOCAL_DECLARATION.finditer(body):
+                if local.group(1) in own:
+                    found.append((u"local", local.group(1)))
+
+            for kind, name in found:
+                problems.append((
+                    rel, line,
+                    u"{0}::{1} has a {2} called {3}, which is a member of {0}: an error "
+                    u"under UE5's shadow-variable level, and the member is not the one "
+                    u"being written".format(class_name, match.group(2), kind, name)))
+
+    # --- IsValid() on a soft pointer ----------------------------------------
+    soft_names = set()
+    for rel, path in files:
+        text = strip_comments_and_strings(io.open(path, encoding="utf-8", errors="ignore").read())
+        soft_names.update(re.findall(
+            r'TSoft(?:Object|Class)Ptr\s*<[^;()]*?>\s*&?\s*([A-Za-z_][A-Za-z0-9_]*)\s*[;=,)]', text))
+
+    if soft_names:
+        soft_pattern = re.compile(r'(?<![A-Za-z0-9_])(%s)\s*\.\s*IsValid\s*\(\s*\)' % u"|".join(
+            re.escape(name) for name in sorted(soft_names)))
+
+        for rel, path in files:
+            if not rel.endswith(".cpp"):
+                continue
+
+            text = strip_comments_and_strings(io.open(path, encoding="utf-8", errors="ignore").read())
+            checks += 1
+
+            for match in soft_pattern.finditer(text):
+                problems.append((
+                    rel, text[:match.start()].count("\n") + 1,
+                    u"{0}.IsValid() on a soft pointer is true only when the asset is already "
+                    u"loaded - use !{0}.IsNull() to ask whether one is set".format(match.group(1))))
+
+    # --- audio played once per player controller --------------------------
+    for rel, path in files:
+        if not rel.endswith(".cpp"):
+            continue
+
+        text = strip_comments_and_strings(io.open(path, encoding="utf-8", errors="ignore").read())
+
+        for match in re.finditer(r'\bfor\s*\([^;{]*GetPlayerControllerIterator\s*\(\s*\)[^{]*\{', text):
+            checks += 1
+            body = _braced_body(text, match.end() - 1)
+
+            if re.search(r'GetAudioManager\s*\(|GetAudioFor\s*\(|PlaySound(?:AtLocation|2D|Attached)\s*\(', body):
+                problems.append((
+                    rel, text[:match.start()].count("\n") + 1,
+                    u"plays audio inside a loop over the player controllers: once per player "
+                    u"on a listen host, and never on a client if this runs on the server - "
+                    u"play through UOneBrahamAudioManagerComponent::GetLocal() from code that "
+                    u"runs on every machine"))
 
     # --- the same function defined twice ---------------------------------
     seen = {}
@@ -625,7 +899,9 @@ def build_all():
             C.log(u"      {0}:{1} {2}".format(rel, line, message))
     else:
         C.log(u"  no scoped enum is compared with an operator it does not have, no "
-              u"member shadows an engine property, no function is defined twice. OK")
+              u"member shadows an engine property, no engine-private member is read, no "
+              u"parameter or local hides a member, no sound is played once per player, "
+              u"no soft pointer is asked IsValid(), no function is defined twice. OK")
 
     return _SymbolReport(checked, missing, hygiene, hygiene_checks)
 
@@ -646,8 +922,9 @@ def main():
         C.log(u"  every declared member function has a definition. OK")
 
     if not hygiene and not missing:
-        C.log(u"  hygiene: scoped enums, shadowed engine properties, duplicate "
-              u"definitions. OK")
+        C.log(u"  hygiene: scoped enums, shadowed engine properties, engine-private "
+              u"members, shadowed members, per-controller audio, soft-pointer IsValid, "
+              u"duplicate definitions, integer float literals, unbudgeted Server RPCs. OK")
         return 0
 
     for rel, line, message in hygiene:

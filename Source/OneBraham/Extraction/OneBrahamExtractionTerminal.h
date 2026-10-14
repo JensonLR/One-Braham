@@ -152,11 +152,17 @@ protected:
 	/** Local: the outline pass, shared with the keycards and the panels. */
 	void ApplyHighlight(bool bEnabled);
 
-	/** Every machine: a one-shot for one console event. */
-	void PlayTerminalEffects(FName SoundId, float Volume, float Pitch = 1.f);
+	/**
+	 * Server: plays one sound here on every machine, through each listener's own
+	 * mix. The server-side callers used to walk the player controllers and play
+	 * through each one's audio manager: on a listen host that is once per player
+	 * on the host's speakers, and on a client - which never runs the server code -
+	 * nothing at all.
+	 */
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastPlayTerminalEffects(FName SoundId, float Volume, float Pitch = 1.f);
 
 	/** The squad the interactor is on, from the game state's own table. */
 	int32 ResolveCallingSquadId(const AOneBrahamPlayerController* Interactor) const;
 
-	static UOneBrahamAudioManagerComponent* GetAudioFor(const AOneBrahamPlayerController* PC);
 };

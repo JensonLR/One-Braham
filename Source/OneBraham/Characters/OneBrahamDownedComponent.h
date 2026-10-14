@@ -193,6 +193,9 @@ protected:
 	float NextQuipTime = 0.f;
 	int32 QuipsSpoken = 0;
 
+	/** V_DOWNED_FINAL is said once, in the last five seconds. */
+	bool bFinalWordsSaid = false;
+
 	/** Cached character/movement references. */
 	TWeakObjectPtr<class AOneBrahamCharacter> CachedCharacter;
 };

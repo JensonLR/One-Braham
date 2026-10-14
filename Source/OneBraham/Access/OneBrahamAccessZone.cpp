@@ -3,6 +3,8 @@
 // OneBrahamAccessZone.cpp
 
 #include "Access/OneBrahamAccessZone.h"
+#include "Core/OneBrahamLightUtils.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 
 #include "OneBraham.h"
 #include "Access/OneBrahamAccessZoneComponent.h"
@@ -252,8 +254,7 @@ void AOneBrahamAccessZone::Tick(float DeltaSeconds)
 			Intensity *= 1.6f;
 		}
 
-		ReaderLight->SetLightColor(Desired);
-		ReaderLight->SetIntensity(FMath::FInterpTo(ReaderLight->Intensity, Intensity, DeltaSeconds, 10.f));
+		OneBrahamLights::Ease(ReaderLight, Desired, Intensity, DeltaSeconds, 10.f);
 	}
 }
 
@@ -329,23 +330,12 @@ void AOneBrahamAccessZone::PlayDoorEffects(EOneBrahamUnlockMethod Method, bool b
 		ReaderLight->SetLightColor(bUnlocked ? OBReaderOpen : OBReaderLocked);
 	}
 
-	UWorld* World = GetWorld();
-	if (World == nullptr)
-	{
-		return;
-	}
-
 	const FVector Location = GetBarrierCentre();
 
-	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	// This runs on every machine, so the listener's manager is the only one to
+	// play through: walking the controllers played it once per player on a host.
+	if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this))
 	{
-		AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(It->Get());
-		UOneBrahamAudioManagerComponent* Audio = GetAudioFor(PC);
-		if (Audio == nullptr)
-		{
-			continue;
-		}
-
 		if (bUnlocked)
 		{
 			switch (Method)
@@ -354,7 +344,7 @@ void AOneBrahamAccessZone::PlayDoorEffects(EOneBrahamUnlockMethod Method, bool b
 				Audio->PlaySoundAtLocation(FName(TEXT("SFX_Keycard_Use")), Location, 0.9f, 1.f, this);
 				break;
 			case EOneBrahamUnlockMethod::Breach:
-				Audio->PlaySoundAtLocation(FName(TEXT("SFX_Breach_Explosion")), Location, 1.f, 1.f, this);
+				// The charge that opened it played the blast where it went off.
 				break;
 			case EOneBrahamUnlockMethod::Escalation:
 				// The building does it for you: no click, just the mechanism.
@@ -379,9 +369,12 @@ void AOneBrahamAccessZone::PlayDoorEffects(EOneBrahamUnlockMethod Method, bool b
 		FRotator::ZeroRotator, FVector(0.8f));
 }
 
-UOneBrahamAudioManagerComponent* AOneBrahamAccessZone::GetAudioFor(const AOneBrahamPlayerController* PC)
+void AOneBrahamAccessZone::MulticastPlayZoneSound_Implementation(FName SoundId, float Volume)
 {
-	return PC != nullptr ? PC->GetAudioManager() : nullptr;
+	if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this))
+	{
+		Audio->PlaySoundAtLocation(SoundId, GetBarrierCentre(), Volume, 1.f, this);
+	}
 }
 
 FVector AOneBrahamAccessZone::GetBarrierCentre() const
@@ -589,6 +582,7 @@ bool AOneBrahamAccessZone::OnInteractionStart_Implementation(AOneBrahamPlayerCon
 		const bool bUnlocked = Zone->ServerUnlock(EOneBrahamUnlockMethod::Keycard, PlayerId);
 		if (bUnlocked)
 		{
+			FOneBrahamVoiceDirector::OnAccessGranted(Cast<AOneBrahamCharacter>(Interactor->GetPawn()));
 			OB_ACCESS_LOG("Door '%s' opened by badge (player %d).", *GetZoneId().ToString(), PlayerId);
 			return true;
 		}
@@ -605,11 +599,8 @@ bool AOneBrahamAccessZone::OnInteractionStart_Implementation(AOneBrahamPlayerCon
 			*UEnum::GetValueAsString(Zone->RequiredTier),
 			*Zone->GetRefusalText(Interactor).ToString());
 
-		if (UOneBrahamAudioManagerComponent* Audio = GetAudioFor(Interactor))
-		{
-			Audio->PlaySoundAtLocation(FName(TEXT("SFX_Door_Locked")), GetBarrierCentre(), 0.8f, 1.f, this);
-			Audio->PlaySoundAtLocation(FName(TEXT("SFX_Terminal_Deny")), GetBarrierCentre(), 0.7f, 1.f, this);
-		}
+		MulticastPlayZoneSound(FName(TEXT("SFX_Door_Locked")), 0.8f);
+		MulticastPlayZoneSound(FName(TEXT("SFX_Terminal_Deny")), 0.7f);
 
 		return false;
 	}
@@ -620,11 +611,7 @@ bool AOneBrahamAccessZone::OnInteractionStart_Implementation(AOneBrahamPlayerCon
 	HoldInteractor = Interactor;
 	HoldLastSeconds = 0.f;
 
-	UOneBrahamAudioManagerComponent* Audio = GetAudioFor(Interactor);
-	if (Audio != nullptr)
-	{
-		Audio->PlaySoundAtLocation(FName(TEXT("SFX_Terminal_Hum")), GetBarrierCentre(), 0.7f, 1.f, this);
-	}
+	MulticastPlayZoneSound(FName(TEXT("SFX_Terminal_Hum")), 0.7f);
 
 	return true;
 }
@@ -758,17 +745,11 @@ void AOneBrahamAccessZone::ApplyBreachDamage(float Damage, AActor* Breacher, con
 
 	UOneBrahamVFXStatics::SpawnExplosion(this, GetBarrierCentre(), 320.f, /*bBreach*/ true);
 
-	// Everyone on the floor hears that. That is the cost of the shortcut.
-	if (UWorld* World = GetWorld())
-	{
-		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-		{
-			if (UOneBrahamAudioManagerComponent* Audio = GetAudioFor(Cast<AOneBrahamPlayerController>(It->Get())))
-			{
-				Audio->PlaySoundAtLocation(FName(TEXT("SFX_Breach_Explosion")), GetBarrierCentre(), 1.2f, 1.f, this);
-			}
-		}
-	}
+	// Everyone on the floor hears it, and the charge is what they hear: the
+	// projectile plays the blast through every listener's mix
+	// (AOneBrahamProjectileBase::MulticastDetonationFeedback). This played a
+	// second blast once per player controller, so a listen host heard it twelve
+	// times over and the clients heard it from the charge only.
 }
 
 float AOneBrahamAccessZone::GetBreachIntegrity01() const

@@ -1,8 +1,13 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Extraction/OneBrahamExtractionComponent.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 
 #include "Audio/OneBrahamAudioManagerComponent.h"
+#include "VFX/OneBrahamCameraShake.h"
+#include "Engine/Engine.h"
+#include "Camera/PlayerCameraManager.h"
+#include "Camera/CameraShakeBase.h"
 #include "Characters/OneBrahamCharacter.h"
 #include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamPlayerController.h"
@@ -118,6 +123,19 @@ void UOneBrahamExtractionComponent::TickComponent(float DeltaTime, ELevelTick Ti
 	const float HoldSeconds = Settings ? FMath::Max(1.f, Settings->ExtractionHoldSeconds) : OBFallbackHoldSeconds;
 	const float LoiterSeconds = Settings ? FMath::Max(1.f, Settings->HelicopterLoiterSeconds) : OBFallbackLoiterSeconds;
 
+	// The claiming squad is on the floor. Nobody is left to walk onto the wire, and
+	// the pad has to re-arm for whoever is still standing. Checked for every live
+	// phase, not only the hold: a squad wiped while the helicopter is still inbound
+	// would otherwise keep its claim and lock every other squad out of the win.
+	if ((ExtractionState == EOneBrahamExtractionState::Broadcast
+			|| ExtractionState == EOneBrahamExtractionState::Arriving
+			|| ExtractionState == EOneBrahamExtractionState::Holding)
+		&& !IsClaimingSquadAlive())
+	{
+		ServerAbortExtraction(EOneBrahamExtractionFailReason::CallersEliminated);
+		return;
+	}
+
 	switch (ExtractionState)
 	{
 	case EOneBrahamExtractionState::Inactive:
@@ -130,6 +148,7 @@ void UOneBrahamExtractionComponent::TickComponent(float DeltaTime, ELevelTick Ti
 		if (Remaining <= 0.f)
 		{
 			ServerSetState(EOneBrahamExtractionState::Arriving);
+			FOneBrahamVoiceDirector::OnHelicopterArriving(GetWorld());
 			break;
 		}
 		break;
@@ -166,13 +185,6 @@ void UOneBrahamExtractionComponent::TickComponent(float DeltaTime, ELevelTick Ti
 		if (TimeInState >= LoiterSeconds)
 		{
 			ServerAbortExtraction(EOneBrahamExtractionFailReason::LoiterExpired);
-			return;
-		}
-
-		// The claiming squad is on the floor. Nobody is left to walk onto the wire.
-		if (GS->IsSquadEliminated(ClaimingSquadId))
-		{
-			ServerAbortExtraction(EOneBrahamExtractionFailReason::CallersEliminated);
 			return;
 		}
 
@@ -279,8 +291,7 @@ bool UOneBrahamExtractionComponent::ServerCallExtraction(int32 SquadId, AOneBrah
 		// One storey below the Skydeck, from the building's own storey height
 		// rather than a literal 400: this was the second place the number was
 		// written down, and the constant exists so there is only one.
-		const float SkydeckMinZ = static_cast<float>(OneBrahamConstants::FloorSkydeck - 1)
-			* OneBrahamConstants::FloorHeightCm;
+		const float SkydeckMinZ = OneBrahamConstants::FloorZ(OneBrahamConstants::FloorSkydeck);
 		if (Pawn == nullptr || Pawn->GetActorLocation().Z < SkydeckMinZ)
 		{
 			OutRefusal = NSLOCTEXT("OneBraham", "Extraction_TooLow", "Winch terminals are on the Skydeck, fifteenth floor.");
@@ -573,6 +584,37 @@ void UOneBrahamExtractionComponent::ApplyLocalExtractionAudio()
 		return;
 	}
 
+	// The rotor wash. When the helicopter arrives over the deck (HOLDING), anyone
+	// standing within 30 m of the pad feels it, more the closer they are - once
+	// per hold, on their own machine, through their screen-shake setting.
+	AOneBrahamPlayerController* LocalPC = GEngine != nullptr
+		? Cast<AOneBrahamPlayerController>(GEngine->GetFirstLocalPlayerController(World))
+		: nullptr;
+
+	if (ExtractionState != EOneBrahamExtractionState::Holding)
+	{
+		bShookForHold = false;
+
+		// The authored shake is continuous (Docs/11 section 4): it ends when the
+		// rotor leaves the pad, not when its own clock does.
+		if (UCameraShakeBase* Shake = HoldShake.Get())
+		{
+			if (LocalPC != nullptr && LocalPC->PlayerCameraManager != nullptr)
+			{
+				LocalPC->PlayerCameraManager->StopCameraShake(Shake, /*bImmediately*/ false);
+			}
+		}
+		HoldShake.Reset();
+	}
+	else if (!bShookForHold && LocalPC != nullptr && LocalPC->GetPawn() != nullptr)
+	{
+		bShookForHold = true;
+
+		const float Distance = FVector::Dist(LocalPC->GetPawn()->GetActorLocation(), HelipadLocation);
+		const float Scale = FMath::Clamp(1.f - Distance / 3000.f, 0.f, 1.f);
+		HoldShake = LocalPC->PlayCameraShakeLocally(UOneBrahamCameraShake::GetExtractionShakeClass(), Scale);
+	}
+
 	// Active means the helicopter is on its way or on the wire. COMPLETE drops the
 	// rotor (it is climbing out, and `SFX_Helicopter_Leave` covers it); FAILED and
 	// INACTIVE drop it too, because an aborted run has to sound like a lift home.
@@ -586,8 +628,7 @@ void UOneBrahamExtractionComponent::ApplyLocalExtractionAudio()
 		return;
 	}
 
-	AOneBrahamPlayerController* PC = World->GetFirstPlayerController<AOneBrahamPlayerController>();
-	UOneBrahamAudioManagerComponent* Audio = PC ? PC->GetAudioManager() : nullptr;
+	UOneBrahamAudioManagerComponent* Audio = LocalPC ? LocalPC->GetAudioManager() : nullptr;
 	if (Audio == nullptr)
 	{
 		return;

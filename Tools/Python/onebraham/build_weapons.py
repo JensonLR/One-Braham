@@ -34,7 +34,7 @@ EVERY WEAPON IS A REAL DECISION
 
 WHAT IT CREATES
     /Game/OneBraham/Data/Weapons/DA_Weapon_<Name>     UOneBrahamWeaponDefinition
-    /Game/OneBraham/Weapons/BP_OB_Weapon_<Name>       AOneBrahamWeaponBase subclass
+    /Game/OneBraham/Weapons/BP_OB_Weapon_<Name>       AOneBrahamPickupBase subclass
     /Game/OneBraham/Data/DA_WeaponRegistry            UOneBrahamWeaponRegistry
 
 USAGE
@@ -271,13 +271,19 @@ def _text(value):
 
 
 def build_weapon_blueprints(report):
-    """One Blueprint per weapon, subclassing AOneBrahamWeaponBase.
+    """One Blueprint per weapon, subclassing AOneBrahamPickupBase.
+
+    A pickup, not a bare AOneBrahamWeaponBase: the same actor is held, dropped on
+    a swap, and left at a body on death, and only a pickup can lie on the floor.
+    With the bare weapon as the parent every death drop was given a thirty
+    second lifespan instead, so nobody ever looted a body. A Blueprint made by
+    an earlier run with the old parent is reparented in place.
 
     The Blueprint is where the meshes, sockets and animations get attached; the
     data asset is where the behaviour gets tuned. Keeping them apart is what lets
     artists work on a weapon without touching its ballistics.
     """
-    parent = getattr(unreal, "OneBrahamWeaponBase", None)
+    parent = getattr(unreal, "OneBrahamPickupBase", None)
     blueprints = {}
 
     for weapon in WEAPONS:
@@ -285,7 +291,20 @@ def build_weapon_blueprints(report):
         path = u"{0}/{1}".format(BP_WEAPONS_ROOT, name)
 
         if unreal.EditorAssetLibrary.does_asset_exist(path):
-            blueprints[weapon["id"]] = unreal.EditorAssetLibrary.load_asset(path)
+            existing = unreal.EditorAssetLibrary.load_asset(path)
+            if parent is not None and existing is not None:
+                try:
+                    current = existing.get_editor_property("parent_class")
+                except Exception:  # noqa: BLE001
+                    current = None
+                if current != parent:
+                    if unreal.BlueprintEditorLibrary.reparent_blueprint(existing, parent):
+                        unreal.BlueprintEditorLibrary.compile_blueprint(existing)
+                        unreal.EditorAssetLibrary.save_loaded_asset(existing)
+                    else:
+                        report.failed(name, "could not reparent to AOneBrahamPickupBase; delete the "
+                                            "Blueprint and re-run this script")
+            blueprints[weapon["id"]] = existing
             report.updated_asset(path)
             continue
 
@@ -293,7 +312,7 @@ def build_weapon_blueprints(report):
         if parent is not None:
             factory.set_editor_property("parent_class", parent)
         else:
-            report.failed(name, "AOneBrahamWeaponBase is not reflected yet - compile the "
+            report.failed(name, "AOneBrahamPickupBase is not reflected yet - compile the "
                                 "OneBraham module, then re-run this script")
 
         asset = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
@@ -333,7 +352,7 @@ def build_weapon_definitions(report, blueprints):
             continue
 
         asset = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
-            asset_name, WEAPONS_ROOT, definition_class, unreal.DataAssetFactory())
+            asset_name, WEAPONS_ROOT, definition_class, C.data_asset_factory(definition_class))
 
         if asset is None:
             report.failed(asset_name, "could not create weapon definition")
@@ -429,8 +448,8 @@ def _apply_definition(report, asset, weapon, blueprints):
         for prop, value in fields:
             try:
                 spread.set_editor_property(prop, value)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                report.failed(context, u"spread.{0}: {1}".format(prop, exc))
         try:
             asset.set_editor_property("spread", spread)
         except Exception as exc:  # noqa: BLE001
@@ -456,8 +475,8 @@ def _apply_definition(report, asset, weapon, blueprints):
         for prop, value in fields:
             try:
                 recoil.set_editor_property(prop, value)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                report.failed(context, u"recoil.{0}: {1}".format(prop, exc))
         try:
             asset.set_editor_property("recoil", recoil)
         except Exception as exc:  # noqa: BLE001
@@ -467,7 +486,7 @@ def _apply_definition(report, asset, weapon, blueprints):
     thickness, retention = weapon["pen"]
     _set(asset, "max_penetration_thickness", thickness, report, context)
     _set(asset, "penetration_damage_retention", retention, report, context)
-    _set(asset, "b_can_penetrate_cover", thickness > 0.0, report, context)
+    _set(asset, "can_penetrate_cover", thickness > 0.0, report, context)
 
     # --- ammunition ------------------------------------------------------
     _set(asset, "magazine_size", weapon["mag"], report, context)
@@ -477,7 +496,7 @@ def _apply_definition(report, asset, weapon, blueprints):
     _set(asset, "reload_time_empty", weapon["reload"][1], report, context)
 
     if weapon.get("per_shell"):
-        _set(asset, "b_per_shell_reload", True, report, context)
+        _set(asset, "per_shell_reload", True, report, context)
         _set(asset, "per_shell_reload_time", weapon.get("shell_time", 0.6), report, context)
 
     # --- handling --------------------------------------------------------
@@ -493,6 +512,7 @@ def _apply_definition(report, asset, weapon, blueprints):
     audible, interior, suppressed = weapon["audio"]
     _set(asset, "audible_radius", audible, report, context)
     _set(asset, "interior_audible_radius", interior, report, context)
+    _set(asset, "integral_suppressor", suppressed, report, context)
 
     sound_prefix = {
         "W_Pistol": "SFX_Gunshot_Pistol",
@@ -513,7 +533,7 @@ def _apply_definition(report, asset, weapon, blueprints):
     C.log(u"  audio cue for {0}: {1} (radius {2:.0f} cm)".format(weapon_id, sound_prefix, audible))
 
     # --- VFX -------------------------------------------------------------
-    _set(asset, "b_hide_tracer", not weapon["tracer"], report, context)
+    _set(asset, "hide_tracer", not weapon["tracer"], report, context)
 
     # --- loot ------------------------------------------------------------
     min_floor, max_floor = weapon["floors"]
@@ -522,15 +542,16 @@ def _apply_definition(report, asset, weapon, blueprints):
     _set(asset, "max_floor", max_floor, report, context)
 
     # --- classes ---------------------------------------------------------
+    # The definition names its own Blueprint. This used to be wrapped in a bare
+    # "except: pass" against a property the definition did not have, so every
+    # weapon silently spawned as the registry default (unset: the C++ base).
     blueprint = blueprints.get(weapon_id)
     if blueprint is not None:
-        try:
-            asset.set_editor_property("weapon_actor_class", blueprint.get_editor_property("generated_class")
-                                      if hasattr(blueprint, "generated_class") else blueprint)
-        except Exception:  # noqa: BLE001
-            # The class reference resolves from the Blueprint's generated class at
-            # runtime; recording it here is a convenience for the editor.
-            pass
+        generated = unreal.BlueprintEditorLibrary.generated_class(blueprint)
+        if generated is not None:
+            _set(asset, "weapon_actor_class", generated, report, context)
+        else:
+            report.failed(context, "BP for {0} has no generated class - compile it".format(weapon_id))
 
 
 def build_registry(report, definitions):

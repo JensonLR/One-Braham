@@ -384,7 +384,55 @@ def run():
                     u"engine-free steps".format(claimed_free, actual_free),
                     u"stale number"))
 
+    # 5. HANDOVER's "where the project stands" table: the file, document and
+    #    test counts a new reader trusts first. They had drifted to two thirds of
+    #    the real numbers, because nothing compared them.
+    numbers_checked += _check_handover_table(problems)
+
     return numbers_checked, problems
+
+
+def _check_handover_table(problems):
+    """HANDOVER section 1's Source, Docs and Tests rows against the tree."""
+    handover = os.path.join(os.path.dirname(os.path.dirname(DOCS_17)), "HANDOVER.md")
+    if not os.path.isfile(handover):
+        return 0
+    text = io.open(handover, encoding="utf-8", errors="ignore").read()
+    root = os.path.dirname(handover)
+    source = os.path.join(root, "Source", "OneBraham")
+    docs = os.path.join(root, "Docs")
+
+    cpp = h = 0
+    for _dir, _subdirs, files in os.walk(source):
+        cpp += sum(1 for name in files if name.endswith(".cpp"))
+        h += sum(1 for name in files if name.endswith(".h"))
+    systems = sum(1 for name in os.listdir(source)
+                  if os.path.isdir(os.path.join(source, name)) and name != "Tests")
+    numbered = sum(1 for name in os.listdir(docs) if re.match(r"\d\d_.*\.md$", name))
+    tests_dir = os.path.join(source, "Tests")
+    test_files = [name for name in os.listdir(tests_dir) if name.endswith(".cpp")]
+    tests = sum(len(re.findall(r"IMPLEMENT_(?:SIMPLE|COMPLEX)_AUTOMATION_TEST\(",
+                               io.open(os.path.join(tests_dir, name), encoding="utf-8", errors="ignore").read()))
+                for name in test_files)
+
+    claims = (
+        (r"\| Source \| (\d+) `\.cpp`, (\d+) `\.h`, (\d+) system folders", (cpp, h, systems), "Source"),
+        (r"\| Docs \| (\d+) numbered documents", (numbered,), "Docs"),
+        (r"\| Tests \| (\d+) automation tests in (\d+) files", (tests, len(test_files)), "Tests"),
+    )
+    checked = 0
+    for pattern, actual, row in claims:
+        match = re.search(pattern, text)
+        checked += 1
+        if match is None:
+            problems.append((u"HANDOVER section 1 no longer has its {0} row in the expected form".format(row),
+                             u"missing claim"))
+            continue
+        claimed = tuple(int(group) for group in match.groups())
+        if claimed != actual:
+            problems.append((u"HANDOVER's {0} row says {1} and the tree has {2}".format(
+                row, u"/".join(str(n) for n in claimed), u"/".join(str(n) for n in actual)), u"stale number"))
+    return checked
 
 
 class _DocNumberReport(object):

@@ -22,7 +22,7 @@ that gets disabled after a month.
 ```bat
 Scripts\RunTests.bat                    all OneBraham.* tests
 Scripts\RunTests.bat OneBraham.Weapons   one category
-Scripts\RunTests.bat smoke               the smoke category on a dedicated server
+Scripts\RunTests.bat smoke               the match-boot composition check
 ```
 
 The suites are in `Source/OneBraham/Tests/`, one file per category, entirely inside
@@ -65,9 +65,13 @@ that is otherwise a link error.
 | `OneBraham.Brand` | `Palette` | the seven brand colours match the published values in both the class defaults and `Config/DefaultEngine.ini`, `UOneBrahamUIStyle` reads them from the settings rather than from literals, and alarm red is distinguishable from warning yellow |
 | `OneBraham.Weapons` | `FireRate`, `Falloff`, `Recoil`, `LootGating` | RPM to fire interval; damage never rises with range, never exceeds the base value and never goes negative out to 200 m; one-pull shotgun totals; recoil steps are finite, upward, non-constant, and a negative shot index reads nothing off the end of the pattern; floor gating (a floor 6 marksman rifle never spawns on the ground floor) and the registry's own validator |
 | `OneBraham.Damage` | `HealthModel`, `Armour`, `Zone` | 100 health + 50 armour, armour absorbing 60 % of each hit until it breaks (the worked example in `Docs/04`: 30 damage → 12 health and 18 armour), four shots to break the plate and a fifth to kill, head/neck/torso/limb multipliers in the right order, and the shots-to-kill a carbine and a marksman rifle need through a full plate |
-| `OneBraham.Voice` | `CodecShape`, `LineSet`, `Wheel` | 16 kHz mono 20 ms frames inside a 1024-byte transport ceiling and under 64 kB/s worst case; the line set fills itself from the compiled-in table (97 core + 66 variants), idempotently, with no duplicate ids, no empty subtitles, and no line that can never be said; the comms wheel's eight segments are unique, labelled, and every one resolves against the script; out-of-range segments return nothing |
-| `OneBraham.Input` | `AllActionsBound`, `MappingContexts` | `ValidateAllActionsSet` reports every one of the 41 reflected action fields on an empty config, reports nothing on a fully assigned one, names the three overlay actions explicitly, and the mapping contexts are soft references of the right type |
+| `OneBraham.Voice` | `CodecShape`, `LineSet`, `Wheel` | 16 kHz mono 20 ms frames inside a 1024-byte transport ceiling and under 64 kB/s worst case; the line set fills itself from the compiled-in table (105 core + 66 variants, at least 120 of them different words), idempotently, with no duplicate ids, no empty subtitles, and no line that can never be said; the comms wheel's eight segments are unique, labelled, and every one resolves against the script; out-of-range segments return nothing |
+| `OneBraham.Input` | `AllActionsBound`, `MappingContexts`, `Rebind`, `AimAssist`, `KeyLabels` | `ValidateAllActionsSet` reports every one of the 41 reflected action fields on an empty config, reports nothing on a fully assigned one, names the three overlay actions explicitly, and the mapping contexts are soft references of the right type; a rebind replaces one key and keeps the rest, taking another action's key swaps the two so nothing is left doing two things, rebinding one key of Move writes all four with their modifiers, a pad button cannot be a keyboard binding, the look axes are not offered, and reset restores the defaults (the player's own rows are put back afterwards); aim assist slows the stick only over an enemy and by the strength setting, ignores targets outside the distance-scaled cone or beyond hip and ADS range, follows a target across the screen in its direction but never faster than its cap, follows nothing when player and target move together, prefers the target nearest the crosshair for its cone and skips one whose sight line was blocked; pad buttons are labelled as printed on the controller (A, RB, LT, Menu) and every other key keeps the engine's short name |
 | `OneBraham.Multiplayer` | `ReplicationContract`, `Smoke` | every server and client RPC is reliable, every `ReplicatedUsing` property names a function that exists on its own class, there are zero `WithValidation` RPCs, and the network surface has the shape a server-authoritative game should; then the match-boot composition check: the classes the config names load and derive from the right bases, ASCENT is the default mode, and the building and mode data agree on a twelve-player match |
+| `OneBraham.Animation` | `PoseAndDirection` | every armed weapon category holds a weapon pose and utility holds none; a body's movement direction is measured against where it faces (forwards 0, strafing right 90, backwards 180), and standing still or falling straight down reads 0 rather than a NaN |
+| `OneBraham.Online` | `CareerRecord`, `AchievementTable`, `PlatformRules` | a finished match folds into the career record from the local player's own row, found by player id; an unfinished result records nothing; the best extraction time only improves; Hold the Floor needs a last-squad-standing win on floors 9-11, not 12 and not a loss; FIRE DRILL counts wins only; achievements are earned once; every achievement id is unique, starts `ACH_` and is unearned on a fresh profile; every cosmetic an achievement grants is locked on a fresh profile and opens with its tag; every rich presence token the code sends is in `Config/Steam/rich_presence_english.vdf`; crossplay pairs the same platform always and different platforms only when both sides allow it, with a dedicated server (no platform) open to everyone; every network and travel failure has words for the player; a notice is read once; the block list answers by id |
+| `OneBraham.Match` | `ControlPointCapture`, `SmokeBlocksSight` | FIRE DRILL's capture rule: one team alone builds a claim over the capture time, both teams freeze it as contested, an empty point keeps a half-built claim, a full claim owns the point, and taking the other team's point drains their claim before building yours, so a flip takes twice as long; a sight line through a smoke cloud is blocked, one passing wide or grazing its thin outer edge is not, one that stops short is not, one from inside is, and a cloud grows from nothing to most of its size in the first second |
+| `OneBraham.Extraction` | `HelicopterPath` | the helicopter's approach starts at the approach point and ends exactly over the pad when the arrival timer reaches zero, never dips below the hover height on the way in, and the hold hovers over the pad with less than half a metre of bob |
 | `OneBraham.KillFeed` | `Verb`, `DeathCause`, `Wiring` | the kill verb's branch order (the building outranks a self-kill, a self-kill outranks an execution, an execution outranks a headshot, and no combination of circumstances produces the disconnect verb); the death screen's wording for every verb, named and unnamed, never empty and never leaking an unformatted placeholder; and that the three files that carry a kill - the character's death path, the game mode's single kill entry point, the controller's Client RPC - are still wired to each other |
 | `OneBraham.StaticChecks` | `EngineFreeChecks` | runs the seventeen engine-free checkers in `Tools/Python/onebraham` as child processes and fails on any non-zero exit, so `RunTests.bat` covers the static shape of the project as well as the parts that need an engine - including whether the suites in this table exist |
 
@@ -116,8 +120,9 @@ or a hole nobody has noticed yet.
 
 ## 3. The 12-player smoke run
 
-`Scripts\RunTests.bat smoke` runs the `OneBraham.Multiplayer` category on a
-dedicated server process. The automatic part is the composition check: the classes
+`Scripts\RunTests.bat smoke` runs `OneBraham.Multiplayer.Smoke` in the headless
+editor (it is an editor-context test; a Shipping server has no automation
+framework to run it in). The automatic part is the composition check: the classes
 the config names exist, the mode's squad maths gives twelve players, and the
 building table backs it.
 
@@ -215,7 +220,7 @@ should be at 4 Hz.
 2. **Nanite for architecture, LODs for props.** Every wall, floor and ceiling is a
    Nanite candidate; every loose prop has LODs and is `Movable` only if Chaos
    needs it.
-3. **No dynamic bounds on Niagara.** Fixed bounds on all 17 systems.
+3. **No dynamic bounds on Niagara.** Fixed bounds on all 18 systems.
 4. **No VFX or audio work on a dedicated server.**
    `ShouldSpawnForLocalViewer` returns false with no local viewer.
 5. **Occlusion traces at 15 Hz per listener**, not per frame.
@@ -224,8 +229,9 @@ should be at 4 Hz.
    distance.
 7. **One material master per purpose.** Fifteen surface instances of two masters,
    not fifteen masters.
-8. **World Partition on the server** so the dedicated process loads only what it
-   simulates.
+8. **The whole tower stays loaded on the server.** It is one persistent level
+   and sixteen always-loaded floor sublevels of blockout, small enough to hold
+   at once, and the server simulates every floor a player is on anyway.
 9. **Audio concurrency limits** per cue type, and a per-frame budget on new
    one-shots.
 10. **Shaders are cooked, not compiled on first use.** A shipping build must never
@@ -255,6 +261,7 @@ documented here rather than discovered in the source:
 | `ob.NetDebug 1` | the per-actor replication cost overlay: the replicated actors near the local view, in the order the replication scheduler will spend bandwidth on them, from `AActor::GetNetPriority`, with update rate, cull distance and designed dormancy. `ob.NetDebug.Lines` (default 12) sets how many and `ob.NetDebug.Radius` (default 4000 cm) how far it looks. |
 | `ob.Bench.Skydeck [seconds]` | the scripted flythrough benchmark. One leg per floor of the building layout, default 6 s each, camera panning and yawing across each floor, frame time recorded every frame. Writes `Saved/Benchmarks/ob_bench_<stamp>.md` with overall and per-floor mean, median, p95, p99 and worst, plus the three blanks a real record needs: hardware, resolution and scalability, build. Needs a local player |
 | `ob.Bench.Skydeck.Stop` | ends a run early and writes the same report for the frames captured so far. |
+| `ob.bots.dump` | one line per practice bot: state, skill, team, floor, location, target, line of sight and reaction time remaining. Server only; bots exist only in bot practice and the QA modes, never in ASCENT. |
 | `ob.netbudget` | the replication budget report: what the game state counts per second against `RpcBudgetPerSecond`. Server only. |
 | `ob.give <WeaponId>` | puts a weapon in the local player's hands. Cheat, development builds only. |
 | `ob.weapon.remove` | destroys the local player's held weapon without dropping it. For the unarmed cases: the first-person arms with nothing in them, the player who has just been relieved of a rifle, the locker preview. |

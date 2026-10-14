@@ -188,63 +188,73 @@ AREA_DEFAULT_FINISH = {
 # with a break-out area and two meeting pods, a server floor with four rows and a
 # cold aisle, and an executive floor with a boardroom and a corner office.
 ROOM_PROGRAMMES = {
+    # Every room is placed around the service core (common.CORE_BAND) and clear
+    # of the corridor in front of it (common.CORE_CORRIDOR); check_building_layout
+    # fails on any overlap, between rooms or with the core.
     "Ground_Plaza": [
-        ("Reception_Island", 0, 0, 700, 400),
-        ("Turnstile_Bank_1", -900, 600, 500, 160),
-        ("Turnstile_Bank_2", 900, 600, 500, 160),
-        ("Security_Desk", 0, 900, 600, 300),
+        ("Reception_Island", 0, -200, 700, 400),
+        ("Turnstile_Bank_1", -900, 150, 500, 160),
+        ("Turnstile_Bank_2", 900, 150, 500, 160),
+        ("Security_Desk", -2000, 900, 600, 300),
         ("Bike_Store", -1700, -1200, 900, 600),
         ("Loading_Bay", 1500, -1300, 1400, 700),
     ],
     "Lobby": [
-        ("Reception_Desk", 0, 300, 900, 350),
+        ("Reception_Desk", 0, -100, 900, 350),
         ("Waiting_Seating", 0, -700, 1200, 400),
         ("Coffee_Point", 1100, 0, 500, 350),
-        ("Lift_Lobby", 0, 0, 900, 500),
+        ("Lift_Lobby", 0, 200, 1000, 200),
         ("Under_Stair_Store", -1300, -1000, 500, 400),
     ],
     "Mezzanine": [
-        ("Breakout_Area", 0, 0, 1400, 800),
-        ("Bridge_To_Core", 0, 900, 500, 500),
+        ("Breakout_Area", 0, -500, 1400, 800),
+        ("Bridge_To_Core", 0, 200, 500, 200),
         ("Vending_Alcove", 1200, -900, 400, 350),
     ],
     "OpenPlan": [
         ("Desk_Farm_A", -900, -700, 1400, 1100),
         ("Desk_Farm_B", 900, -700, 1400, 1100),
-        ("Meeting_Pod_1", -900, 900, 600, 500),
-        ("Meeting_Pod_2", 900, 900, 600, 500),
-        ("Break_Out_Kitchen", 0, 1300, 900, 500),
-        ("Print_Alcove", -1700, 0, 450, 350),
+        ("Meeting_Pod_1", -1850, 900, 500, 500),
+        ("Meeting_Pod_2", 1850, 900, 500, 500),
+        ("Break_Out_Kitchen", 1850, 0, 500, 700),
+        ("Print_Alcove", -1900, 300, 450, 350),
     ],
     "ServerComms": [
-        ("Cold_Aisle", 0, -600, 900, 1200),
-        ("Server_Row_1", -700, -600, 200, 1200),
-        ("Server_Row_2", 700, -600, 200, 1200),
-        ("NOC", 0, 700, 1200, 600),
-        ("Power_Room", -1000, 900, 500, 450),
-        ("Comms_Cupboard", 1000, 900, 350, 320),
+        ("Cold_Aisle", 0, -800, 900, 900),
+        ("Server_Row_1", -700, -800, 200, 900),
+        ("Server_Row_2", 700, -800, 200, 900),
+        ("NOC", 0, 100, 1200, 300),
+        ("Power_Room", -1350, -1050, 400, 500),
+        ("Comms_Cupboard", 1350, -1050, 400, 500),
     ],
     "Executive": [
-        ("Boardroom", 0, 0, 1600, 1000),
-        ("Corner_Office", -1000, 900, 700, 600),
-        ("Exec_PA_Desk", 900, 900, 500, 400),
-        ("West_Lounge", 1200, -700, 700, 700),
+        ("Boardroom", 0, -650, 1600, 900),
+        ("Corner_Office", -1350, 0, 700, 400),
+        ("Exec_PA_Desk", 1300, 0, 500, 400),
+        ("West_Lounge", 1300, -850, 700, 700),
     ],
     "Canteen": [
-        ("Canteen_Hall", 0, 0, 1800, 1400),
-        ("Servery", 0, 1000, 1400, 400),
-        ("Kitchen", -1200, 900, 700, 500),
-        ("Terrace", 1300, 300, 600, 900),
+        ("Canteen_Hall", 0, -650, 1800, 1100),
+        ("Servery", 0, 150, 1400, 300),
+        ("Kitchen", -1750, 900, 500, 700),
+        ("Terrace", 1750, 900, 500, 700),
     ],
     "Skydeck": [
-        ("Helipad", 0, 0, 1800, 1800),
-        ("Plant_Room", 1800, 0, 700, 900),
-        ("Winch_Control", -1500, 400, 600, 500),
-        ("Bar_Pavilion", 0, 1500, 1200, 600),
+        ("Helipad", 0, -800, 1800, 1800),
+        ("Plant_Room", 1950, -800, 700, 700),
+        ("Winch_Control", -1950, -500, 600, 500),
+        ("Bar_Pavilion", 0, 1600, 1200, 400),
         ("Edge_Rail_North", 0, 1900, 4200, 120),
         ("Edge_Rail_South", 0, -1900, 4200, 120),
     ],
 }
+
+# Rooms that are areas of open deck rather than enclosed rooms: no partitions,
+# no door, and the edge rails are where the balustrade runs.
+OPEN_AIR_ROOMS = {"Helipad", "Edge_Rail_North", "Edge_Rail_South",
+                  # Not rooms but the lift-lobby threshold: walled, they would
+                  # wall off the lifts.
+                  "Lift_Lobby", "Bridge_To_Core"}
 
 # Anchors: named, gameplay-relevant positions per area. The manifest this script
 # writes is the authoritative list the C++ and Docs reference.
@@ -257,7 +267,7 @@ ANCHORS = {
     "Lobby": [
         ("Lobby_Spawn_A", -1800, -1200),
         ("Lobby_Spawn_B", 1800, -1200),
-        ("Lobby_Spawn_C", 0, 1000),
+        ("Lobby_Spawn_C", 0, 1500),
     ],
     "Mezzanine": [
         ("Mezz_Spawn_A", -1500, 0),
@@ -271,59 +281,66 @@ ANCHORS = {
         ("Office_Spawn_D", 1800, 1400),
    ],
     "ServerComms": [
-        ("Server_Spawn_A", -1300, -1000),
-        ("Server_Spawn_B", 1300, -1000),
-        ("Server_Spawn_C", 0, 1100),
+        ("Server_Spawn_A", -1100, -250),
+        ("Server_Spawn_B", 1100, -250),
+        ("Server_Spawn_C", 0, -1330),
     ],
     "Executive": [
         ("Exec_Spawn_A", -1500, -1100),
-        ("Exec_Spawn_B", 1500, -1100),
-        ("Exec_Spawn_C", 0, 1000),
+        ("Exec_Spawn_B", 1600, -1350),
+        ("Exec_Spawn_C", 0, 1400),
     ],
     "Canteen": [
         ("Canteen_Spawn_A", -1600, -1200),
         ("Canteen_Spawn_B", 1600, -1200),
-        ("Canteen_Spawn_C", 0, 1100),
+        ("Canteen_Spawn_C", 0, 1450),
     ],
+    # The deck's four corners: clear of the service core, the helipad (the
+    # extraction pad), the plant room, the winch control room and the bar, and
+    # 3-4 m in from the edges. Any two corners are at least 32 m apart, so every
+    # squad pairing clears the 20 m enemy rule. (The first layout put two
+    # opposing squads 17.5 m apart on the same open deck.)
     "Skydeck": [
-        ("Deck_Spawn_West", -2000, 0),
-        ("Deck_Spawn_East", 2000, 0),
-        ("Deck_Spawn_North", 0, -1600),
-        ("Deck_Spawn_South", 0, 1600),
+        ("Deck_Spawn_NorthWest", -2100, 1600),
+        ("Deck_Spawn_SouthEast", 2100, -1600),
+        ("Deck_Spawn_NorthEast", 2100, 1600),
+        ("Deck_Spawn_SouthWest", -2100, -1600),
     ],
 }
 
 # Access zones: the locked doors that define ASCENT's progression. Each entry is
 # (zone_id, floor, tier, x, y, paired_zone_id, breachable, escalation_opens).
 ACCESS_ZONES = [
-    ("Core_Lift_Lobby",         1,  "Public",    0,    0,    "Core_Lift_Mezzanine", False, True),
-    ("Core_Lift_Mezzanine",     2,  "Staff",     0,    0,    "Core_Lift_Lobby",     False, True),
-    ("Stair_A_F03",             3,  "Staff",   -1300,  0,    None,                  True,  True),
-    ("Stair_B_F03",             3,  "Staff",    1300,  0,    None,                  True,  True),
-    ("Office_Floor09",          9,  "Secure",    0,   -900,  None,                  True,  True),
-    ("Server_Floor09",          9,  "Secure",   -900,   0,    None,                  True,  True),
-    ("Executive_Floor12",      12,  "Executive", 0,    0,    "Executive_Wing_East", True,  True),
-    ("Executive_Wing_East",    12,  "Executive", 900,  900,  "Executive_Floor12",   True,  True),
-    ("Canteen_Floor15",        15,  "Staff",     0,    0,    "Skydeck_Gate",        True,  False),
-    ("Skydeck_Gate",           15,  "Skydeck", 900, -700,  "Canteen_Floor15",     True,  False),
+    ("Core_Lift_Lobby",         1,  "Public",    0,    300,  "Core_Lift_Mezzanine", False, True),
+    ("Core_Lift_Mezzanine",     2,  "Staff",     0,    300,  "Core_Lift_Lobby",     False, True),
+    ("Stair_A_F03",             3,  "Staff",   -1100,  470,  None,                  True,  True),
+    ("Stair_B_F03",             3,  "Staff",    1100,  470,  None,                  True,  True),
+    ("Office_Floor09",          9,  "Secure",    0,    -50,  None,                  True,  True),
+    ("Server_Floor09",          9,  "Secure",    0,  -1250,  None,                  True,  True),
+    ("Executive_Floor12",      12,  "Executive", 0,  -1100,  "Executive_Wing_East", True,  True),
+    ("Executive_Wing_East",    12,  "Executive", 1300, -200, "Executive_Floor12",   True,  True),
+    ("Canteen_Floor15",        15,  "Staff",   -1100,  470,  "Skydeck_Gate",        True,  False),
+    ("Skydeck_Gate",           15,  "Skydeck",  1100,  470,  "Canteen_Floor15",     True,  False),
 ]
 
 # Override terminals: hold-to-open. Two-panel pairs are what make the co-op push
 # into the Skydeck a real coordination problem.
 OVERRIDE_TERMINALS = [
-    ("Terminal_Office09_PanelA", 9,  -500, -1100, "Terminal_Office09_PanelB"),
-    ("Terminal_Office09_PanelB", 9,   500, -1100, "Terminal_Office09_PanelA"),
-    ("Terminal_Executive12",     12,   0,    700,  None),
-    ("Terminal_Canteen15",       15,  -700,   0,   "Terminal_Skydeck15"),
-    ("Terminal_Skydeck15",       15,   700,   0,   "Terminal_Canteen15"),
+    ("Terminal_Office09_PanelA", 9,  -400, -1350, "Terminal_Office09_PanelB"),
+    ("Terminal_Office09_PanelB", 9,   400, -1350, "Terminal_Office09_PanelA"),
+    ("Terminal_Executive12",     12,  300, -1250,  None),
+    ("Terminal_Canteen15",       15, -1600,  300, "Terminal_Skydeck15"),
+    ("Terminal_Skydeck15",       15,  1600,  300, "Terminal_Canteen15"),
 ]
 
 # Breachable walls: plasterboard and service partitions that a charge opens. Each
 # is (id, floor, x, y, yoke_axis, width, height, surface).
 BREACHABLE_WALLS = [
-    ("Breach_Office05_Partition", 5,  0,  700, "X", 600, 400, "Plasterboard"),
+    ("Breach_Office05_Partition", 5,  0,   -700, "Y", 1000, 400, "Plasterboard"),
     ("Breach_Server09_Riser",     9,  900, -600, "Y", 200, 400, "Plasterboard"),
-    ("Breach_Exec12_StairLock",  12, -900,  0,   "X", 250, 400, "Metal"),
+    # In front of stairwell A's door on floor 12: the stair is locked until
+    # somebody spends a charge on it. That floor has no shutter on stair A.
+    ("Breach_Exec12_StairLock",  12, -1100, 470, "X", 250, 400, "Metal"),
     ("Breach_Canteen14_Wall",    14,  0,   -900, "X", 700, 400, "Plasterboard"),
 ]
 
@@ -372,9 +389,120 @@ def _load(mesh_path):
 _load.misses = set()
 
 
+#: Every actor this script spawns is tagged with this prefix plus the level it
+#: was built into, so a rebuild can remove exactly what an earlier run made and
+#: nothing a designer placed by hand. Without it a second run stacked a second
+#: building on the first.
+GENERATED_TAG_PREFIX = "OB_Generated:"
+_current_build_level = [""]
+
+
 def _spawn(actor_class, location, rotation=None):
+    # unreal.Rotator's positional order is (roll, pitch, yaw), not the
+    # (pitch, yaw, roll) of FRotator in C++. Four calls here had it the C++
+    # way round: the ceiling lights shone sideways, the winch console faced the
+    # floor and the sun was rolled. Pass rotations by keyword.
     rot = rotation if rotation is not None else unreal.Rotator(0.0, 0.0, 0.0)
-    return _actor_subsystem().spawn_actor_from_class(actor_class, location, rot)
+    actor = _actor_subsystem().spawn_actor_from_class(actor_class, location, rot)
+    if actor is not None and _current_build_level[0]:
+        try:
+            tags = list(actor.tags)
+            tags.append(unreal.Name(GENERATED_TAG_PREFIX + _current_build_level[0]))
+            actor.tags = tags
+        except Exception:  # noqa: BLE001 - a missing tag only costs a clean rebuild
+            pass
+    return actor
+
+
+def _editor_world():
+    return unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
+
+
+def _open_level_for_build(report, level_path):
+    """Opens level_path for building, creating it if it does not exist, and
+    removes the actors an earlier run of this script generated in it.
+
+    Levels are created unpartitioned. World Partition streams by a 2D grid in
+    XY; sixteen storeys stacked on one 52 x 44 m footprint all fall in the same
+    cells, so a partitioned tower can only load all of itself or none of it,
+    and a partitioned world cannot hold the per-floor sublevels at all.
+    """
+    level_subsystem = _level_subsystem()
+    existed = unreal.EditorAssetLibrary.does_asset_exist(level_path)
+
+    try:
+        if existed:
+            ok = level_subsystem.load_level(level_path)
+        else:
+            try:
+                ok = level_subsystem.new_level(level_path, False)
+            except TypeError:
+                ok = level_subsystem.new_level(level_path)
+    except Exception as exc:  # noqa: BLE001
+        report.failed(level_path, u"could not open: {0}".format(exc))
+        return False
+
+    if ok is False:
+        report.failed(level_path, u"could not {0}".format("load" if existed else "create"))
+        return False
+
+    _current_build_level[0] = level_path.rsplit("/", 1)[-1]
+    tag = unreal.Name(GENERATED_TAG_PREFIX + _current_build_level[0])
+
+    removed = 0
+    for actor in list(_actor_subsystem().get_all_level_actors()):
+        try:
+            if tag in list(actor.tags):
+                _actor_subsystem().destroy_actor(actor)
+                removed += 1
+        except Exception:  # noqa: BLE001
+            continue
+
+    if existed:
+        report.updated_asset(level_path)
+        if removed:
+            C.log(u"  {0}: removed {1} actor(s) from the previous build".format(level_path, removed))
+    else:
+        report.created_asset(level_path)
+
+    return True
+
+
+def _save_build_level(report, level_path):
+    try:
+        _level_subsystem().save_current_level()
+        return True
+    except Exception as exc:  # noqa: BLE001
+        report.failed(level_path, u"could not save: {0}".format(exc))
+        return False
+    finally:
+        _current_build_level[0] = ""
+
+
+def _attach_floor_levels(report, persistent_path, floor_paths):
+    """Adds every floor as an always-loaded sublevel of the persistent level.
+
+    Until this the floors were created and never referenced: the persistent
+    map that ships held the shell and the winch, and no building. Always
+    loaded, not distance-streamed: nothing in the game streams floors at
+    runtime, and a floor that is not loaded has no collision to stand on.
+    """
+    if not _open_level_for_build(report, persistent_path):
+        return 0
+
+    world = _editor_world()
+    attached = 0
+    for level_path in floor_paths:
+        package = level_path
+        try:
+            if unreal.GameplayStatics.get_streaming_level(world, unreal.Name(package)) is None:
+                unreal.EditorLevelUtils.add_level_to_world(world, package, unreal.LevelStreamingAlwaysLoaded)
+            attached += 1
+        except Exception as exc:  # noqa: BLE001
+            report.failed(level_path, u"could not attach to the persistent level: {0}".format(exc))
+
+    _save_build_level(report, persistent_path)
+    return attached
 
 
 def _label(actor, label):
@@ -431,9 +559,11 @@ def _floor_z(floor_index):
 
 
 def _area_for_floor(floor_index):
-    for name, (first, last), origin_x, origin_y, size_x, size_y in C.AREAS:
+    """The area on a floor, as (name, centre_x, centre_y, size_x, size_y)."""
+    for area in C.AREAS:
+        name, (first, last), centre_x, centre_y, size_x, size_y = C.area_centre(area)
         if first <= floor_index <= last:
-            return name, origin_x, origin_y, size_x, size_y
+            return name, centre_x, centre_y, size_x, size_y
     return None, 0.0, 0.0, 0.0, 0.0
 
 
@@ -518,15 +648,16 @@ def _note_surface(surface_name, place):
 #  plant room into the glazing and being flash-blinded for a second and a half.
 # ---------------------------------------------------------------------------
 AREA_GRADE = {
-    # area,            min brightness, max brightness, bloom, grain, vignette
-    "Ground_Plaza":  (0.35, 2.4, 0.85, 0.030, 0.42),
-    "Lobby":         (0.40, 2.2, 0.75, 0.028, 0.38),
-    "Mezzanine":     (0.45, 2.1, 0.70, 0.026, 0.36),
-    "OpenPlan":      (0.60, 1.9, 0.55, 0.022, 0.30),
-    "ServerComms":   (0.22, 1.6, 0.40, 0.034, 0.46),
-    "Executive":     (0.65, 2.0, 0.60, 0.020, 0.32),
-    "Canteen":       (0.70, 2.3, 0.65, 0.022, 0.30),
-    "Skydeck":       (0.55, 3.6, 1.15, 0.024, 0.44),
+    # area,            min brightness, max brightness, bloom, vignette
+    # (film grain is the player's setting, not the map's)
+    "Ground_Plaza":  (0.35, 2.4, 0.85, 0.42),
+    "Lobby":         (0.40, 2.2, 0.75, 0.38),
+    "Mezzanine":     (0.45, 2.1, 0.70, 0.36),
+    "OpenPlan":      (0.60, 1.9, 0.55, 0.30),
+    "ServerComms":   (0.22, 1.6, 0.40, 0.46),
+    "Executive":     (0.65, 2.0, 0.60, 0.32),
+    "Canteen":       (0.70, 2.3, 0.65, 0.30),
+    "Skydeck":       (0.55, 3.6, 1.15, 0.44),
 }
 
 
@@ -566,7 +697,12 @@ def build_floor_shell(report, floor_index, materials):
 
     # 20 cm of slab so floors read as floors from the stairwell, and so a round
     # that misses a stairwell rail has something to stop in.
-    _box((origin_x, origin_y, z - 10.0), (size_x, size_y, 20.0), slab_material, prefix + "_Slab")
+    # Cut round the core: the stairwells behind their landings and the lift
+    # shafts, so the flights and the cars come up through it.
+    footprint = (origin_x - half_x, origin_x + half_x, origin_y - half_y, origin_y + half_y)
+    for index, (x0, x1, y0, y1) in enumerate(C.subtract_rects(footprint, C.core_holes(floor_index))):
+        _box(((x0 + x1) / 2.0, (y0 + y1) / 2.0, z - 10.0), (x1 - x0, y1 - y0, 20.0),
+             slab_material, "{0}_Slab_{1:02d}".format(prefix, index))
     created.append((prefix + "_Slab", (origin_x, origin_y, z - 10.0)))
     _note_surface("Marble" if area_name == "Lobby" else
                   ("Concrete" if area_name == "Ground_Plaza" else
@@ -574,15 +710,24 @@ def build_floor_shell(report, floor_index, materials):
                   prefix + "_Slab")
 
     # --- Ceiling ----------------------------------------------------------
-    _box((origin_x, origin_y, z + C.CEILING_HEIGHT_CM + 10.0),
-         (size_x, size_y, 20.0), plaster, prefix + "_Ceiling")
-    _note_surface("Plasterboard", prefix + "_Ceiling")
+    # Not on the Skydeck: it is the roof, open to the sky, and the one floor
+    # where the weather is real. It used to get the office ceiling and the
+    # office glazing like every other floor, which made the ending of the game
+    # a sixteenth open-plan office with a helicopter pad painted on the carpet.
+    if area_name != "Skydeck":
+        # The ceiling is the underside of the floor above, so it has that
+        # floor's holes: a stair capped by a plasterboard ceiling is a wall.
+        for index, (x0, x1, y0, y1) in enumerate(
+                C.subtract_rects(footprint, C.core_holes(floor_index + 1))):
+            _box(((x0 + x1) / 2.0, (y0 + y1) / 2.0, z + C.CEILING_HEIGHT_CM - 30.0),
+                 (x1 - x0, y1 - y0, 20.0), plaster, "{0}_Ceiling_{1:02d}".format(prefix, index))
+        _note_surface("Plasterboard", prefix + "_Ceiling")
 
     # --- Perimeter glazing (the thing that makes the tower feel like a tower) --
     # Windows are placed as a bank rather than individually: the banded look of a
     # curtain-wall office is what sells the building from inside *and* it is what
     # makes a floor edge dangerous to walk near.
-    if area_name not in ("ServerComms", "Ground_Plaza"):
+    if area_name not in ("ServerComms", "Ground_Plaza", "Skydeck"):
         window_h = C.CEILING_HEIGHT_CM - 120.0
         _box((origin_x, origin_y - half_y, z + window_h / 2.0 + 60.0),
              (size_x - 200.0, 12.0, window_h), glass, prefix + "_Glazing_South")
@@ -591,22 +736,19 @@ def build_floor_shell(report, floor_index, materials):
         _note_surface("BallisticGlass" if materials.get("BallisticGlass") is not None else "Glass",
                       prefix + "_Glazing")
 
-    # --- Core walls (the lift core is a hole in the middle of every floor) ---
-    core = C.LIFT_CORE_SIZE_CM
-    core_wall = 20.0
-    _box((origin_x - core / 2.0, origin_y, z + C.CEILING_HEIGHT_CM / 2.0),
-         (core_wall, core, C.CEILING_HEIGHT_CM), concrete, prefix + "_Core_West")
-    _box((origin_x + core / 2.0, origin_y, z + C.CEILING_HEIGHT_CM / 2.0),
-         (core_wall, core, C.CEILING_HEIGHT_CM), concrete, prefix + "_Core_East")
-    _box((origin_x, origin_y - core / 2.0, z + C.CEILING_HEIGHT_CM / 2.0),
-         (core, core_wall, C.CEILING_HEIGHT_CM), concrete, prefix + "_Core_South")
-    # The north face is left open on most floors: that is the door into the core.
+    # --- The service core ------------------------------------------------
+    created.extend(build_core(report, floor_index, materials))
 
     # --- Room partitions --------------------------------------------------
     rooms = ROOM_PROGRAMMES.get(area_name, [])
     for room_name, rx, ry, rsx, rsy in rooms:
         cx = origin_x + rx
         cy = origin_y + ry
+
+        # Open-air rooms have no partitions: a helipad with plaster walls round
+        # it is a box, and an "edge rail" walled in plasterboard is not an edge.
+        if room_name in OPEN_AIR_ROOMS:
+            continue
 
         # Partitions around every room except its entrance side. Entrances are
         # placed facing the core, which is what makes every room approachable from
@@ -661,85 +803,345 @@ def build_floor_shell(report, floor_index, materials):
         created.append(("{0}_{1}_Finish".format(prefix, room_name), (fx, fy, z - 0.6)))
         _note_surface(finish_name, "{0}/{1}".format(prefix, room_name))
 
-    # --- Circulation: stairwells and the lift doors -----------------------
-    stair_x = -1300.0
-    stair_y = 0.0
-    _box((origin_x + stair_x, origin_y + stair_y, z + 60.0),
-         (C.STAIRWELL_SIZE_CM, C.STAIRWELL_SIZE_CM, 120.0), concrete, prefix + "_Stair_A_Landing")
-    _box((origin_x - stair_x, origin_y + stair_y, z + 60.0),
-         (C.STAIRWELL_SIZE_CM, C.STAIRWELL_SIZE_CM, 120.0), concrete, prefix + "_Stair_B_Landing")
-
-    # Lift doors on the core's north face: two shafts, 110 cm doors, which is the
-    # chokepoint the whole map is balanced around.
-    for i, offset in enumerate((-260.0, 260.0)):
-        _box((origin_x + offset, origin_y + core / 2.0, z + 110.0),
-             (C.DOOR_WIDTH_CM, 20.0, 220.0), metal, "{0}_Lift_Door_{1}".format(prefix, i + 1))
-    _note_surface("Metal", prefix + "_Lift_Door")
-    _note_surface("Concrete", prefix + "_Stair_Landing")
     _note_surface("Plasterboard", prefix + "_Partitions")
 
     return created
 
 
-def build_vertical_circulation(report, materials):
-    """Builds the stair flights and lift shafts through all fifteen floors.
+def stair_flights(floor_index):
+    """The stairs from floor_index to the floor above, as boxes.
 
-    Stairs are the spine of ASCENT: the lockdown seals them, the breach opens
-    them, and the whole game is a decision about when to stop climbing. Each
-    flight is a run of steps, built as real geometry so the character movement
-    component's mantle and step-up logic has something honest to work with.
+    (label, centre x, centre y, centre z, size x, size y, size z) for every step
+    and the mid-landing of both stairwells. Two flights a storey: the first up
+    the west half of the well from the floor-level landing to a mid-landing at
+    the back, the second back down the east half to the landing of the floor
+    above. Each step is a block two risers deep, so the flight stacked above
+    leaves full headroom. Pure, so the engine-free check can walk the stair.
     """
+    if floor_index >= C.FLOOR_COUNT:
+        return []
+
+    z0 = _floor_z(floor_index)
+    rise = (C.FLOOR_HEIGHT_CM / 2.0) / C.STAIR_RISERS_PER_FLIGHT
+    tread = C.STAIR_TREAD_CM
+    well = C.STAIRWELL_SIZE_CM
+    y_start = C.CORE_BAND[2] + C.STAIR_LANDING_DEPTH_CM
+    y_turn = y_start + C.STAIR_RISERS_PER_FLIGHT * tread
+    flight_width = well / 2.0 - 20.0
+
+    boxes = []
+    for name, cx in C.STAIRWELLS:
+        west = cx - well / 4.0 - 5.0
+        east = cx + well / 4.0 + 5.0
+        for step in range(C.STAIR_RISERS_PER_FLIGHT):
+            top = z0 + (step + 1) * rise
+            depth = min(2.0 * rise, top - z0)
+            boxes.append(("Stair_{0}_F{1:02d}_Up1_{2:02d}".format(name, floor_index, step),
+                          west, y_start + (step + 0.5) * tread, top - depth / 2.0,
+                          flight_width, tread, depth))
+
+            top2 = z0 + C.FLOOR_HEIGHT_CM / 2.0 + (step + 1) * rise
+            boxes.append(("Stair_{0}_F{1:02d}_Up2_{2:02d}".format(name, floor_index, step),
+                          east, y_turn - (step + 0.5) * tread, top2 - 2.0 * rise / 2.0,
+                          flight_width, tread, 2.0 * rise))
+
+        landing_depth = C.CORE_BAND[3] - y_turn
+        boxes.append(("Stair_{0}_F{1:02d}_MidLanding".format(name, floor_index),
+                      cx, y_turn + landing_depth / 2.0, z0 + C.FLOOR_HEIGHT_CM / 2.0 - 10.0,
+                      well, landing_depth, 20.0))
+    return boxes
+
+
+def build_core(report, floor_index, materials):
+    """One floor of the service core: stairwell walls and flights, the lift
+    shafts with their landing openings, and the solid risers between them."""
     concrete = materials.get("Concrete")
     metal = materials.get("Metal")
+    z = _floor_z(floor_index)
+    is_deck = floor_index == C.FLOOR_COUNT
+    wall_h = 300.0 if is_deck else C.FLOOR_HEIGHT_CM
+    wall_z = z + wall_h / 2.0
+    prefix = "F{0:02d}_Core".format(floor_index)
+    band_x0, band_x1, band_y0, band_y1 = C.CORE_BAND
+    well = C.STAIRWELL_SIZE_CM
+    t = 20.0
+    created = []
 
-    stair_x = 1300.0
-    step_count = 12
-    step_rise = C.FLOOR_HEIGHT_CM / step_count
-    step_run = 26.0
+    def wall(label, x0, x1, y0, y1, material=concrete, height=wall_h, base=z):
+        _box(((x0 + x1) / 2.0, (y0 + y1) / 2.0, base + height / 2.0), (x1 - x0, y1 - y0, height),
+             material, "{0}_{1}".format(prefix, label))
 
-    for floor_index in range(0, C.FLOOR_COUNT):
-        z0 = _floor_z(floor_index)
-        z1 = _floor_z(floor_index + 1)
+    # Stairwells: three solid walls and a south wall with the door in it.
+    for name, cx in C.STAIRWELLS:
+        x0, x1 = cx - well / 2.0, cx + well / 2.0
+        wall("Stair_{0}_W".format(name), x0 - t, x0, band_y0, band_y1)
+        wall("Stair_{0}_E".format(name), x1, x1 + t, band_y0, band_y1)
+        wall("Stair_{0}_N".format(name), x0 - t, x1 + t, band_y1, band_y1 + t)
+        door = C.DOOR_WIDTH_CM / 2.0
+        wall("Stair_{0}_S_W".format(name), x0, cx - door, band_y0 - t, band_y0)
+        wall("Stair_{0}_S_E".format(name), cx + door, x1, band_y0 - t, band_y0)
+        wall("Stair_{0}_S_Head".format(name), cx - door, cx + door, band_y0 - t, band_y0,
+             height=wall_h - C.DOOR_HEIGHT_CM, base=z + C.DOOR_HEIGHT_CM)
+        if is_deck:
+            # The stair head on the roof: a lid over the well.
+            wall("Stair_{0}_Roof".format(name), x0 - t, x1 + t, band_y0 - t, band_y1 + t,
+                 height=20.0, base=z + wall_h)
+        created.append(("{0}_Stair_{1}".format(prefix, name), (cx, (band_y0 + band_y1) / 2.0, z)))
 
-        for side in (-1.0, 1.0):
-            x = stair_x * side
-            for i in range(step_count):
-                step_z = z0 + step_rise * (i + 1)
-                step_y = i * step_run
-                _box((x, step_y, step_z - step_rise / 2.0),
-                     (120.0, step_run, step_rise), concrete,
-                     "Stair_{0}_{1}_Step_{2}".format("A" if side < 0 else "B", floor_index, i))
+    for label, x, y, bz, sx, sy, sz in stair_flights(floor_index):
+        _box((x, y, bz), (sx, sy, sz), concrete, label)
+    _note_surface("Concrete", prefix + "_Stairs")
 
-        # Lift shaft: an open tube with a car floor at every level, so the lifts
-        # can be animated without a separate mesh.
-        for shaft in (-260.0, 260.0):
-            _box((shaft, 0.0, (z0 + z1) / 2.0), (C.LIFT_CAR_SIZE_CM, C.LIFT_CAR_SIZE_CM, C.FLOOR_HEIGHT_CM),
-                 metal, "Lift_Shaft_{0}_{1}".format(int(shaft), floor_index))
+    # Risers between the stairwells and the lift lobby.
+    lobby_x0, lobby_x1, _lobby_y0, lobby_y1 = C.LIFT_LOBBY
+    first_well_x1 = C.STAIRWELLS[0][1] + well / 2.0 + t
+    last_well_x0 = C.STAIRWELLS[-1][1] - well / 2.0 - t
+    wall("Riser_W", first_well_x1, lobby_x0, band_y0, band_y1)
+    wall("Riser_E", lobby_x1, last_well_x0, band_y0, band_y1)
 
-    return True
+    has_shafts = C.LIFT_FLOORS[0] <= floor_index <= C.LIFT_FLOORS[1]
+    if not has_shafts:
+        wall("Riser_Centre", lobby_x0, lobby_x1, lobby_y1, band_y1)
+        return created
+
+    # Lift shafts: walls round each, an opening on its lobby face at a stop.
+    half = C.LIFT_SHAFT_SIZE_CM / 2.0
+    shaft_y0 = C.LIFT_SHAFTS[0][2] - half
+    shaft_y1 = C.LIFT_SHAFTS[0][2] + half
+    wall("Shaft_Back", lobby_x0, lobby_x1, shaft_y1, band_y1)
+    wall("Shaft_W", lobby_x0, C.LIFT_SHAFTS[0][1] - half, shaft_y0, shaft_y1)
+    wall("Shaft_E", C.LIFT_SHAFTS[-1][1] + half, lobby_x1, shaft_y0, shaft_y1)
+    wall("Shaft_Mid", C.LIFT_SHAFTS[0][1] + half, C.LIFT_SHAFTS[-1][1] - half, shaft_y0, shaft_y1)
+
+    stop = floor_index in C.LIFT_STOPS
+    for name, cx, _cy in C.LIFT_SHAFTS:
+        if stop:
+            # The landing doors themselves belong to AOneBrahamLift; the wall
+            # only leaves them a hole the width of the car.
+            gap = C.LIFT_CAR_SIZE_CM / 2.0
+            wall("Shaft_{0}_Front_W".format(name), cx - half, cx - gap, shaft_y0 - t, shaft_y0, metal)
+            wall("Shaft_{0}_Front_E".format(name), cx + gap, cx + half, shaft_y0 - t, shaft_y0, metal)
+            wall("Shaft_{0}_Front_Head".format(name), cx - gap, cx + gap, shaft_y0 - t, shaft_y0, metal,
+                 height=wall_h - C.DOOR_HEIGHT_CM, base=z + C.DOOR_HEIGHT_CM)
+        else:
+            wall("Shaft_{0}_Front".format(name), cx - half, cx + half, shaft_y0 - t, shaft_y0, metal)
+    _note_surface("Metal", prefix + "_Lift")
+    return created
+
+
+def build_vertical_circulation(report, materials):
+    """Places the lifts. The stairs and shafts are part of each floor's core
+    (build_core); a lift is one actor that spans the floors it serves."""
+    lift_class = getattr(unreal, "OneBrahamLift", None)
+    if lift_class is None:
+        report.failed("OneBrahamLift", "the C++ class is not available; compile the module first")
+        return []
+
+    placed = []
+    for name, cx, cy in C.LIFT_SHAFTS:
+        actor = _spawn(lift_class, unreal.Vector(cx, cy, _floor_z(C.LIFT_FLOORS[0])))
+        if actor is None:
+            report.failed("Lift " + name, "could not spawn")
+            continue
+        _label(actor, "Lift_" + name)
+        try:
+            actor.set_editor_property("LiftId", unreal.Name("Lift_" + name))
+            actor.set_editor_property("StopFloors", list(C.LIFT_STOPS))
+            actor.set_editor_property("DoorFacingY", -1.0)
+        except Exception as exc:  # noqa: BLE001
+            report.failed("Lift " + name, str(exc))
+            continue
+        placed.append("Lift_" + name)
+    return placed
 
 
 # ===========================================================================
 #  Gameplay anchors
 # ===========================================================================
 
-def build_spawn_points(report):
-    """Places and configures every spawn anchor.
+#: Rooms no loot is placed in: the pad and the edge rails are where a player
+#: should be looking at the sky and the other squads, not the floor.
+LOOT_EXCLUDED_ROOMS = {"Helipad", "Edge_Rail_North", "Edge_Rail_South"}
 
-    Spawn safety is a hard requirement of the map spec: no spawn may be within
-    SPAWN_MIN_ENEMY_DISTANCE_CM of an enemy's spawn, and no two same-team spawns
-    may be closer than SPAWN_MIN_SAME_TEAM_DISTANCE_CM. This functions places
-    them, configures them, and hands the list to the manifest where
-    validate_project.py checks it - a map where the first thing that happens is
-    being shot in the back is a map that does not ship.
+#: One loot point per this many square metres of room, three to sixteen a room.
+LOOT_SQUARE_METRES_PER_POINT = 5.0
+LOOT_POINTS_MIN, LOOT_POINTS_MAX = 3, 16
+
+#: The first points in each room may also hold a keycard: a floor issues its
+#: cards from desks people work at, two a room, never from a stairwell.
+LOOT_KEYCARD_POINTS_PER_ROOM = 2
+
+#: Bit values of EOneBrahamLootCategory (Loot/OneBrahamLootSpawnPoint.h).
+LOOT_MASK_DEFAULT = 0b01111     # weapon, ammo, utility, medkit
+LOOT_MASK_WITH_KEYCARD = 0b11111
+
+
+def loot_points_for_room(room, centre_x, centre_y):
+    """(x, y, is_keycard_point) for one room, centred on the area centre.
+
+    A grid over the room, inset 60 cm from its walls, so the points are spread
+    across the room rather than stacked in its middle. Pure, so the engine-free
+    check can count what a floor will have before an editor ever runs.
     """
-    spawn_class = getattr(unreal, "OneBrahamSpawnPoint", None)
-    if spawn_class is None:
-        report.failed("OneBrahamSpawnPoint", "the C++ class is not available; "
-                      "compile the project before running the environment build.")
+    name, rx, ry, size_x, size_y = room
+    if name in LOOT_EXCLUDED_ROOMS:
+        return []
+
+    area_m2 = (size_x * size_y) / 10000.0
+    count = int(max(LOOT_POINTS_MIN, min(LOOT_POINTS_MAX, round(area_m2 / LOOT_SQUARE_METRES_PER_POINT))))
+
+    columns = max(1, int(math.ceil(math.sqrt(count * size_x / max(size_y, 1.0)))))
+    rows = max(1, int(math.ceil(count / float(columns))))
+
+    inset_x = min(60.0, size_x / 4.0)
+    inset_y = min(60.0, size_y / 4.0)
+    span_x = max(0.0, size_x - 2.0 * inset_x)
+    span_y = max(0.0, size_y - 2.0 * inset_y)
+
+    points = []
+    for index in range(count):
+        column = index % columns
+        row = index // columns
+        px = centre_x + rx - span_x / 2.0 + (column + 0.5) * span_x / columns
+        py = centre_y + ry - span_y / 2.0 + (row + 0.5) * span_y / rows
+        points.append((px, py, index < LOOT_KEYCARD_POINTS_PER_ROOM))
+
+    return points
+
+
+def loot_points_per_floor():
+    """floor index -> number of loot points the builder will place."""
+    counts = {}
+    for area in C.AREAS:
+        name, (first, last), cx, cy, _sx, _sy = C.area_centre(area)
+        per_floor = sum(len(loot_points_for_room(room, cx, cy)) for room in ROOM_PROGRAMMES.get(name, []))
+        for floor in range(first, last + 1):
+            counts[floor] = per_floor
+    return counts
+
+
+def build_loot_points(report):
+    """Places AOneBrahamLootSpawnPoint actors in every room of every floor.
+
+    The match settings say how much loot a floor holds; these say where it may
+    be. There are deliberately more points than any floor's profile asks for,
+    so the same room holds its rifle on a different desk next match.
+    """
+    point_class = getattr(unreal, "OneBrahamLootSpawnPoint", None)
+    if point_class is None:
+        report.failed("OneBrahamLootSpawnPoint", "the C++ class is not available; compile the module first")
         return []
 
     placed = []
+    for area in C.AREAS:
+        name, (first, last), cx, cy, _sx, _sy = C.area_centre(area)
+        for floor_index in range(first, last + 1):
+            z = _floor_z(floor_index) + 2.0
+            for room in ROOM_PROGRAMMES.get(name, []):
+                for index, (px, py, keycard) in enumerate(loot_points_for_room(room, cx, cy)):
+                    actor = _spawn(point_class, unreal.Vector(px, py, z))
+                    if actor is None:
+                        continue
+
+                    label = "Loot_F{0:02d}_{1}_{2:02d}".format(floor_index, room[0], index)
+                    _label(actor, label)
+                    try:
+                        actor.set_editor_property("FloorIndex", floor_index)
+                        actor.set_editor_property("CategoryMask",
+                                                  LOOT_MASK_WITH_KEYCARD if keycard else LOOT_MASK_DEFAULT)
+                    except Exception as exc:  # noqa: BLE001
+                        report.failed(label, str(exc))
+                        continue
+
+                    placed.append({"label": label, "floor": floor_index, "room": room[0],
+                                   "location": [px, py, z], "keycard": keycard})
+
+    C.log(u"  loot: {0} spawn points".format(len(placed)))
+    return placed
+
+
+#: Destructible props: (kind, hazard, size cm, health). Hazard names are
+#: EOneBrahamPropHazard values.
+DESTRUCTIBLE_KINDS = {
+    "Extinguisher": ("Extinguisher", (18.0, 18.0, 60.0), 25.0),
+    "Water_Cooler": ("Water", (32.0, 32.0, 108.0), 60.0),
+    "Printer": ("Electrical", (60.0, 60.0, 110.0), 140.0),
+    "Rack_Panel": ("Electrical", (60.0, 8.0, 200.0), 180.0),
+}
+
+#: Rooms that get a water cooler, and rooms that get a printer, at their centre.
+COOLER_ROOMS = {"Coffee_Point", "Vending_Alcove", "Break_Out_Kitchen", "NOC", "Servery", "Exec_PA_Desk"}
+PRINTER_ROOMS = {"Print_Alcove", "Exec_PA_Desk", "Security_Desk"}
+
+
+def destructible_props_for_floor(floor_index):
+    """(label, kind, x, y) for every destructible prop on a floor.
+
+    Pure, so the engine-free check can see that none of them stands in the
+    service core or outside the floor.
+    """
+    area = next((a for a in C.AREAS if a[1][0] <= floor_index <= a[1][1]), None)
+    if area is None:
+        return []
+    name, _floors, cx, cy, _sx, _sy = C.area_centre(area)
+    prefix = "F{0:02d}".format(floor_index)
+    props = []
+
+    # An extinguisher beside every stairwell door: the corridor's one piece of
+    # furniture, and a smoke screen for whoever shoots it.
+    for stair, sx in C.STAIRWELLS:
+        props.append(("{0}_Extinguisher_{1}".format(prefix, stair), "Extinguisher",
+                      sx + C.DOOR_WIDTH_CM / 2.0 + 100.0, C.STAIRWELL_DOOR_Y - 25.0))
+
+    for room, rx, ry, rsx, rsy in ROOM_PROGRAMMES.get(name, []):
+        x, y = cx + rx, cy + ry
+        if room in COOLER_ROOMS:
+            props.append(("{0}_{1}_Cooler".format(prefix, room), "Water_Cooler",
+                          x - rsx / 2.0 + 40.0, y + rsy / 2.0 - 40.0))
+        if room in PRINTER_ROOMS:
+            props.append(("{0}_{1}_Printer".format(prefix, room), "Printer",
+                          x + rsx / 2.0 - 50.0, y + rsy / 2.0 - 50.0))
+        if room.startswith("Server_Row"):
+            for index in range(4):
+                props.append(("{0}_{1}_Panel_{2}".format(prefix, room, index), "Rack_Panel",
+                              x, y - rsy / 2.0 + (index + 0.5) * rsy / 4.0))
+    return props
+
+
+def build_destructible_props(report, floor_index):
+    """Places this floor's AOneBrahamDestructibleProp actors."""
+    prop_class = getattr(unreal, "OneBrahamDestructibleProp", None)
+    if prop_class is None:
+        report.failed("OneBrahamDestructibleProp", "the C++ class is not available; compile the module first")
+        return []
+
+    hazard_enum = getattr(unreal, "OneBrahamPropHazard", None)
+    z = _floor_z(floor_index)
+    placed = []
+    for label, kind, x, y in destructible_props_for_floor(floor_index):
+        hazard, size, health = DESTRUCTIBLE_KINDS[kind]
+        actor = _spawn(prop_class, unreal.Vector(x, y, z + size[2] / 2.0))
+        if actor is None:
+            continue
+        _label(actor, label)
+        try:
+            actor.set_editor_property("PropId", unreal.Name(label))
+            actor.set_editor_property("SizeCm", unreal.Vector(*size))
+            actor.set_editor_property("MaxHealth", health)
+            if hazard_enum is not None:
+                actor.set_editor_property("Hazard", getattr(hazard_enum, hazard.upper()))
+        except Exception as exc:  # noqa: BLE001
+            report.failed(label, str(exc))
+            continue
+        placed.append(label)
+    return placed
+
+
+def spawn_plan():
+    """Every spawn anchor as the map will place it: name, floor, area, zone tag,
+    world location and squad cluster. Pure data, so check_building_layout can
+    run the spawn-safety rules with no engine."""
+    plan = []
     spawn_index = 0
 
     for area_name, anchors in ANCHORS.items():
@@ -760,78 +1162,109 @@ def build_spawn_points(report):
             # them all on the middle one: two anchors on the same floor 3000 cm
             # apart are one spawn, not two.
             floor_index = floors[0] + (index % floor_span)
-            z = _floor_z(floor_index) + 90.0
-
-            actor = _spawn(spawn_class, unreal.Vector(ax, ay, z))
-            if actor is None:
-                continue
-
-            _label(actor, anchor_name)
-
-            try:
-                actor.set_editor_property("FloorIndex", floor_index)
-
-                # ASCENT is three squads of four in a free-for-all: no anchor is
-                # tied to a team, and the cluster id is what keeps a squad
-                # together. The game mode round-robins players onto clusters 0-2.
-                actor.set_editor_property("SquadClusterId", spawn_index % 3)
-                actor.set_editor_property("Weight", 1.0)
-                actor.set_editor_property("CooldownSeconds", 0.0)
-                actor.set_editor_property("bEnabled", True)
-
-                # Best-effort tag: if the tag list in DefaultGame.ini has not been
-                # compiled into this editor session, leave it unset rather than
-                # failing the build. An untagged spawn point is a spawn point the
-                # game mode weights less; it is not a broken map.
-                try:
-                    tag = unreal.GameplayTagLibrary.request_gameplay_tag(zone_tag_name)
-                    if tag is not None and tag.is_valid:
-                        actor.set_editor_property("ZoneTag", tag)
-                except Exception:  # noqa: BLE001
-                    pass
-
-            except Exception as exc:  # noqa: BLE001
-                report.failed("spawn point " + anchor_name, str(exc))
-
-            placed.append({
+            plan.append({
                 "name": anchor_name,
                 "floor": floor_index,
                 "area": area_name,
                 "zone_tag": zone_tag_name,
-                "location": [ax, ay, z],
+                "location": [ax, ay, _floor_z(floor_index) + 90.0],
                 "squad_cluster": spawn_index % 3,
             })
             spawn_index += 1
+    return plan
 
-    # The two rules, checked here as well as in the validator: a failure at build
-    # time names the anchor, which a validation report cannot.
-    #
-    # MEASURED ON THE SAME STOREY. The enemy rule exists to stop an opening rush
-    # reaching an opposing squad before it has moved, and a squad two floors away
-    # cannot do that: the slab between them is a real barrier, and the stairwells
-    # are the only route. Measuring straight-line distance through a floor would
-    # force spawn anchors into the corners of a floor plan and make the tower
-    # worse to play in order to satisfy a number. Same storey, then, and the
-    # vertical case is covered by the deploy timer and the spawn-heat scan in
-    # AOneBrahamGameMode.
+
+def spawn_safety_problems(plan):
+    """The two spawn rules over a plan; one line per offending pair.
+
+    MEASURED ON THE SAME STOREY. The enemy rule exists to stop an opening rush
+    reaching an opposing squad before it has moved, and a squad two floors away
+    cannot do that: the slab between them is a real barrier, and the stairwells
+    are the only route. Measuring straight-line distance through a floor would
+    force spawn anchors into the corners of a floor plan and make the tower
+    worse to play in order to satisfy a number. Same storey, then, and the
+    vertical case is covered by the deploy timer and the spawn-heat scan in
+    AOneBrahamGameMode.
+    """
     import math
     problems = []
-
-    for i, a in enumerate(placed):
-        for b in placed[i + 1:]:
+    for i, a in enumerate(plan):
+        for b in plan[i + 1:]:
             if abs(a["location"][2] - b["location"][2]) >= C.FLOOR_HEIGHT_CM:
                 continue
-
             distance = math.hypot(a["location"][0] - b["location"][0],
                                   a["location"][1] - b["location"][1])
-
             if a["squad_cluster"] != b["squad_cluster"] and distance < C.SPAWN_MIN_ENEMY_DISTANCE_CM:
                 problems.append(u"{0} (F{1:02d}) is {2:.0f} cm from {3} (F{4:02d}), enemy rule is {5:.0f} cm".format(
-                    a["name"], a["floor"], distance, b["name"], b["floor"],
-                    C.SPAWN_MIN_ENEMY_DISTANCE_CM))
+                    a["name"], a["floor"], distance, b["name"], b["floor"], C.SPAWN_MIN_ENEMY_DISTANCE_CM))
             elif a["squad_cluster"] == b["squad_cluster"] and distance < C.SPAWN_MIN_SAME_TEAM_DISTANCE_CM:
                 problems.append(u"{0} (F{1:02d}) is {2:.0f} cm from squadmate {3} (F{4:02d})".format(
                     a["name"], a["floor"], distance, b["name"], b["floor"]))
+    return problems
+
+
+def build_spawn_points(report):
+    """Places and configures every spawn anchor.
+
+    Spawn safety is a hard requirement of the map spec: no spawn may be within
+    SPAWN_MIN_ENEMY_DISTANCE_CM of an enemy's spawn, and no two same-team spawns
+    may be closer than SPAWN_MIN_SAME_TEAM_DISTANCE_CM. This functions places
+    them, configures them, and hands the list to the manifest where
+    validate_project.py checks it - a map where the first thing that happens is
+    being shot in the back is a map that does not ship.
+    """
+    spawn_class = getattr(unreal, "OneBrahamSpawnPoint", None)
+    if spawn_class is None:
+        report.failed("OneBrahamSpawnPoint", "the C++ class is not available; "
+                      "compile the project before running the environment build.")
+        return []
+
+    placed = []
+
+    for spawn in spawn_plan():
+        anchor_name = spawn["name"]
+        floor_index = spawn["floor"]
+        zone_tag_name = spawn["zone_tag"]
+        ax, ay, z = spawn["location"]
+
+        actor = _spawn(spawn_class, unreal.Vector(ax, ay, z))
+        if actor is None:
+            report.failed("spawn point " + anchor_name, "could not be spawned")
+            continue
+
+        _label(actor, anchor_name)
+
+        try:
+            actor.set_editor_property("FloorIndex", floor_index)
+
+            # ASCENT is three squads of four in a free-for-all: no anchor is
+            # tied to a team, and the cluster id is what keeps a squad
+            # together. The game mode round-robins players onto clusters 0-2.
+            actor.set_editor_property("SquadClusterId", spawn["squad_cluster"])
+            actor.set_editor_property("Weight", 1.0)
+            actor.set_editor_property("CooldownSeconds", 0.0)
+            actor.set_editor_property("bEnabled", True)
+
+            # Best-effort tag: if the tag list in DefaultGame.ini has not been
+            # compiled into this editor session, leave it unset rather than
+            # failing the build. An untagged spawn point is a spawn point the
+            # game mode weights less; it is not a broken map.
+            tag = C.make_gameplay_tag(zone_tag_name)
+            if tag is not None:
+                actor.set_editor_property("ZoneTag", tag)
+            else:
+                report.skipped_asset(anchor_name, u"zone tag {0} is not registered in this "
+                                     u"editor session".format(zone_tag_name))
+
+        except Exception as exc:  # noqa: BLE001
+            report.failed("spawn point " + anchor_name, str(exc))
+
+        placed.append(spawn)
+
+    # The two rules, checked here as well as by check_building_layout (which
+    # runs the same function with no engine): a failure at build time names the
+    # anchor, which a validation report cannot.
+    problems = spawn_safety_problems(placed)
 
     if problems:
         # A spawn-safety failure is a design failure, not a script failure, so it
@@ -1030,19 +1463,22 @@ def build_shutters(report):
     for floor in SHUTTER_FLOORS:
         z = _floor_z(floor) + C.DOOR_HEIGHT_CM / 2.0
 
-        for side in (-1.0, 1.0):
-            x = 1300.0 * side
-            side_name = "A" if side < 0 else "B"
+        for side_name, x in C.STAIRWELLS:
+            # In the corridor, in front of the stairwell door.
+            y = C.STAIRWELL_DOOR_Y - 30.0
+            if any(row[1] == floor and abs(row[2] - x) < 1.0 and abs(row[3] - y) < 60.0
+                   for row in BREACHABLE_WALLS):
+                continue
 
             if shutter_class is None:
                 report.skipped_asset(
                     "AOneBrahamFireShutter",
                     "fire shutter class is not loaded; stair opening " + side_name +
                     " on floor " + str(floor) + " cannot be sealed by the lockdown.")
-                _box((x, 0.0, z), (C.DOOR_WIDTH_CM + 40.0, 30.0, C.DOOR_HEIGHT_CM),
+                _box((x, y, z), (C.DOOR_WIDTH_CM + 40.0, 30.0, C.DOOR_HEIGHT_CM),
                      None, "Shutter_{0}_F{1:02d}".format(side_name, floor), static=False)
             else:
-                shutter = _spawn(shutter_class, unreal.Vector(x, 0.0, z))
+                shutter = _spawn(shutter_class, unreal.Vector(x, y, z))
                 if shutter is not None:
                     _label(shutter, "Shutter_{0}_F{1:02d}".format(side_name, floor))
                     try:
@@ -1081,8 +1517,13 @@ def build_extraction(report):
     _box((px + 130.0, py, deck_z + 2.0), (40.0, 300.0, 4.0), None, "Helipad_H_Right")
     _box((px, py, deck_z + 2.0), (300.0, 40.0, 4.0), None, "Helipad_H_Cross")
 
-    # Winch control room, from the room programme.
-    _box((-1500.0, 400.0, deck_z + 125.0), (600.0, 500.0, 250.0), None, "Winch_Control_Shell")
+    # The winch control room is built by the floor shell from the room
+    # programme. A second, solid "shell" box used to sit at its old position,
+    # which after the core went in was the head of stairwell A.
+    room = next(r for r in ROOM_PROGRAMMES["Skydeck"] if r[0] == "Winch_Control")
+    room_centre = C.area_centre(next(a for a in C.AREAS if a[0] == "Skydeck"))
+    room_x = room_centre[2] + room[1]
+    room_y = room_centre[3] + room[2]
 
     # Beacon mast: the thing the whole building can see. Four metres of mast with
     # a light on top, hot on the extraction channel.
@@ -1131,9 +1572,11 @@ def build_extraction(report):
     # The console stands against the pad-facing wall of the winch control shell,
     # facing the deck: calling the winch means turning your back on the pad, which
     # is the decision the mode is built around.
-    console_x = -1140.0
-    console_y = 400.0
+    # On the outside of the room's pad-facing (east) wall, facing the pad.
+    console_x = room_x + room[3] / 2.0 + 40.0
+    console_y = room_y
     console_z = deck_z + 20.0
+    console_yaw = math.degrees(math.atan2(py - console_y, px - console_x))
 
     if console_class is None:
         report.skipped_asset(
@@ -1144,7 +1587,7 @@ def build_extraction(report):
              "Winch_Console_Blockout", static=False)
     else:
         console = _spawn(console_class, unreal.Vector(console_x, console_y, console_z),
-                         unreal.Rotator(0.0, -90.0, 0.0))
+                         unreal.Rotator(roll=0.0, pitch=0.0, yaw=console_yaw))
         if console is not None:
             _label(console, "Winch_Control_Console")
             try:
@@ -1155,6 +1598,16 @@ def build_extraction(report):
                 console.set_editor_property("InteractionRangeCm", 220.0)
             except Exception as exc:  # noqa: BLE001
                 report.failed("winch console", str(exc))
+
+    # The helicopter: placed once, hidden until a squad calls it. It derives its
+    # whole flight from the extraction component's replicated state.
+    heli_class = getattr(unreal, "OneBrahamHelicopter", None)
+    if heli_class is None:
+        report.failed("OneBrahamHelicopter", "the C++ class is not available; compile the module first")
+    else:
+        heli = _spawn(heli_class, unreal.Vector(px, py, deck_z + 1800.0))
+        if heli is not None:
+            _label(heli, "Extraction_Helicopter")
 
     C.log(u"  extraction pad built at {0} (hold radius {1} cm)".format(
         C.EXTRACTION_PAD_LOCATION, C.EXTRACTION_HOLD_RADIUS_CM))
@@ -1200,7 +1653,7 @@ def build_lighting(report, floor_index):
             ly = origin_y - size_y / 2.0 + (iy + 0.5) * (size_y / grid_y)
 
             light = _spawn(unreal.RectLight, unreal.Vector(lx, ly, ceiling_z),
-                           unreal.Rotator(0.0, 0.0, -90.0))
+                           unreal.Rotator(roll=0.0, pitch=-90.0, yaw=0.0))  # facing down
             if light is None:
                 continue
 
@@ -1213,8 +1666,8 @@ def build_lighting(report, floor_index):
                 # 4000 K: the colour of a building's own lighting, everywhere.
                 component.set_editor_property("LightColor", unreal.Color(255, 246, 232, 232))
                 component.set_editor_property("Mobility", unreal.ComponentMobility.STATIC)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                report.failed("rect light, floor {0}".format(floor_index), u"{0}".format(exc))
 
             _label(light, "Ceiling_Light_{0}_F{1:02d}_{2}".format(area_name, floor_index, spawn_count))
             spawn_count += 1
@@ -1222,82 +1675,128 @@ def build_lighting(report, floor_index):
     C.log(u"  floor {0:02d} ({1}): {2} ceiling lights".format(floor_index, area_name, spawn_count))
 
 
-def build_post_process(report, floor_index):
-    """Adds the unbound post-process volume that grades this floor.
+def _fit_volume(report, volume, centre, half_extent, label):
+    """Scales a volume so its brush covers centre +/- half_extent (cm).
 
-    Created per floor rather than once in the persistent level because the
-    Skydeck and the server room cannot share an exposure range, and a single
-    global volume is how a game ends up with one floor that looks like a
-    photograph and another that looks like a screenshot of a spreadsheet.
-
-    Every property is set inside the same try/except the rest of this file uses:
-    post-process property names have moved between engine minor versions, and a
-    volume that exists with default settings is still better than a build that
-    failed because one property was renamed.
+    Measured, not assumed: the brush a volume is spawned with is read from its
+    bounds and the scale is the ratio, so this is right whatever size the
+    editor's box builder used. False (and a report line) when the volume has
+    no brush to scale.
     """
-    area_name, origin_x, origin_y, size_x, size_y = _area_for_floor(floor_index)
+    try:
+        volume.set_actor_location(unreal.Vector(*centre), False, False)
+        volume.set_actor_scale3d(unreal.Vector(1.0, 1.0, 1.0))
+        _origin, extent = volume.get_actor_bounds(False)
+        if extent.x <= 1.0 or extent.y <= 1.0 or extent.z <= 1.0:
+            report.failed(label, u"spawned without a brush; cannot be bounded")
+            return False
+        volume.set_actor_scale3d(unreal.Vector(half_extent[0] / extent.x,
+                                               half_extent[1] / extent.y,
+                                               half_extent[2] / extent.z))
+        return True
+    except Exception as exc:  # noqa: BLE001
+        report.failed(label, u"could not size: {0}".format(exc))
+        return False
+
+
+def _apply_post_process(report, volume, label, values):
+    """Writes post-process settings onto a volume, override flags and all.
+
+    Two things went wrong here before, silently. The settings struct is a
+    copy in Unreal Python: editing `volume.settings` changes nothing unless the
+    struct is written back. And a value without its `override_` flag is
+    ignored by the renderer. So every value here sets its flag, the struct is
+    written back once, and a property that will not take is reported rather
+    than swallowed.
+
+    values: {python_property_name: value}; "weighted_blendables" has no flag.
+    """
+    try:
+        settings = volume.get_editor_property("settings")
+    except Exception as exc:  # noqa: BLE001
+        report.failed(label, u"no post-process settings: {0}".format(exc))
+        return False
+
+    for name, value in values.items():
+        try:
+            if name != "weighted_blendables":
+                settings.set_editor_property("override_" + name, True)
+            settings.set_editor_property(name, value)
+        except Exception as exc:  # noqa: BLE001
+            report.failed(label, u"{0}: {1}".format(name, exc))
+
+    try:
+        volume.set_editor_property("settings", settings)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        report.failed(label, u"settings not written back: {0}".format(exc))
+        return False
+
+
+def build_post_process(report, floor_index):
+    """Adds the bounded post-process volume that grades this floor.
+
+    One per floor, because the Skydeck and the server room cannot share an
+    exposure range. Bounded to the floor and above the global baseline
+    (priority 1 over 0): these used to be sixteen unbound volumes at equal
+    priority, which blended every floor's grade into every other floor's.
+
+    Motion blur and film grain are not here. They are the player's settings
+    (UOneBrahamGameUserSettings drives their CVars), and a volume value would
+    override the menu.
+    """
+    area_name, centre_x, centre_y, size_x, size_y = _area_for_floor(floor_index)
     if area_name is None:
         return
 
+    label = "PostProcess_{0}_F{1:02d}".format(area_name, floor_index)
     z = _floor_z(floor_index) + C.CEILING_HEIGHT_CM / 2.0
 
-    volume = _spawn(unreal.PostProcessVolume, unreal.Vector(origin_x, origin_y, z))
+    volume = _spawn(unreal.PostProcessVolume, unreal.Vector(centre_x, centre_y, z))
     if volume is None:
         return
 
-    _label(volume, "PostProcess_{0}_F{1:02d}".format(area_name, floor_index))
+    _label(volume, label)
 
-    min_brightness, max_brightness, bloom, grain, vignette = AREA_GRADE.get(
-        area_name, (0.5, 2.0, 0.6, 0.025, 0.35))
+    min_brightness, max_brightness, bloom, vignette = AREA_GRADE.get(
+        area_name, (0.5, 2.0, 0.6, 0.35))
 
+    # The floor's footprint and storey, a few centimetres inside the slabs so
+    # the floor above and below never share a point.
+    bounded = _fit_volume(report, volume, (centre_x, centre_y, z),
+                          (size_x / 2.0, size_y / 2.0, C.CEILING_HEIGHT_CM / 2.0 - 5.0), label)
     try:
-        volume.set_editor_property("bUnbound", True)
-        volume.set_editor_property("BlendWeight", 1.0)
-        volume.set_editor_property("Priority", 0.0)
-    except Exception:  # noqa: BLE001
-        pass
-
-    try:
-        settings = volume.settings
-
-        # Exposure: manual range, so a dark plant room does not auto-brighten the
-        # whole floor and a bright one does not auto-dim it.
-        settings.set_editor_property("AutoExposureMethod", unreal.AutoExposureMethod.AEM_Manual)
-        settings.set_editor_property("AutoExposureMinBrightness", float(min_brightness))
-        settings.set_editor_property("AutoExposureMaxBrightness", float(max_brightness))
-
-        # Grade: restrained. One Braham is a corporate building, not a film.
-        settings.set_editor_property("BloomIntensity", float(bloom))
-        settings.set_editor_property("FilmGrainIntensity", float(grain))
-        settings.set_editor_property("VignetteIntensity", float(vignette))
-        settings.set_editor_property("MotionBlurAmount", 0.28)
-    except Exception:  # noqa: BLE001
-        pass
-
-    # The interaction outline. Six interactables in this game set custom-depth
-    # stencil 2 when the player looks at them (SetInteractionHighlight), and
-    # until now nothing on the receiving end read it: the highlight was written
-    # to the depth buffer and consumed by nobody. M_OB_Highlight is the material
-    # that reads it, and this is where it is applied - the material is
-    # build_materials.py's, the volume is this file's.
-    #
-    # Loaded by path and skipped with a warning rather than a failure: a floor
-    # without an outline is still a floor, and the build order already puts
-    # materials first for exactly the case where it is not.
-    try:
-        highlight = unreal.EditorAssetLibrary.load_asset(C.MATERIALS + "/M_OB_Highlight")
-
-        if highlight is None:
-            C.warn(u"  M_OB_Highlight not built yet - no interaction outline on "
-                   u"PostProcess_{0}_F{1:02d} (run build_materials.py first)".format(
-                       area_name, floor_index))
-        else:
-            blendables = unreal.WeightedBlendables()
-            blendables.set_editor_property("array", [unreal.WeightedBlendable(1.0, highlight)])
-            settings.set_editor_property("WeightedBlendables", blendables)
+        volume.set_editor_property("unbound", not bounded)
+        volume.set_editor_property("blend_weight", 1.0)
+        volume.set_editor_property("blend_radius", 150.0)
+        volume.set_editor_property("priority", 1.0)
     except Exception as exc:  # noqa: BLE001
-        C.warn(u"  outline blendable not attachable on PostProcess_{0}_F{1:02d}: {2}".format(
-            area_name, floor_index, exc))
+        report.failed(label, u"volume properties: {0}".format(exc))
+
+    values = {
+        # Histogram exposure clamped to the area's range, so a dark plant room
+        # does not brighten the whole floor and the glazing does not blind.
+        "auto_exposure_method": unreal.AutoExposureMethod.AEM_HISTOGRAM,
+        "auto_exposure_min_brightness": float(min_brightness),
+        "auto_exposure_max_brightness": float(max_brightness),
+        # Grade: restrained. One Braham is a corporate building, not a film.
+        "bloom_intensity": float(bloom),
+        "vignette_intensity": float(vignette),
+    }
+
+    # The interaction outline. Six interactables set custom-depth stencil 2 when
+    # the player looks at them; M_OB_Highlight (build_materials.py) is what reads
+    # it, so it rides on every floor's volume.
+    highlight = unreal.EditorAssetLibrary.load_asset(C.MATERIALS + "/M_OB_Highlight")
+    if highlight is None:
+        C.warn(u"  M_OB_Highlight not built yet - no interaction outline on {0} "
+               u"(run build_materials.py first)".format(label))
+    else:
+        blendables = unreal.WeightedBlendables()
+        blendables.set_editor_property("array", [unreal.WeightedBlendable(1.0, highlight)])
+        values["weighted_blendables"] = blendables
+
+    _apply_post_process(report, volume, label, values)
 
 
 def build_audio_zone(report, floor_index):
@@ -1319,14 +1818,16 @@ def build_audio_zone(report, floor_index):
 
     _label(volume, "AudioZone_{0}_F{1:02d}".format(area_name, floor_index))
 
+    label = "AudioZone_{0}_F{1:02d}".format(area_name, floor_index)
+    _fit_volume(report, volume, (origin_x, origin_y, z),
+                (size_x / 2.0, size_y / 2.0, C.CEILING_HEIGHT_CM / 2.0 - 5.0), label)
     try:
-        volume.set_actor_scale3d(unreal.Vector(size_x / 100.0, size_y / 100.0, C.CEILING_HEIGHT_CM / 100.0))
-        # The zone id maps to AMB_* in the audio bank (see OneBrahamAudioBankAsset).
-        settings = volume.settings
-        settings.set_editor_property("Enabled", True)
-        settings.set_editor_property("Priority", 1.0)
-    except Exception:  # noqa: BLE001
-        pass
+        # Enabled and priority are the volume's own properties; they used to be
+        # written to a copy of its reverb struct, which has neither.
+        volume.set_editor_property("enabled", True)
+        volume.set_editor_property("priority", 1.0)
+    except Exception as exc:  # noqa: BLE001
+        report.failed(label, u"volume properties: {0}".format(exc))
 
 
 def build_nav(report, floor_index):
@@ -1346,9 +1847,13 @@ def build_nav(report, floor_index):
         report.failed("NavMeshBoundsVolume F{0}".format(floor_index), "could not spawn")
         return
 
-    _label(volume, "NavBounds_F{0:02d}_{1}".format(floor_index, area_name))
-    volume.set_actor_scale3d(unreal.Vector((size_x - 200.0) / 100.0, (size_y - 200.0) / 100.0,
-                                           (C.CEILING_HEIGHT_CM - 80.0) / 100.0))
+    label = "NavBounds_F{0:02d}_{1}".format(floor_index, area_name)
+    _label(volume, label)
+    # The plate less a metre at each edge, and one storey: this was scaled as
+    # if the brush were 100 cm, which made every floor's bounds twice the plate
+    # and 640 cm tall, generating nav into the floors above and below.
+    _fit_volume(report, volume, (origin_x, origin_y, z + C.CEILING_HEIGHT_CM / 2.0),
+                (size_x / 2.0 - 100.0, size_y / 2.0 - 100.0, (C.CEILING_HEIGHT_CM - 80.0) / 2.0), label)
 
 
 def build_skydeck_climate(report):
@@ -1361,6 +1866,9 @@ def build_skydeck_climate(report):
     """
     deck_z = _floor_z(15)
 
+    build_skydeck_edge(report)
+    _set_kill_z(report, _floor_z(0) - 1200.0)
+
     sky = _spawn(unreal.SkyAtmosphere, unreal.Vector(0.0, 0.0, deck_z))
     if sky is None:
         report.failed("SkyAtmosphere", "could not spawn")
@@ -1368,7 +1876,7 @@ def build_skydeck_climate(report):
         _label(sky, "Sky_OneBraham")
 
     sun = _spawn(unreal.DirectionalLight, unreal.Vector(0.0, 0.0, deck_z + 2000.0),
-                 unreal.Rotator(-38.0, 145.0, 0.0))
+                 unreal.Rotator(roll=0.0, pitch=-38.0, yaw=145.0))
     if sun is not None:
         _label(sun, "Sun_London_Overcast")
         try:
@@ -1378,8 +1886,8 @@ def build_skydeck_climate(report):
             component.set_editor_property("Intensity", 2.2)
             component.set_editor_property("LightColor", unreal.Color(214, 222, 232, 255))
             component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            report.failed("Sun_London_Overcast", u"{0}".format(exc))
 
     fog = _spawn(unreal.ExponentialHeightFog, unreal.Vector(0.0, 0.0, deck_z))
     if fog is not None:
@@ -1388,8 +1896,8 @@ def build_skydeck_climate(report):
             component = fog.component
             component.set_editor_property("FogDensity", 0.012)
             component.set_editor_property("FogHeightFalloff", 0.12)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            report.failed("Fog_London", u"{0}".format(exc))
 
     skylight = _spawn(unreal.SkyLight, unreal.Vector(0.0, 0.0, deck_z + 400.0))
     if skylight is not None:
@@ -1397,8 +1905,8 @@ def build_skydeck_climate(report):
         try:
             skylight.sky_light_component.set_editor_property("Intensity", 0.8)
             skylight.sky_light_component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            report.failed("Skylight_OneBraham", u"{0}".format(exc))
 
     # Post-process: a corporate colour grade (slightly desaturated, cool shadows,
     # a small amount of grain) so the building reads as a building even in the
@@ -1407,18 +1915,95 @@ def build_skydeck_climate(report):
     if ppv is not None:
         _label(ppv, "PPS_OneBraham_Global")
         try:
-            ppv.set_editor_property("Unbound", True)
-            settings = ppv.settings
-            settings.set_editor_property("OverrideFilmGrainIntensity", True)
-            settings.set_editor_property("FilmGrainIntensity", 0.18)
-            settings.set_editor_property("OverrideColorSaturation", True)
-            settings.set_editor_property("ColorSaturation", unreal.Vector4(0.94, 0.94, 0.94, 1.0))
-            settings.set_editor_property("OverrideAutoExposureMinBrightness", True)
-            settings.set_editor_property("AutoExposureMinBrightness", 0.65)
-            settings.set_editor_property("OverrideAutoExposureMaxBrightness", True)
-            settings.set_editor_property("AutoExposureMaxBrightness", 1.6)
+            # The baseline under every floor's own volume (priority 0 < 1).
+            ppv.set_editor_property("unbound", True)
+            ppv.set_editor_property("priority", 0.0)
         except Exception as exc:  # noqa: BLE001
-            report.failed("Post-process volume", str(exc))
+            report.failed("PPS_OneBraham_Global", str(exc))
+        # No grain here: the player's film-grain setting owns it.
+        _apply_post_process(report, ppv, "PPS_OneBraham_Global", {
+            "color_saturation": unreal.Vector4(0.94, 0.94, 0.94, 1.0),
+            "auto_exposure_min_brightness": 0.65,
+            "auto_exposure_max_brightness": 1.6,
+        })
+
+
+#: The Skydeck balustrade: frameless glass, 110 cm, the height a real roof
+#: terrace has. Breakable, because the fall is the deck's one environmental
+#: story: a squad that shoots out the glass behind the holding squad has made
+#: the pad a cliff edge, and Landed / FellOutOfWorld do the rest.
+BALUSTRADE_HEIGHT_CM = 110.0
+BALUSTRADE_PANE_WIDTH_CM = 240.0
+BALUSTRADE_INSET_CM = 40.0
+
+
+
+def skydeck_balustrade_panes():
+    """(pane id, centre x, centre y, yaw) for every pane round the deck edge.
+
+    Pure, so the engine-free check can see that the deck has an edge on all four
+    sides before an editor ever runs.
+    """
+    area = next(a for a in C.AREAS if a[0] == "Skydeck")
+    _name, _floors, cx, cy, size_x, size_y = C.area_centre(area)
+    half_x = size_x / 2.0 - BALUSTRADE_INSET_CM
+    half_y = size_y / 2.0 - BALUSTRADE_INSET_CM
+
+    panes = []
+    for side, (start, end, fixed, along_x) in (
+            ("North", (-half_x, half_x, cy + half_y, True)),
+            ("South", (-half_x, half_x, cy - half_y, True)),
+            ("East", (-half_y, half_y, cx + half_x, False)),
+            ("West", (-half_y, half_y, cx - half_x, False))):
+        length = end - start
+        count = max(1, int(round(length / BALUSTRADE_PANE_WIDTH_CM)))
+        width = length / count
+        for index in range(count):
+            along = start + (index + 0.5) * width
+            if along_x:
+                panes.append(("Pane_Skydeck_{0}_{1:02d}".format(side, index), cx + along, fixed, 0.0, width))
+            else:
+                panes.append(("Pane_Skydeck_{0}_{1:02d}".format(side, index), fixed, cy + along, 90.0, width))
+    return panes
+
+
+def build_skydeck_edge(report):
+    """Places the deck's glass balustrade as AOneBrahamBreakableGlass panes."""
+    glass_class = getattr(unreal, "OneBrahamBreakableGlass", None)
+    if glass_class is None:
+        report.failed("Skydeck balustrade", "OneBrahamBreakableGlass is not reflected; compile the module first")
+        return []
+
+    deck_z = _floor_z(C.FLOOR_COUNT)
+    placed = []
+    for pane_id, x, y, yaw, width in skydeck_balustrade_panes():
+        actor = _spawn(glass_class, unreal.Vector(x, y, deck_z + BALUSTRADE_HEIGHT_CM / 2.0),
+                       unreal.Rotator(0.0, 0.0, yaw))
+        if actor is None:
+            continue
+
+        _label(actor, pane_id)
+        try:
+            actor.set_editor_property("PaneId", unreal.Name(pane_id))
+            actor.set_editor_property("PaneSizeCm", unreal.Vector2D(width, BALUSTRADE_HEIGHT_CM))
+            actor.set_editor_property("FloorIndex", C.FLOOR_COUNT)
+        except Exception as exc:  # noqa: BLE001
+            report.failed(pane_id, str(exc))
+            continue
+        placed.append(pane_id)
+
+    C.log(u"  Skydeck: {0} balustrade panes".format(len(placed)))
+    return placed
+
+
+def _set_kill_z(report, kill_z):
+    """Below the plaza, so anything that leaves the map dies rather than falling
+    for ever; FellOutOfWorld turns it into a death the kill feed can name."""
+    try:
+        settings = _editor_world().get_world_settings()
+        settings.set_editor_property("kill_z", kill_z)
+    except Exception as exc:  # noqa: BLE001
+        report.failed("KillZ", str(exc))
 
 
 # ===========================================================================
@@ -1426,53 +2011,46 @@ def build_skydeck_climate(report):
 # ===========================================================================
 
 def build_floor_level(report, floor_index, materials):
-    """Creates (or updates) the streaming level for one floor."""
+    """Creates or rebuilds the sublevel for one floor. Returns its package path."""
     level_path = "{0}/{1}_F{2:02d}".format(C.MAPS, "L_OneBraham", floor_index)
-    full_path = level_path + "." + os.path.basename(level_path)
 
-    level_subsystem = _level_subsystem()
-
-    if unreal.EditorAssetLibrary.does_asset_exist(level_path):
-        C.log(u"  floor {0:02d}: streaming level already exists, updating".format(floor_index))
-        report.updated_asset(level_path)
-        return level_path
-
-    try:
-        level_subsystem.new_level(level_path)
-    except Exception as exc:  # noqa: BLE001
-        report.failed(level_path, u"could not create streaming level: {0}".format(exc))
+    # An existing floor used to be returned untouched with "updating" in the
+    # log, so a change to a room programme never reached a map that had been
+    # built once. It is now opened, cleared of what the last run made, and
+    # rebuilt.
+    if not _open_level_for_build(report, level_path):
         return None
 
     build_floor_shell(report, floor_index, materials)
+    build_destructible_props(report, floor_index)
     build_lighting(report, floor_index)
     build_post_process(report, floor_index)
     build_audio_zone(report, floor_index)
     build_nav(report, floor_index)
 
-    try:
-        level_subsystem.save_current_level()
-    except Exception as exc:  # noqa: BLE001
-        report.failed(level_path, u"could not save: {0}".format(exc))
+    if not _save_build_level(report, level_path):
         return None
 
-    report.created_asset(level_path)
     return level_path
 
 
 def build_persistent_level(report, materials, manifest):
     """Creates the persistent level: the shell, the town, and the references."""
-    level_subsystem = _level_subsystem()
     persistent_path = "{0}/{1}".format(C.MAPS, C.MAP_PERSISTENT)
 
-    if unreal.EditorAssetLibrary.does_asset_exist(persistent_path):
-        C.log(u"persistent level exists; rebuilding its persistent actors")
-    else:
-        try:
-            level_subsystem.new_level(persistent_path)
-            report.created_asset(persistent_path)
-        except Exception as exc:  # noqa: BLE001
-            report.failed(persistent_path, u"could not create: {0}".format(exc))
-            return None
+    if not _open_level_for_build(report, persistent_path):
+        return None
+
+    # --- Gameplay anchors -------------------------------------------------
+    # These were placed before this level was opened, into whatever map the
+    # editor happened to have open, so the persistent level shipped with no
+    # spawn points, access zones, terminals, breach walls or shutters.
+    manifest["spawn_anchors"] = C.guard(report, "spawn points", build_spawn_points, report) or []
+    manifest["access_zones"] = C.guard(report, "access zones", build_access_zones, report) or []
+    manifest["terminals"] = C.guard(report, "terminals", build_override_terminals, report) or []
+    manifest["breachable_walls"] = C.guard(report, "breachable walls", build_breachable_walls, report, materials) or []
+    manifest["shutters"] = C.guard(report, "shutters", build_shutters, report) or []
+    manifest["loot_points"] = C.guard(report, "loot points", build_loot_points, report) or []
 
     # --- The building shell -----------------------------------------------
     # A single exterior mass so the tower is visible from the Skydeck, the lobby
@@ -1484,11 +2062,17 @@ def build_persistent_level(report, materials, manifest):
     # mass rather than fifteen stacked bands: the interior floors have their own
     # glazing, and this is the silhouette the players see in the trailer.
     glass = materials.get("BallisticGlass") or materials.get("Glass")
-    total_height = (C.FLOOR_COUNT + 1) * C.FLOOR_HEIGHT_CM
-    _box((0.0, -4200.0, total_height / 2.0 - 400.0), (8600.0, 60.0, total_height), glass, "Facade_South")
-    _box((0.0, 4200.0, total_height / 2.0 - 400.0), (8600.0, 60.0, total_height), glass, "Facade_North")
-    _box((-4400.0, 0.0, total_height / 2.0 - 400.0), (60.0, 8600.0, total_height), glass, "Facade_West")
-    _box((4400.0, 0.0, total_height / 2.0 - 400.0), (60.0, 8600.0, total_height), glass, "Facade_East")
+    # From the plaza to the underside of the Skydeck slab and no higher: the
+    # curtain wall used to run a storey past the deck, so the roof was a glass
+    # box and nobody could see out of the ending or fall off it.
+    facade_bottom = _floor_z(0)
+    facade_top = _floor_z(C.FLOOR_COUNT) - 20.0
+    total_height = facade_top - facade_bottom
+    facade_z = facade_bottom + total_height / 2.0
+    _box((0.0, -4200.0, facade_z), (8600.0, 60.0, total_height), glass, "Facade_South")
+    _box((0.0, 4200.0, facade_z), (8600.0, 60.0, total_height), glass, "Facade_North")
+    _box((-4400.0, 0.0, facade_z), (60.0, 8600.0, total_height), glass, "Facade_West")
+    _box((4400.0, 0.0, facade_z), (60.0, 8600.0, total_height), glass, "Facade_East")
 
     # --- Ground: the plaza and Aldgate ------------------------------------
     # Asphalt, kerbs, a road with markings, and the low buildings opposite:
@@ -1514,11 +2098,7 @@ def build_persistent_level(report, materials, manifest):
 
     manifest["persistent_level"] = persistent_path
 
-    try:
-        level_subsystem.save_current_level()
-    except Exception as exc:  # noqa: BLE001
-        report.failed(persistent_path, u"could not save: {0}".format(exc))
-
+    _save_build_level(report, persistent_path)
     return persistent_path
 
 
@@ -1540,22 +2120,18 @@ def build_all(write_manifest=True):
     C.step(1, 6, "materials")
     materials = C.guard(report, "materials", build_materials, report) or {}
 
-    C.step(2, 6, "gameplay anchors")
+    C.step(2, 6, "room programmes")
     _SURFACE_USAGE.clear()
 
     manifest = {
         "generated_by": "Tools/Python/onebraham/build_environment.py",
         "floor_height_cm": C.FLOOR_HEIGHT_CM,
         "floor_count": C.FLOOR_COUNT,
-        "areas": [{"name": a[0], "floors": list(a[1]), "origin": [a[2], a[3]], "size": [a[4], a[5]]}
+        "areas": [{"name": a[0], "floors": list(a[1]), "min_corner": [a[2], a[3]],
+                   "centre": list(C.area_centre(a)[2:4]), "size": [a[4], a[5]]}
                   for a in C.AREAS],
     }
 
-    manifest["spawn_anchors"] = C.guard(report, "spawn points", build_spawn_points, report) or []
-    manifest["access_zones"] = C.guard(report, "access zones", build_access_zones, report) or []
-    manifest["terminals"] = C.guard(report, "terminals", build_override_terminals, report) or []
-    manifest["breachable_walls"] = C.guard(report, "breachable walls", build_breachable_walls, report, materials) or []
-    manifest["shutters"] = C.guard(report, "shutters", build_shutters, report) or []
     manifest["rooms"] = [
         {"area": area, "name": room[0], "x": room[1], "y": room[2],
          "size": [room[3], room[4]]}
@@ -1572,8 +2148,8 @@ def build_all(write_manifest=True):
         report.failed("rooms", u"only {0} rooms programmed; the map needs 40".format(
             len(manifest["rooms"])))
 
-    C.step(3, 6, "persistent level")
-    C.guard(report, "persistent level", build_persistent_level, report, materials, manifest)
+    C.step(3, 6, "persistent level and gameplay anchors")
+    persistent_path = C.guard(report, "persistent level", build_persistent_level, report, materials, manifest)
 
     C.step(4, 6, "per-floor streaming levels")
     floors = []
@@ -1595,8 +2171,17 @@ def build_all(write_manifest=True):
         report.failed("floor levels", u"only {0} of {1} floors built".format(
             len(floors), C.FLOOR_COUNT + 1))
 
+    if persistent_path:
+        attached = C.guard(report, "attach floors", _attach_floor_levels, report, persistent_path,
+                           [floor["level"] for floor in floors]) or 0
+        manifest["floors_attached"] = attached
+        if attached != len(floors):
+            report.failed("floor levels", u"{0} of {1} floors attached to {2}".format(
+                attached, len(floors), persistent_path))
+
     C.step(5, 6, "fire drill arena")
     C.guard(report, "fire drill arena", build_fire_drill_arena, report, materials)
+    C.guard(report, "front-end maps", build_front_end_maps, report)
 
     C.step(6, 6, "manifest")
     if write_manifest:
@@ -1604,6 +2189,51 @@ def build_all(write_manifest=True):
 
     C.log(report.summary())
     return report
+
+
+def build_front_end_maps(report):
+    """Builds L_MainMenu and L_Loading.
+
+    L_MainMenu is where a client starts (GameDefaultMap) and where a match
+    returns to. Its world settings name AOneBrahamMenuGameMode, whose controller
+    puts the C++ main menu on screen: the level itself is an empty room with a
+    light, because the menu covers it.
+
+    L_Loading is the seamless-travel transition map (TransitionMap). It runs the
+    engine's base game mode, so the match's game mode never initialises a match
+    in the half-second a travel spends there.
+    """
+    built = []
+    for name, mode_class in ((C.MAP_MAIN_MENU, "OneBrahamMenuGameMode"), (C.MAP_LOADING, "GameModeBase")):
+        path = "{0}/{1}".format(C.MAPS, name)
+        if not _open_level_for_build(report, path):
+            continue
+
+        game_mode = getattr(unreal, mode_class, None)
+        if game_mode is None:
+            report.failed(name, u"{0} is not available; compile the project first".format(mode_class))
+            continue
+        try:
+            settings = _editor_world().get_world_settings()
+            settings.set_editor_property("default_game_mode", game_mode)
+        except Exception as exc:  # noqa: BLE001
+            report.failed(name, u"world settings: {0}".format(exc))
+            continue
+
+        if name == C.MAP_MAIN_MENU:
+            # One soft light so the level is not black in the editor; the
+            # menu's own backdrop is what a player sees.
+            light = _actor_subsystem().spawn_actor_from_class(
+                unreal.DirectionalLight, unreal.Vector(0.0, 0.0, 400.0), unreal.Rotator(roll=0.0, pitch=-45.0, yaw=0.0))
+            if light is not None:
+                light.set_actor_label("MainMenu_Light")
+                light.tags = [unreal.Name(GENERATED_TAG_PREFIX + name)]
+
+        if _save_build_level(report, path):
+            built.append(name)
+
+    C.log(u"  front-end maps: {0}".format(", ".join(built) or "none"))
+    return built
 
 
 def build_fire_drill_arena(report, materials):
@@ -1616,14 +2246,7 @@ def build_fire_drill_arena(report, materials):
     """
     path = "{0}/{1}".format(C.MAPS, C.MAP_FIRE_DRILL)
 
-    if unreal.EditorAssetLibrary.does_asset_exist(path):
-        report.updated_asset(path)
-        return path
-
-    try:
-        _level_subsystem().new_level(path)
-    except Exception as exc:  # noqa: BLE001
-        report.failed(path, u"could not create: {0}".format(exc))
+    if not _open_level_for_build(report, path):
         return None
 
     concrete = materials.get("Concrete")
@@ -1656,11 +2279,35 @@ def build_fire_drill_arena(report, materials):
     for team, sy in (("Staff", -3200.0), ("Contractors", 3200.0)):
         _box((0.0, sy, 60.0), (3600.0, 500.0, 120.0), carpet, "SpawnRoom_{0}".format(team))
 
+    # Eight spawns per team along the back of each room, facing the points.
+    # Team affinity keeps each side in its own room; without these, FIRE DRILL
+    # put everybody at the world origin, on point B.
+    spawn_class = getattr(unreal, "OneBrahamSpawnPoint", None)
+    if spawn_class is None:
+        report.failed("FIRE DRILL spawns", "OneBrahamSpawnPoint is not available; compile first")
+    else:
+        for team_name, team_enum, sy, yaw in (("Staff", "INTERNAL_STAFF", -3200.0, 90.0),
+                                              ("Contractors", "EXTERNAL_CONTRACTORS", 3200.0, -90.0)):
+            for index in range(8):
+                x = -1400.0 + index * 400.0
+                actor = _spawn(spawn_class, unreal.Vector(x, sy, 210.0), unreal.Rotator(roll=0.0, pitch=0.0, yaw=yaw))
+                if actor is None:
+                    report.failed("FIRE DRILL spawns", u"could not spawn {0} {1}".format(team_name, index))
+                    continue
+                _label(actor, "FD_Spawn_{0}_{1}".format(team_name, index))
+                try:
+                    actor.set_editor_property("FloorIndex", 1)
+                    actor.set_editor_property("TeamAffinity", getattr(unreal.OneBrahamTeam, team_enum))
+                    actor.set_editor_property("SquadClusterId", 0 if team_name == "Staff" else 1)
+                    actor.set_editor_property("bEnabled", True)
+                except Exception as exc:  # noqa: BLE001
+                    report.failed("FIRE DRILL spawns", u"{0} {1}: {2}".format(team_name, index, exc))
+
     # Lighting: same ceiling grid language as the tower, brighter, colder.
     for ix in range(-2, 3):
         for iy in range(-3, 4):
             light = _spawn(unreal.RectLight, unreal.Vector(ix * 1000.0, iy * 1000.0, 380.0),
-                           unreal.Rotator(0.0, 0.0, -90.0))
+                           unreal.Rotator(roll=0.0, pitch=-90.0, yaw=0.0))  # facing down
             if light is None:
                 continue
             try:
@@ -1669,19 +2316,19 @@ def build_fire_drill_arena(report, materials):
                 component.set_editor_property("AttenuationRadius", 900.0)
                 component.set_editor_property("SourceWidth", 80.0)
                 component.set_editor_property("SourceHeight", 80.0)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                report.failed("FIRE DRILL arena light", u"{0}".format(exc))
 
-    _spawn(unreal.NavMeshBoundsVolume, unreal.Vector(0.0, 0.0, 200.0))
+    # The whole arena: an unscaled bounds volume is a 2 m cube, and FIRE DRILL's
+    # bots had nowhere to walk.
+    nav = _spawn(unreal.NavMeshBoundsVolume, unreal.Vector(0.0, 0.0, 200.0))
+    if nav is not None:
+        _fit_volume(report, nav, (0.0, 0.0, 200.0), (2500.0, 3500.0, 230.0), "NavBounds_FireDrill")
     _spawn(unreal.SkyLight, unreal.Vector(0.0, 0.0, 600.0))
 
-    try:
-        _level_subsystem().save_current_level()
-    except Exception as exc:  # noqa: BLE001
-        report.failed(path, u"could not save: {0}".format(exc))
+    if not _save_build_level(report, path):
         return None
 
-    report.created_asset(path)
     C.log(u"FIRE DRILL arena built: three control points, two flanks, one corridor")
     return path
 

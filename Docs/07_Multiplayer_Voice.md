@@ -25,6 +25,29 @@ device, no voice capture. Every system in this project checks
 `UOneBrahamVoiceSubsystem` refuses to initialise capture on a dedicated process
 rather than failing at capture time.
 
+### Finding a match
+
+A dedicated server advertises itself. `AGameModeBase::InitGame` calls
+`RegisterServer` on any networked server without a session, and
+`AOneBrahamGameSession` turns that into `RegisterDedicatedSession` on the
+game instance: an advertised, presence-free session (`bIsDedicated`, no lobby,
+no invites) carrying the mode, the name from `-ServerName=`, the region and
+the network protocol. A listen host made its session from the menu, so the
+same call does nothing there.
+
+The server browser and matchmaking search twice: player lobbies, then
+dedicated servers (`SEARCH_DEDICATED_ONLY`). Both passes filter on
+`OB_PROTOCOL`, so an out-of-date client never sees a server it cannot join.
+The results of both go into one list, ping first; a row's index stays
+joinable whichever pass found it. A LAN browse has no lobbies and runs one pass.
+
+Every session call binds its completion delegate by handle and unbinds it in
+the handler, so a second host, search or join never fires the first one's
+callback. Cancelling matchmaking cancels the search in flight
+(`CancelFindSessions`), and so does the timeout before it hosts. A re-host waits
+for the old session's destroy to complete before it creates the new one.
+`Shutdown` stops the search, unbinds everything and leaves the session.
+
 ## 2. Authority model
 
 | Thing | Authority |
@@ -39,18 +62,89 @@ rather than failing at capture time.
 | Movement | server-authoritative with client prediction and a 15% speed tolerance |
 | Cosmetics | server: a client cannot grant itself an appearance |
 
-Anti-cheat basics (thresholds in `Config/DefaultGame.ini` `[OneBrahamAntiCheat]`):
+Anti-cheat basics. The thresholds are `UOneBrahamGameSettings` properties in
+`Config/DefaultEngine.ini` under `[/Script/OneBraham.OneBrahamGameSettings]`:
 
-* Impossible speed: flagged above 1.15× the movement component's maximum for
-  more than 0.4 s; corrected on the spot, logged to the server's audit line.
-* Impossible fire rate: over-rate shots are dropped; a sustained 20% over-rate
-  flags.
+* Impossible speed: the server checks its own simulated speed every 0.25 s, and
+  four checks in a row above 1.35× the movement cap (`MaxMovementSpeedTolerance`)
+  are a violation. The pawn is clamped back to the cap on the spot. A client whose
+  speed reports stop arriving is flagged too.
+* Impossible fire rate: a shot that arrives more than 0.08 s
+  (`MaxFireRateTolerance`) earlier than the weapon's interval allows is dropped
+  and reported. The weapon and the weapon component both check.
 * Damage originating from a client value: ignored entirely; the server recomputes.
-* Hit registration through geometry: rejected — the server line-traces the same
-  shot from the same origin with a 12 cm tolerance.
-* Shot from outside the map volume: rejected.
-* Reported and kicked, not silently tolerated. The reason is written to the
-  player's session so a support ticket can be answered.
+* Shot origin: rejected when the client's eye is more than 270 cm (3× the
+  component's 90 cm drift allowance) from where the server has it.
+* Aim direction: rejected when it is more than the weapon's current spread plus
+  12°, plus 6° of slack, off the server's view.
+* Shooting from inside geometry: rejected.
+* Every violation adds to the player's score and writes a `SECURITY:` line to the
+  server's audit log (`bLogSuspiciousActions`). Kicking at 25 points
+  (`ViolationsBeforeKick`) is a server switch, `bKickOnRepeatedViolations`, and
+  it is **off** by default. These checks have not yet met real players' latency,
+  and a false kick costs more than a logged cheater. Turn it on once the audit log
+  from a playtest shows the thresholds are not catching honest players. A kick
+  tells the player why.
+
+### Movement prediction
+
+Sprint, walk, slide and mantle are predicted. The player's intent travels in
+the character movement's saved moves (`FSavedMove_OneBraham`, compressed flags
+`Custom_0` to `Custom_3`), not in separate RPCs, so the owning client and the
+server run the same movement code on the same input, move for move. The server's
+result still decides; it simply agrees, so nobody is corrected for starting a
+sprint, and a slide or a mantle starts on the client's own frame.
+
+Two details make that hold under replay. First, every timer that decides a slide
+or a mantle (time sliding, cooldown left, time sprinting, mantle progress)
+advances by each move's own delta time, never by the world clock, so a move
+replayed after a correction lands exactly where it first did. Second, the
+mantle's ledge traces run on both machines from the same move. The server's
+world wins if they disagree, and it never takes a ledge position from the
+client. These used to be four RPCs (`ServerSetSprint`, `ServerSetWalk`,
+`ServerRequestSlide`, `ServerRequestMantle`), and the client and server changed
+speed at different moments, which is what a correction is.
+
+### The RPC budget
+
+Every Server RPC is a door the client can open as often as it likes, so every
+one is bounded. Most spend from a per-controller budget
+(`RpcBudgetPerSecond`, 90 by default, through `CheckRPCBudgetFor` at the top of
+the handler); a client over it has the call dropped and a violation recorded.
+Three run far above that rate and carry their own limit instead, named in a
+comment in the handler:
+
+| RPC | Its own limit |
+| --- | --- |
+| `ServerPushVoiceFrame` | 64 frames a second per speaker (20 ms frames are 50). A flood is dropped before any listener hears it |
+| `ServerRequestFire` | the weapon's rate of fire, already validated per shot |
+| `ServerReportSpeed` | one report per 0.1 s (they are sent every 0.25 s) |
+
+`check_cpp_symbols.py` fails the build on a Server RPC that does neither.
+
+### Hit rewind
+
+A shot is scored against the world the shooter was looking at.
+`UOneBrahamLagCompensationSubsystem` samples every character's body mesh 30
+times a second on the server. When a shot arrives it moves every other
+character's mesh (the per-bone `OneBrahamHitbox` bodies) to where it was one
+round trip plus `ob.LagComp.ExtraMs` (50 ms, the proxy smoothing) ago,
+interpolated between samples. Then it runs the trace, ignoring the
+present-day capsules, and puts the meshes back. All of that happens in one
+frame, so nothing is replicated in between.
+
+* **The cap.** The rewind is capped at `ob.LagComp.MaxMs` (250 ms). Beyond
+  that, a shooter has to lead their targets.
+* **The round trip.** It is the full round trip, not half. A client sees
+  state that is half a round trip old, and its shot takes the other half to
+  arrive.
+* **The pose.** It is the current pose at the old position. Rewinding every
+  bone is possible from the same history but has not been needed at these
+  ranges.
+* **Hosts and bots.** A listen host's own shots and bots are not rewound;
+  they already see the present.
+* **Switching it off.** `ob.LagComp 0` turns rewind off, so the
+  difference can be felt on a high-ping test client.
 
 ## 3. The player path
 

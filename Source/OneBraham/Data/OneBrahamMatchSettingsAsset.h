@@ -101,9 +101,13 @@ struct FOneBrahamControlPointDef
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Fire Drill")
 	float ScorePerSecond = 1.f;
 
-	/** Only the triggering actor picks this up; the volume itself lives in the level. */
+	/** Where the point is in the FIRE DRILL arena, cm: the centre of its platform. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Fire Drill")
-	FName VolumeActorTag = NAME_None;
+	FVector Location = FVector::ZeroVector;
+
+	/** Players within this distance of Location (and on its level) are on the point. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Fire Drill")
+	float RadiusCm = 700.f;
 };
 
 /**
@@ -151,6 +155,10 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Roster")
 	int32 PostMatchSeconds = 45;
+
+	/** Chance a match starts in the rain: the plaza and the Skydeck get it, nowhere else. London. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weather", meta = (ClampMin = "0", ClampMax = "1"))
+	float RainChance = 0.6f;
 
 	// --- Damage model -----------------------------------------------------
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat")

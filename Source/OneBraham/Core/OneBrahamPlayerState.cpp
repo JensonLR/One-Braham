@@ -2,6 +2,7 @@
 
 #include "Core/OneBrahamPlayerState.h"
 
+#include "Core/OneBrahamPlayerController.h"
 #include "OneBraham.h"
 #include "Core/OneBrahamGameplayTags.h"
 #include "Core/OneBrahamGameState.h"
@@ -56,7 +57,7 @@ void AOneBrahamPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	DOREPLIFETIME(AOneBrahamPlayerState, bSelfMuted);
 	DOREPLIFETIME(AOneBrahamPlayerState, bIsTransmitting);
 	DOREPLIFETIME_CONDITION(AOneBrahamPlayerState, MutedPlayerIds, COND_OwnerOnly);
-	DOREPLIFETIME(AOneBrahamPlayerState, EquippedCosmetics);
+	DOREPLIFETIME(AOneBrahamPlayerState, ReplicatedCosmetics);
 }
 
 void AOneBrahamPlayerState::CopyProperties(APlayerState* PlayerState)
@@ -88,7 +89,7 @@ void AOneBrahamPlayerState::CopyProperties(APlayerState* PlayerState)
 		OneBrahamState->VoiceChannel = VoiceChannel;
 		OneBrahamState->bSelfMuted = bSelfMuted;
 		OneBrahamState->MutedPlayerIds = MutedPlayerIds;
-		OneBrahamState->EquippedCosmetics = EquippedCosmetics;
+		OneBrahamState->SetEquippedCosmetics(EquippedCosmetics);
 	}
 }
 
@@ -185,6 +186,7 @@ FOneBrahamPlayerSummary AOneBrahamPlayerState::MakeSummary() const
 {
 	FOneBrahamPlayerSummary Summary;
 	Summary.PlayerName = GetPlayerName();
+	Summary.PlayerId = GetPlayerId();
 	Summary.ArchetypeTag = ArchetypeTag;
 	Summary.Team = Team;
 	Summary.Kills = Kills;
@@ -194,7 +196,16 @@ FOneBrahamPlayerSummary AOneBrahamPlayerState::MakeSummary() const
 	Summary.Revives = RevivesPerformed;
 	Summary.DamageDealt = DamageDealt;
 	Summary.FloorsClimbed = CurrentFloor;
-	Summary.TimeAliveSeconds = 0.f;
+
+	// The length of the life the match ended on - which, in ASCENT with no
+	// respawns, is the match. A player who is out of it has no clock running.
+	const bool bStillIn = LifeState == EOneBrahamLifeState::Alive
+		|| LifeState == EOneBrahamLifeState::Downed
+		|| LifeState == EOneBrahamLifeState::Extracted;
+	const UWorld* World = GetWorld();
+	Summary.TimeAliveSeconds = bStillIn && World != nullptr && LastSpawnServerTime > 0.f
+		? FMath::Max(0.f, World->GetTimeSeconds() - LastSpawnServerTime)
+		: 0.f;
 	Summary.bExtracted = (LifeState == EOneBrahamLifeState::Extracted);
 	Summary.Score = FMath::RoundToInt(GetScore());
 	return Summary;
@@ -205,6 +216,11 @@ FOneBrahamPlayerSummary AOneBrahamPlayerState::MakeSummary() const
 // ==========================================================================
 void AOneBrahamPlayerState::ServerSetVoiceChannel_Implementation(EOneBrahamVoiceChannel NewChannel)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerSetVoiceChannel")))
+	{
+		return;
+	}
+
 	if (!HasAuthority())
 	{
 		return;
@@ -224,6 +240,11 @@ void AOneBrahamPlayerState::ServerSetVoiceChannel_Implementation(EOneBrahamVoice
 
 void AOneBrahamPlayerState::ServerSetSelfMuted_Implementation(bool bMuted)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerSetSelfMuted")))
+	{
+		return;
+	}
+
 	if (!HasAuthority())
 	{
 		return;
@@ -239,6 +260,11 @@ void AOneBrahamPlayerState::ServerSetSelfMuted_Implementation(bool bMuted)
 
 void AOneBrahamPlayerState::ServerSetPlayerMuted_Implementation(int32 TargetPlayerId, bool bMuted)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerSetPlayerMuted")))
+	{
+		return;
+	}
+
 	if (!HasAuthority())
 	{
 		return;
@@ -265,7 +291,7 @@ void AOneBrahamPlayerState::ServerSetPlayerMuted_Implementation(int32 TargetPlay
 			for (APlayerState* Other : GS->PlayerArray)
 			{
 				AOneBrahamPlayerState* OtherState = Cast<AOneBrahamPlayerState>(Other);
-				if (OtherState == nullptr || OtherState->PlayerId != TargetPlayerId)
+				if (OtherState == nullptr || OtherState->GetPlayerId() != TargetPlayerId)
 				{
 					continue;
 				}
@@ -376,8 +402,25 @@ bool AOneBrahamPlayerState::StoreLoadout(FName PrimaryWeaponId, FName SidearmWea
 	return bFirstReceipt;
 }
 
+void AOneBrahamPlayerState::ApplyAppearanceLocally()
+{
+	OnRep_Archetype();
+	OnRep_Cosmetics();
+}
+
+void AOneBrahamPlayerState::SetEquippedCosmetics(const TMap<FName, FName>& InCosmetics)
+{
+	EquippedCosmetics = InCosmetics;
+	ReplicatedCosmetics = OneBrahamReplication::CosmeticsToArray(InCosmetics);
+	ForceNetUpdate();
+}
+
 void AOneBrahamPlayerState::OnRep_Cosmetics()
 {
+	// Clients rebuild the lookup from the wire; on the server this is a no-op
+	// rebuild of the same values (ApplyAppearanceLocally calls it there).
+	EquippedCosmetics = OneBrahamReplication::CosmeticsToMap(ReplicatedCosmetics);
+
 	if (AOneBrahamCharacter* Character = GetOneBrahamCharacter())
 	{
 		Character->ApplyCosmetics(EquippedCosmetics);

@@ -76,6 +76,7 @@ namespace
 		case EOneBrahamVFXEffect::DustPuff:			return TEXT("NS_OB_Dust");
 		case EOneBrahamVFXEffect::BreachDebris:		return TEXT("NS_OB_BreachDebris");
 		case EOneBrahamVFXEffect::CorpseImpact:		return TEXT("NS_OB_CorpseImpact");
+		case EOneBrahamVFXEffect::Rain:				return TEXT("NS_OB_Rain");
 		default:									return TEXT("NS_OB_Impact_Concrete");
 		}
 	}
@@ -121,7 +122,20 @@ UNiagaraSystem* UOneBrahamVFXStatics::LoadEffectSystem(EOneBrahamVFXEffect Effec
 	}
 
 	const FString Path = GetEffectAssetPath(Effect);
-	UNiagaraSystem* System = LoadObject<UNiagaraSystem>(nullptr, *Path);
+	UNiagaraSystem* System = LoadObject<UNiagaraSystem>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
+
+	// build_vfx.py creates every system so the paths resolve; a system nobody
+	// has authored yet has no emitters and draws nothing. Treated as missing,
+	// so the C++ fallback keeps drawing the effect until an artist fills it in.
+	// Without this, running the content build made every impact invisible.
+	if (System != nullptr && System->GetEmitterHandles().Num() == 0)
+	{
+		UE_LOG(LogOneBraham, Log,
+			TEXT("[OB.VFX] '%s' exists but has no emitters yet - using the runtime fallback effect."), *Path);
+		System = nullptr;
+		GMissingEffects.Add(Effect);
+		return nullptr;
+	}
 
 	if (System == nullptr)
 	{
@@ -409,12 +423,9 @@ void UOneBrahamVFXStatics::SpawnImpact(UObject* WorldContextObject, const FOneBr
 	// --- Audio ------------------------------------------------------------
 	// Impacts are played by every machine from this one replicated entry point,
 	// so the sound and the dust always agree about where the bullet landed.
-	if (AOneBrahamPlayerController* PC = World->GetFirstPlayerController<AOneBrahamPlayerController>())
+	if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(World))
 	{
-		if (UOneBrahamAudioManagerComponent* Audio = PC->GetAudioManager())
-		{
-			Audio->PlayImpactSound(Impact, /*VolumeScale*/ 1.f);
-		}
+		Audio->PlayImpactSound(Impact, /*VolumeScale*/ 1.f);
 	}
 }
 
@@ -426,12 +437,9 @@ void UOneBrahamVFXStatics::PlayNearMiss(UObject* WorldContextObject, const FVect
 		return;
 	}
 
-	if (AOneBrahamPlayerController* PC = World->GetFirstPlayerController<AOneBrahamPlayerController>())
+	if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(World))
 	{
-		if (UOneBrahamAudioManagerComponent* Audio = PC->GetAudioManager())
-		{
-			Audio->PlayNearMissWhizz(Location);
-		}
+		Audio->PlayNearMissWhizz(Location);
 	}
 }
 
@@ -514,12 +522,9 @@ void UOneBrahamVFXStatics::SpawnGlassShatter(UObject* WorldContextObject, const 
 
 	// Glass is loud and it is a commitment: breaking a partition on floor 9 tells
 	// the entire floor that somebody is coming through it.
-	if (AOneBrahamPlayerController* PC = World->GetFirstPlayerController<AOneBrahamPlayerController>())
+	if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(World))
 	{
-		if (UOneBrahamAudioManagerComponent* Audio = PC->GetAudioManager())
-		{
-			Audio->PlaySoundAtLocation(FName(TEXT("SFX_Window_Break")), Location, FMath::Clamp(Scale.X, 0.8f, 1.6f), FMath::FRandRange(0.95f, 1.05f), nullptr);
-		}
+		Audio->PlaySoundAtLocation(FName(TEXT("SFX_Window_Break")), Location, FMath::Clamp(Scale.X, 0.8f, 1.6f), FMath::FRandRange(0.95f, 1.05f), nullptr);
 	}
 }
 

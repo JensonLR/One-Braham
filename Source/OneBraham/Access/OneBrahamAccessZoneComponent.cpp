@@ -310,7 +310,7 @@ FText UOneBrahamAccessZoneComponent::GetInteractionPrompt(const AOneBrahamPlayer
 
 	if (RequiredTier == EOneBrahamAccessTier::Override)
 	{
-		return FText::Format(NSLOCTEXT("OneBraham", "Zone_OverrideOnly", "Hold E - override {0}"), ZoneName);
+		return FText::Format(NSLOCTEXT("OneBraham", "Zone_OverrideOnly", "Hold {Interact} - override {0}"), ZoneName);
 	}
 
 	// Can they just use it, or are they about to be told no?
@@ -331,7 +331,7 @@ FText UOneBrahamAccessZoneComponent::GetInteractionPrompt(const AOneBrahamPlayer
 		return FText::Format(NSLOCTEXT("OneBraham", "Zone_Card", "Use badge - {0}"), ZoneName);
 	}
 
-	return FText::Format(NSLOCTEXT("OneBraham", "Zone_OverrideNeeded", "Hold E - override {0}"), ZoneName);
+	return FText::Format(NSLOCTEXT("OneBraham", "Zone_OverrideNeeded", "Hold {Interact} - override {0}"), ZoneName);
 }
 
 float UOneBrahamAccessZoneComponent::GetOverrideSecondsFor(const AOneBrahamPlayerController* Interactor) const

@@ -103,6 +103,52 @@ says so on screen:
 
 > *Cosmetics are cosmetic. Nothing here changes how you play.*
 
+**How an outfit reaches the match.** A player's archetype, outfit, clan tag and
+loadout live in their own saved profile, on their own machine. When the local
+player attaches to its controller (`AOneBrahamPlayerController::ReceivedPlayer`,
+on a client and on a listen host alike) the controller sends them:
+`ServerSetLoadout`, and `ServerSetAppearance` with the archetype id and the outfit
+as parallel slot/option arrays. The server keeps an archetype only if the registry
+has it, a cosmetic only if it is a real option of the slot it names and not in
+`CompetitiveBannedCosmeticIds`, and cuts the clan tag to four upper-case letters
+and digits. Until it arrives, the game mode gives the player a default from the
+registry's own cast (`FindArchetypeByIndex`, by player id). `ApplyCosmetics`
+walks every slot, so a slot the outfit leaves empty is cleared.
+
+This replaced a path that copied *the server's* profile onto every player who
+joined: on a listen host, twelve copies of the host.
+
+**What the server cannot check yet: ownership.** Unlocks are recorded in the
+local profile, so a modified client can wear a cosmetic it has not earned. It
+changes nothing about play (that is the point of section 4), but cosmetics are
+the monetisation. The fix belongs to the Steam integration, not to this table:
+each purchasable option gets a Steam Inventory item definition, the client sends
+its inventory result with `ServerSetAppearance`, and the server keeps an option
+only if the signed result contains it (`ISteamInventory::CheckResultSteamID` on
+the result handle). Earnable options stay profile-checked; nothing earnable is
+worth forging. `Docs/20` carries this as a release item.
+
+### Earned options
+
+Four options are earned rather than issued. `UOneBrahamCosmeticDataAsset` (the
+`DA_CosmeticCatalogue` asset, with the same rows compiled in as its defaults)
+names each one with the `OB.Cosmetic.Unlock.*` tag that opens it. The tags come
+from achievements (`Docs/19` section 9) and are kept in the profile.
+
+| Option | Opened by | Achievement |
+| --- | --- | --- |
+| `Jacket_Bomber` | `OB.Cosmetic.Unlock.Milestone.Extract5` | Frequent Flyer: five extractions |
+| `BagTag_Event` | `OB.Cosmetic.Unlock.Milestone.NoDamageExtract` | Conscientious Objector: extract having dealt no damage |
+| `Fleece_Branded` | `OB.Cosmetic.Unlock.Milestone.ServerFloorWin` | Hold the Floor: last squad standing on floors 9-11 |
+| `HiVis_Orange` | `OB.Cosmetic.Unlock.Achievement.FireDrill50` | Fire Warden: 50 FIRE DRILL wins |
+
+The wardrobe shows a locked option with the catalogue's line under it
+(`UOneBrahamUILibrary::GetCosmeticLockText`). `SendProfileToServer` never sends
+a locked option: its slot falls back to the archetype's default outfit. None of
+the four is a starter item or an archetype default, so locking one never leaves
+a slot bare. `check_cosmetic_ids.py` enforces that, along with registered tags,
+no duplicate rows, and a row for every tag an achievement grants.
+
 ---
 
 ## 4. Competitive integrity
@@ -233,13 +279,16 @@ and the only way a match could end was elimination.
 
 | Actor | Prompt | Tags | Hold | Reach | Montage |
 | --- | --- | --- | --- | --- | --- |
-| `AOneBrahamAccessZone` | "Open {zone}", "Use badge - {zone}", "Hold E - override {zone}", or the refusal ("Staff badge required") | `OB.Interaction.Door`, `OB.Interaction.Door.Secure`, `OB.Interaction.Terminal` | tap with the badge, override 12 s (`UOneBrahamAccessZoneComponent::OverrideSeconds`), 3 s (`UOneBrahamAccessZoneComponent::OverrideTwoPersonSeconds`) at the paired panel | 240 cm (`AOneBrahamAccessZone::OBDoorInteractionRange`) | `AM_OB_Interact_Door`, `AM_OB_Interact_Terminal` |
+| `AOneBrahamAccessZone` | "Open {zone}", "Use badge - {zone}", "Hold {Interact} - override {zone}", or the refusal ("Staff badge required") | `OB.Interaction.Door`, `OB.Interaction.Door.Secure`, `OB.Interaction.Terminal` | tap with the badge, override 12 s (`UOneBrahamAccessZoneComponent::OverrideSeconds`), 3 s (`UOneBrahamAccessZoneComponent::OverrideTwoPersonSeconds`) at the paired panel | 240 cm (`AOneBrahamAccessZone::OBDoorInteractionRange`) | `AM_OB_Interact_Door`, `AM_OB_Interact_Terminal` |
 | `AOneBrahamBreachableWall` | "Plant breaching charge", or "Partition - breaching charge required" | `OB.Interaction.Door.Breachable` | 1.6 s (`AOneBrahamBreachableWall::PlantSeconds`) | 260 cm (`AOneBrahamBreachableWall::OBBreachInteractionRange`) | `AM_OB_Interact_Door` |
 | `AOneBrahamKeycard` | "Take {tier} badge - issued floor {n}", or "Take {tier} ({name})" for a dropped card | `OB.Interaction.Keycard` | tap | 210 cm (`AOneBrahamKeycard::CardPickupRangeCm`) | `AM_OB_Interact_Keycard` |
-| `AOneBrahamOverrideTerminal` | "Hold E - override", "Already released", "Access panel offline", "Unlinked panel" | `OB.Interaction.Terminal` | 12 s (`UOneBrahamAccessZoneComponent::OverrideSeconds`) solo, 3 s (`UOneBrahamAccessZoneComponent::OverrideTwoPersonSeconds`) paired | 200 cm (`AOneBrahamOverrideTerminal::OBTerminalInteractionRange`) | `AM_OB_Interact_Terminal` |
+| `AOneBrahamOverrideTerminal` | "Hold {Interact} - override", "Already released", "Access panel offline", "Unlinked panel" | `OB.Interaction.Terminal` | 12 s (`UOneBrahamAccessZoneComponent::OverrideSeconds`) solo, 3 s (`UOneBrahamAccessZoneComponent::OverrideTwoPersonSeconds`) paired | 200 cm (`AOneBrahamOverrideTerminal::OBTerminalInteractionRange`) | `AM_OB_Interact_Terminal` |
 | `AOneBrahamPickupBase` | "Take {weapon}" | `OB.Interaction.Weapon` | tap | 220 cm (`AOneBrahamPickupBase::PickupRangeCm`) | `AM_OB_Interact_Door` |
-| `AOneBrahamExtractionTerminal` | "Hold E - call the winch", or the state of the winch: "Called - helicopter inbound", "Winch live - hold the pad", "Winch aborted - stands by" | `OB.Interaction.Extraction` | 1.4 s (`AOneBrahamExtractionTerminal::CallHoldSeconds`) | 220 cm (`AOneBrahamExtractionTerminal::InteractionRangeCm`) | `AM_OB_Interact_Radio` |
-| `AOneBrahamCharacter` | "Hold E - revive {name}" for a squadmate, "Hold E - finish {name}" for an enemy | `OB.Interaction.Revive`, `OB.Interaction.Execute` | 4.5 s (`OneBrahamConstants::ReviveSeconds`), 2 s (`UOneBrahamDownedComponent::ExecuteSeconds`) | 220 cm (`OneBrahamConstants::InteractRangeCm`) | `AM_OB_Interact_Revive`, `AM_OB_Interact_Execute` |
+| `AOneBrahamLift` | "Lift to floor {n}" for a rider; "Lift - staff badge required", "Lift in transit", "Lifts out of service - lockdown" | `OB.Interaction.Lift` | tap | 200 cm (`AOneBrahamLift::PanelRangeCm`) | `AM_OB_Interact_LiftPanel` |
+| `AOneBrahamLiftCallPanel` | "Call lift", "Lift is here", or the lift's refusal | `OB.Interaction.Lift` | tap | 200 cm (`AOneBrahamLift::PanelRangeCm`) | `AM_OB_Interact_LiftPanel` |
+| `AOneBrahamSupplyPickup` | "Take ammunition", "Take frag grenade" (and the other three utilities), "Take medkit"; refused, and left where it is, when the pouch is full | `OB.Interaction.Ammo`, `OB.Interaction.Utility`, `OB.Interaction.Medkit` | tap | 210 cm (`AOneBrahamSupplyPickup::PickupRangeCm`) | `AM_OB_Interact_Loot` |
+| `AOneBrahamExtractionTerminal` | "Hold {Interact} - call the winch", or the state of the winch: "Called - helicopter inbound", "Winch live - hold the pad", "Winch aborted - stands by" | `OB.Interaction.Extraction` | 1.4 s (`AOneBrahamExtractionTerminal::CallHoldSeconds`) | 220 cm (`AOneBrahamExtractionTerminal::InteractionRangeCm`) | `AM_OB_Interact_Radio` |
+| `AOneBrahamCharacter` | "Hold {Interact} - revive {name}" for a squadmate, "Hold {Interact} - finish {name}" for an enemy | `OB.Interaction.Revive`, `OB.Interaction.Execute` | 4.5 s (`OneBrahamConstants::ReviveSeconds`), 2 s (`UOneBrahamDownedComponent::ExecuteSeconds`) | 220 cm (`OneBrahamConstants::InteractRangeCm`) | `AM_OB_Interact_Revive`, `AM_OB_Interact_Execute` |
 
 Three rules the table encodes, and the reasons they are rules rather than
 conventions:
@@ -265,7 +314,7 @@ conventions:
 
 **Table 6 — declared, and not yet emitted**
 
-Seven interaction tags are declared in the native registry and mirrored in
+Three interaction tags are declared in the native registry and mirrored in
 `Config/DefaultGame.ini`, and nothing in the game emits them yet. They are listed here rather than deleted because each is
 the designed vocabulary of content that has not been built, and because the
 montage contract in section 7 already reserves an animation family for several of
@@ -275,10 +324,6 @@ which side of the line the tag belongs on.
 
 | Tag | Why nothing emits it | What it is waiting on |
 | --- | --- | --- |
-| `OB.Interaction.Lift` | the two lift cores are access zones, so their doors return `OB.Interaction.Door.*` and the lift-panel montage is unreachable | a lift actor (call panel, car, floor indicator) rather than a door in the core |
-| `OB.Interaction.Ammo` | there are no ammo pickups: resupply is the looted weapon and the magazine in it | an ammo box pickup actor |
-| `OB.Interaction.Utility` | utility is granted by the loadout and found as a floor pickup, not picked up as utility | a utility pickup actor |
-| `OB.Interaction.Medkit` | the meal deal is used from the inventory wheel, never off a surface | a placed consumable |
 | `OB.Interaction.Body` | nothing is lootable: a corpse is a ragdoll, not a container | the death-bag pass (searchable bodies and dropped bags) |
 | `OB.Interaction.HoldToUnlock` | the HUD verb category for a hold: `RequiresHold()` already answers this in C++, so nothing emits the tag | a decision - either the widget reads it or the tag goes |
 | `OB.Interaction.TapToUse` | the same, for a tap | the same decision |

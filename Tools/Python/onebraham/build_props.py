@@ -491,7 +491,7 @@ def _dress_room(actor_subsystem, prop, mesh):
         if area is None:
             continue
 
-        _name, floors, origin_x, origin_y, _size_x, _size_y = area
+        _name, floors, origin_x, origin_y, _size_x, _size_y = C.area_centre(area)
         floor_count = max(1, floors[1] - floors[0] + 1)
 
         rooms_per_floor = max(1, len(rooms))

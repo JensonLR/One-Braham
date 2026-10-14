@@ -4,6 +4,7 @@
 
 #include "OneBraham.h"
 #include "Core/OneBrahamGameSettings.h"
+#include "Core/OneBrahamGameUserSettings.h"
 #include "Styling/SlateBrush.h"
 #include "Styling/SlateTypes.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
@@ -37,18 +38,56 @@ namespace
 
 // ==========================================================================
 //  Palette
+//
+//  Colour-blind modes swap the signal colours themselves, not the frame (a
+//  filter over the whole game makes everything worse to fix four colours).
+//  The replacements are from the Okabe-Ito set, chosen to stay apart under
+//  each deficiency:
+//    red-green (protanopia, deuteranopia): the alarm red becomes vermillion and
+//      the success green becomes blue, so "bad" and "good" never meet;
+//    blue-yellow (tritanopia): the signal blue becomes reddish purple, so the
+//      two FIRE DRILL teams and the blue/yellow prompts stay distinct.
 // ==========================================================================
+namespace
+{
+	EOneBrahamColourBlindMode ColourBlindMode()
+	{
+		const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
+		return Settings != nullptr ? Settings->ColourBlindMode : EOneBrahamColourBlindMode::Off;
+	}
+
+	bool IsRedGreen()
+	{
+		const EOneBrahamColourBlindMode Mode = ColourBlindMode();
+		return Mode == EOneBrahamColourBlindMode::Protanopia || Mode == EOneBrahamColourBlindMode::Deuteranopia;
+	}
+}
+
 FLinearColor UOneBrahamUIStyle::Navy()			{ return UOneBrahamGameSettings::Get().BrandNavy; }
 FLinearColor UOneBrahamUIStyle::LightGrey()		{ return UOneBrahamGameSettings::Get().BrandLightGrey; }
-FLinearColor UOneBrahamUIStyle::SignalBlue()	{ return UOneBrahamGameSettings::Get().BrandSignalBlue; }
 FLinearColor UOneBrahamUIStyle::SafetyYellow()	{ return UOneBrahamGameSettings::Get().BrandSafetyYellow; }
-FLinearColor UOneBrahamUIStyle::EmergencyRed()	{ return UOneBrahamGameSettings::Get().BrandEmergencyRed; }
+
+FLinearColor UOneBrahamUIStyle::SignalBlue()
+{
+	return ColourBlindMode() == EOneBrahamColourBlindMode::Tritanopia
+		? FLinearColor::FromSRGBColor(FColor(204, 121, 167))	// reddish purple
+		: UOneBrahamGameSettings::Get().BrandSignalBlue;
+}
+
+FLinearColor UOneBrahamUIStyle::EmergencyRed()
+{
+	return IsRedGreen()
+		? FLinearColor::FromSRGBColor(FColor(213, 94, 0))		// vermillion
+		: UOneBrahamGameSettings::Get().BrandEmergencyRed;
+}
 
 FLinearColor UOneBrahamUIStyle::SuccessGreen()
 {
 	// A restrained green, deliberately darker than a "gamer" green so it sits in
 	// the same corporate palette as the rest of the interface.
-	return FLinearColor(0.196f, 0.612f, 0.376f, 1.f);
+	return IsRedGreen()
+		? FLinearColor::FromSRGBColor(FColor(0, 114, 178))		// blue
+		: FLinearColor(0.196f, 0.612f, 0.376f, 1.f);
 }
 
 FLinearColor UOneBrahamUIStyle::Crosshair()

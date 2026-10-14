@@ -151,6 +151,7 @@ void UOneBrahamAudioBankAsset::EnsureCoreEntries()
 		Row(TEXT("SFX_Override_Hum"),			EOneBrahamAudioBus::Gameplay, EOneBrahamAudioCategory::Loop, 0.50f, 2600.f, 0.00f, 2, true),
 		Row(TEXT("SFX_Lift_Arrive"),			EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Mechanical, 0.85f, 6000.f, 0.00f, 3),
 		Row(TEXT("SFX_Lift_Doors"),				EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Mechanical, 0.70f, 4500.f, 0.00f, 3),
+		Row(TEXT("SFX_Tube_Rumble"),			EOneBrahamAudioBus::Ambience, EOneBrahamAudioCategory::Mechanical, 0.80f, 0.f, 0.00f, 1),
 		Row(TEXT("SFX_Lift_Motor"),				EOneBrahamAudioBus::Ambience, EOneBrahamAudioCategory::Loop, 0.55f, 3000.f, 0.00f, 2, true),
 		Row(TEXT("SFX_Shutter_Drop"),			EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Mechanical, 1.0f, 9000.f, 0.00f, 4),
 		Row(TEXT("SFX_Lockdown_Siren"),			EOneBrahamAudioBus::Ambience, EOneBrahamAudioCategory::Loop, 0.75f, 0.f, 0.00f, 1, true),
@@ -276,15 +277,15 @@ void UOneBrahamAudioBankAsset::EnsureCoreEntries()
 
 	// Resolve the mix assets the audio manager expects. These are created by the
 	// audio bootstrap Python script; EnsureCoreEntries only records the intent.
-	if (!MasterSoundClass.IsValid())
+	if (MasterSoundClass.IsNull())
 	{
 		MasterSoundClass = TSoftObjectPtr<USoundClass>(FSoftObjectPath(TEXT("/Game/OneBraham/Audio/Mix/SC_OneBraham_Master.SC_OneBraham_Master")));
 	}
-	if (!BaseSoundMix.IsValid())
+	if (BaseSoundMix.IsNull())
 	{
 		BaseSoundMix = TSoftObjectPtr<USoundMix>(FSoftObjectPath(TEXT("/Game/OneBraham/Audio/Mix/SM_OneBraham.SM_OneBraham")));
 	}
-	if (!VoiceDuckSoundMix.IsValid())
+	if (VoiceDuckSoundMix.IsNull())
 	{
 		VoiceDuckSoundMix = TSoftObjectPtr<USoundMix>(FSoftObjectPath(TEXT("/Game/OneBraham/Audio/Mix/SM_OneBraham_VoiceDuck.SM_OneBraham_VoiceDuck")));
 	}
@@ -318,7 +319,7 @@ bool UOneBrahamAudioBankAsset::ValidateBank(TArray<FString>& OutProblems) const
 				*Entry.SoundId.ToString(), Entry.Volume));
 		}
 
-		if (!Entry.Sound.IsValid() && !OneBrahamProceduralAudio::HasSynthesisedSound(Entry.SoundId))
+		if (Entry.Sound.IsNull() && !OneBrahamProceduralAudio::HasSynthesisedSound(Entry.SoundId))
 		{
 			// Not fatal: an authored asset may still be assigned before ship, but it
 			// is exactly the sort of silence that ships by accident.

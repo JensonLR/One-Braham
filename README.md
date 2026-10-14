@@ -41,31 +41,31 @@ Prerequisites: **Unreal Engine 5.5 or newer**, **Visual Studio 2022** with the
 running if you intend to build the platform configuration.
 
 ```
-1.  Run Setup.bat                     verifies the engine, the plugins and the toolchain
-2.  Right-click OneBraham.uproject    Generate Visual Studio project files
-3.  Build the Editor target           Development | Editor | Win64
-4.  Run BuildContent.bat              builds every generated asset and the map
-5.  RunAll.bat                        every check that needs no engine
-6.  RunTests.bat                      the automation suite (needs the editor)
-7.  Play                              open L_Persistent_OneBraham and press Play
+1.  Scripts\Setup.bat                engine, plugins, toolchain; generates project files
+2.  Scripts\BuildEditor.bat          compiles the editor target
+3.  Scripts\BuildContent.bat         builds every generated asset and the map
+4.  Scripts\Validate.bat             project, MAP CHECK, references, cook
+5.  Scripts\RunTests.bat             the automation suite (needs the editor)
+6.  Scripts\PackageClient.bat        the Windows client
+7.  Scripts\PackageServer.bat        the dedicated server
 ```
 
-`Scripts/README.md` is the full script index, with the switches each one takes
-and the order they must run in.
+`README_BUILD.md` walks through it, with what each step proves; `README_RUN.md`
+is how to play a match; `Scripts/README.md` is the full script index.
 
 ### Running a match
 
 ```
 Scripts\RunServer.bat                          dedicated server, 12 players, ASCENT
 Scripts\RunClient.bat 127.0.0.1                one client
-Scripts\RunClient.bat 127.0.0.1 -Squad 2       a client on a specific squad
+Scripts\RunClient.bat L_Persistent_OneBraham?listen    host a listen server
 ```
 
 `RunTests.bat` runs the automation suites in `Source/OneBraham/Tests/`: the match
 rules, weapons, damage, voice, input and replication contracts, and the
-engine-free static checks. `RunTests.bat smoke` runs the same suites on a
-dedicated server, and the bot-driven twelve-player run in `Docs/18` §3 is what
-gates a release.
+engine-free static checks. `RunTests.bat smoke` runs the match-boot composition
+check, and the bot-driven twelve-player run in `Docs/18` §3 is what gates a
+release.
 
 ---
 
@@ -114,7 +114,7 @@ cosmetic is earnable.
 
 | Area | What it uses |
 | --- | --- |
-| Engine | UE 5.5, World Partition, level streaming per floor |
+| Engine | UE 5.5; one persistent level with an always-loaded sublevel per floor |
 | Rendering | Lumen GI and reflections, Virtual Shadow Maps, Nanite on architecture, TSR |
 | Language | C++20 for every system; Blueprint for authoring and animation glue |
 | Input | Enhanced Input, 41 actions, four mapping contexts — all generated |
@@ -155,7 +155,7 @@ cosmetic is earnable.
 3. **Server authority for anything that matters.** Damage, unlocks, breaches,
    timers and cosmetics.
 4. **`validate_project.py` must report zero failures before a build goes out.**
-   It runs 35 checks, and eighteen of them need no engine at all — so a broken
+   It runs 37 checks, and nineteen of them need no engine at all — so a broken
    include, a member function with no definition, an RPC with no body, a
    replicated property with no `DOREPLIFETIME`, a log category with no verbosity,
    a VFX system nothing spawns, an asset path nothing creates, a call with the

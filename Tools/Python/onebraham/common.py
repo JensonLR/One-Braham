@@ -65,9 +65,8 @@ VOICE = GAME_ROOT + "/Voice"
 # strings are load-bearing in three places at once - do not rename casually.
 MAP_PERSISTENT = "L_Persistent_OneBraham"
 MAP_FIRE_DRILL = "L_FireDrill_Arena"
-MAP_TUTORIAL = "L_Tutorial_SignIn"
+MAP_MAIN_MENU = "L_MainMenu"
 MAP_LOADING = "L_Loading"
-MAP_BENCHMARK = "L_Benchmark_Skydeck"
 
 # ---------------------------------------------------------------------------
 #  Naming conventions
@@ -122,7 +121,8 @@ FLOOR_HEIGHT_CM = 400.0
 FLOOR_COUNT = 15
 
 # The eight named areas of the map spec (Docs/09). Each entry is
-# (name, first_floor, last_floor, wing_origin_xy, wing_size_xy).
+# (name, (first_floor, last_floor), min_corner_x, min_corner_y, size_x, size_y):
+# the footprint's MINIMUM corner, not its centre - read rows with area_centre().
 # The tower is a rectangular core with four wings around a central lift core,
 # which is what gives every floor a chokepoint, a flank and a sightline.
 AREAS = [
@@ -138,6 +138,21 @@ AREAS = [
 ]
 
 AREA_NAMES = [a[0] for a in AREAS]
+
+
+def area_centre(area):
+    """(name, floors, centre_x, centre_y, size_x, size_y) for one AREAS row.
+
+    AREAS stores the minimum corner of each footprint: (-2600, -2200) with a
+    5200 x 4400 footprint is a plaza centred on the origin. Every builder places
+    things about the area's *centre* (slabs, rooms, lights, volumes, nav bounds,
+    props), while the lift core, the spawn anchors and the extraction pad are
+    placed about the world origin. Handing the corner to code that wants the
+    centre built every floor half a footprint south-west of its own lifts, so
+    this is the only way the builders read an area.
+    """
+    name, floors, min_x, min_y, size_x, size_y = area
+    return name, floors, min_x + size_x / 2.0, min_y + size_y / 2.0, size_x, size_y
 
 def AREAS_AS_PAIRS():
     """(name, (first_floor, last_floor)) for every area, in build order.
@@ -155,19 +170,105 @@ LIFT_CAR_SIZE_CM = 220.0
 CORRIDOR_WIDTH_CM = 260.0
 DOOR_WIDTH_CM = 110.0
 DOOR_HEIGHT_CM = 215.0
-STAIRWELL_SIZE_CM = 900.0
+STAIRWELL_SIZE_CM = 800.0
 STAIRWELL_FLIGHTS_PER_FLOOR = 2
 SERVER_ROW_SPACING_CM = 180.0
 DESK_GRID_CM = 180.0
 CEILING_HEIGHT_CM = 400.0
 WINDOW_SPACING_CM = 300.0
 
+# ---------------------------------------------------------------------------
+#  The service core: the same on every floor, plaza to Skydeck.
+#
+#  The game is a climb, and the core is how the climb works: two stairwells and
+#  a lift bank in one band along the north of every floor, behind a corridor
+#  that every floor keeps clear. Rooms, spawns, doors and terminals are laid out
+#  around it, and check_building_layout fails if anything is placed inside it
+#  that is not part of it. (The first layout put a 12 m core in the middle of
+#  every floor, under the boardroom, the canteen and the helipad, with solid
+#  boxes for stair landings and lift doors and no hole in any slab: nobody
+#  could get from one floor to the next.)
+# ---------------------------------------------------------------------------
+#: (x min, x max, y min, y max) of the core band.
+CORE_BAND = (-1500.0, 1500.0, 500.0, 1300.0)
+#: The corridor in front of the core, kept clear of rooms on every floor.
+CORE_CORRIDOR = (-1500.0, 1500.0, 300.0, 500.0)
+
+#: Stairwells: (name, centre x). Each is STAIRWELL_SIZE_CM square, centred in
+#: the band's depth, with its door in the middle of its south (corridor) wall.
+STAIRWELLS = [("A", -1100.0), ("B", 1100.0)]
+STAIRWELL_DOOR_Y = CORE_BAND[2]
+
+#: Two flights a storey: 11 risers of 18.2 cm and 11 treads of 28 cm each, a
+#: 200 cm floor-level landing by the door and a mid-landing at the back.
+STAIR_RISERS_PER_FLIGHT = 11
+STAIR_TREAD_CM = 28.0
+STAIR_LANDING_DEPTH_CM = 200.0
+
+#: Lift shafts: (name, centre x, centre y), each LIFT_SHAFT_SIZE_CM square
+#: inside, running LIFT_FLOORS and opening onto the corridor at LIFT_STOPS.
+LIFT_SHAFT_SIZE_CM = 260.0
+LIFT_SHAFTS = [("L1", -150.0, 930.0), ("L2", 150.0, 930.0)]
+LIFT_FLOORS = (1, 9)
+LIFT_STOPS = (1, 3, 9)
+#: The lift lobby: the alcove in front of the shafts, x and y range.
+LIFT_LOBBY = (-300.0, 300.0, 500.0, 800.0)
+
+
+def core_holes(floor_index):
+    """(x0, x1, y0, y1) holes this floor's slab needs.
+
+    A stairwell's slab is cut behind its floor-level landing, so the flights
+    from the storey below come up through it. A lift shaft is cut on every
+    floor the shaft passes, so the car can.
+    """
+    holes = []
+    if floor_index > 0:
+        for _name, cx in STAIRWELLS:
+            holes.append((cx - STAIRWELL_SIZE_CM / 2.0, cx + STAIRWELL_SIZE_CM / 2.0,
+                          CORE_BAND[2] + STAIR_LANDING_DEPTH_CM, CORE_BAND[3]))
+    if LIFT_FLOORS[0] < floor_index <= LIFT_FLOORS[1]:
+        for _name, cx, cy in LIFT_SHAFTS:
+            half = LIFT_SHAFT_SIZE_CM / 2.0
+            holes.append((cx - half, cx + half, cy - half, cy + half))
+    return holes
+
+
+def subtract_rects(rect, holes):
+    """rect minus every hole, as a list of rectangles. All are (x0, x1, y0, y1).
+
+    Used for the slabs and the ceilings: a box per remaining piece is real,
+    walkable geometry with no boolean meshes.
+    """
+    pieces = [rect]
+    for hx0, hx1, hy0, hy1 in holes:
+        next_pieces = []
+        for x0, x1, y0, y1 in pieces:
+            if hx1 <= x0 or hx0 >= x1 or hy1 <= y0 or hy0 >= y1:
+                next_pieces.append((x0, x1, y0, y1))
+                continue
+            cx0, cx1 = max(x0, hx0), min(x1, hx1)
+            cy0, cy1 = max(y0, hy0), min(y1, hy1)
+            if y0 < cy0:
+                next_pieces.append((x0, x1, y0, cy0))
+            if cy1 < y1:
+                next_pieces.append((x0, x1, cy1, y1))
+            if x0 < cx0:
+                next_pieces.append((x0, cx0, cy0, cy1))
+            if cx1 < x1:
+                next_pieces.append((cx1, x1, cy0, cy1))
+        pieces = next_pieces
+    return [p for p in pieces if p[1] - p[0] > 1.0 and p[3] - p[2] > 1.0]
+
+
 # Spawn safety: no spawn point may be within this distance of an enemy's.
 SPAWN_MIN_ENEMY_DISTANCE_CM = 2000.0
 SPAWN_MIN_SAME_TEAM_DISTANCE_CM = 600.0
 
 # Gameplay anchors.
-EXTRACTION_PAD_LOCATION = (0.0, 0.0, 15.0 * FLOOR_HEIGHT_CM)
+# On the Skydeck slab: floor N stands at (N - 1) x 400 (Docs/09 section 1), so
+# floor 15 is 5600. This was 15 x 400 = 6000, a storey above the deck it sits on.
+EXTRACTION_PAD_LOCATION = (0.0, -800.0, 14.0 * FLOOR_HEIGHT_CM)
 EXTRACTION_HOLD_RADIUS_CM = 900.0
 CANTEEN_SKYDECK_STAIR_XY = (900.0, -700.0)
 
@@ -514,3 +615,35 @@ def guard(report, label, fn, *args, **kwargs):
     except Exception as exc:  # noqa: BLE001 - deliberately broad at the boundary
         report.failed(label, u"{0}\n{1}".format(exc, traceback.format_exc()))
         return None
+
+
+def make_gameplay_tag(tag_string):
+    """'OB.Zone.Lobby' -> the registered unreal.GameplayTag, or None.
+
+    The engine's Python API has no tag-from-string function, so the module
+    exposes one (UOneBrahamGameplayStatics::RequestTag). None means the tag is
+    not registered: the C++ module did not load, or the name is not in
+    DefaultGame.ini's tag list. The caller reports that; it is never silently
+    an empty tag.
+    """
+    library = getattr(unreal, "OneBrahamGameplayStatics", None) if IN_EDITOR else None
+    if library is None:
+        return None
+    tag = library.request_tag(unreal.Name(tag_string))
+    try:
+        valid = unreal.BlueprintGameplayTagLibrary.is_gameplay_tag_valid(tag)
+    except Exception:  # noqa: BLE001
+        valid = str(tag_string) in tag.export_text()
+    return tag if valid else None
+
+
+def data_asset_factory(asset_class):
+    """A DataAssetFactory that makes exactly this class.
+
+    The factory falls back to the class create_asset is given, but naming it
+    on the factory as well is what the engine's own UI does, and leaves no
+    path where an abstract base class is instantiated instead.
+    """
+    factory = unreal.DataAssetFactory()
+    factory.set_editor_property("DataAssetClass", asset_class)
+    return factory

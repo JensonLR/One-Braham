@@ -25,7 +25,7 @@ validator fails the build if the two disagree.
 | 08 | [Interface](08_UI.md) | the HUD, the menus, the settings, the palette |
 | 09 | [Map implementation](09_Map_Implementation.md) | fifteen floors, eight areas, the routes up |
 | 10 | [Environment art](10_Environment_Art.md) | master material graphs, lighting per area, dressing |
-| 11 | [Niagara VFX](11_Niagara_VFX.md) | 17 systems, their parameters and their budgets |
+| 11 | [Niagara VFX](11_Niagara_VFX.md) | 18 systems, their parameters and their budgets |
 | 12 | [Audio](12_Audio.md) | classes, mixes, attenuation, ambience, the recording brief |
 | 13 | [Characters and clothing](13_Characters_Clothing.md) | six archetypes, cosmetics, competitive integrity |
 | 14 | [Voice script](14_Voice_Script.md) | 161 lines, six actors, per-line direction |
@@ -35,6 +35,8 @@ validator fails the build if the two disagree.
 | 18 | [Testing and performance](18_Testing_Performance.md) | the test plan, the budgets, the manual QA pass |
 | 19 | [Steam, marketing, trailer](19_Steam_Marketing_Trailer.md) | the store page, the capsule art, the 96-second trailer |
 | 20 | [Release checklists](20_Release_Checklists.md) | everything that must pass before a build goes out |
+| 21 | [Xbox](21_Xbox.md) | ID@Xbox, what the code already does for consoles, and what needs the GDK |
+| 22 | [First day on a Mac](22_First_Day_Mac.md) | Xcode, the engine, the code, the first compile, the content build, playing |
 | — | [Licences](LICENCES.md) | every third-party asset and its licence |
 
 ---

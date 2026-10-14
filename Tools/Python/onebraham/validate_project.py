@@ -155,7 +155,7 @@ EXPECTED_NIAGARA = [
     "NS_OB_Impact_Flesh", "NS_OB_MuzzleFlash", "NS_OB_Tracer", "NS_OB_ShellEject",
     "NS_OB_Explosion_Frag", "NS_OB_Explosion_Breach", "NS_OB_Flashbang",
     "NS_OB_Smoke", "NS_OB_BloodMist", "NS_OB_SprinklerSpray", "NS_OB_SparkShower",
-    "NS_OB_Dust", "NS_OB_BreachDebris", "NS_OB_CorpseImpact",
+    "NS_OB_Dust", "NS_OB_BreachDebris", "NS_OB_CorpseImpact", "NS_OB_Rain",
 ]
 
 # Performance caps from Docs/18_Performance.md. A dedicated 12-player server is
@@ -872,13 +872,223 @@ def check_performance(v, config_only):
 #  12. Config drift
 # ---------------------------------------------------------------------------
 
+#: Where a UCLASS(config=X) reads its section from.
+CONFIG_FILE_FOR = {"Engine": "DefaultEngine.ini", "Game": "DefaultGame.ini",
+                   "GameUserSettings": "DefaultGameUserSettings.ini", "Input": "DefaultInput.ini",
+                   "Editor": "DefaultEditor.ini"}
+
+
+def project_config_classes():
+    """{ClassNameWithoutPrefix: (config file, parent, {property: type})} for the module's classes."""
+    source = os.path.join(REPO_ROOT, "Source", "OneBraham")
+    classes = {}
+    for root, _dirs, files in os.walk(source):
+        for name in files:
+            if not name.endswith(".h"):
+                continue
+            text = read_text(os.path.join(root, name))
+            # Comments out first: a doc comment between UPROPERTY() and the
+            # declaration is normal, and commented-out code is not a property.
+            text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+            text = re.sub(r"//[^\n]*", "", text)
+            heads = list(re.finditer(r"UCLASS\(((?:[^()]|\([^()]*\))*)\)\s*class\s+ONEBRAHAM_API\s+[AU](\w+)\s*:\s*public\s+[AU](\w+)", text))
+            for index, head in enumerate(heads):
+                body = text[head.end():heads[index + 1].start() if index + 1 < len(heads) else len(text)]
+                spec = re.search(r"\bconfig\s*=\s*(\w+)", head.group(1), re.I)
+                props = dict((prop, kind.strip()) for kind, prop in re.findall(
+                    r"UPROPERTY\((?:[^()]|\([^()]*\))*\b(?:config|GlobalConfig)\b(?:[^()]|\([^()]*\))*\)\s*"
+                    r"([\w:<>,\s\*]+?)\s+(\w+)\s*(?:=|;|\[|\{)", body, re.I))
+                classes[head.group(2)] = (CONFIG_FILE_FOR.get(spec.group(1)) if spec else None,
+                                          head.group(3), props)
+    return classes
+
+
+def project_enum_values():
+    """{EnumName: set of value names} for the module's UENUMs."""
+    source = os.path.join(REPO_ROOT, "Source", "OneBraham")
+    enums = {}
+    for root, _dirs, files in os.walk(source):
+        for name in files:
+            if name.endswith(".h"):
+                text = re.sub(r"//[^\n]*", "", read_text(os.path.join(root, name)))
+                for enum_name, body in re.findall(r"enum\s+class\s+(\w+)\s*:\s*\w+\s*\{(.*?)\}", text, re.S):
+                    enums[enum_name] = set(re.findall(r"^\s*(\w+)\s*(?:=|,|UMETA|$)", body, re.M))
+    return enums
+
+
+def check_project_config_keys(v):
+    """Every key under [/Script/OneBraham.X] is a config property of X, in the file X reads.
+
+    The engine ignores an ini key that names no property, and a whole section
+    for a class that reads another file, without a word. This project shipped
+    a 31-line section for a class that does not exist, its anti-cheat
+    thresholds in a file their class never opens, and ColorBlindMode for a
+    property spelled ColourBlindMode.
+    """
+    classes = project_config_classes()
+    enums = project_enum_values()
+    unknown, misplaced, bad_enums = [], [], []
+    for root, _dirs, files in os.walk(CONFIG_DIR):
+        for name in sorted(files):
+            if not name.endswith(".ini"):
+                continue
+            path = os.path.join(root, name)
+            section = None
+            for number, raw in enumerate(read_text(path).splitlines(), 1):
+                line = raw.strip()
+                if line.startswith("[") and line.endswith("]"):
+                    section = line[1:-1]
+                    continue
+                if not section or not section.startswith("/Script/OneBraham.") or not line or line.startswith(";"):
+                    continue
+                where = u"{0}:{1}".format(os.path.relpath(path, REPO_ROOT), number)
+                cls = section[len("/Script/OneBraham."):]
+                if cls not in classes:
+                    unknown.append(u"{0} [{1}]: no such class".format(where, section))
+                    continue
+                if root == CONFIG_DIR and classes[cls][0] and name != classes[cls][0]:
+                    misplaced.append(u"{0}: {1} reads {2}, not {3}".format(where, cls, classes[cls][0], name))
+                key = line.lstrip("+-!.").split("=")[0].split("[")[0].split("(")[0].strip()
+                value = line.split("=", 1)[1].strip() if "=" in line else u""
+                kind, current = None, cls
+                while current in classes and kind is None:
+                    kind = classes[current][2].get(key)
+                    current = classes[current][1]
+                if kind is None:
+                    unknown.append(u"{0}: {1} has no config property '{2}'".format(where, cls, key))
+                elif kind in enums and value not in enums[kind]:
+                    bad_enums.append(u"{0}: {1}={2} is not a {3} value name".format(where, key, value, kind))
+
+    for label, problems, fix in (
+            ("config keys", unknown, "the engine ignores these lines; fix the name or delete the line"),
+            ("config files", misplaced, "move the section to the file the class reads"),
+            ("config enums", bad_enums, "write the enum value's name, as the engine reads it")):
+        if problems:
+            v.fail("config", u"{0}: {1}".format(label, u"; ".join(problems)), fix)
+        else:
+            v.pass_("config", u"{0}: every project setting is read".format(label))
+
+
+
+#: Engine plugin names (the .uplugin file names) the project may enable, each
+#: checked against https://dev.epicgames.com/documentation/unreal-engine/API/PluginIndex.
+VERIFIED_ENGINE_PLUGINS = frozenset((
+    "EnhancedInput", "CommonUI", "Niagara", "ChaosCloth", "HairStrands", "SoundUtilities",
+    "Synthesis", "Metasound", "OnlineSubsystem", "OnlineSubsystemUtils", "OnlineSubsystemSteam",
+    "ModelingToolsEditorMode", "EditorScriptingUtilities", "DataValidation", "PythonScriptPlugin",
+))
+
+
+def check_targets(v, _config_only):
+    """No target changes the shared build environment unless it owns one.
+
+    A Game or Editor target built against the Launcher engine shares the
+    engine's prebuilt modules, and UBT stops the build outright when a target
+    changes how they would be compiled: global definitions, Windows compiler
+    switches, logging or checks in Shipping. All three of this project's
+    targets did, and none of it was used. A target may change them only after
+    declaring BuildEnvironment = TargetBuildEnvironment.Unique, which needs a
+    source build of the engine (the dedicated server needs one anyway).
+    """
+    forbidden = ("GlobalDefinitions", "bStrictConformanceMode", "bUseLoggingInShipping",
+                 "bUseChecksInShipping", "bOverrideBuildEnvironment", "AdditionalCompilerArguments",
+                 "bUseUnityBuild", "bForceEnableExceptions", "bForceEnableRTTI")
+    source = os.path.join(REPO_ROOT, "Source")
+    problems, targets = [], 0
+    for name in sorted(os.listdir(source)):
+        if not name.endswith(".Target.cs"):
+            continue
+        targets += 1
+        text = re.sub(r"//[^\n]*", "", read_text(os.path.join(source, name)))
+        if "TargetBuildEnvironment.Unique" in text:
+            continue
+        for setting in forbidden:
+            if re.search(r"\b" + setting + r"\b", text):
+                problems.append(u"{0} sets {1} on the shared build environment".format(name, setting))
+    if problems:
+        v.fail("targets", u"; ".join(problems),
+               u"UBT refuses this against the Launcher engine; remove it, or give the target "
+               u"BuildEnvironment = TargetBuildEnvironment.Unique (source engine only)")
+    else:
+        v.pass_("targets", u"{0} targets, none changes the shared build environment".format(targets))
+
+
+#: unreal.* names the content builders have used that the editor's Python API
+#: does not have, and what to write instead. Python strips only the U/A/F
+#: prefix, so UInputAction_Factory is unreal.InputAction_Factory.
+UNREAL_PYTHON_MISNAMES = {
+    "InputActionFactory": "InputAction_Factory",
+    "InputMappingContextFactory": "InputMappingContext_Factory",
+    "GameplayTagLibrary": "common.make_gameplay_tag (UOneBrahamGameplayStatics::RequestTag)",
+}
+
+
+def check_python_api_names(v, _config_only):
+    """No builder calls an unreal.* name the editor's Python does not have.
+
+    The builders run only inside the editor, so a wrong name surfaces on the
+    first content build, often inside a try block that turns it into a silent
+    skip. Every input asset and every archetype tag went missing that way.
+    """
+    tools = os.path.join(REPO_ROOT, "Tools", "Python", "onebraham")
+    problems = []
+    for name in sorted(os.listdir(tools)):
+        if not name.endswith(".py") or name == "validate_project.py":
+            continue
+        text = read_text(os.path.join(tools, name))
+        for bad, good in sorted(UNREAL_PYTHON_MISNAMES.items()):
+            for match in re.finditer(r"\bunreal\." + bad + r"\b", text):
+                problems.append(u"{0}:{1} uses unreal.{2}; use {3}".format(
+                    name, text[:match.start()].count("\n") + 1, bad, good))
+    # A bool property's Python name drops its b: bIntegralSuppressor is
+    # integral_suppressor, and "b_integral_suppressor" is neither that nor the
+    # C++ name. Five properties (the suppressed pistol's suppressor, shell-by-
+    # shell reload, cover penetration, tracer hiding, hiding cosmetics when
+    # armed) were never set that way.
+    for name in sorted(os.listdir(tools)):
+        if not name.endswith(".py") or name == "validate_project.py":
+            continue
+        text = read_text(os.path.join(tools, name))
+        for match in re.finditer(r"""_editor_property\(\s*["'](b_[a-z0-9_]+)["']|_set\([^"'\n]*["'](b_[a-z0-9_]+)["']""", text):
+            prop = match.group(1) or match.group(2)
+            problems.append(u"{0}:{1} names property '{2}'; a bool's Python name drops the b ('{3}')".format(
+                name, text[:match.start()].count("\n") + 1, prop, prop[2:]))
+
+    # A property set inside try/except: pass is how every one of the above went
+    # unnoticed: the name was wrong, the set threw, and the build said OK. A
+    # failed set is reported (report.failed, or C.warn where there is no report).
+    for name in sorted(os.listdir(tools)):
+        if not name.endswith(".py") or name == "validate_project.py":
+            continue
+        lines = read_text(os.path.join(tools, name)).split("\n")
+        for index, line in enumerate(lines):
+            if not re.match(r"\s*except\b[^:]*:\s*(#.*)?$", line):
+                continue
+            following = index + 1
+            while following < len(lines) and lines[following].strip().startswith("#"):
+                following += 1
+            if following >= len(lines) or lines[following].strip() != "pass":
+                continue
+            start = index - 1
+            while start > 0 and not lines[start].strip().startswith("try:"):
+                start -= 1
+            if any("set_editor_property" in body for body in lines[start:index]):
+                problems.append(u"{0}:{1} swallows a failed set_editor_property; report it".format(name, index + 1))
+
+    if problems:
+        v.fail("python api", u"; ".join(problems))
+    else:
+        v.pass_("python api", u"no builder uses a known-missing unreal.* name")
+
+
 def check_config(v, _config_only):
     game_ini = read_text(os.path.join(CONFIG_DIR, "DefaultGame.ini"))
     engine_ini = read_text(os.path.join(CONFIG_DIR, "DefaultEngine.ini"))
 
     required_sections = [
-        ("[/Script/OneBraham.OneBrahamMatchSettings]", game_ini, "match tuning"),
-        ("[/Script/OneBraham.OneBrahamGameSettings]", game_ini, "palette and gameplay"),
+        ("[/Script/OneBraham.OneBrahamGameSettings]", engine_ini, "palette, security and registries"),
+        ("[/Script/OneBraham.OneBrahamGameUserSettings]",
+         read_text(os.path.join(CONFIG_DIR, "DefaultGameUserSettings.ini")), "player settings defaults"),
         ("[/Script/Engine.Engine]", engine_ini, "engine classes"),
     ]
 
@@ -890,14 +1100,54 @@ def check_config(v, _config_only):
         v.pass_("config", u"all {0} required config sections present".format(
             len(required_sections)))
 
-    # The three modes must each have a settings block: a mode with no block
-    # loads with the C++ defaults, which is how one mode quietly plays like
-    # another.
-    for mode in ("Ascent", "FireDrill", "NightShift"):
-        if mode not in game_ini:
-            v.fail("config", u"no [OneBrahamMatchSettings] entry for {0}".format(mode))
-        else:
-            v.pass_("config", u"{0} settings present".format(mode))
+    check_project_config_keys(v)
+
+    # The content pipeline is Python run inside the editor: -run=pythonscript
+    # needs the Python plugin enabled in this project (Epic: per project), and
+    # the builders call the Editor Scripting Utilities.
+    try:
+        import json
+        with io.open(os.path.join(os.path.dirname(CONFIG_DIR), "OneBraham.uproject"), encoding="utf-8") as handle:
+            plugins = dict((p.get("Name"), p.get("Enabled")) for p in json.load(handle).get("Plugins", []))
+    except (IOError, OSError, ValueError) as exc:
+        plugins = {}
+        v.fail("config", u"OneBraham.uproject could not be read: {0}".format(exc))
+    # A plugin is named by its .uplugin file, and a name the engine has no file
+    # for stops the editor at startup. "ChaosClothPlugin" (the file is
+    # ChaosCloth.uplugin) did exactly that. Every engine plugin the project
+    # enables must be one of these names, each checked against Epic's plugin
+    # index; a project plugin must exist under Plugins/.
+    unknown_plugins = [name for name in plugins
+                       if name not in VERIFIED_ENGINE_PLUGINS
+                       and not os.path.isdir(os.path.join(os.path.dirname(CONFIG_DIR), "Plugins", name))]
+    if unknown_plugins:
+        v.fail("config", u"OneBraham.uproject enables {0}, which is not a verified engine plugin name "
+               u"or a folder under Plugins/".format(u", ".join(sorted(unknown_plugins))),
+               u"use the .uplugin file's name (Epic's plugin index shows it as the link's last segment), "
+               u"then add it to VERIFIED_ENGINE_PLUGINS")
+    missing_plugins = [name for name in ("PythonScriptPlugin", "EditorScriptingUtilities") if not plugins.get(name)]
+    if missing_plugins:
+        v.fail("config", u"OneBraham.uproject does not enable {0}".format(u", ".join(missing_plugins)),
+               u"Scripts/BuildContent cannot run a single builder without them")
+    else:
+        v.pass_("config", u"editor Python and scripting plugins enabled")
+
+    # The game net driver. With no definition the engine's IpNetDriver carries
+    # every connection and a Steam lobby join, which resolves to a steam.<id>
+    # P2P address, cannot connect. The engine's own row must be cleared first or
+    # it is matched before ours.
+    game_driver = re.search(r'^\+NetDriverDefinitions=\(DefName="GameNetDriver",'
+                            r'DriverClassName="([^"]+)",DriverClassNameFallback="([^"]+)"\)',
+                            engine_ini, re.M)
+    if (game_driver is None or "SteamNetDriver" not in game_driver.group(1)
+            or "IpNetDriver" not in game_driver.group(2)):
+        v.fail("config", u"no GameNetDriver definition using SteamNetDriver with an IpNetDriver fallback",
+               u"Steam lobby joins will fail; see Docs/02, Steam")
+    elif "!NetDriverDefinitions=ClearArray" not in engine_ini:
+        v.fail("config", u"NetDriverDefinitions is not cleared before the game's rows",
+               u"the engine's IpNetDriver row is matched first and the Steam driver never loads")
+    else:
+        v.pass_("config", u"game net driver: Steam, falling back to IP")
 
     # Story-critical numbers, checked because they are quoted in the design and
     # in the store page.
@@ -1002,6 +1252,15 @@ def check_cpp_includes(v, _config_only):
                 target = match.group(1)
 
                 if target.endswith(".generated.h"):
+                    continue
+
+                # A module's Public/, Private/ and Classes/ folders are its include
+                # roots, so a path through one never resolves: the include is
+                # written from the folder below them ("InputAction.h", not
+                # "EnhancedInput/Public/InputAction.h").
+                if re.search(r'(^|/)(Public|Private|Classes)/', target):
+                    checked += 1
+                    missing.append((os.path.relpath(path, SOURCE_DIR), target))
                     continue
 
                 base = os.path.basename(target)
@@ -1172,7 +1431,11 @@ def check_vfx_reachability(v, _config_only):
         v.fail("vfx reachability", u"EOneBrahamVFXEffect not found in VFXStatics.h")
         return
 
-    effects = [name.strip() for name in re.split(r'[,\n]', enum_body.group(1)) if name.strip()]
+    # Comments out first: a documented enumerator ("/** ... */ Rain") is still
+    # one name, not a sentence and a name.
+    body = re.sub(r'/\*.*?\*/', u"", enum_body.group(1), flags=re.DOTALL)
+    body = re.sub(r'//[^\n]*', u"", body)
+    effects = [name.strip() for name in re.split(r'[,\n]', body) if name.strip()]
 
     if not effects:
         v.fail("vfx reachability", u"EOneBrahamVFXEffect is empty")
@@ -1860,6 +2123,8 @@ def build_all(config_only=False):
         ("cosmetics", check_cosmetics),
         ("performance", check_performance),
         ("config", check_config),
+        ("targets", check_targets),
+        ("python api", check_python_api_names),
         ("cpp symbols", check_cpp_symbols),
         ("cpp includes", check_cpp_includes),
         ("log categories", check_log_categories),

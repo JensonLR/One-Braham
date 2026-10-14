@@ -1,6 +1,8 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "UI/OneBrahamHUDComponent.h"
+#include "EngineUtils.h"
+#include "Match/OneBrahamControlPoint.h"
 
 #include "UI/OneBrahamHUDStringTable.h"
 
@@ -571,6 +573,15 @@ void UOneBrahamHUDComponent::GatherHUDData()
 {
 	AOneBrahamCharacter* Character = BoundCharacter.Get();
 	AOneBrahamPlayerController* PC = OwningController.Get();
+
+	// Spectating first: a spectator has no pawn of their own, and this is the
+	// one part of the HUD that matters to them.
+	Data.bSpectating = PC != nullptr && PC->bIsSpectating;
+	Data.bSpectatorFreeCamera = Data.bSpectating && PC->IsFreeCameraActive();
+	const AOneBrahamPlayerState* Watched = Data.bSpectating ? PC->GetSpectatedPlayerState() : nullptr;
+	Data.SpectatedPlayerName = Watched ? Watched->GetPlayerName() : FString();
+	Data.SpectatedFloor = Watched ? Watched->CurrentFloor : 0;
+
 	if (Character == nullptr || PC == nullptr)
 	{
 		return;
@@ -666,23 +677,25 @@ void UOneBrahamHUDComponent::GatherHUDData()
 	//
 	// "How far through the hold am I" belongs to the interaction component, and it
 	// is replicated, so the ring is honest on a client.
-	if (const AOneBrahamPlayerController* OwningController = Cast<AOneBrahamPlayerController>(GetOwner()))
+	// Named Controller, not OwningController: that is the member, and a local that
+	// shadows a member is an error under UE5's default shadow-variable level.
+	if (const AOneBrahamPlayerController* Controller = Cast<AOneBrahamPlayerController>(GetOwner()))
 	{
-		const FOneBrahamInteractionTarget& Target = OwningController->GetInteractionTarget();
+		const FOneBrahamInteractionTarget& Target = Controller->GetInteractionTarget();
 
 		// "Something to say", not "something under the crosshair": an interactable
 		// that returns an empty prompt has nothing to offer right now (a breached
 		// wall, a colleague who is on their feet), and drawing a blank line where
 		// a verb should be is worse than drawing nothing.
 		Data.bHasInteractionTarget = Target.Actor != nullptr && !Target.Prompt.IsEmpty();
-		Data.InteractionPrompt = Target.Prompt;
+		Data.InteractionPrompt = Controller->ResolvePromptKeys(Target.Prompt);
 
 		// A target you cannot use yet is not hidden, it is refused: the prompt goes
 		// red and the widget prints the interactable's own refusal sentence
 		// ("Partition - breaching charge required", "Executive badge required"),
 		// which tells the player what to do about it.
 		Data.bInteractionBlocked = Data.bHasInteractionTarget && !Target.bEnabled;
-		Data.InteractionBlockedReason = Data.bInteractionBlocked ? Target.Prompt : FText::GetEmpty();
+		Data.InteractionBlockedReason = Data.bInteractionBlocked ? Data.InteractionPrompt : FText::GetEmpty();
 	}
 
 	if (UOneBrahamInteractComponent* Interaction = CachedInteraction.Get())
@@ -822,6 +835,50 @@ void UOneBrahamHUDComponent::GatherHUDData()
 		{
 			Data.bLockdownActive = Lockdown->IsLockdownActive();
 			Data.LockdownSecondsRemaining = Lockdown->GetSecondsToNextStage();
+		}
+
+		// FIRE DRILL: the three points, in the order they stand in the arena.
+		Data.ControlPointSummary = FText::GetEmpty();
+		if (GS->MatchMode == EOneBrahamMatchMode::FireDrill)
+		{
+			TArray<const AOneBrahamControlPoint*> Points;
+			for (TActorIterator<AOneBrahamControlPoint> It(GetWorld()); It; ++It)
+			{
+				Points.Add(*It);
+			}
+			Points.Sort([](const AOneBrahamControlPoint& A, const AOneBrahamControlPoint& B)
+			{
+				return A.GetActorLocation().Y < B.GetActorLocation().Y;
+			});
+			const auto TeamWord = [](int32 TeamIndex)
+			{
+				return TeamIndex == 0 ? NSLOCTEXT("OneBraham", "HUD_CP_Staff", "STAFF") : NSLOCTEXT("OneBraham", "HUD_CP_Contractors", "CONTRACTORS");
+			};
+			TArray<FString> Parts;
+			for (const AOneBrahamControlPoint* Point : Points)
+			{
+				const FString Letter = Point->GetDisplayName().ToString().Left(1);
+				FText State;
+				if (Point->IsContested())
+				{
+					State = NSLOCTEXT("OneBraham", "HUD_CP_Contested", "CONTESTED");
+				}
+				else if (Point->GetCapturingTeamIndex() != INDEX_NONE)
+				{
+					State = FText::Format(NSLOCTEXT("OneBraham", "HUD_CP_Capturing", "{0}% {1}"),
+						FText::AsNumber(FMath::RoundToInt(Point->GetProgress01() * 100.f)), TeamWord(Point->GetCapturingTeamIndex()));
+				}
+				else if (Point->GetOwnerTeamIndex() != INDEX_NONE)
+				{
+					State = TeamWord(Point->GetOwnerTeamIndex());
+				}
+				else
+				{
+					State = NSLOCTEXT("OneBraham", "HUD_CP_Neutral", "-");
+				}
+				Parts.Add(FString::Printf(TEXT("%s %s"), *Letter, *State.ToString()));
+			}
+			Data.ControlPointSummary = FText::FromString(FString::Join(Parts, TEXT("   ")));
 		}
 
 		if (const UOneBrahamExtractionComponent* Extraction = GS->GetExtractionComponent())

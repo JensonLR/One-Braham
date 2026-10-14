@@ -64,7 +64,13 @@ public:
 	// ======================================================================
 	//  Setup
 	// ======================================================================
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "One Braham|Weapon")
+	/**
+	 * What this weapon is. Replicated: it was not, so on every remote machine a
+	 * weapon had no definition - no mesh, no muzzle flash, no shell, no tracer,
+	 * no ADS field of view, no magazine size. OnRep_Definition applies the
+	 * presentation half of InitialiseFromDefinition; the server owns the rest.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_Definition, Category = "One Braham|Weapon")
 	TObjectPtr<UOneBrahamWeaponDefinition> Definition;
 
 	/** Initialises this weapon actor from a definition. Safe to call twice. */
@@ -123,6 +129,10 @@ public:
 	/** Server: finishes the reload (called by a timer set in ServerStartReload). */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Weapon")
 	void ServerFinishReload();
+
+	/** Per-shell weapons: one more shell's worth of time, after the component
+	 *  has loaded the last one and found room for another. */
+	void ServerContinueShellReload();
 
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Weapon")
 	void ServerCancelReload();
@@ -189,7 +199,10 @@ public:
 	float GetEffectiveADSTime() const;
 
 	UFUNCTION(BlueprintPure, Category = "One Braham|Weapon")
-	bool HasSuppressor() const { return bSuppressorFitted; }
+	bool HasSuppressor() const { return IsSuppressed(); }
+
+	/** A suppressor in the muzzle slot, or a weapon built suppressed. */
+	bool IsSuppressed() const;
 
 	// ======================================================================
 	//  FX (client-side, called on every machine that can see the shot)
@@ -200,8 +213,9 @@ public:
 	UFUNCTION(NetMulticast, Unreliable, Category = "One Braham|Weapon")
 	void MulticastPlayImpactFX(const TArray<FOneBrahamImpactInfo>& Impacts);
 
+	/** Stage: "Start", "Shell" (one shell in, per-shell weapons), "Complete" or "Abort". Montage and reload foley on every machine. */
 	UFUNCTION(NetMulticast, Reliable, Category = "One Braham|Weapon")
-	void MulticastPlayReloadFX(bool bStarted);
+	void MulticastPlayReloadFX(FName Stage);
 
 public:
 	/** Total length of the current reload, seconds. 0 when not reloading. */
@@ -211,13 +225,24 @@ public:
 	/** Seconds left on the current reload, 0 when not reloading. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Weapon")
 	float GetReloadTimeRemaining() const;
-protected:
-
+	/**
+	 * The empty click. Public: the weapon component calls it the moment the
+	 * trigger meets an empty magazine. It sat under `protected:`, which the
+	 * component cannot call - a compile error nothing here could see.
+	 */
 	UFUNCTION(NetMulticast, Unreliable, Category = "One Braham|Weapon")
 	void MulticastPlayDryFire();
 
+protected:
+
 	/** Plays the tracer as a travelling projectile-like effect the client sees. */
 	void PlayTracerLocal(const FVector& Start, const FVector& End, bool bSuppressed);
+
+	/**
+	 * A remote shot whose line passes close to this machine's player, with
+	 * nothing solid in between, plays the whizz where it passed. Local only.
+	 */
+	void PlayNearMissForLocalListener(const FVector& MuzzleLocation, const FVector& Direction) const;
 
 	// ======================================================================
 	//  State
@@ -229,8 +254,18 @@ protected:
 	int32 AmmoInMagazine = 0;
 
 	/** Attachment ids by slot, replicated so other clients see the right model. */
-	UPROPERTY(ReplicatedUsing = OnRep_Attachments, BlueprintReadOnly, Category = "One Braham|Weapon")
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Weapon")
 	TMap<EOneBrahamAttachmentSlot, FName> Attachments;
+
+	/** Attachments on the wire; OnRep_Attachments rebuilds the map from it. */
+	UPROPERTY(ReplicatedUsing = OnRep_Attachments)
+	TArray<FOneBrahamAttachmentEntry> ReplicatedAttachments;
+
+	/** Server: copies Attachments to the wire after a change. */
+	void SyncReplicatedAttachments();
+
+	/** Every machine: the meshes, FX and materials a definition implies. */
+	void ApplyDefinitionPresentation();
 
 	/** The cosmetic skin. Replicated with a rep notify so every machine paints
 	 *  the weapon it can see: a material instance is local to the machine that
@@ -296,6 +331,7 @@ protected:
 	UFUNCTION() void OnRep_SkinId();
 	UFUNCTION() void OnRep_Ammo();
 	UFUNCTION() void OnRep_Attachments();
+	UFUNCTION() void OnRep_Definition();
 
 	/** Places attachment meshes on their sockets. */
 	void RebuildAttachmentMeshes();
@@ -350,6 +386,10 @@ protected:
 
 	/** Timer handle for the reload completion. */
 	FTimerHandle ReloadTimerHandle;
+
+	/** Local: the magazine-in and bolt cues of a reload, scheduled on every machine. */
+	FTimerHandle ReloadMagInCueHandle;
+	FTimerHandle ReloadChargeCueHandle;
 	FTimerHandle MeleeTimerHandle;
 
 	/** Server-side shot counter, used to index the recoil pattern. */

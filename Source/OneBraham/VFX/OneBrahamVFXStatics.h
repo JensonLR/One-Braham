@@ -50,7 +50,9 @@ enum class EOneBrahamVFXEffect : uint8
 	SparkShower,
 	DustPuff,
 	BreachDebris,
-	CorpseImpact
+	CorpseImpact,
+	/** Outdoor rain around the local camera (UOneBrahamWorldEffectsComponent). */
+	Rain
 };
 
 UCLASS()
@@ -130,6 +132,7 @@ public:
 	/** Global VFX intensity from the user's settings (0 = off, 1 = full). */
 	static float GetVFXIntensity();
 
-	/** Drops every cached Niagara asset. Called from module shutdown. */
+	/** Drops every cached Niagara asset and every remembered miss. Called after
+	 *  each world's cleanup and at module shutdown. */
 	static void ReleaseCachedAssets();
 };

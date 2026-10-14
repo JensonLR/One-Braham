@@ -444,7 +444,8 @@ namespace OneBrahamProceduralAudio
 	const FAmbienceRecipe* GetAmbienceRecipe(FName SoundId)
 	{
 		// Ordered as the bank is, so the two read side by side.
-		static const TPair<FName, FAmbienceRecipe> Recipes[] = {
+		struct FNamedBed { const TCHAR* Id; FAmbienceRecipe Recipe; };
+		static const FNamedBed Recipes[] = {
 			// Street: rain on the canopy over traffic, and a bus idling.
 			{ TEXT("AMB_Plaza_Street"),   { 7.f, 0.62f, 0.55f, 38.f, 57.f, 0.16f, 3.6f, 118.f, 0.20f, 0.22f, 0.30f } },
 			// The same weather on glass, close and brighter, no traffic.
@@ -469,11 +470,11 @@ namespace OneBrahamProceduralAudio
 			{ TEXT("AMB_London_Bed"),     { 8.f, 0.40f, 0.44f, 45.f, 71.f, 0.14f, 0.f, 0.f, 0.f, 0.09f, 0.20f } }
 		};
 
-		for (const TPair<FName, FAmbienceRecipe>& Pair : Recipes)
+		for (const FNamedBed& Bed : Recipes)
 		{
-			if (Pair.Key == SoundId)
+			if (SoundId == FName(Bed.Id))
 			{
-				return &Pair.Value;
+				return &Bed.Recipe;
 			}
 		}
 
@@ -614,25 +615,309 @@ namespace OneBrahamProceduralAudio
 		return nullptr;
 	}
 
+	// -----------------------------------------------------------------------
+	//  Layered cues
+	//
+	//  Every cue the bank names that has no hand-written recipe above: movement,
+	//  impacts, doors, the lifts, the winch, the UI set and the eight music
+	//  beds. A cue is a few layers (a shaped noise burst, a tone that may sweep
+	//  or carry a chord, a later second note, an amplitude pulse) and a recipe
+	//  is the numbers for them, so a whole build's worth of sound is one table a
+	//  sound designer can read top to bottom.
+	//
+	//  None of these is the shipping sound. Each is what plays until the wave at
+	//  the bank's path exists, so a clean clone is never silent where it matters:
+	//  a bullet into concrete, a door, a lift arriving two floors down.
+	// -----------------------------------------------------------------------
+	struct FCueRecipe
+	{
+		float Duration = 0.3f;
+		float Gain = 0.3f;
+		bool bLoop = false;
+
+		float NoiseLevel = 0.f;
+		/** One-pole alpha: 0 = bright hiss, 0.99 = a dark thump. */
+		float NoiseColour = 0.6f;
+		float NoiseAttack = 0.001f;
+		/** Seconds to -60 dB after the attack; 0 = sustained. */
+		float NoiseDecay = 0.1f;
+
+		float ToneHz = 0.f;
+		/** Sweep target; 0 = steady. */
+		float ToneEndHz = 0.f;
+		float ToneLevel = 0.f;
+		float ToneAttack = 0.002f;
+		/** Seconds to -60 dB; 0 = sustained. */
+		float ToneDecay = 0.f;
+		EOneBrahamToneShape Shape = EOneBrahamToneShape::Sine;
+		/** Extra partials as ratios of ToneHz: a chord, or a bell's overtones. */
+		float Chord[3] = { 0.f, 0.f, 0.f };
+
+		/** A later second note: a chime's answer, a latch after a handle. */
+		float SecondHz = 0.f;
+		float SecondDelay = 0.f;
+		float SecondLevel = 0.f;
+
+		/** Amplitude pulse: a heartbeat, a tempo, a motor's flutter. */
+		float PulseHz = 0.f;
+		float PulseDepth = 0.f;
+		/** Above 1, pulses get shorter and harder. */
+		float PulseSharpness = 1.f;
+
+		FCueRecipe& Len(float Seconds, float InGain) { Duration = Seconds; Gain = InGain; return *this; }
+		FCueRecipe& Loop() { bLoop = true; return *this; }
+		FCueRecipe& Noise(float Level, float Colour, float Attack, float Decay)
+		{
+			NoiseLevel = Level; NoiseColour = Colour; NoiseAttack = Attack; NoiseDecay = Decay; return *this;
+		}
+		FCueRecipe& Tone(float Hz, float Level, float Decay, EOneBrahamToneShape InShape = EOneBrahamToneShape::Sine)
+		{
+			ToneHz = Hz; ToneLevel = Level; ToneDecay = Decay; Shape = InShape; return *this;
+		}
+		FCueRecipe& Sweep(float EndHz) { ToneEndHz = EndHz; return *this; }
+		FCueRecipe& Swell(float Attack) { ToneAttack = Attack; return *this; }
+		FCueRecipe& WithChord(float A, float B = 0.f, float C = 0.f) { Chord[0] = A; Chord[1] = B; Chord[2] = C; return *this; }
+		FCueRecipe& Then(float Hz, float Delay, float Level) { SecondHz = Hz; SecondDelay = Delay; SecondLevel = Level; return *this; }
+		FCueRecipe& Pulse(float Hz, float Depth, float Sharpness = 1.f) { PulseHz = Hz; PulseDepth = Depth; PulseSharpness = Sharpness; return *this; }
+	};
+
+	const TMap<FName, FCueRecipe>& LayeredCues()
+	{
+		static const TMap<FName, FCueRecipe> Cues = []()
+		{
+			using S = EOneBrahamToneShape;
+			TMap<FName, FCueRecipe> Map;
+			const auto Cue = [&Map](const TCHAR* Id, const FCueRecipe& Recipe) { Map.Add(FName(Id), Recipe); };
+
+			// --- Movement: the sounds that give a player away --------------------
+			Cue(TEXT("SFX_Land_Soft"),       FCueRecipe().Len(0.35f, 0.26f).Noise(0.25f, 0.93f, 0.002f, 0.12f));
+			Cue(TEXT("SFX_Land_Hard"),       FCueRecipe().Len(0.45f, 0.42f).Noise(0.9f, 0.78f, 0.001f, 0.16f).Tone(70.f, 0.5f, 0.18f));
+			Cue(TEXT("SFX_Mantle"),          FCueRecipe().Len(0.55f, 0.26f).Noise(0.6f, 0.70f, 0.04f, 0.35f));
+			Cue(TEXT("SFX_Slide"),           FCueRecipe().Len(0.70f, 0.28f).Noise(0.7f, 0.50f, 0.12f, 0.50f));
+			Cue(TEXT("SFX_Crouch_Down"),     FCueRecipe().Len(0.25f, 0.20f).Noise(0.5f, 0.85f, 0.003f, 0.12f).Tone(900.f, 0.15f, 0.05f));
+			Cue(TEXT("SFX_Crouch_Up"),       FCueRecipe().Len(0.22f, 0.20f).Noise(0.5f, 0.85f, 0.010f, 0.10f));
+			Cue(TEXT("SFX_Cloth_Move"),      FCueRecipe().Len(2.0f, 0.14f).Loop().Noise(0.4f, 0.82f, 0.f, 0.f).Pulse(1.5f, 0.7f));
+			Cue(TEXT("SFX_Gear_Rattle"),     FCueRecipe().Len(0.50f, 0.24f).Noise(0.5f, 0.40f, 0.001f, 0.08f).Tone(2600.f, 0.2f, 0.05f).Pulse(18.f, 0.8f, 3.f));
+			Cue(TEXT("SFX_Downed_Heartbeat"),FCueRecipe().Len(1.2f, 0.40f).Loop().Tone(52.f, 1.f, 0.f).Pulse(1.6667f, 1.f, 8.f));
+			Cue(TEXT("SFX_DryFire"),         FCueRecipe().Len(0.12f, 0.32f).Noise(0.4f, 0.30f, 0.0005f, 0.01f).Tone(3100.f, 0.5f, 0.02f));
+
+			// --- Weapons -------------------------------------------------------
+			Cue(TEXT("SFX_Weapon_Draw"),     FCueRecipe().Len(0.40f, 0.26f).Noise(0.5f, 0.60f, 0.03f, 0.20f).Tone(1800.f, 0.25f, 0.06f).Then(2400.f, 0.25f, 0.2f));
+			Cue(TEXT("SFX_Shell_Drop"),      FCueRecipe().Len(0.30f, 0.20f).Noise(0.2f, 0.30f, 0.0005f, 0.02f).Tone(4200.f, 0.6f, 0.08f).Then(3900.f, 0.11f, 0.4f));
+			Cue(TEXT("SFX_FireMode_Switch"), FCueRecipe().Len(0.10f, 0.24f).Noise(0.3f, 0.40f, 0.0005f, 0.01f).Tone(2200.f, 0.4f, 0.02f, S::Square));
+			Cue(TEXT("SFX_Laser_On"),        FCueRecipe().Len(0.08f, 0.18f).Tone(2800.f, 0.5f, 0.03f));
+			Cue(TEXT("SFX_Laser_Off"),       FCueRecipe().Len(0.08f, 0.16f).Tone(2000.f, 0.5f, 0.03f));
+			Cue(TEXT("SFX_Melee_Swing"),     FCueRecipe().Len(0.30f, 0.30f).Noise(0.7f, 0.35f, 0.08f, 0.12f));
+
+			// --- Bullet impacts: what the surface is, at a glance --------------
+			Cue(TEXT("SFX_Bullet_Impact_Concrete"), FCueRecipe().Len(0.25f, 0.36f).Noise(1.f, 0.45f, 0.0005f, 0.06f).Tone(1200.f, 0.3f, 0.02f));
+			Cue(TEXT("SFX_Bullet_Impact_Metal"),    FCueRecipe().Len(0.40f, 0.36f).Noise(0.5f, 0.30f, 0.0005f, 0.03f).Tone(2900.f, 0.7f, 0.20f).WithChord(1.47f));
+			Cue(TEXT("SFX_Bullet_Impact_Wood"),     FCueRecipe().Len(0.22f, 0.34f).Noise(0.8f, 0.75f, 0.0005f, 0.05f).Tone(380.f, 0.4f, 0.05f));
+			Cue(TEXT("SFX_Bullet_Impact_Glass"),    FCueRecipe().Len(0.50f, 0.36f).Noise(0.8f, 0.15f, 0.0005f, 0.12f).Tone(4800.f, 0.4f, 0.25f).WithChord(1.33f, 1.71f));
+			Cue(TEXT("SFX_Bullet_Impact_Carpet"),   FCueRecipe().Len(0.15f, 0.28f).Noise(0.7f, 0.92f, 0.001f, 0.03f));
+			Cue(TEXT("SFX_Bullet_Impact_Flesh"),    FCueRecipe().Len(0.18f, 0.34f).Noise(0.9f, 0.88f, 0.001f, 0.04f).Tone(110.f, 0.5f, 0.05f));
+			Cue(TEXT("SFX_Bullet_Whizz"),    FCueRecipe().Len(0.22f, 0.30f).Noise(0.8f, 0.20f, 0.03f, 0.08f).Tone(1800.f, 0.3f, 0.12f).Sweep(700.f));
+			Cue(TEXT("SFX_Helmet_Ping"),     FCueRecipe().Len(0.50f, 0.34f).Noise(0.4f, 0.30f, 0.0005f, 0.01f).Tone(2600.f, 0.8f, 0.30f).WithChord(2.76f));
+			Cue(TEXT("SFX_Utility_Throw"),   FCueRecipe().Len(0.30f, 0.24f).Noise(0.6f, 0.50f, 0.05f, 0.12f));
+
+			// --- Medical -------------------------------------------------------
+			Cue(TEXT("SFX_Medkit_Use"),      FCueRecipe().Len(0.60f, 0.22f).Noise(0.5f, 0.55f, 0.02f, 0.20f).Tone(1500.f, 0.2f, 0.05f).Pulse(9.f, 0.6f));
+			Cue(TEXT("SFX_Medkit_Complete"), FCueRecipe().Len(0.40f, 0.26f).Tone(660.f, 0.6f, 0.20f).Then(990.f, 0.12f, 0.5f));
+			Cue(TEXT("SFX_Revive_Start"),    FCueRecipe().Len(0.50f, 0.24f).Noise(0.3f, 0.80f, 0.02f, 0.20f).Tone(330.f, 0.5f, 0.30f).Sweep(440.f));
+			Cue(TEXT("SFX_Bandage_Loop"),    FCueRecipe().Len(2.0f, 0.16f).Loop().Noise(0.5f, 0.60f, 0.f, 0.f).Pulse(3.f, 0.8f, 2.f));
+
+			// --- Doors, terminals, the building ----------------------------------
+			Cue(TEXT("SFX_Door_Open"),       FCueRecipe().Len(0.70f, 0.30f).Noise(0.5f, 0.80f, 0.05f, 0.40f).Tone(140.f, 0.4f, 0.30f).Then(2200.f, 0.05f, 0.15f));
+			Cue(TEXT("SFX_Door_Close"),      FCueRecipe().Len(0.50f, 0.36f).Noise(0.9f, 0.85f, 0.001f, 0.18f).Tone(90.f, 0.6f, 0.20f).Then(2400.f, 0.02f, 0.2f));
+			Cue(TEXT("SFX_Door_Locked"),     FCueRecipe().Len(0.25f, 0.30f).Noise(0.4f, 0.50f, 0.0008f, 0.02f).Tone(1900.f, 0.4f, 0.03f, S::Square).Then(1900.f, 0.09f, 0.4f));
+			Cue(TEXT("SFX_Terminal_Hum"),    FCueRecipe().Len(2.0f, 0.14f).Loop().Noise(0.15f, 0.70f, 0.f, 0.f).Tone(60.f, 0.6f, 0.f).WithChord(2.f, 3.f));
+			Cue(TEXT("SFX_Terminal_Progress"), FCueRecipe().Len(0.08f, 0.18f).Tone(1600.f, 0.5f, 0.04f));
+			Cue(TEXT("SFX_Lift_Arrive"),     FCueRecipe().Len(1.40f, 0.34f).Tone(880.f, 0.6f, 0.90f).WithChord(2.f).Then(698.5f, 0.35f, 0.6f));
+			Cue(TEXT("SFX_Lift_Doors"),      FCueRecipe().Len(1.60f, 0.26f).Noise(0.5f, 0.60f, 0.25f, 0.90f).Tone(180.f, 0.3f, 1.0f));
+			Cue(TEXT("SFX_Lift_Motor"),      FCueRecipe().Len(4.0f, 0.20f).Loop().Noise(0.3f, 0.90f, 0.f, 0.f).Tone(48.f, 0.7f, 0.f).WithChord(2.f, 3.5f).Pulse(0.5f, 0.2f));
+			Cue(TEXT("SFX_Shutter_Drop"),    FCueRecipe().Len(1.40f, 0.48f).Noise(0.9f, 0.45f, 0.002f, 0.60f).Tone(75.f, 0.5f, 0.60f).Pulse(22.f, 0.6f));
+			Cue(TEXT("SFX_Security_Purge"),  FCueRecipe().Len(2.50f, 0.36f).Tone(520.f, 0.6f, 0.f, S::Square).Sweep(260.f).Pulse(4.f, 0.9f, 2.f));
+			Cue(TEXT("SFX_Power_Down"),      FCueRecipe().Len(2.00f, 0.40f).Noise(0.2f, 0.90f, 0.001f, 1.2f).Tone(240.f, 0.7f, 1.6f).Sweep(30.f));
+			Cue(TEXT("SFX_Window_Break"),    FCueRecipe().Len(1.10f, 0.50f).Noise(1.f, 0.12f, 0.0005f, 0.35f).Tone(5200.f, 0.4f, 0.40f).WithChord(1.31f, 1.77f));
+			Cue(TEXT("SFX_Extraction_Winch"),FCueRecipe().Len(2.0f, 0.30f).Loop().Noise(0.4f, 0.60f, 0.f, 0.f).Tone(90.f, 0.5f, 0.f, S::Square).WithChord(1.5f).Pulse(7.f, 0.4f));
+			// The Underground under Aldgate: a train you feel before you hear,
+			// the wheels a flutter on top, gone in seven seconds.
+			Cue(TEXT("SFX_Tube_Rumble"),     FCueRecipe().Len(7.0f, 0.42f).Noise(0.8f, 0.985f, 1.8f, 4.5f).Tone(31.f, 0.7f, 5.0f).Swell(1.5f).Sweep(27.f).Pulse(6.f, 0.3f));
+			Cue(TEXT("SFX_Helicopter_Leave"),FCueRecipe().Len(4.00f, 0.50f).Noise(0.6f, 0.80f, 0.30f, 2.8f).Tone(44.f, 0.6f, 3.0f).Sweep(30.f).Pulse(11.f, 0.8f));
+
+			// --- UI ---------------------------------------------------------------
+			Cue(TEXT("UI_Damage_Taken"),     FCueRecipe().Len(0.18f, 0.34f).Noise(0.6f, 0.85f, 0.001f, 0.06f).Tone(160.f, 0.6f, 0.08f));
+			Cue(TEXT("UI_LowHealth"),        FCueRecipe().Len(2.5f, 0.30f).Loop().Tone(60.f, 1.f, 0.f).Pulse(1.2f, 1.f, 6.f));
+			Cue(TEXT("UI_Banner"),           FCueRecipe().Len(0.50f, 0.22f).Tone(523.f, 0.5f, 0.35f).Then(784.f, 0.10f, 0.5f));
+			Cue(TEXT("UI_Countdown"),        FCueRecipe().Len(0.12f, 0.24f).Tone(1046.f, 0.6f, 0.08f));
+			Cue(TEXT("UI_Objective_Capture"),FCueRecipe().Len(0.70f, 0.26f).Tone(523.f, 0.5f, 0.40f).WithChord(1.25f, 1.5f).Then(1046.f, 0.18f, 0.4f));
+			Cue(TEXT("UI_Objective_Lost"),   FCueRecipe().Len(0.70f, 0.26f).Tone(440.f, 0.6f, 0.50f).Sweep(330.f).WithChord(1.19f));
+			Cue(TEXT("UI_Match_Win"),        FCueRecipe().Len(1.80f, 0.30f).Tone(392.f, 0.5f, 1.40f).WithChord(1.25f, 1.5f, 2.f).Then(784.f, 0.30f, 0.4f));
+			Cue(TEXT("UI_Match_Lose"),       FCueRecipe().Len(1.80f, 0.28f).Tone(330.f, 0.5f, 1.40f).Sweep(294.f).WithChord(1.19f, 1.5f));
+			Cue(TEXT("UI_LevelUp"),          FCueRecipe().Len(0.90f, 0.26f).Tone(523.f, 0.5f, 0.60f).Sweep(1046.f).WithChord(1.5f));
+			Cue(TEXT("UI_Unlock"),           FCueRecipe().Len(0.70f, 0.26f).Tone(784.f, 0.5f, 0.45f).Then(1175.f, 0.12f, 0.6f));
+			Cue(TEXT("UI_Voice_Connected"),  FCueRecipe().Len(0.20f, 0.20f).Tone(880.f, 0.5f, 0.10f).Then(1320.f, 0.07f, 0.5f));
+			Cue(TEXT("UI_Voice_Disconnected"), FCueRecipe().Len(0.20f, 0.20f).Tone(1320.f, 0.5f, 0.10f).Then(880.f, 0.07f, 0.5f));
+			Cue(TEXT("UI_Voice_ChannelSwitch"), FCueRecipe().Len(0.10f, 0.18f).Tone(1100.f, 0.5f, 0.05f, S::Triangle));
+			Cue(TEXT("UI_Voice_Muted"),      FCueRecipe().Len(0.14f, 0.18f).Tone(440.f, 0.5f, 0.08f, S::Square));
+			Cue(TEXT("UI_Voice_Radio_Open"), FCueRecipe().Len(0.12f, 0.20f).Noise(0.6f, 0.20f, 0.001f, 0.05f).Tone(1800.f, 0.4f, 0.03f));
+			Cue(TEXT("UI_Voice_Radio_Close"),FCueRecipe().Len(0.18f, 0.20f).Noise(0.7f, 0.20f, 0.001f, 0.12f));
+			Cue(TEXT("UI_TeamPing"),         FCueRecipe().Len(0.25f, 0.22f).Tone(1568.f, 0.5f, 0.15f).Then(2093.f, 0.06f, 0.5f));
+			Cue(TEXT("UI_Ping_Enemy"),       FCueRecipe().Len(0.30f, 0.24f).Tone(988.f, 0.5f, 0.12f, S::Square).Then(988.f, 0.12f, 0.8f));
+
+			// --- Music: eight beds, each a chord on a pulse at the state's tempo.
+			//     Loop lengths hold a whole number of beats so the loop point is
+			//     on the beat.
+			Cue(TEXT("MUS_Lobby"),       FCueRecipe().Len(8.f, 0.18f).Loop().Tone(110.f, 0.4f, 0.f).Swell(2.f).WithChord(1.5f, 2.f, 2.4f).Pulse(0.125f, 0.3f));
+			Cue(TEXT("MUS_MatchEarly"),  FCueRecipe().Len(8.f, 0.20f).Loop().Noise(0.1f, 0.95f, 0.f, 0.f).Tone(73.4f, 0.5f, 0.f).WithChord(1.5f, 2.f, 2.38f).Pulse(1.5f, 0.5f, 3.f));
+			Cue(TEXT("MUS_MatchMid"),    FCueRecipe().Len(6.f, 0.22f).Loop().Tone(82.4f, 0.5f, 0.f).WithChord(1.5f, 2.f, 2.38f).Pulse(1.8333f, 0.6f, 4.f));
+			Cue(TEXT("MUS_MatchLate"),   FCueRecipe().Len(6.f, 0.24f).Loop().Tone(87.3f, 0.5f, 0.f).WithChord(1.06f, 1.5f, 2.f).Pulse(2.1667f, 0.7f, 5.f));
+			Cue(TEXT("MUS_Lockdown"),    FCueRecipe().Len(6.f, 0.26f).Loop().Noise(0.15f, 0.90f, 0.f, 0.f).Tone(98.f, 0.5f, 0.f).WithChord(1.06f, 1.41f, 2.f).Pulse(2.3333f, 0.8f, 6.f));
+			Cue(TEXT("MUS_Extraction"),  FCueRecipe().Len(6.f, 0.28f).Loop().Noise(0.2f, 0.85f, 0.f, 0.f).Tone(73.4f, 0.5f, 0.f).WithChord(1.5f, 2.f, 3.f).Pulse(2.3333f, 0.8f, 6.f));
+			Cue(TEXT("MUS_Downed"),      FCueRecipe().Len(8.f, 0.18f).Loop().Noise(0.1f, 0.97f, 0.f, 0.f).Tone(55.f, 0.5f, 0.f).WithChord(1.19f, 1.5f).Pulse(1.f, 0.9f, 8.f));
+			Cue(TEXT("MUS_Results"),     FCueRecipe().Len(8.f, 0.20f).Loop().Tone(130.8f, 0.4f, 0.f).Swell(1.5f).WithChord(1.25f, 1.5f, 2.f).Pulse(0.25f, 0.2f));
+			return Map;
+		}();
+		return Cues;
+	}
+
+	USoundWaveProcedural* MakeLayeredCue(const FCueRecipe& Recipe)
+	{
+		FBuffer Buffer(Recipe.Duration);
+		FNoise Noise;
+		float NoiseState = 0.f;
+		float Phase = 0.f;
+
+		for (int32 Index = 0; Index < Buffer.Num(); ++Index)
+		{
+			const float Time = static_cast<float>(Index) / static_cast<float>(SampleRate);
+			float Value = 0.f;
+
+			if (Recipe.NoiseLevel > 0.f)
+			{
+				const float Envelope = Time < Recipe.NoiseAttack
+					? (Recipe.NoiseAttack <= KINDA_SMALL_NUMBER ? 1.f : Time / Recipe.NoiseAttack)
+					: DecayGain(Time - Recipe.NoiseAttack, Recipe.NoiseDecay);
+				Value += LowPass(Noise.Next(), NoiseState, Recipe.NoiseColour) * Recipe.NoiseLevel * Envelope;
+			}
+
+			if (Recipe.ToneHz > 0.f && Recipe.ToneLevel > 0.f)
+			{
+				const float Hz = Recipe.ToneEndHz > 0.f
+					? Recipe.ToneHz * FMath::Pow(Recipe.ToneEndHz / Recipe.ToneHz, Time / FMath::Max(Recipe.Duration, KINDA_SMALL_NUMBER))
+					: Recipe.ToneHz;
+				Phase = FMath::Fmod(Phase + Hz / static_cast<float>(SampleRate), 1.f);
+
+				// The sweep shapes are a sine whose pitch moves; Sweep() says where.
+				const bool bSweepShape = Recipe.Shape == EOneBrahamToneShape::SweepUp || Recipe.Shape == EOneBrahamToneShape::SweepDown;
+				float Tone = Oscillator(bSweepShape ? EOneBrahamToneShape::Sine : Recipe.Shape, Phase);
+				for (const float Ratio : Recipe.Chord)
+				{
+					if (Ratio > 0.f)
+					{
+						Tone += FMath::Sin(2.f * PI * Recipe.ToneHz * Ratio * Time) * 0.6f;
+					}
+				}
+				const float Swell = Recipe.ToneAttack <= KINDA_SMALL_NUMBER ? 1.f : FMath::Min(1.f, Time / Recipe.ToneAttack);
+				Value += Tone * Recipe.ToneLevel * Swell * DecayGain(Time, Recipe.ToneDecay);
+			}
+
+			if (Recipe.SecondHz > 0.f && Time >= Recipe.SecondDelay)
+			{
+				const float Local = Time - Recipe.SecondDelay;
+				Value += FMath::Sin(2.f * PI * Recipe.SecondHz * Local) * Recipe.SecondLevel
+					* DecayGain(Local, Recipe.ToneDecay > 0.f ? Recipe.ToneDecay : 0.4f);
+			}
+
+			if (Recipe.PulseHz > 0.f && Recipe.PulseDepth > 0.f)
+			{
+				const float Wave = FMath::Pow(0.5f + 0.5f * FMath::Sin(2.f * PI * Recipe.PulseHz * Time), Recipe.PulseSharpness);
+				Value *= 1.f - Recipe.PulseDepth * (1.f - Wave);
+			}
+
+			Buffer.Add(Index, Value);
+		}
+
+		if (Recipe.bLoop)
+		{
+			// Crossfade the tail into the head, as the beds do, so the loop
+			// point does not tick.
+			const int32 FadeCount = FMath::Min(Buffer.Num() / 4, FMath::RoundToInt(0.05f * SampleRate));
+			for (int32 Index = 0; Index < FadeCount; ++Index)
+			{
+				const float Alpha = static_cast<float>(Index) / static_cast<float>(FadeCount);
+				const int32 TailIndex = Buffer.Num() - FadeCount + Index;
+				Buffer.Samples[TailIndex] = FMath::Lerp(Buffer.Samples[Index], Buffer.Samples[TailIndex], Alpha);
+			}
+		}
+		else
+		{
+			// Five milliseconds of fade so a one-shot never ends on a click.
+			const int32 FadeCount = FMath::Min(Buffer.Num() / 4, FMath::RoundToInt(0.005f * SampleRate));
+			for (int32 Index = 0; Index < FadeCount; ++Index)
+			{
+				Buffer.Samples[Buffer.Num() - 1 - Index] *= static_cast<float>(Index) / static_cast<float>(FadeCount);
+			}
+		}
+
+		return Bake(Buffer, Recipe.Gain, Recipe.bLoop);
+	}
+
+	bool IsLayeredCue(FName SoundId)
+	{
+		return LayeredCues().Contains(SoundId);
+	}
+
+	/** The ids GetSynthesisedSound's hand-written branches answer. Kept beside
+	 *  them; check_audio_ids.py fails the build if the two lists differ. */
+	const TSet<FName>& HandWrittenIds()
+	{
+		static const TSet<FName> Ids = {
+			TEXT("SFX_FuseBeep"),
+			TEXT("SFX_FuseBeep_Close"),
+			TEXT("SFX_UtilityBounce"),
+			TEXT("SFX_Flashbang_Ring"),
+			TEXT("SFX_Flashbang_Bang"),
+			TEXT("SFX_Frag_Explosion"),
+			TEXT("SFX_Breach_Explosion"),
+			TEXT("SFX_Wall_Collapse"),
+			TEXT("SFX_Shutter_Close"),
+			TEXT("SFX_Breach_Plant"),
+			TEXT("SFX_Smoke_Deploy"),
+			TEXT("SFX_Gunshot_Pistol"),
+			TEXT("SFX_Gunshot_SMG"),
+			TEXT("SFX_Gunshot_Shotgun"),
+			TEXT("SFX_Gunshot_Rifle"),
+			TEXT("SFX_Gunshot_Marksman"),
+			TEXT("SFX_Gunshot_Suppressed"),
+			TEXT("SFX_Helicopter_Rotor"),
+			TEXT("SFX_FireAlarm"),
+			TEXT("SFX_Lockdown_Siren"),
+			TEXT("SFX_Melee_Thud"),
+			TEXT("SFX_Reload_Mag_Out"),
+			TEXT("SFX_Reload_Mag_In"),
+			TEXT("SFX_Reload_Bolt"),
+			TEXT("SFX_Revive_Complete"),
+			TEXT("SFX_Downed_Tinnitus"),
+			TEXT("SFX_Extraction_Start"),
+			TEXT("SFX_Override_Hum"),
+			TEXT("SFX_Terminal_Accept"),
+			TEXT("SFX_Terminal_Deny"),
+			TEXT("SFX_Keycard_Use"),
+			TEXT("SFX_Footstep_Carpet"),
+			TEXT("SFX_Footstep_Hard"),
+			TEXT("SFX_Footstep_Metal"),
+			TEXT("SFX_Footstep_Water"),
+		};
+		return Ids;
+	}
+
 	bool HasSynthesisedSound(FName SoundId)
 	{
-		static const TSet<FName> Known = {
-			TEXT("SFX_FuseBeep"), TEXT("SFX_FuseBeep_Close"), TEXT("SFX_UtilityBounce"),
-			TEXT("SFX_Flashbang_Ring"), TEXT("SFX_Flashbang_Bang"), TEXT("SFX_Frag_Explosion"),
-			TEXT("SFX_Breach_Explosion"), TEXT("SFX_Breach_Plant"), TEXT("SFX_Smoke_Deploy"),
-			TEXT("SFX_Wall_Collapse"), TEXT("SFX_Shutter_Close"),
-			TEXT("SFX_Gunshot_Suppressed"),
-			TEXT("SFX_Helicopter_Rotor"), TEXT("SFX_FireAlarm"), TEXT("SFX_Lockdown_Siren"),
-			TEXT("SFX_Melee_Thud"), TEXT("SFX_Reload_Mag_Out"), TEXT("SFX_Reload_Mag_In"),
-			TEXT("SFX_Reload_Bolt"), TEXT("SFX_Revive_Complete"), TEXT("SFX_Downed_Tinnitus"),
-			TEXT("SFX_Extraction_Start"), TEXT("SFX_Override_Hum"), TEXT("SFX_Terminal_Accept"),
-			TEXT("SFX_Terminal_Deny"), TEXT("SFX_Keycard_Use"), TEXT("SFX_Footstep_Carpet"),
-			TEXT("SFX_Footstep_Hard"), TEXT("SFX_Footstep_Metal"), TEXT("SFX_Footstep_Water"),
-			TEXT("UI_Click"), TEXT("UI_Hover"), TEXT("UI_Accept"), TEXT("UI_Deny"),
-			TEXT("UI_ScoreTick")
-		};
-
-		if (Known.Contains(SoundId))
+		// The hand-written recipes in GetSynthesisedSound and the layered table
+		// are the answer. This used to be a separate whitelist, and it drifted:
+		// five of the six gunshots played but were reported as silent.
+		if (HandWrittenIds().Contains(SoundId) || IsLayeredCue(SoundId))
 		{
 			return true;
 		}
@@ -714,6 +999,7 @@ namespace OneBrahamProceduralAudio
 		// Ambience beds: the room you are standing in, before any wave is
 		// authored. Eleven of these cover the whole building.
 		else if (IsSynthesisedAmbience(SoundId))	{ Wave = MakeAmbienceLoop(SoundId); }
+		else if (const FCueRecipe* Layered = LayeredCues().Find(SoundId)) { Wave = MakeLayeredCue(*Layered); }
 		else											{ Wave = MakeUISound(SoundId); }
 
 		if (Wave == nullptr)

@@ -144,7 +144,7 @@ void UOneBrahamNetDebugSubsystem::Refresh()
 	{
 		AActor* Actor = *It;
 
-		if (Actor == nullptr || !Actor->bReplicates)
+		if (Actor == nullptr || !Actor->GetIsReplicated())
 		{
 			continue;
 		}
@@ -171,7 +171,7 @@ void UOneBrahamNetDebugSubsystem::Refresh()
 		FOneBrahamNetDebugEntry Entry;
 		Entry.ActorName = Actor->GetName();
 		Entry.ClassName = Actor->GetClass() != nullptr ? Actor->GetClass()->GetName() : TEXT("?");
-		Entry.NetUpdateFrequency = Actor->NetUpdateFrequency;
+		Entry.NetUpdateFrequency = Actor->GetNetUpdateFrequency();
 		Entry.CullDistanceMeters = Actor->NetCullDistanceSquared > 0.f
 			? FMath::Sqrt(Actor->NetCullDistanceSquared) / 100.f
 			: 0.f;

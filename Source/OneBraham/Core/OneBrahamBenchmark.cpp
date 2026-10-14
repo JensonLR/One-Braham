@@ -213,7 +213,7 @@ void UOneBrahamBenchmarkSubsystem::BuildRoute()
 
 	for (const FOneBrahamFloorDescription& Floor : Layout->Floors)
 	{
-		const float Z = static_cast<float>(Floor.FloorIndex) * OneBrahamConstants::FloorHeightCm + EyeHeightCm;
+		const float Z = OneBrahamConstants::FloorZ(Floor.FloorIndex) + EyeHeightCm;
 		const float X = (Index % 2 == 0) ? -PanAmplitudeCm : PanAmplitudeCm * 0.5f;
 		const float Y = (Index % 3 == 0) ? PanAmplitudeCm : -PanAmplitudeCm * 0.5f;
 

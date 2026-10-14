@@ -9,6 +9,8 @@
 #include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamPlayerController.h"
 #include "Characters/OneBrahamCharacter.h"
+#include "Bots/OneBrahamBotController.h"
+#include "EngineUtils.h"
 #include "Extraction/OneBrahamExtractionComponent.h"
 #include "Weapons/OneBrahamWeaponComponent.h"
 #include "Lockdown/OneBrahamLockdownComponent.h"
@@ -97,6 +99,11 @@ bool UOneBrahamConsole::ConsoleCommand(const FString& Command)
 			OBDumpAudio();
 			return true;
 		}
+		if (Verb == TEXT("ob.bots.dump"))
+		{
+			OBDumpBots();
+			return true;
+		}
 		if (Verb == TEXT("ob.bench.skydeck"))
 		{
 			// Seconds per floor, so a short pass can be run while iterating.
@@ -146,6 +153,27 @@ void UOneBrahamConsole::OBDumpAudio()
 	{
 		OB_LOG("%s", *Line);
 	}
+}
+
+void UOneBrahamConsole::OBDumpBots()
+{
+	// Bots exist only where the game mode spawned them - the server - so on a
+	// client this lists nothing, and says why rather than printing an empty list.
+	UWorld* World = GetWorld();
+	if (World == nullptr || World->GetNetMode() == NM_Client)
+	{
+		OB_WARN("ob.bots.dump: bots live on the server. Run this on a listen host or a dedicated server.");
+		return;
+	}
+
+	int32 Count = 0;
+	for (TActorIterator<AOneBrahamBotController> It(World); It; ++It)
+	{
+		OB_LOG("%s", *It->GetBotDebugString());
+		++Count;
+	}
+
+	OB_LOG("ob.bots.dump: %d bot(s).", Count);
 }
 
 void UOneBrahamConsole::OBBenchSkydeck(float SecondsPerLeg)

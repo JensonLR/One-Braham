@@ -22,10 +22,9 @@
 
 UOneBrahamGameUserSettings::UOneBrahamGameUserSettings()
 {
-	// Sensible non-zero defaults so a first launch before any save exists still
-	// gives the player a keyboard-bindable push-to-talk key.
-	PushToTalkKey = EKeys::V;
-	PushToTalkGamepadKey = EKeys::Gamepad_LeftThumbstick;
+	// Push to talk has no key setting here. It is IA_PushToTalk, bound in
+	// [OneBraham.Input] like every other action: a second key setting was a
+	// second source of truth that nothing read (V, which is melee).
 }
 
 UOneBrahamGameUserSettings* UOneBrahamGameUserSettings::GetOneBrahamSettings()
@@ -620,8 +619,9 @@ void UOneBrahamGameUserSettings::SetColourBlindMode(EOneBrahamColourBlindMode Ne
 {
 	ColourBlindMode = NewMode;
 
-	// CVD is implemented as a post-process material parameter so it works for
-	// all three deficiency types without shipping three LUTs.
+	// The interface swaps its own signal colours (UOneBrahamUIStyle reads this
+	// setting). The collection carries the mode to world materials too, so a
+	// beacon or a marker in the level can follow the same rule.
 	UMaterialParameterCollection* Collection = LoadObject<UMaterialParameterCollection>(
 		nullptr, TEXT("/Game/OneBraham/Materials/MPC_OneBraham_Global.MPC_OneBraham_Global"));
 

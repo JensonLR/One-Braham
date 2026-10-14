@@ -40,6 +40,7 @@ public:
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void Tick(float DeltaSeconds) override;
+	virtual void BeginPlay() override;
 
 	// ======================================================================
 	//  Match identity
@@ -57,6 +58,10 @@ public:
 	/** True when this instance has no human authority (dedicated host). */
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Match")
 	bool bIsDedicatedServerMatch = false;
+
+	/** This match's weather, rolled by the game mode at the start. Outdoors only. */
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Match")
+	bool bRaining = false;
 
 	/** Seconds since the active phase began, replicated at 1 Hz to save bandwidth. */
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Match")

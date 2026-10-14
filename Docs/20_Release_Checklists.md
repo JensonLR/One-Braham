@@ -39,10 +39,16 @@ completes with a `MatchResult` on both the winning and losing paths.
 ## 4. Compile and package
 
 - [ ] Editor target compiles with no warnings escalated to errors.
-- [ ] Game, Server and Client targets compile.
+- [ ] Game and Server targets compile (there is no separate Client target: the
+      Game target is the client).
 - [ ] Non-unity build compiles (monthly; catches missing includes).
-- [ ] `Scripts\Package.bat Shipping` completes for Windows.
-- [ ] `Scripts\Package.bat Server` completes for Linux.
+- [ ] `Scripts\BuildEditor.bat -Target All -Configuration Shipping` compiles the
+      editor, game and server targets with no errors.
+- [ ] `Scripts\Validate.bat` passes: project, MAP CHECK, data validation, cook.
+- [ ] `Scripts\PackageClient.bat` produces `Build\WindowsClient\Windows\OneBraham.exe`.
+- [ ] `Scripts\PackageServer.bat` produces the Windows server, and
+      `Scripts/Package.sh Server` on the Linux build machine produces
+      `Build/LinuxServer/LinuxServer/OneBrahamServer.sh`.
 - [ ] Cooked build launches and reaches the main menu with **no** shader-compile
       hitch on the first firefight.
 
@@ -50,8 +56,8 @@ completes with a `MatchResult` on both the winning and losing paths.
 
 - [ ] `Scripts\RunTests.bat` → all `OneBraham.*` categories pass, including
       `OneBraham.StaticChecks`, which runs the engine-free checks in-process.
-- [ ] `Scripts\RunTests.bat smoke` → the composition check passes on a dedicated
-      server (see §2 of `Docs/18` for what that does and does not cover).
+- [ ] `Scripts\RunTests.bat smoke` → the match-boot composition check passes (see
+      §2 of `Docs/18` for what that does and does not cover).
 - [ ] The bot-driven 12-player run in `Docs/18` §3 completes with a `MatchResult`
       naming a winning squad, and the losing path reports `NoSurvivors`.
 - [ ] The content caps in `Docs/18` §4 are inside budget on the release map
@@ -66,6 +72,9 @@ completes with a `MatchResult` on both the winning and losing paths.
 - [ ] Listen server match with 8 players: host is flagged, match completes.
 - [ ] Steam session: invite, browse, join, and a full match over Steam networking.
 - [ ] Server list: the build appears, the mode filter works, ping is reported.
+- [ ] Listen server, four players with four different saved outfits and
+      loadouts: each is seen by all four in their own outfit, carrying their own
+      rifle (`Docs/13` section 3). The host's profile is on the host only.
 
 ## 7. Every system, played
 
@@ -120,8 +129,13 @@ completes with a `MatchResult` on both the winning and losing paths.
       placeholders (480 / 480001 / 480002) with the real values.
 - [ ] Steam Dev AppID replaced in `Config/DefaultEngine.ini`.
 - [ ] Achievements and stats upload cleanly.
+- [ ] Colour-blind modes reach the purge lighting and the alarm beacons (lights in the level, not materials, so they need their own alternative colours).
 - [ ] Steam Input action manifest matches the four mapping contexts.
 - [ ] Cloud saves: settings and keybinds survive a second machine.
+- [ ] Purchasable cosmetics are Steam Inventory items, and `ServerSetAppearance`
+      keeps one only when the client's signed inventory result contains it
+      (`Docs/13` section 3). Test: a profile edited by hand to wear an unowned
+      item is shown in the default for that slot to everyone else.
 - [ ] Store page assets all uploaded and free of HUD, of placeholder art, and of
       the words "work in progress".
 

@@ -115,7 +115,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "One Braham|Voice")
 	int32 GetActiveStreamCount() const { return StreamComponents.Num(); }
 
+	/** Frames a speaker may send per second: 20 ms frames are 50, plus slack for jitter. */
+	static constexpr int32 MaxVoiceFramesPerSecond = 64;
+
 protected:
+	/** Server: the current one-second window of incoming frames. */
+	double VoiceWindowStart = 0.0;
+	int32 VoiceFramesInWindow = 0;
+
 	// --- helpers ---------------------------------------------------------
 	AOneBrahamCharacter* GetCharacter() const;
 	AOneBrahamPlayerState* GetOwnerState() const;

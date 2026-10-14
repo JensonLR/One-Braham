@@ -29,6 +29,62 @@ Floor to floor is 400 cm. That is a real floor height, and it is what makes the
 stairwells the vertical spine of the game: from any stairwell landing you can
 hear a firefight two floors up and hear a fire door close one floor down.
 
+### The service core
+
+Every floor, plaza to Skydeck, has the same core: a band along the north of the
+floor (`common.CORE_BAND`, x −1500 to 1500, y 500 to 1300) behind a corridor
+that no room may occupy (`CORE_CORRIDOR`, y 300 to 500).
+
+* **Stairwells.** Stairwell A is at x −1100 and stairwell B at x 1100. Each is
+  800 cm square, with its door in the middle of its corridor wall. Every storey
+  is two flights of 11 risers (18.2 cm) and 11 treads (28 cm). The first flight
+  climbs the west half from a 200 cm landing by the door to a mid-landing at
+  the back; the second comes down the east half to the landing of the floor
+  above. Each slab is cut behind its landing so the flights from below come up
+  through it, and the ceilings are cut to match.
+* **Lifts.** Two glass cars between the stairwells (`AOneBrahamLift`) run floors
+  1 to 9 and open at 1, 3 and 9. Each floor a car stops at has a call panel
+  (`AOneBrahamLiftCallPanel`) beside the landing doors.
+* **Risers.** Solid between the stairwells and the lift lobby, and behind the
+  shafts.
+
+`check_building_layout.py` fails if a room, spawn, door, terminal or breach wall
+is built into the band, if two rooms overlap, if a room's doorway opens onto a
+wall, or if a flight does not arrive at the next floor.
+
+**The lift's traps.** The doors close on whoever is standing in them, for 35
+damage (`AOneBrahamLift::DoorCrushDamage`). They then reopen and try again two
+seconds later, and the kill feed names `LiftDoors`. From the Lockdown stage on,
+a car finishes its run, opens and stays open: the lifts are out of service. A
+car costs a Staff badge, chimes on arrival on the floor it stops at, and is a
+lit glass box: the fastest route up, and the most visible.
+
+**Destructible props.** These are `AOneBrahamDestructibleProp`, 78 in the
+building, from `destructible_props_for_floor()`:
+
+* an extinguisher beside every stairwell door;
+* a water cooler in each break-out room;
+* a printer in the print and PA rooms;
+* four panels along each server row.
+
+They are cover until they break. Then their collision goes and they make the
+noise that tells the floor where the fight is. A printer or a rack panel
+shorts, with sparks and a 12 damage burn within 140 cm, credited to
+`ElectricalShort`. A cooler sprays. An extinguisher discharges a small smoke
+cloud. Bullets break them, and so do grenades and breaching charges, with the
+same line-of-sight rule as the glass.
+
+**The helicopter.** `AOneBrahamHelicopter` is placed over the pad and hidden
+until a squad calls it. It has no state of its own: every machine flies it from
+the extraction component's replicated state and time remaining, so it is
+exactly as far out as the HUD timer says. During the approach it comes in over
+the City and settles into a hover 18 m above the pad. While a squad holds, its
+searchlight stays on the pad and the winch line is down. When the match ends
+either way, it climbs out the way it came. It carries aviation lighting, which is
+how a squad first picks it out in the rain: steady red to port, steady green to
+starboard, a red anti-collision beacon flashing once a second on the belly, and
+a white tail strobe flashing half a second out of phase with it.
+
 ### Routes up
 
 | Route | Cost | Cost in practice |
@@ -195,8 +251,18 @@ it *feels* like that.
 ### 2.8 Skydeck — floor 15
 
 **Layout.** 4800 × 4000 cm. Extraction pad (900 cm hold radius) marked in safety
-yellow, the winch rig, three air-handling units, four floodlight masts, a steel
-balustrade, planters, a winch control room.
+yellow, the winch rig, three air-handling units, four floodlight masts, planters,
+a winch control room. It has no ceiling and no glazing: it is the roof, open to
+the sky.
+
+**The edge.** A 110 cm frameless glass balustrade runs round all four sides,
+inset 40 cm from the slab edge. It is 72 `AOneBrahamBreakableGlass` panes from
+`skydeck_balustrade_panes()`, each about 240 cm wide. The glass breaks like any
+other pane, so shooting it out behind the holding squad makes the pad a cliff
+edge. A fall from the deck is lethal on landing (`AOneBrahamCharacter::Landed`).
+Anything that leaves the map entirely passes the level's KillZ, 1200 cm below
+the plaza, and dies through `FellOutOfWorld`. The curtain-wall facades stop at
+the underside of the deck slab.
 
 **Fights here.** The ending, and the only place the game deliberately holds a
 player still. The pad is exposed on three sides with cover on one: the AHU boxes.
@@ -312,7 +378,7 @@ validator fails if an authored surface is used by nothing.
 
 The building is what makes the effects happen: a partition gives dust, a rack
 gives sparks, a fall gives a body landing. `Docs/11` carries the full
-seventeen-effect table with its call sites; the map's half of it is:
+eighteen-effect table with its call sites; the map's half of it is:
 
 | The map provides | The effect that follows |
 | --- | --- |
@@ -326,7 +392,7 @@ seventeen-effect table with its call sites; the map's half of it is:
 
 ### 5.3 Lighting, grade and audio, per floor
 
-Each streaming floor level is created by `build_floor_level`, which places four
+Each floor sublevel is created by `build_floor_level`, which places four
 things besides the geometry, so a new floor gets all of them without anyone
 remembering to add them — which is the point of generating the map rather than
 placing it.
@@ -338,22 +404,35 @@ derived from the floor's own footprint, so the plaza gets a grid appropriate to
 central visual contrast: fourteen floors of flat, faintly green office light, one
 floor of London weather.
 
-**One unbound `PostProcessVolume` per floor**, carrying that area's grade:
-manual exposure range, bloom, film grain and vignette, from `AREA_GRADE`. The
-ranges are wide on purpose — clamped exposure is what stops a player walking out
-of the plant room into the glazing and being flash-blinded for a second and a
-half.
+**One bounded `PostProcessVolume` per floor**, carrying that area's grade:
+a histogram exposure range, bloom and vignette, from `AREA_GRADE`. Each volume
+is sized to its floor (measured from the brush it spawns with, not assumed) at
+priority 1, over one unbound global volume at priority 0 that sets the
+building's baseline (a slight desaturation). The ranges are wide on purpose:
+clamped exposure is what stops a player walking out of the plant room into the
+glazing and being flash-blinded for a second and a half.
 
-| Area | Exposure range | Bloom | Grain | Vignette |
-| --- | --- | --- | --- | --- |
-| Ground Plaza | 0.35 – 2.4 | 0.85 | 0.030 | 0.42 |
-| Lobby | 0.40 – 2.2 | 0.75 | 0.028 | 0.38 |
-| Mezzanine | 0.45 – 2.1 | 0.70 | 0.026 | 0.36 |
-| Open Plan | 0.60 – 1.9 | 0.55 | 0.022 | 0.30 |
-| Server & Comms | 0.22 – 1.6 | 0.40 | 0.034 | 0.46 |
-| Executive | 0.65 – 2.0 | 0.60 | 0.020 | 0.32 |
-| Canteen | 0.70 – 2.3 | 0.65 | 0.022 | 0.30 |
-| Skydeck | 0.55 – 3.6 | 1.15 | 0.024 | 0.44 |
+Motion blur and film grain are not on any volume. They are the player's
+settings, and a volume value would override the menu.
+
+Every value is written through `_apply_post_process`, which sets the value's
+override flag and writes the settings struct back. Before that, the builder
+edited a copy of the struct (`volume.settings` is a copy in Unreal Python),
+set no override flags and swallowed every failure, so no grade ever reached the
+renderer. The floor volumes were also all unbound at equal priority, so they
+blended into one another. `check_building_layout.py` now fails on a settings
+struct read by attribute, or a motion-blur or grain value on a volume.
+
+| Area | Exposure range | Bloom | Vignette |
+| --- | --- | --- | --- |
+| Ground Plaza | 0.35 – 2.4 | 0.85 | 0.42 |
+| Lobby | 0.40 – 2.2 | 0.75 | 0.38 |
+| Mezzanine | 0.45 – 2.1 | 0.70 | 0.36 |
+| Open Plan | 0.60 – 1.9 | 0.55 | 0.30 |
+| Server & Comms | 0.22 – 1.6 | 0.40 | 0.46 |
+| Executive | 0.65 – 2.0 | 0.60 | 0.32 |
+| Canteen | 0.70 – 2.3 | 0.65 | 0.30 |
+| Skydeck | 0.55 – 3.6 | 1.15 | 0.44 |
 
 **No reflection captures, deliberately.** The project runs Lumen, which builds
 its own reflection scene from the same geometry and lights. A per-floor capture
@@ -384,6 +463,24 @@ floor, room, spawn anchor, access zone, terminal, breach wall, shutter and
 surface, with locations. That manifest is what `validate_project.py` checks the
 level against, which is how a level edit by hand gets caught before it becomes a
 mystery bug three weeks later.
+
+**What a build makes, in order.** The persistent level is opened (or created)
+first, and the gameplay anchors go into it: spawn points, access zones,
+terminals, breach walls, shutters, loot points (`build_loot_points`, about one
+per 5 m² of room, the first two in each room also allowed to hold a keycard),
+the winch and the Skydeck climate. Then each
+floor is built as its own level, and every floor is attached to the persistent
+level as an always-loaded sublevel. Every actor the builder spawns carries an
+`OB_Generated:<level>` tag, and a rebuild removes exactly those before placing
+them again, so running it twice gives one building, not two, and anything
+placed by hand survives.
+
+**One frame.** `AREAS` stores each footprint's minimum corner, and every
+builder reads it through `common.area_centre()`. The lift core, the spawn
+anchors and the pad sit around the world origin, and each floor is centred on
+it too. Floor N's slab is at `(N − 1) × 400` cm, the datum in section 1, and
+the C++ converts with `OneBrahamConstants::FloorZ` and `FloorIndexForZ`, the
+only two conversions.
 
 Adding a floor means adding an entry to `AREAS` and `ROOM_PROGRAMMES` in
 `build_environment.py`. Adding a route up means adding an entry to `ACCESS_ZONES`.

@@ -97,7 +97,7 @@ def ensure_registry(report):
         unreal.EditorAssetLibrary.make_directory(folder)
 
     registry = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
-        "DA_CharacterRegistry", folder, registry_class, unreal.DataAssetFactory())
+        "DA_CharacterRegistry", folder, registry_class, C.data_asset_factory(registry_class))
 
     if registry is None:
         report.failed("DA_CharacterRegistry", "could not create the registry asset")
@@ -108,17 +108,8 @@ def ensure_registry(report):
 
 
 def _make_tag(tag_string):
-    """OB.Character.Archetype.Analyst -> the reflected FGameplayTag."""
-    try:
-        return unreal.GameplayTagLibrary.request_gameplay_tag(unreal.GameplayTag(),
-                                                              unreal.Name(tag_string))
-    except Exception:  # noqa: BLE001
-        try:
-            tag = unreal.GameplayTag()
-            tag.tag_name = unreal.Name(tag_string)
-            return tag
-        except Exception:  # noqa: BLE001
-            return None
+    """OB.Character.Archetype.Analyst -> the reflected FGameplayTag, or None."""
+    return C.make_gameplay_tag(tag_string)
 
 
 def build_archetype_struct(report, registry, entry):
@@ -158,6 +149,12 @@ def build_archetype_struct(report, registry, entry):
     tag = _make_tag(tag_string)
     if tag is not None:
         _set("archetype_tag", tag)
+    else:
+        # The archetype tag is the archetype's identity; without it the cast
+        # cannot be told apart, so this is a failure, not a skip.
+        report.failed(entry.get("id", "?"), u"archetype tag '{0}' is not registered in this editor "
+                      u"session (is the OneBraham module loaded, and the tag in DefaultGame.ini?)"
+                      .format(tag_string))
 
     _set("display_name", unreal.Text(entry.get("display_name", entry.get("id", ""))))
     _set("biography", unreal.Text(entry.get("biography", "")))
@@ -178,8 +175,8 @@ def build_archetype_struct(report, registry, entry):
             for key, value in personality.items():
                 try:
                     existing.set_editor_property(key, float(value))
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    report.failed(entry.get("id", "?"), u"personality.{0}: {1}".format(key, exc))
             archetype.set_editor_property("personality", existing)
     except Exception as exc:  # noqa: BLE001
         report.failed(entry.get("id", "?"), u"personality: {0}".format(exc))
@@ -203,8 +200,24 @@ def build_archetype_struct(report, registry, entry):
         if path:
             try:
                 archetype.set_editor_property(prop, unreal.SoftObjectPath(path))
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                report.failed(entry.get("id", "?"), u"{0}: {1}".format(prop, exc))
+
+    # The animation class: the authored ABP (parented on UOneBrahamAnimInstance
+    # by build_characters), or the C++ instance itself until the ABP exists, so
+    # the body's locomotion, aim and life-state values are computed either way.
+    anim_class = None
+    abp = unreal.EditorAssetLibrary.load_asset(C.CHARACTERS + "/ABP_OneBrahamCharacter")
+    if abp is not None:
+        anim_class = unreal.BlueprintEditorLibrary.generated_class(abp)
+    if anim_class is None:
+        anim_class = getattr(unreal, "OneBrahamAnimInstance", None)
+        anim_class = anim_class.static_class() if anim_class is not None else None
+    if anim_class is not None:
+        try:
+            archetype.set_editor_property("anim_instance_class", anim_class)
+        except Exception as exc:  # noqa: BLE001
+            report.failed(entry.get("id", "?"), u"anim instance class: {0}".format(exc))
 
     return archetype
 
@@ -229,7 +242,7 @@ def build_cosmetic_slot_struct(report, registry, entry):
     _set("display_name", unreal.Text(entry.get("display_name", entry.get("id", ""))))
     _set("parent_bone", unreal.Name(entry.get("parent_bone", "spine_03")))
     _set("attach_socket", unreal.Name(entry.get("socket", "")))
-    _set("b_hidden_when_armed", bool(entry.get("hidden_when_armed", False)))
+    _set("hidden_when_armed", bool(entry.get("hidden_when_armed", False)))
 
     return slot
 
@@ -272,8 +285,8 @@ def apply_payload(report, registry, payload):
     try:
         registry.set_editor_property("competitive_banned_cosmetic_ids",
                                      [unreal.Name(b) for b in banned])
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        report.failed("DA_CharacterRegistry", u"competitive_banned_cosmetic_ids: {0}".format(exc))
 
     if banned:
         report.failed("cosmetic integrity",
