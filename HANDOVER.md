@@ -51,6 +51,12 @@ package the pipeline shares:
 export PYTHONPATH=Tools/Python
 ```
 
+If the shell's locale is ASCII - this sandbox's is - also `export PYTHONUTF8=1`. The
+tools print and read UTF-8, and under an ASCII locale a single raised exception
+fails inside the traceback renderer instead of showing you the error:
+`report_uncalled.py` reports its 83 findings happily and then dies with a
+`UnicodeDecodeError` from `linecache` if anything goes wrong after that.
+
 `run_all.py` sets it for the steps it runs, so it works either way; nothing else
 does.
 
