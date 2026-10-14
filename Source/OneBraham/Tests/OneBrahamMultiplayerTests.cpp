@@ -108,6 +108,21 @@ bool FOneBrahamRpcContractTest::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("the game module has classes to audit"), Classes.Num() > 50);
 
+	// The deliberate exceptions to "every client/server RPC is reliable": streams
+	// sent many times a second, where a reliable copy would queue behind lost
+	// packets and can overflow the reliable buffer (which disconnects the
+	// client), and cosmetic feedback whose loss changes nothing.
+	static const TSet<FString> IntentionallyUnreliable = {
+		TEXT("OneBrahamCharacter::ServerSetLean"),				// every lean input; the next one supersedes it
+		TEXT("OneBrahamCharacter::ServerReportSpeed"),			// per-tick telemetry for the anti-cheat
+		TEXT("OneBrahamCharacter::ServerReportFloor"),			// per-tick telemetry, superseded next tick
+		TEXT("OneBrahamProximityVoiceComponent::ServerPushVoiceFrame"),	// 20 ms audio frames
+		TEXT("OneBrahamProximityVoiceComponent::ClientReceiveVoiceFrame"),	// the same frames, relayed
+		TEXT("OneBrahamWeaponComponent::ClientHitConfirmed"),		// hit marker only
+		TEXT("OneBrahamPlayerController::ClientDamageTaken"),		// hit direction indicator only
+		TEXT("OneBrahamPlayerController::ClientApplyExplosionShake"),	// camera shake only
+	};
+
 	int32 ServerRpcs = 0;
 	int32 ClientRpcs = 0;
 	int32 MulticastRpcs = 0;
@@ -140,7 +155,7 @@ bool FOneBrahamRpcContractTest::RunTest(const FString& Parameters)
 				// one silently is a player pressing a button and nothing happening,
 				// and the client has no way to tell that from lag.
 				TestTrue(*FString::Printf(TEXT("%s::%s is reliable"), *Class->GetName(), *Function->GetName()),
-					bReliable);
+					bReliable || IntentionallyUnreliable.Contains(Class->GetName() + TEXT("::") + Function->GetName()));
 
 				// Server RPCs must be validated by hand rather than by
 				// WithValidation: the project has zero of those by decision, because
@@ -154,7 +169,7 @@ bool FOneBrahamRpcContractTest::RunTest(const FString& Parameters)
 			{
 				++ClientRpcs;
 				TestTrue(*FString::Printf(TEXT("%s::%s is reliable"), *Class->GetName(), *Function->GetName()),
-					bReliable);
+					bReliable || IntentionallyUnreliable.Contains(Class->GetName() + TEXT("::") + Function->GetName()));
 			}
 
 			if (bMulticast)

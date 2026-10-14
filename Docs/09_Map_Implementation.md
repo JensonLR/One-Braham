@@ -1,6 +1,6 @@
 # ONE BRAHAM — map implementation
 
-The building: 15 floors, 8 areas, 40 rooms, one vertical line from the ground
+The building: 15 floors, 7 areas, 38 rooms, one vertical line from the ground
 plaza to the Skydeck. This document is how it is built, why each area is shaped
 the way it is, and what every space is *for* as a fight.
 
@@ -15,9 +15,8 @@ the map rather than a plan for something that might.
 ```
  Floor  Z (cm)   Area                          What it is for
  ────────────────────────────────────────────────────────────────────────────
-  15    5600     Skydeck                       the ending: 30 s hold, 3 sides exposed
-  13-14 4800-5200 Canteen                      the last cover before the roof
-  12    4400     Executive                     the quiet floor; boardroom long push
+  15    5600     Canteen + Skydeck balcony     the ending: canteen cover, then the 30 s hold
+  12-14 4400-5200 Executive                    the quiet floors; boardroom long push
   9-11  3200-4000 Server & Comms               the loud floor; cold-aisle sightlines
   3-8   800-2800 Open Plan Office              the main battleground
   2     400      Mezzanine / Lift Lobby        the decision floor
@@ -66,8 +65,14 @@ disagree. The table:
 | 3–8 | `OpenPlan` | Open plan office | OFFICES | breachable on 5 |
 | 9–11 | `ServerComms` | Server and comms | SERVER / COMMS | breachable on 9 |
 | 12 | `Executive` | Executive wing and boardroom | EXECUTIVE | breachable on 12 |
-| 13–14 | `Canteen` | Canteen and terrace | CANTEEN | breachable on 14 |
-| 15 | `Skydeck` | Skydeck and extraction | SKYDECK | the winch |
+| 13 | `Executive` | Executive offices | EXECUTIVE | |
+| 14 | `Executive` | Executive suites | EXECUTIVE | breachable on 14 |
+| 15 | `Skydeck` | Canteen and Skydeck balcony | CANTEEN / SKYDECK | the winch |
+
+Floors 1–14 are one typical floor plate, 4400 × 3600 cm, centred on the lift
+core: the same core, stairs, lifts and curtain wall on every floor, column-free
+around the core, so the floors differ only in their room programmes. The ground
+floor and floor 15 are the exceptions.
 
 `/Game/OneBraham/Data/DA_BuildingLayout` is the authored asset. It is optional by
 design: the compiled-in default on the class is the shipping building, so a clean
@@ -179,22 +184,27 @@ punishes anybody who tries to hold it.
 **Access.** Tier `Executive`, with a paired zone between the floor and the east
 wing, so the two-panel rule appears twice in a match rather than once.
 
-### 2.7 Canteen — floor 13–14
+### 2.7 Executive — floors 12–14
 
-**Layout.** 4000 × 3200 cm. Eighteen six-seat tables, a long servery counter, hot
-holding units, a terrace edge, a kitchen behind a swing door.
+**Layout.** The typical floor plate. The boardroom wing on 12, executive offices
+on 13 and suites on 14, each with the boardroom, corner office, PA desk and
+lounge programme. Breach walls on 12 and 14.
 
-**Fights here.** The densest cover in the game, which is what makes it the most
-violent room in the match: eighteen tables means eighteen fire positions at
-19 m × 14 m, and a servery counter that is hard cover for its entire length.
+### 2.8 Canteen and Skydeck — floor 15
 
-**Why it matters.** It is the last room before the roof. Squads arrive here with
-one down, no utility, and less than a magazine each, and the design intent is that
-it *feels* like that.
+**Layout.** 4800 × 4000 cm, split by a glass winter-garden screen. South of it,
+under a roof, the canteen: eighteen six-seat tables, a long servery counter, hot
+holding units and a kitchen with a wet floor. North of it, open to the sky, the
+Skydeck balcony.
 
-### 2.8 Skydeck — floor 15
+**Fights here.** The canteen is the densest cover in the game: eighteen tables
+means eighteen fire positions, and a servery counter that is hard cover for its
+entire length. The screen is ordinary glass, so the canteen and the balcony can
+see each other, and the one door in it - the Skydeck gate - is where the last
+push happens. Squads arrive with one down, no utility and less than a magazine
+each, and the design intent is that it *feels* like that.
 
-**Layout.** 4800 × 4000 cm. Extraction pad (900 cm hold radius) marked in safety
+**The balcony.** Extraction pad (900 cm hold radius) marked in safety
 yellow, the winch rig, three air-handling units, four floodlight masts, a steel
 balustrade, planters, a winch control room.
 
@@ -231,7 +241,7 @@ with any other material the four states are told through the screen light alone.
 
 ## 3. The rooms, as data
 
-Forty rooms across the eight areas, each `(name, x, y, size_x, size_y)` in the
+Thirty-eight rooms across the seven areas, each `(name, x, y, size_x, size_y)` in the
 area's local frame, in `ROOM_PROGRAMMES` in `build_environment.py`:
 
 | Area | Rooms |
@@ -241,9 +251,8 @@ area's local frame, in `ROOM_PROGRAMMES` in `build_environment.py`:
 | Mezzanine | Bridge_To_Core, Meeting_Pod_1, Meeting_Pod_2, Breakout_Area, Lift_Lobby |
 | Open Plan | Desk_Farm_A, Desk_Farm_B, Meeting_Pod_1, Meeting_Pod_2, Break_Out_Kitchen, Print_Alcove, Power_Room, Plant_Room, Under_Stair_Store |
 | Server & Comms | Server_Row_1, Server_Row_2, Cold_Aisle, NOC, Comms_Cupboard, Power_Room, Vending_Alcove |
-| Executive | Boardroom, Corner_Office, Exec_PA_Desk, West_Lounge, Bar_Pavilion |
-| Canteen | Canteen_Hall, Kitchen, Servery, Terrace |
-| Skydeck | Helipad, Winch_Control, Edge_Rail_North, Edge_Rail_South, Plant_Room |
+| Executive | Boardroom, Corner_Office, Exec_PA_Desk, West_Lounge |
+| Skydeck | Canteen_Hall, Servery, Kitchen, Helipad, Winch_Control, Plant_Room, Bar_Pavilion, Edge_Rail_North |
 
 ---
 
@@ -352,7 +361,6 @@ half.
 | Open Plan | 0.60 – 1.9 | 0.55 | 0.022 | 0.30 |
 | Server & Comms | 0.22 – 1.6 | 0.40 | 0.034 | 0.46 |
 | Executive | 0.65 – 2.0 | 0.60 | 0.020 | 0.32 |
-| Canteen | 0.70 – 2.3 | 0.65 | 0.022 | 0.30 |
 | Skydeck | 0.55 – 3.6 | 1.15 | 0.024 | 0.44 |
 
 **No reflection captures, deliberately.** The project runs Lumen, which builds

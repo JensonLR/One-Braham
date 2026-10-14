@@ -87,12 +87,12 @@ to learn the building without losing a 25-minute run to it.
 **NIGHT SHIFT** — 4-player co-op survival against the building's own systems.
 Post-launch.
 
-### The eight areas
+### The seven areas
 
 Ground Plaza · Lobby · Mezzanine and Lift Lobby · Open Plan Office (floors 3–8) ·
-Server and Comms (9–11) · Executive (12) · Canteen (13–14) · Skydeck (15).
+Server and Comms (9–11) · Executive (12–14) · Canteen and Skydeck balcony (15).
 
-All 8 areas are built at true dimensions: 400 cm floor to floor, 110 cm doors,
+All 7 areas are built at true dimensions: 400 cm floor to floor, 110 cm doors,
 real desk rows, real server aisles, a canteen with eighteen tables and a boardroom
 with a table you have to walk around.
 

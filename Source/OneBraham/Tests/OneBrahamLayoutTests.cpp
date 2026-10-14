@@ -112,8 +112,7 @@ bool FOneBrahamBuildingLayoutTest::RunTest(const FString& Parameters)
 			{ TEXT("Mezzanine"),    2, 2 },
 			{ TEXT("OpenPlan"),     3, 8 },
 			{ TEXT("ServerComms"),  9, 11 },
-			{ TEXT("Executive"),    12, 12 },
-			{ TEXT("Canteen"),      13, 14 },
+			{ TEXT("Executive"),    12, 14 },
 			{ TEXT("Skydeck"),      15, 15 }
 		};
 
@@ -149,7 +148,7 @@ bool FOneBrahamBuildingLayoutTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	// The endgame floors - the canteen block and the Skydeck - are the ones the
+	// The endgame floor - the canteen and the Skydeck balcony, both on 15 - is the one the
 	// lockdown never seals and the plan draws in signal yellow.
 	{
 		int32 Endgame = 0;
@@ -164,7 +163,8 @@ bool FOneBrahamBuildingLayoutTest::RunTest(const FString& Parameters)
 			}
 		}
 
-		TestEqual(TEXT("three endgame floors"), Endgame, 3);
+		// The canteen and the Skydeck balcony share floor 15: one endgame floor.
+		TestEqual(TEXT("one endgame floor"), Endgame, 1);
 		TestTrue(TEXT("the extraction floor is an endgame floor"),
 			Building->FindFloor(Building->ExtractionFloorIndex) != nullptr
 			&& Building->FindFloor(Building->ExtractionFloorIndex)->bEndgameFloor);
@@ -203,8 +203,10 @@ bool FOneBrahamBuildingLayoutTest::RunTest(const FString& Parameters)
 		// breach is a shortcut between distinct fights or it is a novelty.
 		TestTrue(TEXT("the first breach wall is above the open plan's first floors"),
 			Breachable.Num() > 0 && Breachable[0] >= 3);
-		TestTrue(TEXT("the last is below the canteen"),
-			Breachable.Num() > 0 && Breachable.Last() < OneBrahamConstants::FloorCanteen);
+		// The last breach is the canteen's (floor 14, Docs/09): a shortcut into the
+		// endgame, still below the Skydeck it cannot bypass.
+		TestTrue(TEXT("the last is below the Skydeck"),
+			Breachable.Num() > 0 && Breachable.Last() < OneBrahamConstants::FloorSkydeck);
 	}
 
 	// Asking about a floor that does not exist is a null, an empty name and an

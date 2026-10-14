@@ -248,8 +248,9 @@ FText UOneBrahamUIStyle::FloorLabel(int32 FloorIndex)
 	case 5:		return NSLOCTEXT("OneBraham", "Floor_Office", "5 - OPEN PLAN OFFICE");
 	case 9:		return NSLOCTEXT("OneBraham", "Floor_Server", "9 - SERVER / COMMUNICATIONS");
 	case 12:	return NSLOCTEXT("OneBraham", "Floor_Executive", "12 - EXECUTIVE");
-	case 14:	return NSLOCTEXT("OneBraham", "Floor_Canteen", "14 - CANTEEN");
-	case 15:	return NSLOCTEXT("OneBraham", "Floor_Skydeck", "15 - SKYDECK");
+	case 13:	return NSLOCTEXT("OneBraham", "Floor_Executive13", "13 - EXECUTIVE");
+	case 14:	return NSLOCTEXT("OneBraham", "Floor_Executive14", "14 - EXECUTIVE");
+	case 15:	return NSLOCTEXT("OneBraham", "Floor_Skydeck", "15 - CANTEEN / SKYDECK");
 	default:
 		return FText::Format(NSLOCTEXT("OneBraham", "Floor_Generic", "FL {0}"), FText::AsNumber(FloorIndex));
 	}

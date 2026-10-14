@@ -172,12 +172,13 @@ bool FOneBrahamDamageArmourTest::RunTest(const FString& Parameters)
 	// exactly what 50 points of it should be worth.
 	TestTrue(TEXT("the fifth shot is lethal"), HealthLeft - Shot <= 0.f);
 
-	// A single huge hit is absorbed down to its remainder and no further: armour
-	// is a percentage soak, not a second health bar.
+	// A single huge hit soaks 60 % until the armour runs out and no further:
+	// armour is a percentage soak, not a second health bar. 60 % of 200 is 120,
+	// more than the 50 there is, so the armour takes 50 and the body the rest.
 	{
 		const float BigHit = 200.f;
 		const float Absorbed = FMath::Min(Health->MaxArmour, BigHit * Health->ArmourAbsorption);
-		TestNearlyEqual(TEXT("a 200 damage hit is absorbed by 30"), Absorbed, 30.f, 0.01f);
+		TestNearlyEqual(TEXT("a 200 damage hit is absorbed by all 50 armour"), Absorbed, 50.f, 0.01f);
 		TestTrue(TEXT("and still takes 170 through"), BigHit - Absorbed > Health->MaxHealth);
 
 		// It reduces a hit, it never inverts one: a fully armoured target cannot

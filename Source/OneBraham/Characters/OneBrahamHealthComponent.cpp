@@ -36,8 +36,10 @@ void UOneBrahamHealthComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// Every life starts at 100 + 50 (Docs/04): the TTK table in Docs/05 is
+	// written against a target wearing full armour.
 	Health = MaxHealth;
-	Armour = 0.f;
+	Armour = MaxArmour;
 	bDead = false;
 }
 
@@ -122,7 +124,7 @@ void UOneBrahamHealthComponent::InitializeHealth(float NewMaxHealth, bool bRefil
 void UOneBrahamHealthComponent::ResetHealth()
 {
 	Health = MaxHealth;
-	Armour = 0.f;
+	Armour = MaxArmour;
 	bDead = false;
 	LastDamageTime = -1000.f;
 	RecentAttackers.Reset();

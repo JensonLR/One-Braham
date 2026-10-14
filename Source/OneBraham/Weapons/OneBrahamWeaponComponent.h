@@ -328,7 +328,9 @@ public:
 	// ======================================================================
 	//  RPCs
 	// ======================================================================
-	UFUNCTION(Server, Unreliable, Category = "One Braham|Weapons")
+	/** Reliable: the client has already predicted this shot (ammo, recoil, FX),
+	 *  so a dropped request would leave the two magazines disagreeing. */
+	UFUNCTION(Server, Reliable, Category = "One Braham|Weapons")
 	void ServerRequestFire(FVector_NetQuantize AimOrigin, FVector_NetQuantizeNormal AimDirection, int32 InClientShotIndex);
 
 	UFUNCTION(Server, Reliable, Category = "One Braham|Weapons")

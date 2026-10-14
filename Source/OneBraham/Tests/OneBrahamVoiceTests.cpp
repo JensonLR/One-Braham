@@ -96,19 +96,27 @@ bool FOneBrahamVoiceLineSetTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("the core table filled the set"), Set->Lines.Num() >= 160);
 	TestEqual(TEXT("97 core lines and 66 variants"), Set->Lines.Num(), 97 + 66);
 
-	TSet<FName> Seen;
+	// An archetype variant shares its core line's id and differs by filter, so
+	// a line is identified by the pair.
+	TSet<FString> Seen;
 	int32 Subtitleless = 0;
 	int32 WrongPrefix = 0;
 	int32 NoPriority = 0;
 
 	for (const FOneBrahamVoiceLine& Line : Set->Lines)
 	{
-		if (Seen.Contains(Line.LineId))
+		FString Key = Line.LineId.ToString();
+		for (const FGameplayTag& Archetype : Line.ArchetypeFilter)
 		{
-			AddError(FString::Printf(TEXT("duplicate line id %s"), *Line.LineId.ToString()));
+			Key += TEXT("|") + Archetype.ToString();
 		}
 
-		Seen.Add(Line.LineId);
+		if (Seen.Contains(Key))
+		{
+			AddError(FString::Printf(TEXT("duplicate line %s"), *Key));
+		}
+
+		Seen.Add(Key);
 
 		if (Line.Subtitle.IsEmpty())
 		{

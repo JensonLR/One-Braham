@@ -25,7 +25,7 @@ Every shared enum and struct. The ones that matter:
 | `EOneBrahamLockdownStage` | `Normal, PreLockdown, Lockdown, Purge` | |
 | `EOneBrahamExtractionState` | `Inactive, Broadcast, Arriving, Holding, Complete, Failed` | |
 | `EOneBrahamExtractionFailReason` | `None, CallersEliminated, Contested, LoiterExpired, Purge` | the end-of-match copy |
-| `EOneBrahamHitZone` | `Head, Neck, Torso, UpperArm, LowerArm, Hand, UpperLeg, LowerLeg, Foot` | multipliers 2.6 / 0.8 / 1.0 / 0.82 |
+| `EOneBrahamHitZone` | `Head, Neck, Torso, UpperArm, LowerArm, Hand, UpperLeg, LowerLeg, Foot` | multipliers 2.6 / 1.6 / 1.0 / 0.82 |
 | `EOneBrahamWeaponCategory` | `Pistol, CompactPistol, SuppressedPistol, SMG, PDW, PumpShotgun, SemiAutoShotgun, Carbine556, CompactAssaultRifle, MarksmanRifle, Utility` | |
 | `EOneBrahamWeaponSlot` | `Primary, Sidearm, Utility, Access, Melee` | |
 | `FOneBrahamKillFeedEntry` | killer, victim, both teams, verb, `WeaponId`, `bWasDowned`, `bAssisted`, timestamp | replicated struct |

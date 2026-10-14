@@ -127,13 +127,16 @@ FLOOR_COUNT = 15
 # which is what gives every floor a chokepoint, a flank and a sightline.
 AREAS = [
     # name,              floors,        x,     y,     size x, size y
+    # Floors 1-14 are one typical floor plate - the same core, stairs, lifts and
+    # curtain wall, column-free around the core - and differ only in their room
+    # programmes. The ground floor and floor 15 are the two that are different:
+    # the plaza and reception below, the canteen and the Skydeck balcony on top.
     ("Ground_Plaza",     (0, 0),        -2600, -2200, 5200,  4400),
     ("Lobby",            (1, 1),        -2200, -1800, 4400,  3600),
-    ("Mezzanine",        (2, 2),        -2000, -1600, 4000,  3200),
+    ("Mezzanine",        (2, 2),        -2200, -1800, 4400,  3600),
     ("OpenPlan",         (3, 8),        -2200, -1800, 4400,  3600),
-    ("ServerComms",      (9, 11),       -1600, -1400, 3200,  2800),
-    ("Executive",        (12, 12),      -1800, -1500, 3600,  3000),
-    ("Canteen",          (13, 14),      -2000, -1600, 4000,  3200),
+    ("ServerComms",      (9, 11),       -2200, -1800, 4400,  3600),
+    ("Executive",        (12, 14),      -2200, -1800, 4400,  3600),
     ("Skydeck",          (15, 15),      -2400, -2000, 4800,  4000),
 ]
 

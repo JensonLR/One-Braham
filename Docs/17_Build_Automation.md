@@ -18,7 +18,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | --- | --- | --- | --- |
 | `generate_input_ini.py` | `Config/DefaultInput.ini` `[OneBraham.Input]`, 41 actions, 72 bindings | no | yes |
 | `build_materials.py` | 15 physical materials, 6 masters (node graphs, one of them the post-process interaction outline), 28 instances | yes | yes |
-| `build_environment.py` | the map: 8 areas, 16 levels, 40 rooms, 10 access zones, 5 terminals, 4 breach walls, 28 shutters | yes | yes |
+| `build_environment.py` | the map: 7 areas, 16 levels, 38 rooms, 10 access zones, 5 terminals, 4 breach walls, 28 shutters | yes | yes |
 | `build_props.py` | 12 gameplay blueprints, 4 loot cards, the prop manifest, the dressing pass | yes | yes |
 | `build_weapons.py` | 10 weapon definitions, 10 blueprints, `DA_WeaponRegistry` | yes | yes |
 | `build_characters.py` | the cast payload + `ABP_OneBrahamCharacter` when the skeleton exists | yes | yes |
@@ -102,7 +102,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | weapon_ids | OK | 0.1 | 118 weapon-id checks, the armoury and the spawn table agree |
 | cosmetic_ids | OK | 0.1 | 135 cosmetic checks, one wardrobe |
 | hud_strings | OK | 0.1 | 99 HUD-string checks, 31 rows and 11 widgets, every one shown |
-| audio_ids | OK | 0.2 | 305 audio-id checks, every cue audible or documented |
+| audio_ids | OK | 0.2 | 303 audio-id checks, every cue audible or documented |
 | interaction_ids | OK | 0.3 | 222 interaction checks, 7 interactables, every verb, tag, tuning number and override accounted for |
 | materials | OK | 3.1 | 6 masters, 15 physicals, 28 instances |
 ...

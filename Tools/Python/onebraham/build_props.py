@@ -132,7 +132,7 @@ PROPS = [
      "are still on it."),
     ("Water_Cooler", "Office", (32, 32, 108), ["OpenPlan", "Mezzanine", "ServerComms"], 9,
      "Fill point (NIGHT SHIFT) and audible tell."),
-    ("Bin_Pedal_20L", "Office", (30, 30, 52), ["OpenPlan", "Mezzanine", "Canteen"], 26,
+    ("Bin_Pedal_20L", "Office", (30, 30, 52), ["OpenPlan", "Mezzanine", "Skydeck"], 26,
      "Kickable. Chaos-enabled: the sound of a bin rolling away tells you exactly "
      "where someone was standing."),
     ("Desk_Lamp", "Office", (18, 18, 46), ["OpenPlan", "Executive"], 20,
@@ -165,10 +165,10 @@ PROPS = [
      "every ASCENT run."),
     ("Turnstile_Bank", "Lobby", (500, 160, 110), ["Ground_Plaza"], 2,
      "Security turnstiles. Chokepoint by design: three lanes, no cover."),
-    ("Sofa_Lobby", "Lobby", (200, 90, 78), ["Lobby", "Canteen"], 8,
+    ("Sofa_Lobby", "Lobby", (200, 90, 78), ["Lobby", "Skydeck"], 8,
      "Soft cover, Chaos-enabled at light weight."),
     ("Coffee_Table","Lobby", (110, 60, 40), ["Lobby"], 4, "Low cover. Reads great."),
-    ("Plant_Planter_Large", "Lobby", (150, 150, 140), ["Lobby", "Mezzanine", "Canteen"], 12,
+    ("Plant_Planter_Large", "Lobby", (150, 150, 140), ["Lobby", "Mezzanine", "Skydeck"], 12,
      "Planter with a real plant. Soft-ish, and it is the one green thing in the "
      "building: use it to break up sightlines without blocking them."),
     ("Plant_Ficus", "Lobby", (90, 90, 210), ["Lobby", "OpenPlan", "Mezzanine"], 14,
@@ -180,13 +180,13 @@ PROPS = [
      "Outside the doors. Holds a car back; holds a player back."),
     ("Bike_Rack_Sheffield", "Ground_Plaza", (100, 40, 80), ["Ground_Plaza"], 8,
      "Bike store. Clutter that reads as a real city ground floor."),
-    ("Vending_Machine", "Lobby", (100, 80, 190), ["Lobby", "Mezzanine", "Canteen", "ServerComms"], 7,
+    ("Vending_Machine", "Lobby", (100, 80, 190), ["Lobby", "Mezzanine", "Skydeck", "ServerComms"], 7,
      "Full cover. Glows. Hum 60 Hz. Loot container (a meal deal is a healing item "
      "and a genuine laugh-free joke about London offices)."),
-    ("Water_Fountain_Wall", "Lobby", (60, 40, 90), ["Lobby", "Canteen"], 4, "Fill point."),
+    ("Water_Fountain_Wall", "Lobby", (60, 40, 90), ["Lobby", "Skydeck"], 4, "Fill point."),
     ("Fire_Point_Cabinet", "Lobby", (45, 25, 70), ["Lobby", "OpenPlan", "Mezzanine"], 11,
      "Every floor has one. Shot, it triggers the sprinkler effect on that floor."),
-    ("Extinguisher", "Lobby", (16, 16, 55), ["Lobby", "OpenPlan", "ServerComms", "Canteen"], 22,
+    ("Extinguisher", "Lobby", (16, 16, 55), ["Lobby", "OpenPlan", "ServerComms", "Skydeck"], 22,
      "Chaos-enabled. Hitting one releases a short dust/snow burst."),
 
     # --- Circulation (stair cores and lift lobbies, all areas) -------------
@@ -200,13 +200,13 @@ PROPS = [
      "Seven-segment floor readout, driven by the lift's own state."),
     ("Sign_Floor_Directory", "Circulation", (100, 5, 40), ["Mezzanine", "OpenPlan", "Executive"], 15,
      "Offices 1-40. Wayfinding that doubles as the HUD map's reference."),
-    ("Sign_Exit_Illuminated", "Circulation", (34, 6, 20), ["OpenPlan", "Mezzanine", "ServerComms", "Canteen"], 26,
+    ("Sign_Exit_Illuminated", "Circulation", (34, 6, 20), ["OpenPlan", "Mezzanine", "ServerComms", "Skydeck"], 26,
      "Illuminated exit sign. Emergency-red or safety-yellow depending on state, "
      "and it is the one light that stays on during a purge."),
-    ("Stair_Core_Rail", "Circulation", (26, 900, 110), ["OpenPlan", "Mezzanine", "Canteen"], 30,
+    ("Stair_Core_Rail", "Circulation", (26, 900, 110), ["OpenPlan", "Mezzanine", "Skydeck"], 30,
      "Handrail. The stairwells are the vertical spine of the game: they are where "
      "you hear the fight two floors below and have to decide."),
-    ("Stair_Tread_Segment", "Circulation", (140, 30, 18), ["OpenPlan", "Mezzanine", "Canteen"], 60,
+    ("Stair_Tread_Segment", "Circulation", (140, 30, 18), ["OpenPlan", "Mezzanine", "Skydeck"], 60,
      "The treads themselves, so the stairs read as stairs from a distance."),
 
     # --- Executive --------------------------------------------------------
@@ -222,18 +222,18 @@ PROPS = [
      "Generic modern art, original, no trademarks in sight."),
 
     # --- Canteen / Skydeck ------------------------------------------------
-    ("Canteen_Table_6", "Canteen", (180, 75, 74), ["Canteen"], 18,
+    ("Canteen_Table_6", "Canteen", (180, 75, 74), ["Skydeck"], 18,
      "Sit-down tables. Creates the densest cover in the game, which is why the "
      "last fight before the stairs is here."),
-    ("Canteen_Chair", "Canteen", (48, 50, 88), ["Canteen"], 62,
+    ("Canteen_Chair", "Canteen", (48, 50, 88), ["Skydeck"], 62,
      "Cheap stacking chair. Chaos-enabled and light: knocking a bank of these "
      "over is a great, honest noise."),
-    ("Servery_Counter", "Canteen", (600, 80, 90), ["Canteen"], 3,
+    ("Servery_Counter", "Canteen", (600, 80, 90), ["Skydeck"], 3,
      "Long counter. Hard cover, and the shape that makes the canteen read as a "
      "canteen from the stairwell door."),
-    ("Hot_Holding_Unit", "Canteen", (90, 70, 85), ["Canteen"], 3, "Stainless. Hard cover."),
-    ("Tray_Stack", "Canteen", (40, 40, 30), ["Canteen"], 5, "Inconvenient clutter."),
-    ("Menu_Board", "Canteen", (110, 6, 70), ["Canteen"], 3,
+    ("Hot_Holding_Unit", "Canteen", (90, 70, 85), ["Skydeck"], 3, "Stainless. Hard cover."),
+    ("Tray_Stack", "Canteen", (40, 40, 30), ["Skydeck"], 5, "Inconvenient clutter."),
+    ("Menu_Board", "Canteen", (110, 6, 70), ["Skydeck"], 3,
      "Today: soup, a roast, and something vegan. The most London object in the game."),
     ("Deck_Planter", "Skydeck", (200, 80, 90), ["Skydeck"], 8,
      "Hardy rooftop planting. The only cover on the extraction pad that is not a "
@@ -491,7 +491,10 @@ def _dress_room(actor_subsystem, prop, mesh):
         if area is None:
             continue
 
-        _name, floors, origin_x, origin_y, _size_x, _size_y = area
+        # C.AREAS stores the plate's corner; room offsets are from its centre.
+        _name, floors, corner_x, corner_y, size_x, size_y = area
+        origin_x = corner_x + size_x / 2.0
+        origin_y = corner_y + size_y / 2.0
         floor_count = max(1, floors[1] - floors[0] + 1)
 
         rooms_per_floor = max(1, len(rooms))

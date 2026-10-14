@@ -26,7 +26,7 @@ completes with a `MatchResult` on both the winning and losing paths.
 - [ ] Every `skipped_asset` in the report has a human assigned and a date.
 - [ ] `Scripts\BuildContent.bat --only environment,props --dress` has been run
       since the last mesh import.
-- [ ] `Tools/Python/onebraham_build_manifest.json` exists and lists all 8 areas.
+- [ ] `Tools/Python/onebraham_build_manifest.json` exists and lists all 7 areas.
 - [ ] Map opens: `L_Persistent_OneBraham`, 16 streaming levels, all present.
 
 ## 3. Validation

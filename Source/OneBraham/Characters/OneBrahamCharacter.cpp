@@ -991,6 +991,20 @@ FText AOneBrahamCharacter::BuildDeathCauseText(const FOneBrahamKillFeedEntry& En
 	Args.Add(TEXT("Victim"), FText::FromString(Entry.VictimName));
 	Args.Add(TEXT("Weapon"), FText::FromName(Entry.WeaponId));
 
+	// These two never have a killer, and each has its own line: checked before
+	// the empty-killer fallback below, or they would read as the building's.
+	if (Entry.Verb == EOneBrahamKillFeedVerb::OwnUtility)
+	{
+		return NSLOCTEXT("OneBraham", "DeathCause_OwnUtility",
+			"Your own utility. Commendable.");
+	}
+
+	if (Entry.Verb == EOneBrahamKillFeedVerb::Left)
+	{
+		return NSLOCTEXT("OneBraham", "DeathCause_Left",
+			"You left the building before the job was done.");
+	}
+
 	if (Entry.KillerName.IsEmpty())
 	{
 		// The building does not gloat. It states the position.
@@ -1007,14 +1021,6 @@ FText AOneBrahamCharacter::BuildDeathCauseText(const FOneBrahamKillFeedEntry& En
 	case EOneBrahamKillFeedVerb::Executed:
 		return FText::Format(NSLOCTEXT("OneBraham", "DeathCause_Executed",
 			"{Killer} - finished you off"), Args);
-
-	case EOneBrahamKillFeedVerb::OwnUtility:
-		return NSLOCTEXT("OneBraham", "DeathCause_OwnUtility",
-			"Your own utility. Commendable.");
-
-	case EOneBrahamKillFeedVerb::Left:
-		return NSLOCTEXT("OneBraham", "DeathCause_Left",
-			"You left the building before the job was done.");
 
 	case EOneBrahamKillFeedVerb::Building:
 		return NSLOCTEXT("OneBraham", "DeathCause_Building",

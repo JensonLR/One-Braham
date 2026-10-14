@@ -92,10 +92,12 @@ namespace OneBrahamConstants
 	static constexpr int32 FloorMezzanine = 2;
 	static constexpr int32 FloorOffices = 3;      // 3..8 are open-plan/meeting
 	static constexpr int32 FloorServer = 9;
-	static constexpr int32 FloorExecutive = 12;
-	/** The canteen block starts here: 13 is the servery, 14 is the seating. */
-	static constexpr int32 FloorCanteen = 13;
+	static constexpr int32 FloorExecutive = 12;   // 12..14
+	/** The canteen and the Skydeck balcony share the top floor. */
+	static constexpr int32 FloorCanteen = 15;
 	static constexpr int32 FloorSkydeck = 15;
+	/** The purge never climbs above this: Executive 14 and floor 15 stay clear of gas. */
+	static constexpr int32 FloorPurgeCeiling = 13;
 
 	/** Extraction hold time, seconds (ASCENT). */
 	static constexpr float ExtractionHoldSeconds = 30.f;

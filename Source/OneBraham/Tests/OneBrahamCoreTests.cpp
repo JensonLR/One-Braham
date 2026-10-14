@@ -80,12 +80,12 @@ bool FOneBrahamAscentRulesTest::RunTest(const FString& Parameters)
 		Settings->ExtractionBroadcastSeconds > 0.f);
 
 	// The building closes behind the players, the Skydeck is never purged, and the
-	// purge stops below the canteen's seating floor.
+	// purge stops at floor 13, below the executive suites and the canteen.
 	TestTrue(TEXT("ASCENT has lockdown"), Settings->bLockdownEnabled);
 	TestNearlyEqual(TEXT("lockdown stage, seconds"), Settings->LockdownStageSeconds, 90.f, 0.5f);
 	TestNearlyEqual(TEXT("lockdown warning, seconds"), Settings->LockdownWarningSeconds, 15.f, 0.5f);
-	TestEqual(TEXT("the purge ceiling is the canteen block"),
-		Settings->PurgeFloorCeiling, OneBrahamConstants::FloorCanteen);
+	TestEqual(TEXT("the purge ceiling is floor 13"),
+		Settings->PurgeFloorCeiling, OneBrahamConstants::FloorPurgeCeiling);
 	TestTrue(TEXT("the purge never reaches the Skydeck"),
 		Settings->PurgeFloorCeiling < OneBrahamConstants::FloorSkydeck);
 
@@ -202,10 +202,10 @@ bool FOneBrahamConstantsTest::RunTest(const FString& Parameters)
 		OneBrahamConstants::FloorServer > OneBrahamConstants::FloorOffices);
 	TestTrue(TEXT("the executive floor is above the server floors"),
 		OneBrahamConstants::FloorExecutive > OneBrahamConstants::FloorServer);
-	TestTrue(TEXT("the canteen is above the executive floor"),
-		OneBrahamConstants::FloorCanteen > OneBrahamConstants::FloorExecutive);
-	TestTrue(TEXT("the Skydeck is above the canteen"),
-		OneBrahamConstants::FloorSkydeck > OneBrahamConstants::FloorCanteen);
+	TestTrue(TEXT("the canteen is above the executive floors"),
+		OneBrahamConstants::FloorCanteen > OneBrahamConstants::FloorExecutive + 2);
+	TestEqual(TEXT("the canteen shares the Skydeck floor"),
+		OneBrahamConstants::FloorCanteen, OneBrahamConstants::FloorSkydeck);
 
 	// The health model: 100 health, 50 armour, and armour that soaks 60% of
 	// incoming damage until it breaks - the number Docs/04's worked example is

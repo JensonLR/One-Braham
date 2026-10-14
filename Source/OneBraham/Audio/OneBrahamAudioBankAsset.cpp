@@ -244,7 +244,6 @@ void UOneBrahamAudioBankAsset::EnsureCoreEntries()
 			{ TEXT("OpenPlan"),     TEXT("AMB_Office_Hum") },
 			{ TEXT("ServerComms"),  TEXT("AMB_Server_Room") },
 			{ TEXT("Executive"),    TEXT("AMB_Executive") },
-			{ TEXT("Canteen"),      TEXT("AMB_Canteen") },
 			{ TEXT("Skydeck"),      TEXT("AMB_Skydeck_Wind") },
 			{ TEXT("Stairwell"),    TEXT("AMB_Stairwell_Door") }
 		};

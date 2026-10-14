@@ -81,7 +81,7 @@ public:
 	float HeadshotMultiplier = 2.6f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Health")
-	float NeckMultiplier = 0.8f;
+	float NeckMultiplier = 1.6f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Health")
 	float TorsoMultiplier = 1.f;
@@ -169,7 +169,7 @@ public:
 	float Health = 100.f;
 
 	UPROPERTY(ReplicatedUsing = OnRep_Armour, BlueprintReadOnly, Category = "One Braham|Health")
-	float Armour = 0.f;
+	float Armour = 50.f;
 
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Health")
 	float LastDamageTime = -1000.f;

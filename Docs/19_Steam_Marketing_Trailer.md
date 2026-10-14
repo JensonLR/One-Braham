@@ -171,7 +171,7 @@ everybody."*
 ## 6. Roadmap as published on the store page
 
 > **Now** — ASCENT, FIRE DRILL, 10 weapons, 6 archetypes, proximity voice,
-> dedicated servers, 8 areas.
+> dedicated servers, 7 areas.
 >
 > **Post-launch 1** — NIGHT SHIFT, 4-player co-op survival.
 >

@@ -107,8 +107,8 @@ per area (`AudioVolume` actors placed by the map builder):
 | Mezzanine | 1.8 s | 0.28 | carpet and soft furnishing |
 | Open Plan (3–8) | 1.2 s | 0.22 | the classic office problem: ceiling, no walls |
 | Server & Comms (9–11) | 0.9 s | 0.30 | metal, noise floor, no soft surfaces at all |
-| Executive (12) | 1.5 s | 0.26 | carpet, glass, stillness |
-| Canteen (13–14) | 1.4 s | 0.24 | hard floor, wide room |
+| Executive (12–14) | 1.5 s | 0.26 | carpet, glass, stillness |
+| Canteen (15) | 1.4 s | 0.24 | hard floor, wide room |
 | Stairwell | 3.4 s | 0.65 | concrete. The loudest place in the game and it should be |
 | Skydeck | 0.4 s | 0.05 | wind. No reverb at all |
 

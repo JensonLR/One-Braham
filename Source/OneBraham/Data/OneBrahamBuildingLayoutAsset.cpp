@@ -96,15 +96,15 @@ UOneBrahamBuildingLayoutAsset::UOneBrahamBuildingLayoutAsset()
 	AddFloor(12, TEXT("Executive"),
 		NSLOCTEXT("OneBraham", "Area_12", "Executive wing and boardroom"),
 		NSLOCTEXT("OneBraham", "AreaShort_12", "EXECUTIVE"), false, true);
-	AddFloor(13, TEXT("Canteen"),
-		NSLOCTEXT("OneBraham", "Area_13", "Canteen and terrace"),
-		NSLOCTEXT("OneBraham", "AreaShort_13", "CANTEEN"), true, false);
-	AddFloor(14, TEXT("Canteen"),
-		NSLOCTEXT("OneBraham", "Area_14", "Canteen and south terrace"),
-		NSLOCTEXT("OneBraham", "AreaShort_14", "CANTEEN"), true, true);
+	AddFloor(13, TEXT("Executive"),
+		NSLOCTEXT("OneBraham", "Area_13", "Executive offices"),
+		NSLOCTEXT("OneBraham", "AreaShort_13", "EXECUTIVE"), false, false);
+	AddFloor(14, TEXT("Executive"),
+		NSLOCTEXT("OneBraham", "Area_14", "Executive suites"),
+		NSLOCTEXT("OneBraham", "AreaShort_14", "EXECUTIVE"), false, true);
 	AddFloor(15, TEXT("Skydeck"),
-		NSLOCTEXT("OneBraham", "Area_15", "Skydeck and extraction"),
-		NSLOCTEXT("OneBraham", "AreaShort_15", "SKYDECK"), true, false);
+		NSLOCTEXT("OneBraham", "Area_15", "Canteen and Skydeck balcony"),
+		NSLOCTEXT("OneBraham", "AreaShort_15", "CANTEEN / SKYDECK"), true, false);
 
 	FloorCount = Floors.Num();
 	ExtractionFloorIndex = 15;

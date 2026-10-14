@@ -679,14 +679,15 @@ def check_manifest(v, config_only):
     spawns = data.get("spawn_anchors", [])
     floors = data.get("floors", [])
 
-    if len(areas) != 8:
-        v.fail("manifest", u"{0} areas in the manifest, expected 8".format(len(areas)))
+    # Seven: the canteen shares floor 15 with the Skydeck balcony.
+    if len(areas) != 7:
+        v.fail("manifest", u"{0} areas in the manifest, expected 7".format(len(areas)))
     if len(floors) < 16:
         v.fail("manifest", u"{0} floors built, expected 16 (plaza + 15)".format(len(floors)))
     if len(spawns) < 24:
         v.warn("manifest", u"only {0} spawn anchors: 12 players need options".format(len(spawns)))
 
-    if len(areas) == 8 and len(floors) >= 16:
+    if len(areas) == 7 and len(floors) >= 16:
         v.pass_("manifest", u"{0} areas, {1} floors, {2} spawn anchors".format(
             len(areas), len(floors), len(spawns)))
 

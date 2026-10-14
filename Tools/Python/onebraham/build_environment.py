@@ -152,16 +152,15 @@ ROOM_FLOOR_FINISH = {
     ("Executive", "Exec_PA_Desk"):  "Carpet",
     ("Executive", "West_Lounge"):   "Carpet",
 
-    # Canteen: lino throughout, and a kitchen floor that is always wet.
-    ("Canteen", "Canteen_Hall"): "Lino",
-    ("Canteen", "Servery"):      "Lino",
-    ("Canteen", "Kitchen"):      "Puddle",
-    ("Canteen", "Terrace"):      "Decking",
+    # The canteen shares floor 15 with the Skydeck balcony: lino throughout,
+    # and a kitchen floor that is always wet.
+    ("Skydeck", "Canteen_Hall"): "Lino",
+    ("Skydeck", "Servery"):      "Lino",
+    ("Skydeck", "Kitchen"):      "Puddle",
 
     # Skydeck: plant deck, the pad, the rails, and a lino control room.
     ("Skydeck", "Helipad"):         "Decking",
     ("Skydeck", "Edge_Rail_North"): "Decking",
-    ("Skydeck", "Edge_Rail_South"): "Decking",
     ("Skydeck", "Winch_Control"):   "Lino",
     ("Skydeck", "Plant_Room"):      "Grating",
     ("Skydeck", "Bar_Pavilion"):    "Wood",
@@ -175,7 +174,6 @@ AREA_DEFAULT_FINISH = {
     "OpenPlan":      "Carpet",
     "ServerComms":   "ServerRack",
     "Executive":     "Carpet",
-    "Canteen":       "Lino",
     "Skydeck":       "Decking",
 }
 
@@ -230,21 +228,26 @@ ROOM_PROGRAMMES = {
         ("Exec_PA_Desk", 900, 900, 500, 400),
         ("West_Lounge", 1200, -700, 700, 700),
     ],
-    "Canteen": [
-        ("Canteen_Hall", 0, 0, 1800, 1400),
-        ("Servery", 0, 1000, 1400, 400),
-        ("Kitchen", -1200, 900, 700, 500),
-        ("Terrace", 1300, 300, 600, 900),
-    ],
+    # Floor 15: the canteen is the enclosed south half (a winter-garden
+    # restaurant), the Skydeck balcony the open north half. The helipad stays
+    # on the extraction pad at the centre.
     "Skydeck": [
-        ("Helipad", 0, 0, 1800, 1800),
-        ("Plant_Room", 1800, 0, 700, 900),
-        ("Winch_Control", -1500, 400, 600, 500),
-        ("Bar_Pavilion", 0, 1500, 1200, 600),
+        ("Canteen_Hall", -600, -1250, 2600, 1100),
+        ("Servery", 1500, -1450, 1200, 500),
+        ("Kitchen", 1500, -900, 1200, 500),
+        ("Helipad", 0, 250, 1800, 1500),
+        ("Plant_Room", 1800, 600, 700, 900),
+        ("Winch_Control", -1700, 400, 600, 500),
+        ("Bar_Pavilion", 0, 1500, 1200, 400),
         ("Edge_Rail_North", 0, 1900, 4200, 120),
-        ("Edge_Rail_South", 0, -1900, 4200, 120),
     ],
 }
+
+# Floor 15's split: the canteen is roofed and glazed south of this line, the
+# balcony open to the north. The Skydeck gate is the door in the screen.
+SKYDECK_SCREEN_Y = -550.0
+SKYDECK_GATE_X = 600.0
+SKYDECK_GATE_WIDTH = 300.0
 
 # Anchors: named, gameplay-relevant positions per area. The manifest this script
 # writes is the authoritative list the C++ and Docs reference.
@@ -275,15 +278,14 @@ ANCHORS = {
         ("Server_Spawn_B", 1300, -1000),
         ("Server_Spawn_C", 0, 1100),
     ],
+    # Spread over 12-14 by index, two per floor.
     "Executive": [
         ("Exec_Spawn_A", -1500, -1100),
         ("Exec_Spawn_B", 1500, -1100),
         ("Exec_Spawn_C", 0, 1000),
-    ],
-    "Canteen": [
-        ("Canteen_Spawn_A", -1600, -1200),
-        ("Canteen_Spawn_B", 1600, -1200),
-        ("Canteen_Spawn_C", 0, 1100),
+        ("Exec_Spawn_D", -1600, 1200),
+        ("Exec_Spawn_E", 1600, 1200),
+        ("Exec_Spawn_F", 0, -1300),
     ],
     "Skydeck": [
         ("Deck_Spawn_West", -2000, 0),
@@ -305,7 +307,7 @@ ACCESS_ZONES = [
     ("Executive_Floor12",      12,  "Executive", 0,    0,    "Executive_Wing_East", True,  True),
     ("Executive_Wing_East",    12,  "Executive", 900,  900,  "Executive_Floor12",   True,  True),
     ("Canteen_Floor15",        15,  "Staff",     0,    0,    "Skydeck_Gate",        True,  False),
-    ("Skydeck_Gate",           15,  "Skydeck", 900, -700,  "Canteen_Floor15",     True,  False),
+    ("Skydeck_Gate",           15,  "Skydeck", 600, -550,  "Canteen_Floor15",     True,  False),
 ]
 
 # Override terminals: hold-to-open. Two-panel pairs are what make the co-op push
@@ -324,7 +326,7 @@ BREACHABLE_WALLS = [
     ("Breach_Office05_Partition", 5,  0,  700, "X", 600, 400, "Plasterboard"),
     ("Breach_Server09_Riser",     9,  900, -600, "Y", 200, 400, "Plasterboard"),
     ("Breach_Exec12_StairLock",  12, -900,  0,   "X", 250, 400, "Metal"),
-    ("Breach_Canteen14_Wall",    14,  0,   -900, "X", 700, 400, "Plasterboard"),
+    ("Breach_Exec14_Wall",       14,  0,   -900, "X", 700, 400, "Plasterboard"),
 ]
 
 # Fire shutters, driven by the lockdown director. One per stairwell per floor.
@@ -431,9 +433,15 @@ def _floor_z(floor_index):
 
 
 def _area_for_floor(floor_index):
+    """The area on a floor, as (name, centre x, centre y, size x, size y).
+
+    C.AREAS stores each floor plate's south-west corner; everything placed on a
+    floor - slab, rooms, lights, volumes - is laid out from its centre, which is
+    also the frame the doors, spawn anchors and extraction pad use.
+    """
     for name, (first, last), origin_x, origin_y, size_x, size_y in C.AREAS:
         if first <= floor_index <= last:
-            return name, origin_x, origin_y, size_x, size_y
+            return name, origin_x + size_x / 2.0, origin_y + size_y / 2.0, size_x, size_y
     return None, 0.0, 0.0, 0.0, 0.0
 
 
@@ -525,7 +533,6 @@ AREA_GRADE = {
     "OpenPlan":      (0.60, 1.9, 0.55, 0.022, 0.30),
     "ServerComms":   (0.22, 1.6, 0.40, 0.034, 0.46),
     "Executive":     (0.65, 2.0, 0.60, 0.020, 0.32),
-    "Canteen":       (0.70, 2.3, 0.65, 0.022, 0.30),
     "Skydeck":       (0.55, 3.6, 1.15, 0.024, 0.44),
 }
 
@@ -574,8 +581,14 @@ def build_floor_shell(report, floor_index, materials):
                   prefix + "_Slab")
 
     # --- Ceiling ----------------------------------------------------------
-    _box((origin_x, origin_y, z + C.CEILING_HEIGHT_CM + 10.0),
-         (size_x, size_y, 20.0), plaster, prefix + "_Ceiling")
+    # Floor 15 is roofed only over the canteen; the Skydeck balcony is open sky.
+    if area_name == "Skydeck":
+        roofed_y = SKYDECK_SCREEN_Y + half_y
+        _box((origin_x, origin_y - half_y + roofed_y / 2.0, z + C.CEILING_HEIGHT_CM + 10.0),
+             (size_x, roofed_y, 20.0), plaster, prefix + "_Ceiling")
+    else:
+        _box((origin_x, origin_y, z + C.CEILING_HEIGHT_CM + 10.0),
+             (size_x, size_y, 20.0), plaster, prefix + "_Ceiling")
     _note_surface("Plasterboard", prefix + "_Ceiling")
 
     # --- Perimeter glazing (the thing that makes the tower feel like a tower) --
@@ -586,10 +599,26 @@ def build_floor_shell(report, floor_index, materials):
         window_h = C.CEILING_HEIGHT_CM - 120.0
         _box((origin_x, origin_y - half_y, z + window_h / 2.0 + 60.0),
              (size_x - 200.0, 12.0, window_h), glass, prefix + "_Glazing_South")
-        _box((origin_x, origin_y + half_y, z + window_h / 2.0 + 60.0),
-             (size_x - 200.0, 12.0, window_h), glass, prefix + "_Glazing_North")
+        if area_name != "Skydeck":
+            # The balcony's north edge is its rail, not a curtain wall.
+            _box((origin_x, origin_y + half_y, z + window_h / 2.0 + 60.0),
+                 (size_x - 200.0, 12.0, window_h), glass, prefix + "_Glazing_North")
         _note_surface("BallisticGlass" if materials.get("BallisticGlass") is not None else "Glass",
                       prefix + "_Glazing")
+
+    # --- The winter-garden screen (floor 15) ------------------------------
+    # Ordinary glass between the canteen and the balcony, in two panels either
+    # side of the Skydeck gate. Plain rather than ballistic: it is an interior
+    # screen, and it is the one place a fight on 15 can see straight through.
+    if area_name == "Skydeck":
+        screen = materials.get("Glass") or glass
+        screen_h = C.CEILING_HEIGHT_CM
+        door_lo = SKYDECK_GATE_X - SKYDECK_GATE_WIDTH / 2.0
+        door_hi = SKYDECK_GATE_X + SKYDECK_GATE_WIDTH / 2.0
+        for label, lo, hi in (("West", -half_x + 100.0, door_lo), ("East", door_hi, half_x - 100.0)):
+            _box((origin_x + (lo + hi) / 2.0, origin_y + SKYDECK_SCREEN_Y, z + screen_h / 2.0),
+                 (hi - lo, 12.0, screen_h), screen, prefix + "_WinterGarden_Screen_" + label)
+        _note_surface("Glass", prefix + "_WinterGarden_Screen")
 
     # --- Core walls (the lift core is a hole in the middle of every floor) ---
     core = C.LIFT_CORE_SIZE_CM
@@ -1515,7 +1544,9 @@ def build_persistent_level(report, materials, manifest):
     glass = materials.get("BallisticGlass") or materials.get("Glass")
     total_height = (C.FLOOR_COUNT + 1) * C.FLOOR_HEIGHT_CM
     _box((0.0, -4200.0, total_height / 2.0 - 400.0), (8600.0, 60.0, total_height), glass, "Facade_South")
-    _box((0.0, 4200.0, total_height / 2.0 - 400.0), (8600.0, 60.0, total_height), glass, "Facade_North")
+    # The north face stops at the floor-15 slab: above it is the open balcony.
+    north_height = C.FLOOR_COUNT * C.FLOOR_HEIGHT_CM
+    _box((0.0, 4200.0, north_height / 2.0 - 400.0), (8600.0, 60.0, north_height), glass, "Facade_North")
     _box((-4400.0, 0.0, total_height / 2.0 - 400.0), (60.0, 8600.0, total_height), glass, "Facade_West")
     _box((4400.0, 0.0, total_height / 2.0 - 400.0), (60.0, 8600.0, total_height), glass, "Facade_East")
 

@@ -89,6 +89,22 @@ void UOneBrahamMatchSettingsAsset::EnsureDefaults()
 		}
 	}
 
+	// The class defaults are ASCENT's (three squads of four, no respawns, an
+	// extraction). FIRE DRILL is two teams of 6-8 with respawns and no
+	// extraction - those are the mode, not tuning, so they are not left to
+	// whoever authors the asset. Team size is tuning within that range
+	// (DefaultGame.ini FireDrillTeamSize=6).
+	if (Mode == EOneBrahamMatchMode::FireDrill)
+	{
+		TeamCount = 2;
+		if (PlayersPerTeam < 6 || PlayersPerTeam > 8 || PlayersPerTeam % 2 != 0)
+		{
+			PlayersPerTeam = 6;
+		}
+		bRespawnEnabled = true;
+		bExtractionEnabled = false;
+	}
+
 	if (ControlPoints.Num() == 0 && Mode == EOneBrahamMatchMode::FireDrill)
 	{
 		auto AddPoint = [this](FName Id, const FString& Name, int32 Floor, float Capture, float ScorePerSec)
