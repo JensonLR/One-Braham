@@ -194,7 +194,16 @@ FOneBrahamPlayerSummary AOneBrahamPlayerState::MakeSummary() const
 	Summary.Revives = RevivesPerformed;
 	Summary.DamageDealt = DamageDealt;
 	Summary.FloorsClimbed = CurrentFloor;
-	Summary.TimeAliveSeconds = 0.f;
+
+	// The length of the life the match ended on - which, in ASCENT with no
+	// respawns, is the match. A player who is out of it has no clock running.
+	const bool bStillIn = LifeState == EOneBrahamLifeState::Alive
+		|| LifeState == EOneBrahamLifeState::Downed
+		|| LifeState == EOneBrahamLifeState::Extracted;
+	const UWorld* World = GetWorld();
+	Summary.TimeAliveSeconds = bStillIn && World != nullptr && LastSpawnServerTime > 0.f
+		? FMath::Max(0.f, World->GetTimeSeconds() - LastSpawnServerTime)
+		: 0.f;
 	Summary.bExtracted = (LifeState == EOneBrahamLifeState::Extracted);
 	Summary.Score = FMath::RoundToInt(GetScore());
 	return Summary;

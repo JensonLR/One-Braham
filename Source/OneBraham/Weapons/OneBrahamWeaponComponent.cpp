@@ -191,7 +191,7 @@ void UOneBrahamWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 						LastLocalFireTime = Now;
 						--ServerBurstRemaining;
 						PredictLocalShot();
-						ServerRequestFire(Character->GetEyeLocation(), Character->GetEyeRotation().Vector(), ClientShotIndex);
+						SendFireRequest();
 					}
 				}
 				else
@@ -199,7 +199,7 @@ void UOneBrahamWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 					++ClientShotIndex;
 					LastLocalFireTime = Now;
 					PredictLocalShot();
-					ServerRequestFire(Character->GetEyeLocation(), Character->GetEyeRotation().Vector(), ClientShotIndex);
+					SendFireRequest();
 				}
 			}
 		}
@@ -791,7 +791,7 @@ void UOneBrahamWeaponComponent::SetTriggerHeld(bool bHeld)
 	++ClientShotIndex;
 	LastLocalFireTime = GetWorld()->GetTimeSeconds();
 	PredictLocalShot();
-	ServerRequestFire(Character->GetEyeLocation(), Character->GetEyeRotation().Vector(), ClientShotIndex);
+	SendFireRequest();
 }
 
 // ==========================================================================
@@ -892,6 +892,14 @@ void UOneBrahamWeaponComponent::ServerRequestFire_Implementation(FVector_NetQuan
 
 	UE_UNUSED(RewindTime);
 	UE_UNUSED(bFired);
+}
+
+void UOneBrahamWeaponComponent::SendFireRequest()
+{
+	FVector AimOrigin;
+	FVector AimDirection;
+	GetLocalAim(AimOrigin, AimDirection);
+	ServerRequestFire(AimOrigin, AimDirection, ClientShotIndex);
 }
 
 void UOneBrahamWeaponComponent::GetLocalAim(FVector& OutOrigin, FVector& OutDirection) const
@@ -1514,7 +1522,10 @@ void UOneBrahamWeaponComponent::ThrowUtility()
 
 	if (!GetOwner()->HasAuthority())
 	{
-		ServerRequestThrowUtility(SelectedUtilityIndex, Character->GetEyeLocation(), Character->GetEyeRotation().Vector());
+		FVector AimOrigin;
+		FVector AimDirection;
+		GetLocalAim(AimOrigin, AimDirection);
+		ServerRequestThrowUtility(SelectedUtilityIndex, AimOrigin, AimDirection);
 		return;
 	}
 

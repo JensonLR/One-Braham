@@ -419,6 +419,9 @@ protected:
 	/** Builds the local player's aim ray from the camera. */
 	void GetLocalAim(FVector& OutOrigin, FVector& OutDirection) const;
 
+	/** The client half of a shot: the aim from GetLocalAim, sent with this shot's index. */
+	void SendFireRequest();
+
 	/** Applies a view kick from the recoil pattern + random yaw jitter. */
 	void ApplyRecoilKick(int32 ShotIndex);
 

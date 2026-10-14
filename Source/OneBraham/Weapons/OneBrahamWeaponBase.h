@@ -212,10 +212,15 @@ public:
 	/** Seconds left on the current reload, 0 when not reloading. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Weapon")
 	float GetReloadTimeRemaining() const;
-protected:
-
+	/**
+	 * The empty click. Public: the weapon component calls it the moment the
+	 * trigger meets an empty magazine. It sat under `protected:`, which the
+	 * component cannot call - a compile error nothing here could see.
+	 */
 	UFUNCTION(NetMulticast, Unreliable, Category = "One Braham|Weapon")
 	void MulticastPlayDryFire();
+
+protected:
 
 	/** Plays the tracer as a travelling projectile-like effect the client sees. */
 	void PlayTracerLocal(const FVector& Start, const FVector& End, bool bSuppressed);

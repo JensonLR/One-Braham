@@ -7,6 +7,8 @@
 #include "Misc/Parse.h"
 #include "HAL/PlatformMisc.h"
 #include "Audio/OneBrahamProceduralAudio.h"
+#include "VFX/OneBrahamVFXStatics.h"
+#include "Engine/World.h"
 
 // ==========================================================================
 //  Log category definitions
@@ -111,6 +113,17 @@ public:
 			}
 			UE_LOG(LogOneBraham, Log, TEXT("[OB] Dedicated server name: %s"), *ServerName);
 		}
+
+		// The VFX cache remembers which Niagara systems are missing so a code-only
+		// checkout does not retry a failed load on every bullet. In the editor that
+		// memory outlived the play session, so a system built by build_vfx.py
+		// while the editor was open stayed "missing" until a restart. A world's
+		// teardown is the point to forget it.
+		WorldCleanupHandle = FWorldDelegates::OnPostWorldCleanup.AddLambda(
+			[](UWorld*, bool /*bSessionEnded*/, bool /*bCleanupResources*/)
+			{
+				UOneBrahamVFXStatics::ReleaseCachedAssets();
+			});
 	}
 
 	virtual void ShutdownModule() override
@@ -120,8 +133,14 @@ public:
 		// package they were allocated in.
 		OneBrahamProceduralAudio::ReleaseSynthesisedSounds();
 
+		FWorldDelegates::OnPostWorldCleanup.Remove(WorldCleanupHandle);
+		UOneBrahamVFXStatics::ReleaseCachedAssets();
+
 		UE_LOG(LogOneBraham, Log, TEXT("[OB] ONE BRAHAM runtime module shutting down."));
 	}
+
+private:
+	FDelegateHandle WorldCleanupHandle;
 };
 
 IMPLEMENT_PRIMARY_GAME_MODULE(FOneBrahamModule, OneBraham, "OneBraham");

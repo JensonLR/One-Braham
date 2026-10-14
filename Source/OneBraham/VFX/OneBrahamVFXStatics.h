@@ -130,6 +130,7 @@ public:
 	/** Global VFX intensity from the user's settings (0 = off, 1 = full). */
 	static float GetVFXIntensity();
 
-	/** Drops every cached Niagara asset. Called from module shutdown. */
+	/** Drops every cached Niagara asset and every remembered miss. Called after
+	 *  each world's cleanup and at module shutdown. */
 	static void ReleaseCachedAssets();
 };

@@ -35,6 +35,9 @@ public:
 	void OBExtractionAbort();
 	void OBReportNetBudget();
 	void OBDumpAudio();
+
+	/** `ob.bots.dump`: one line per practice bot - state, skill, target, line of sight. */
+	void OBDumpBots();
 	void OBBenchSkydeck(float SecondsPerLeg);
 	void OBStopBench();
 };

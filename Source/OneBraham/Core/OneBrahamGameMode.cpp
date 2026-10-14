@@ -541,23 +541,30 @@ FOneBrahamMatchResult AOneBrahamGameMode::BuildMatchResult(EOneBrahamTeam Winnin
 	Result.ExtractedCount = ExtractedCount;
 	Result.MatchDurationSeconds = GetWorld() && MatchStartTime > 0.f ? GetWorld()->GetTimeSeconds() - MatchStartTime : 0.f;
 
+	// One summary per player, from the player state itself. This used to be
+	// assembled from the squad roster, which carries kills, downs and deaths and
+	// nothing else: assists, revives, damage, floors, time and score were all
+	// zero on the results screen, which Docs/08 says is about exactly those.
+	// Squad order, so the screen reads squad by squad as it is designed to.
 	if (const AOneBrahamGameState* GS = GetOBGameState())
 	{
-		for (const FOneBrahamSquadInfo& Squad : GS->Squads)
+		TArray<const AOneBrahamPlayerState*> States;
+		for (const APlayerState* Base : GS->PlayerArray)
 		{
-			for (const FOneBrahamSquadMemberInfo& Member : Squad.Members)
+			if (const AOneBrahamPlayerState* State = Cast<AOneBrahamPlayerState>(Base))
 			{
-				FOneBrahamPlayerSummary Summary;
-				Summary.PlayerName = Member.PlayerName;
-				Summary.ArchetypeTag = Member.ArchetypeTag;
-				Summary.Team = Squad.Team;
-				Summary.Kills = Member.Kills;
-				Summary.Downs = Member.Downs;
-				Summary.Deaths = Member.Deaths;
-				Summary.FloorsClimbed = 0;
-				Summary.bExtracted = (Member.LifeState == EOneBrahamLifeState::Extracted);
-				Result.PlayerSummaries.Add(Summary);
+				States.Add(State);
 			}
+		}
+
+		States.StableSort([](const AOneBrahamPlayerState& A, const AOneBrahamPlayerState& B)
+		{
+			return A.SquadId != B.SquadId ? A.SquadId < B.SquadId : A.GetPlayerId() < B.GetPlayerId();
+		});
+
+		for (const AOneBrahamPlayerState* State : States)
+		{
+			Result.PlayerSummaries.Add(State->MakeSummary());
 		}
 	}
 
