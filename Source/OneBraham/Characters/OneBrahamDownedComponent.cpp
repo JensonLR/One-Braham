@@ -33,7 +33,6 @@ void UOneBrahamDownedComponent::GetLifetimeReplicatedProps(TArray<FLifetimePrope
 	DOREPLIFETIME(UOneBrahamDownedComponent, BleedOutRemaining);
 	DOREPLIFETIME(UOneBrahamDownedComponent, ReviveCount);
 	DOREPLIFETIME(UOneBrahamDownedComponent, ReviveProgress);
-	DOREPLIFETIME(UOneBrahamDownedComponent, bCarryingBody);
 }
 
 void UOneBrahamDownedComponent::BeginPlay()
@@ -239,6 +238,71 @@ void UOneBrahamDownedComponent::BleedOut()
 }
 
 // ==========================================================================
+//  What this body offers
+// ==========================================================================
+EOneBrahamDownedInteraction UOneBrahamDownedComponent::GetInteractionFor(const AOneBrahamPlayerController* Interactor) const
+{
+	if (!bDowned || Interactor == nullptr)
+	{
+		return EOneBrahamDownedInteraction::None;
+	}
+
+	const AOneBrahamCharacter* Character = CachedCharacter.Get();
+	const AOneBrahamPlayerState* Mine = Character != nullptr ? Character->GetPlayerState<AOneBrahamPlayerState>() : nullptr;
+	const AOneBrahamPlayerState* Theirs = Interactor->GetPlayerState<AOneBrahamPlayerState>();
+
+	// No PlayerState on either side (a spectator pawn, a QA dummy): there is no
+	// relationship to read, and both verbs are relationship verbs.
+	if (Mine == nullptr || Theirs == nullptr || Mine == Theirs)
+	{
+		return EOneBrahamDownedInteraction::None;
+	}
+
+	// Unassigned and spectator teams are not factions: they are absence.
+	if (Mine->Team == EOneBrahamTeam::None || Mine->Team == EOneBrahamTeam::Spectator ||
+		Theirs->Team == EOneBrahamTeam::None || Theirs->Team == EOneBrahamTeam::Spectator)
+	{
+		return EOneBrahamDownedInteraction::None;
+	}
+
+	// The interactor must be alive and on their feet. The client will not trace
+	// while it is not (AOneBrahamPlayerController::UpdateInteractionTarget), but
+	// the server does not take the client's word for that.
+	const AOneBrahamCharacter* Reviver = Cast<AOneBrahamCharacter>(Interactor->GetPawn());
+	const UOneBrahamHealthComponent* TheirHealth = Reviver != nullptr ? Reviver->GetHealthComponent() : nullptr;
+
+	if (TheirHealth == nullptr || !TheirHealth->IsAlive())
+	{
+		return EOneBrahamDownedInteraction::None;
+	}
+
+	if (Mine->IsFriendlyWith(Theirs))
+	{
+		// ShouldEnterDownedState kills outright at zero revives, so a body on the
+		// floor always has one banked. This re-read is cheap and it is the server's
+		// own state, not a replicated guess.
+		return Mine->RemainingRevives > 0 ? EOneBrahamDownedInteraction::Revive : EOneBrahamDownedInteraction::None;
+	}
+
+	return EOneBrahamDownedInteraction::Execute;
+}
+
+float UOneBrahamDownedComponent::GetInteractionHoldSeconds(EOneBrahamDownedInteraction Interaction) const
+{
+	switch (Interaction)
+	{
+	case EOneBrahamDownedInteraction::Revive:
+		return ReviveSeconds;
+
+	case EOneBrahamDownedInteraction::Execute:
+		return ExecuteSeconds;
+
+	default:
+		return 0.f;
+	}
+}
+
+// ==========================================================================
 //  Revive / execute
 // ==========================================================================
 void UOneBrahamDownedComponent::SetReviveProgress(float Progress, AActor* Reviver)
@@ -263,10 +327,16 @@ void UOneBrahamDownedComponent::ServerRevive(AController* ReviverController)
 
 	// The reviver must be alive, on the same team, and within reach. The interact
 	// component has already checked this, but a server-authoritative game never
-	// trusts its own callers: re-validate here.
+	// trusts its own callers: re-validate here, against the same rule that drew
+	// the prompt.
+	AOneBrahamPlayerController* ReviverPC = Cast<AOneBrahamPlayerController>(ReviverController);
 	const AOneBrahamCharacter* ReviverCharacter = Cast<AOneBrahamCharacter>(ReviverController->GetPawn());
-	if (ReviverCharacter == nullptr)
+
+	if (ReviverPC == nullptr || ReviverCharacter == nullptr ||
+		GetInteractionFor(ReviverPC) != EOneBrahamDownedInteraction::Revive)
 	{
+		// Somebody asked, over the network, to revive an enemy. The prompt already
+		// said no; this is the half that cannot be argued with.
 		return;
 	}
 
@@ -291,7 +361,7 @@ void UOneBrahamDownedComponent::ServerRevive(AController* ReviverController)
 	{
 		Health->ResetHealth();
 		Health->Heal(ReviveHealth);
-		Health->GrantInvulnerability(1.25f); // a short grace so a revive is not a free kill
+		Health->GrantInvulnerability(ReviveInvulnerabilitySeconds); // not a free kill
 	}
 
 	Character->ApplyLifeStateVisuals(EOneBrahamLifeState::Alive);
@@ -322,6 +392,14 @@ void UOneBrahamDownedComponent::ServerRevive(AController* ReviverController)
 		ReviverState->ServerRegisterRevive();
 	}
 
+	// The line that makes a revive feel like a person did it. It is the revived
+	// player's own voice, not the reviver's: the reviver is busy looking at the
+	// stairs, and "Up. Thank you. Let's move." is what the man on the carpet says.
+	if (UOneBrahamVoiceSubsystem* Voice = UOneBrahamVoiceSubsystem::Get(Character))
+	{
+		Voice->SpeakContextualLine(Character, TEXT("V_REVIVED"));
+	}
+
 	OnDownedStateChanged.Broadcast(false, 0.f);
 	Character->ForceNetUpdate();
 
@@ -334,7 +412,16 @@ void UOneBrahamDownedComponent::ServerRevive(AController* ReviverController)
 void UOneBrahamDownedComponent::ServerExecute(AController* ExecutorController)
 {
 	AOneBrahamCharacter* Character = CachedCharacter.Get();
-	if (Character == nullptr || !Character->HasAuthority() || !bDowned)
+	if (Character == nullptr || !Character->HasAuthority() || !bDowned || ExecutorController == nullptr)
+	{
+		return;
+	}
+
+	// Hostile only, and the executor has to be alive: reviving someone is not
+	// something you can be shot out of, and executing a colleague is not a thing
+	// the rules offer at all.
+	AOneBrahamPlayerController* ExecutorPC = Cast<AOneBrahamPlayerController>(ExecutorController);
+	if (ExecutorPC == nullptr || GetInteractionFor(ExecutorPC) != EOneBrahamDownedInteraction::Execute)
 	{
 		return;
 	}

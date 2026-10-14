@@ -194,7 +194,13 @@ void AOneBrahamKeycard::RefreshTierVisuals()
 		// A Facilities master is brighter than a staff badge: in a dark stairwell
 		// the card's own light is the fastest read of "is that worth crossing the
 		// floor for".
-		CardGlow->SetIntensity(AccessTier >= EOneBrahamAccessTier::Executive ? 11.f : 6.f);
+		// Two tiers are "worth crossing the floor for", not "greater than": the
+		// original line compared the enum with >=, which a scoped enum does not
+		// have and the compiler refuses. The list is spelled out so that adding a
+		// tier above Executive is a decision somebody makes here.
+		const bool bHighTier = AccessTier == EOneBrahamAccessTier::Executive ||
+			AccessTier == EOneBrahamAccessTier::Skydeck;
+		CardGlow->SetIntensity(bHighTier ? 11.f : 6.f);
 	}
 
 	if (CardMesh != nullptr)

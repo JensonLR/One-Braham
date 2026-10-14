@@ -14,6 +14,7 @@
 #include "Characters/OneBrahamDownedComponent.h"
 #include "Characters/OneBrahamRagdollComponent.h"
 #include "Interaction/OneBrahamInteractComponent.h"
+#include "Interaction/OneBrahamInteractionInterface.h"
 #include "Weapons/OneBrahamInventoryComponent.h"
 #include "Weapons/OneBrahamWeaponComponent.h"
 #include "Voice/OneBrahamProximityVoiceComponent.h"
@@ -493,10 +494,13 @@ float AOneBrahamCharacter::GetSprintSpeedMultiplier() const
 
 	const float HealthPenalty = HealthAlpha < 0.85f ? FMath::Lerp(1.f, 0.88f, (0.85f - HealthAlpha) / 0.85f) : 1.f;
 
-	// Carrying a downed colleague halves your speed - handled in the downed comp.
-	const float CarryPenalty = DownedComponent != nullptr && DownedComponent->IsCarryingBody() ? 0.5f : 1.f;
+	// No carry penalty, because there is no carrying: ASCENT has no fireman's lift
+	// (Docs/04 section 4). There used to be a penalty here multiplied by a
+	// bCarryingBody flag that nothing in the project could set true - a speed
+	// modifier that could never apply, wired to a replicated bool that was sent to
+	// every client every time it did not change.
 
-	return HealthPenalty * CarryPenalty;
+	return HealthPenalty;
 }
 
 // ==========================================================================
@@ -661,6 +665,198 @@ void AOneBrahamCharacter::ApplyCosmetics(const TMap<FName, FName>& InCosmetics)
 	}
 }
 
+// ==========================================================================
+//  Interaction: revive and execute (IOneBrahamInteractionInterface)
+// ==========================================================================
+FText AOneBrahamCharacter::GetColleagueName() const
+{
+	if (const AOneBrahamPlayerState* State = GetPlayerState<AOneBrahamPlayerState>())
+	{
+		const FString Name = State->GetPlayerName();
+		if (!Name.IsEmpty())
+		{
+			// Runtime data, so a literal-by-construction FText: the name is the
+			// player's, and it is the same string the kill feed prints.
+			return FText::FromString(Name);
+		}
+	}
+
+	return NSLOCTEXT("OneBraham", "Colleague_Unknown", "a colleague");
+}
+
+FText AOneBrahamCharacter::GetInteractionPrompt_Implementation(const AOneBrahamPlayerController* Interactor) const
+{
+	const UOneBrahamDownedComponent* Downed = DownedComponent;
+	if (Downed == nullptr)
+	{
+		return FText::GetEmpty();
+	}
+
+	const FText Name = GetColleagueName();
+
+	switch (Downed->GetInteractionFor(Interactor))
+	{
+	case EOneBrahamDownedInteraction::Revive:
+		// The prompt names them because you are deciding whose sixty seconds to
+		// spend four and a half of your own on, and because a squad that talks
+		// says "get Okonkwo up", not "revive the body".
+		return FText::Format(NSLOCTEXT("OneBraham", "Downed_Prompt_Revive", "Hold E - revive {0}"), Name);
+
+	case EOneBrahamDownedInteraction::Execute:
+		return FText::Format(NSLOCTEXT("OneBraham", "Downed_Prompt_Execute", "Hold E - finish {0}"), Name);
+
+	default:
+		// An empty prompt draws nothing at all: a standing colleague, a body seen
+		// by a spectator, and a body whose revive budget is spent are all "nothing
+		// in reach", and the HUD already knows how to draw that.
+		return FText::GetEmpty();
+	}
+}
+
+FGameplayTag AOneBrahamCharacter::GetInteractionTag_Implementation(const AOneBrahamPlayerController* Interactor) const
+{
+	const UOneBrahamDownedComponent* Downed = DownedComponent;
+	const EOneBrahamDownedInteraction Verb = Downed != nullptr
+		? Downed->GetInteractionFor(Interactor)
+		: EOneBrahamDownedInteraction::None;
+
+	// The tag picks the input verb and the HUD icon: OB.Interaction.Revive is the
+	// friendly hold, OB.Interaction.Execute the hostile one, and an invalid tag is
+	// the generic interact glyph.
+	return Verb == EOneBrahamDownedInteraction::Execute
+		? OneBrahamTags::Interaction_Execute
+		: (Verb == EOneBrahamDownedInteraction::Revive ? OneBrahamTags::Interaction_Revive : FGameplayTag());
+}
+
+bool AOneBrahamCharacter::CanInteract_Implementation(const AOneBrahamPlayerController* Interactor) const
+{
+	const UOneBrahamDownedComponent* Downed = DownedComponent;
+	return Downed != nullptr && Downed->GetInteractionFor(Interactor) != EOneBrahamDownedInteraction::None;
+}
+
+bool AOneBrahamCharacter::RequiresHold_Implementation(const AOneBrahamPlayerController* Interactor) const
+{
+	// Both verbs are holds. There is no tap version of picking somebody up, and
+	// there should not be: a revive you can do instantly is a revive that happens
+	// mid-firefight with no risk, and ASCENT's whole tension is that helping costs
+	// you the fight you were in.
+	const UOneBrahamDownedComponent* Downed = DownedComponent;
+	return Downed != nullptr && Downed->GetInteractionFor(Interactor) != EOneBrahamDownedInteraction::None;
+}
+
+float AOneBrahamCharacter::GetHoldDuration_Implementation(const AOneBrahamPlayerController* Interactor) const
+{
+	const UOneBrahamDownedComponent* Downed = DownedComponent;
+	if (Downed == nullptr)
+	{
+		return 0.f;
+	}
+
+	return Downed->GetInteractionHoldSeconds(Downed->GetInteractionFor(Interactor));
+}
+
+bool AOneBrahamCharacter::OnInteractionStart_Implementation(AOneBrahamPlayerController* Interactor)
+{
+	UOneBrahamDownedComponent* Downed = DownedComponent;
+	if (Downed == nullptr || Interactor == nullptr)
+	{
+		return false;
+	}
+
+	const EOneBrahamDownedInteraction Verb = Downed->GetInteractionFor(Interactor);
+	if (Verb == EOneBrahamDownedInteraction::None)
+	{
+		return false;
+	}
+
+	// A good revive is visible from the floor: the bar starts empty the moment a
+	// colleague commits, so the player who is bleeding knows somebody came.
+	if (Verb == EOneBrahamDownedInteraction::Revive)
+	{
+		Downed->SetReviveProgress(0.f, Interactor->GetPawn());
+	}
+
+	return true;
+}
+
+void AOneBrahamCharacter::OnInteractionHold_Implementation(AOneBrahamPlayerController* Interactor, float HeldSeconds, float Progress01)
+{
+	UOneBrahamDownedComponent* Downed = DownedComponent;
+	if (Downed == nullptr || Interactor == nullptr)
+	{
+		return;
+	}
+
+	// The execution has no progress to publish: two seconds of a hold whose only
+	// feedback is the animation of the person doing it.
+	if (Downed->GetInteractionFor(Interactor) == EOneBrahamDownedInteraction::Revive)
+	{
+		Downed->SetReviveProgress(Progress01, Interactor->GetPawn());
+	}
+}
+
+void AOneBrahamCharacter::OnInteractionEnd_Implementation(AOneBrahamPlayerController* Interactor, bool bCompleted)
+{
+	UOneBrahamDownedComponent* Downed = DownedComponent;
+	if (Downed == nullptr || Interactor == nullptr || !HasAuthority())
+	{
+		return;
+	}
+
+	// Re-resolve: the hold took four and a half seconds, and in that time the body
+	// can have bled out, been executed by somebody else, or been picked up by a
+	// different squadmate. Whatever the answer is now is the answer.
+	const EOneBrahamDownedInteraction Verb = Downed->GetInteractionFor(Interactor);
+
+	if (!bCompleted)
+	{
+		// Let go, walked away, or shot: the bar empties and nothing happened. The
+		// next hand to reach them starts from zero.
+		if (Verb == EOneBrahamDownedInteraction::Revive)
+		{
+			Downed->SetReviveProgress(0.f, Interactor->GetPawn());
+		}
+		return;
+	}
+
+	switch (Verb)
+	{
+	case EOneBrahamDownedInteraction::Revive:
+		Downed->ServerRevive(Interactor);
+		break;
+
+	case EOneBrahamDownedInteraction::Execute:
+		Downed->ServerExecute(Interactor);
+		break;
+
+	default:
+		// The body stood up, died or was extracted during the hold. Nothing to do,
+		// and nothing logged: this is the normal race, not an error.
+		break;
+	}
+}
+
+void AOneBrahamCharacter::OnInteractionCancelled_Implementation(AOneBrahamPlayerController* Interactor)
+{
+	OnInteractionEnd_Implementation(Interactor, /*bCompleted*/ false);
+}
+
+void AOneBrahamCharacter::SetInteractionHighlight_Implementation(bool bHighlighted)
+{
+	USkeletalMeshComponent* Body = GetMesh();
+	if (Body == nullptr)
+	{
+		return;
+	}
+
+	// Stencil 2 is the interact-outline pass (r.CustomDepth=3 in DefaultEngine.ini;
+	// M_OB_Highlight reads it, built by build_materials.py and documented in
+	// Docs/10 section 2.7). Only the body is outlined, never the first-person
+	// arms: you are not an interactable to yourself.
+	Body->SetRenderCustomDepth(bHighlighted);
+	Body->SetCustomDepthStencilValue(bHighlighted ? 2 : 0);
+}
+
 void AOneBrahamCharacter::ApplyLifeStateVisuals(EOneBrahamLifeState NewState)
 {
 	const EOneBrahamLifeState OldState = LifeState;
@@ -678,6 +874,14 @@ void AOneBrahamCharacter::ApplyLifeStateVisuals(EOneBrahamLifeState NewState)
 
 	case EOneBrahamLifeState::Downed:
 		GetCapsuleComponent()->SetCollisionProfileName(TEXT("OneBrahamCharacter"));
+		// A body on the floor blocks the interaction trace: that is what makes it
+		// aimable. The profile has this channel on Overlap so that a player who is
+		// *standing* never hides the door behind them (invariant: a person is
+		// something you interact with when they are on the carpet, and nothing but
+		// scenery when they are on their feet), and returning to Alive below
+		// restores it by re-applying the profile.
+		GetCapsuleComponent()->SetCollisionResponseToChannel(
+			(ECollisionChannel)EOneBrahamTraceChannel::Interactable, ECR_Block);
 		break;
 
 	case EOneBrahamLifeState::Dead:

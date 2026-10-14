@@ -30,9 +30,11 @@ happening in it, the art direction is working.
 
 ## 2. Master materials
 
-Five masters, authored at `/Game/OneBraham/Materials/`. Every instance in the
+Six masters, authored at `/Game/OneBraham/Materials/`. Every instance in the
 game is one of these with parameters, because fifteen masters is how a project
-loses its shader cache and its frame time at the same time.
+loses its shader cache and its frame time at the same time. Five of the six are
+surface masters; the sixth (2.7, `M_OB_Highlight`) is a post-process material,
+which is why the instance count is 28 and not 29.
 
 ### 2.1 `M_OB_Surface` — the lit opaque master
 
@@ -119,6 +121,44 @@ Every instance also carries a **physical material**, and that is the part that
 matters most: the physical material is what drives footsteps, bullet decals,
 impact VFX, bounce audio and friction. Get it wrong and a marble floor sounds
 like carpet.
+
+### 2.7 `M_OB_Highlight` - the interaction outline
+
+The one master that is not a surface. It is a **post-process material**
+(`MD_POST_PROCESS`, unlit, opaque) applied as a blendable on every floor's
+unbound `PostProcessVolume` by `build_environment.py`.
+
+```
+  SceneTexture:PostProcessInput0 ----------------.
+                                                  Add --> EmissiveColor
+  SceneTexture:CustomStencil  .                   |
+      Subtract(StencilTarget) |                   |
+      Abs                     +--> OneMinus --> Multiply(OutlineColour)
+      Saturate                |
+                              '--  (1 - saturate(|S - 2|)) is 1 on the object the
+                                   player is looking at and 0 on everything else
+```
+
+Why it exists: **six interactables already write this stencil and nothing read
+it.** `AOneBrahamKeycard` sets custom-depth stencil 2 while highlighted and 1
+while not; `SetInteractionHighlight_Implementation` on the access zone, the
+breachable wall, the override terminal, the pickup and `AOneBrahamCharacter` sets
+2 on the highlighted case. `AOneBrahamPlayerController::UpdateInteractionTarget`
+calls it as the trace target changes. All of that ran on a value that no material
+consumed, which is why the outline was in the code, in three documents and in the
+HUD, and nowhere on screen.
+
+Two parameters, both on the volume's material instance rather than in the graph:
+
+| Parameter | Default | What it is |
+| --- | --- | --- |
+| `OutlineColour` | Signal Blue `(0.078, 0.522, 1.000)` | the stencil-2 tint; brand colour, deliberately not a red enemy outline |
+| `StencilTarget` | `2.0` | the stencil value that means "the player is looking at this". **Slider range 0-255.** If the outline ever covers ordinary geometry, the `CustomStencil` node is handing back a normalised value and this wants `0.0078` (2/255) instead - one number, changed on the instance, no rebuild |
+
+The outline is a *tint over the object*, not a six-pixel shell outline: in a game
+where the prompt already tells you the verb, the highlight's job is to say "that
+one", and a tinted edge does that without drawing a shape that has to be art
+directed per object type.
 
 ---
 

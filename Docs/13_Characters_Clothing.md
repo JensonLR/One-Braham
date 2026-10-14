@@ -161,7 +161,7 @@ running towards you is a person rather than a pattern.
 
 ## 7. Interaction montages
 
-Seven montages, loaded by name at runtime by
+Eight montages, loaded by name at runtime by
 `UOneBrahamInteractComponent::PlayInteractionMontage`. They live in
 `/Game/OneBraham/Characters/Shared/Anims` (created by `build_characters.py`, named
 by `common.CHARACTER_ANIMS`), they are played on the upper-body slot so the
@@ -176,6 +176,7 @@ first-person arms mesh so the hands visibly reach for the button.
 | `AM_OB_Interact_Terminal` | override terminals, the extraction console, keycard readers with a screen | 12 s | loops while the hold runs, so it must loop cleanly. The 12 s figure is the solo override time; the paired 3 s override plays the first second and blends out. |
 | `AM_OB_Interact_LiftPanel` | lift call panels only | 0.9 s | the only montage with a real button press: a deliberate, single, index-finger stab, because calling a lift is the one interaction nobody rushes. |
 | `AM_OB_Interact_Revive` | reviving a downed squadmate | 4.5 s | loops for the revive duration (see `OneBrahamConstants::ReviveSeconds`). Needs a clear "pulling them up" read from first person, because the player is blind to their own surroundings while it plays. |
+| `AM_OB_Interact_Execute` | finishing a downed enemy | 2 s | the smallest montage in the game and the coldest: a single step in, the weapon already level, and no flourish at all. It is held for `UOneBrahamDownedComponent::ExecuteSeconds`, and the victim is watching it, so the read has to be legible from the floor. |
 | `AM_OB_Interact_Keycard` | badge readers, the turnstiles, the Skydeck gate | 0.8 s | a swipe, not a press. Left hand, so the weapon hand never leaves the grip. |
 | `AM_OB_Interact_Loot` | searchable bodies and dropped bags | 2.2 s | a crouch-and-reach: the interaction takes a full second longer than any other, and the animation is where the player feels that cost. |
 | `AM_OB_Interact_Radio` | the extraction beacon, the winch control | 1.4 s | the hand comes off the weapon to key a radio. Deliberately the most exposed pose in the game. |
@@ -206,3 +207,78 @@ screen change. `Docs/07_Multiplayer_Voice.md` covers the client-authority
 boundary in full; the relevant rule here is that *appearance is validated the
 same way as damage*, because in a game where a player's gear can be read off a
 body at 20 m, appearance is gameplay information.
+
+---
+
+## 9. What you can interact with
+
+Every interactable in ONE BRAHAM goes through one interface
+(`IOneBrahamInteractionInterface`) and one trace, and this section is the list.
+It exists because the list was previously only in the code, and the code had a
+hole in it the size of a person: revive and execute were implemented, documented
+in three places, and impossible to reach, because the downed player did not
+implement the interface and the interact ray could not see a body on the floor.
+Two tables, both checked by `check_interaction.py` against the classes, the
+gameplay tags, the hold constants and the montage table above.
+
+**Table 5 — the interaction table**
+
+| Actor | Prompt | Tags | Hold | Reach | Montage |
+| --- | --- | --- | --- | --- | --- |
+| `AOneBrahamAccessZone` | "Open {zone}", "Use badge - {zone}", "Hold E - override {zone}", or the refusal ("Staff badge required") | `OB.Interaction.Door`, `OB.Interaction.Door.Secure`, `OB.Interaction.Terminal` | tap with the badge, override 12 s (`UOneBrahamAccessZoneComponent::OverrideSeconds`), 3 s (`UOneBrahamAccessZoneComponent::OverrideTwoPersonSeconds`) at the paired panel | 240 cm (`AOneBrahamAccessZone::OBDoorInteractionRange`) | `AM_OB_Interact_Door`, `AM_OB_Interact_Terminal` |
+| `AOneBrahamBreachableWall` | "Plant breaching charge", or "Partition - breaching charge required" | `OB.Interaction.Door.Breachable` | 1.6 s (`AOneBrahamBreachableWall::PlantSeconds`) | 260 cm (`AOneBrahamBreachableWall::OBBreachInteractionRange`) | `AM_OB_Interact_Door` |
+| `AOneBrahamKeycard` | "Take {tier} badge - issued floor {n}", or "Take {tier} ({name})" for a dropped card | `OB.Interaction.Keycard` | tap | 210 cm (`AOneBrahamKeycard::CardPickupRangeCm`) | `AM_OB_Interact_Keycard` |
+| `AOneBrahamOverrideTerminal` | "Hold E - override", "Already released", "Access panel offline", "Unlinked panel" | `OB.Interaction.Terminal` | 12 s (`UOneBrahamAccessZoneComponent::OverrideSeconds`) solo, 3 s (`UOneBrahamAccessZoneComponent::OverrideTwoPersonSeconds`) paired | 200 cm (`AOneBrahamOverrideTerminal::OBTerminalInteractionRange`) | `AM_OB_Interact_Terminal` |
+| `AOneBrahamPickupBase` | "Take {weapon}" | `OB.Interaction.Weapon` | tap | 220 cm (`AOneBrahamPickupBase::PickupRangeCm`) | `AM_OB_Interact_Door` |
+| `AOneBrahamCharacter` | "Hold E - revive {name}" for a squadmate, "Hold E - finish {name}" for an enemy | `OB.Interaction.Revive`, `OB.Interaction.Execute` | 4.5 s (`OneBrahamConstants::ReviveSeconds`), 2 s (`UOneBrahamDownedComponent::ExecuteSeconds`) | 220 cm (`OneBrahamConstants::InteractRangeCm`) | `AM_OB_Interact_Revive`, `AM_OB_Interact_Execute` |
+
+Three rules the table encodes, and the reasons they are rules rather than
+conventions:
+
+* **The verb is decided in one place.** `UOneBrahamDownedComponent::GetInteractionFor()`
+  answers Revive, Execute or nothing; the prompt, the tag, the hold time and the
+  server's own gate all read that one answer. A prompt the server would refuse is
+  the worst bug an interaction system can have, because the player experiences it
+  as lag.
+* **A person is scenery until they are on the carpet.** The player capsule's
+  response to the `Interactable` channel is `Overlap`, so a standing colleague
+  never hides the door behind them, and the hitbox profile ignores the channel
+  entirely so a body mesh never hides one either. In the downed state the capsule
+  switches to `Block` (`AOneBrahamCharacter::ApplyLifeStateVisuals`), which is
+  what makes a colleague aimable - and it switches back the moment they stand up.
+* **The trace steps through one penetrable surface, and only one.** Cubicle
+  walls, plasterboard and desk partitions are stepped through (the same
+  `Penetrable` test the weapon trace uses for `bCanPenetrateCover`), so a
+  squadmate can be revived through a partition, which is the best clip the game
+  has. Doors, terminals and bodies are never stepped through: if what you are
+  looking at already answers to the interface, it is what you are interacting
+  with.
+
+**Table 6 — declared, and not yet emitted**
+
+Eight interaction tags are declared in `Config/DefaultGame.ini` and nothing in
+the game emits them yet. They are listed here rather than deleted because each is
+the designed vocabulary of content that has not been built, and because the
+montage contract in section 7 already reserves an animation family for several of
+them. `check_interaction.py` fails if a tag is in neither this table nor Table 5,
+if a tag is in both, or if this table's count changes without somebody deciding
+which side of the line the tag belongs on.
+
+| Tag | Why nothing emits it | What it is waiting on |
+| --- | --- | --- |
+| `OB.Interaction.Lift` | the two lift cores are access zones, so their doors return `OB.Interaction.Door.*` and the lift-panel montage is unreachable | a lift actor (call panel, car, floor indicator) rather than a door in the core |
+| `OB.Interaction.Ammo` | there are no ammo pickups: resupply is the looted weapon and the magazine in it | an ammo box pickup actor |
+| `OB.Interaction.Utility` | utility is granted by the loadout and found as a floor pickup, not picked up as utility | a utility pickup actor |
+| `OB.Interaction.Medkit` | the meal deal is used from the inventory wheel, never off a surface | a placed consumable |
+| `OB.Interaction.Body` | nothing is lootable: a corpse is a ragdoll, not a container | the death-bag pass (searchable bodies and dropped bags) |
+| `OB.Interaction.Extraction` | the pad is a thirty-second hold volume, not something you press; the winch control room is scenery | the winch control console as an interactable |
+| `OB.Interaction.HoldToUnlock` | the HUD verb category for a hold: `RequiresHold()` already answers this in C++, so nothing emits the tag | a decision - either the widget reads it or the tag goes |
+| `OB.Interaction.TapToUse` | the same, for a tap | the same decision |
+
+The two HUD rows are the interesting ones. They are the only entries here that
+are not waiting on content: they are a second, redundant way of saying something
+the interface already says, and the correct resolution is probably to delete
+them. They are kept for now because they are in the copy the HUD's Blueprint
+layer was briefed with (`Docs/08` section 3), and deleting a tag a widget author
+was told to use is a conversation, not a commit.
+

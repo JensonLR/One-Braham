@@ -24,6 +24,7 @@
 #include "OneBraham.h"
 #include "GameFramework/Character.h"
 #include "Core/OneBrahamTypes.h"
+#include "Interaction/OneBrahamInteractionInterface.h"
 #include "OneBrahamCharacter.generated.h"
 
 class UCameraComponent;
@@ -62,7 +63,7 @@ struct FOneBrahamCharacterAppearance
 };
 
 UCLASS(BlueprintType)
-class ONEBRAHAM_API AOneBrahamCharacter : public ACharacter
+class ONEBRAHAM_API AOneBrahamCharacter : public ACharacter, public IOneBrahamInteractionInterface
 {
 	GENERATED_BODY()
 
@@ -112,6 +113,41 @@ public:
 	/** The arms + weapon mesh only the owner sees. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Character")
 	USkeletalMeshComponent* GetFirstPersonMesh() const { return FirstPersonMesh; }
+
+	// ======================================================================
+	//  Interaction: a colleague on the carpet is an interactable
+	// ======================================================================
+	//
+	// WHY THE PAWN IMPLEMENTS THIS
+	//   The interact ray finds actors, not components, and a downed colleague is
+	//   an actor: the same trace that finds a fire door finds the body lying in
+	//   front of it. The verbs belong to the downed component (it owns the rules
+	//   and the state), so everything below is an adapter that asks it one
+	//   question - GetInteractionFor() - and turns the answer into a prompt, a
+	//   tag and a hold time. There is no second copy of the friendly/hostile rule
+	//   anywhere in this file.
+	//
+	//   Before this existed the game shipped a sixty-second bleed-out, a revive
+	//   and an execution that no player could ever reach: ServerRevive and
+	//   ServerExecute had no caller, and the trace could not see a body anyway
+	//   (the capsule's Interactable response was Overlap, the hitboxes' default
+	//   was Block). See Docs/13 section 9, which is the interaction surface - this
+	//   citation used to point at section 5, which is Cloth.
+
+	/** The colleague's name for the prompt: the PlayerState's, so it matches the kill feed. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Interaction")
+	FText GetColleagueName() const;
+
+	virtual FText GetInteractionPrompt_Implementation(const AOneBrahamPlayerController* Interactor) const override;
+	virtual FGameplayTag GetInteractionTag_Implementation(const AOneBrahamPlayerController* Interactor) const override;
+	virtual bool CanInteract_Implementation(const AOneBrahamPlayerController* Interactor) const override;
+	virtual bool RequiresHold_Implementation(const AOneBrahamPlayerController* Interactor) const override;
+	virtual float GetHoldDuration_Implementation(const AOneBrahamPlayerController* Interactor) const override;
+	virtual bool OnInteractionStart_Implementation(AOneBrahamPlayerController* Interactor) override;
+	virtual void OnInteractionHold_Implementation(AOneBrahamPlayerController* Interactor, float HeldSeconds, float Progress01) override;
+	virtual void OnInteractionEnd_Implementation(AOneBrahamPlayerController* Interactor, bool bCompleted) override;
+	virtual void OnInteractionCancelled_Implementation(AOneBrahamPlayerController* Interactor) override;
+	virtual void SetInteractionHighlight_Implementation(bool bHighlighted) override;
 
 	// ======================================================================
 	//  Camera / eye helpers used by the controller and weapons

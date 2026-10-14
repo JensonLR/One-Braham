@@ -33,7 +33,7 @@ WHAT IT CHECKS
        correct, and the editor is simply less useful than it should be.
     3. A tag is not declared twice with the same name.
     4. A tag the documentation names is declared. The registry reference in
-       Docs/03 lists all 146 in a brace form (`OB.Access.Tier.{Public,Staff}`)
+       Docs/03 lists all 147 in a brace form (`OB.Access.Tier.{Public,Staff}`)
        which is expanded here before checking, so the table is verified rather
        than trusted. This rule earned its place the day the table was read: it
        listed an `OB.Area.*` namespace that has never existed, an

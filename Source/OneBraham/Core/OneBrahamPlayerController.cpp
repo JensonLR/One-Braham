@@ -769,11 +769,36 @@ void AOneBrahamPlayerController::Input_ToggleLaser(const FInputActionValue& Valu
 	}
 }
 
+namespace
+{
+	/**
+	 * True when an actor is a shoot-through surface: a cubicle wall, a plasterboard
+	 * partition. The test is deliberately the same one the weapon trace uses for
+	 * penetration (OneBrahamWeaponBase, the `bCanPenetrateCover` block): the root
+	 * component's collision object type is the Penetrable channel. Two ways of
+	 * deciding what "penetrable" means would eventually disagree, and the day they
+	 * did, bullets would go through a wall that a hand could not.
+	 */
+	bool IsPenetrableSurface(const AActor* Actor)
+	{
+		return Actor != nullptr && Actor->GetRootComponent() != nullptr &&
+			Actor->GetRootComponent()->GetCollisionObjectType() == ECC_GameTraceChannel4; /*Penetrable*/
+	}
+}
+
 void AOneBrahamPlayerController::UpdateInteractionTarget()
 {
 	AOneBrahamCharacter* Character = GetOneBrahamCharacter();
 	const UOneBrahamHealthComponent* Health = Character != nullptr ? Character->GetHealthComponent() : nullptr;
-	const bool bCanInteract = Character != nullptr && Health != nullptr && Health->IsAlive();
+	const UOneBrahamDownedComponent* Downed = Character != nullptr ? Character->GetDownedComponent() : nullptr;
+
+	// Downed players are the target of an interaction, never the initiator: no
+	// crawling through a fire door to escape a fight. `IsAlive()` is not enough to
+	// say that - a downed player is at 1 HP and very much alive - so the downed
+	// state is asked separately. The interact component makes the same check on
+	// the server, because this one runs on the client that presses E.
+	const bool bCanInteract = Character != nullptr && Health != nullptr && Health->IsAlive() &&
+		(Downed == nullptr || !Downed->IsDowned());
 
 	if (!bCanInteract)
 	{
@@ -798,7 +823,38 @@ void AOneBrahamPlayerController::UpdateInteractionTarget()
 	const bool bHit = GetWorld() != nullptr && GetWorld()->LineTraceSingleByChannel(
 		Hit, Start, End, ECC_GameTraceChannel3 /*Interactable*/, Params);
 
-	if (bHit && Hit.GetActor() != nullptr)
+	// A body behind a cubicle wall is still reachable. The trace is allowed one
+	// penetrable surface - the same one bullet budget the weapon system spends on
+	// `bCanPenetrateCover` - and then reports whatever it finds beyond it. This is
+	// the code that makes "you can be revived through a partition" true, and it is
+	// the single best clip moment the game has: a hand reaching through a wall to
+	// pull somebody up, with both of them blind to the corridor.
+	if (bHit && Hit.GetActor() != nullptr &&
+		Cast<IOneBrahamInteractionInterface>(Hit.GetActor()) == nullptr &&
+		IsPenetrableSurface(Hit.GetActor()))
+	{
+		// Only a *surface* is stepped through, never an interactable that happens
+		// to be penetrable: if the thing you are looking at already answers to the
+		// interface, it is the thing you are interacting with.
+		const AActor* Surface = Hit.GetActor();
+
+		FCollisionQueryParams SecondParams = Params;
+		SecondParams.AddIgnoredActor(Surface);
+
+		FHitResult SecondHit;
+		const FVector SecondStart = Hit.ImpactPoint + Character->GetEyeRotation().Vector() * 2.f;
+
+		if (GetWorld()->LineTraceSingleByChannel(SecondHit, SecondStart, End, ECC_GameTraceChannel3 /*Interactable*/, SecondParams))
+		{
+			// Hit.Distance is measured from the start of *its own* trace, so the
+			// step-through is added back on: Distance means "how far is the thing
+			// I am looking at from my eye", for every hit, from every path.
+			Hit = SecondHit;
+			Hit.Distance += (SecondStart - Start).Size();
+		}
+	}
+
+	if (Hit.GetActor() != nullptr)
 	{
 		if (IOneBrahamInteractionInterface* Interface = Cast<IOneBrahamInteractionInterface>(Hit.GetActor()))
 		{
@@ -816,6 +872,30 @@ void AOneBrahamPlayerController::UpdateInteractionTarget()
 		NewTarget.Actor != CurrentInteractionTarget.Actor ||
 		!NewTarget.Prompt.EqualTo(CurrentInteractionTarget.Prompt) ||
 		NewTarget.bEnabled != CurrentInteractionTarget.bEnabled;
+
+	if (IsLocalController() && CurrentInteractionTarget.Actor != NewTarget.Actor)
+	{
+		// The outline pass: what you are looking at lights up and what you were
+		// looking at goes back to normal. Custom depth, not a material instance:
+		// the highlight has to be able to outline a MetaHuman body, a fire door and
+		// a dropped badge without three different material setups. Stencil 2 is
+		// the "interacting with this" value, and M_OB_Highlight is the
+		// post-process material that reads it: the graph and its two parameters are
+		// in Docs/10 section 2.7, and Tools/Python/onebraham/build_materials.py
+		// authors it. Before that material existed, this call was a write into a
+		// depth buffer that nothing consumed.
+		if (IOneBrahamInteractionInterface* Previous = IsValid(CurrentInteractionTarget.Actor)
+			? Cast<IOneBrahamInteractionInterface>(CurrentInteractionTarget.Actor) : nullptr)
+		{
+			Previous->SetInteractionHighlight_Implementation(false);
+		}
+
+		if (IOneBrahamInteractionInterface* Next = IsValid(NewTarget.Actor)
+			? Cast<IOneBrahamInteractionInterface>(NewTarget.Actor) : nullptr)
+		{
+			Next->SetInteractionHighlight_Implementation(true);
+		}
+	}
 
 	CurrentInteractionTarget = NewTarget;
 

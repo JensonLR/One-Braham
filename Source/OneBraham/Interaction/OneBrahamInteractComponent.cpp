@@ -140,8 +140,19 @@ void UOneBrahamInteractComponent::ServerBeginInteraction_Implementation(AActor* 
 	{
 		if (!Health->IsAlive())
 		{
-			// Downed players may only be the target of an interaction, never the
-			// initiator: no crawling through doors to escape.
+			return;
+		}
+	}
+
+	// Downed players may only be the target of an interaction, never the
+	// initiator: no crawling through doors to escape. This is a second check, not
+	// a duplicate of the one above it: a downed player is at 1 HP, so `IsAlive()`
+	// is true for them, and the client that presses E is not the authority on what
+	// a body on the carpet can do.
+	if (const UOneBrahamDownedComponent* Downed = Character->GetDownedComponent())
+	{
+		if (Downed->IsDowned())
+		{
 			return;
 		}
 	}
@@ -420,7 +431,7 @@ void UOneBrahamInteractComponent::PlayInteractionMontage(FGameplayTag Interactio
 		return;
 	}
 
-	// Seven montages, one per interaction family, loaded by name from
+	// Eight montages, one per interaction family, loaded by name from
 	// /Game/OneBraham/Characters/Shared/Anims. They are played on the upper body
 	// so the player keeps their lower-body locomotion, and the same montage is
 	// played on the first-person arms mesh so the hands visibly reach for the
@@ -431,9 +442,17 @@ void UOneBrahamInteractComponent::PlayInteractionMontage(FGameplayTag Interactio
 	//   Terminal   -> AM_OB_Interact_Terminal
 	//   Lift       -> AM_OB_Interact_LiftPanel
 	//   Revive     -> AM_OB_Interact_Revive
+	//   Execute    -> AM_OB_Interact_Execute
 	//   Keycard    -> AM_OB_Interact_Keycard
 	//   Body       -> AM_OB_Interact_Loot
 	//   Extraction -> AM_OB_Interact_Radio
+	//
+	// The fallback is Door, and that is a trap: a tag whose family is missing here
+	// silently plays the door animation, which is how the execution - the single
+	// most deliberate thing a player can do to another player - was going to be
+	// animated as opening a fire door. check_interaction.py now compares this chain
+	// against the interaction table in Docs/13, tag by tag, so a new verb cannot
+	// inherit the wrong animation in silence.
 	//
 	// A missing montage is not an error: the interaction still happens, because
 	// the animation is the presentation and the state change is the gameplay.
@@ -444,6 +463,7 @@ void UOneBrahamInteractComponent::PlayInteractionMontage(FGameplayTag Interactio
 	if (TagString.Contains(TEXT("Terminal")))      { MontageName = TEXT("AM_OB_Interact_Terminal"); }
 	else if (TagString.Contains(TEXT("Lift")))     { MontageName = TEXT("AM_OB_Interact_LiftPanel"); }
 	else if (TagString.Contains(TEXT("Revive")))   { MontageName = TEXT("AM_OB_Interact_Revive"); }
+	else if (TagString.Contains(TEXT("Execute")))  { MontageName = TEXT("AM_OB_Interact_Execute"); }
 	else if (TagString.Contains(TEXT("Keycard")))  { MontageName = TEXT("AM_OB_Interact_Keycard"); }
 	else if (TagString.Contains(TEXT("Body")))     { MontageName = TEXT("AM_OB_Interact_Loot"); }
 	else if (TagString.Contains(TEXT("Extraction"))) { MontageName = TEXT("AM_OB_Interact_Radio"); }

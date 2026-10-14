@@ -89,6 +89,7 @@ def _expected_counts():
     from onebraham import check_cosmetic_ids
     from onebraham import check_audio_ids
     from onebraham import check_hud_strings
+    from onebraham import check_interaction
     from onebraham import check_cpp_symbols
     from onebraham import check_gameplay_tags
     from onebraham import check_input_actions
@@ -110,6 +111,7 @@ def _expected_counts():
     expectations["cosmetic_ids"] = [check_cosmetic_ids.run()[0]]
     expectations["hud_strings"] = [check_hud_strings.run()[0]]
     expectations["audio_ids"] = [check_audio_ids.run()[0]]
+    expectations["interaction_ids"] = [check_interaction.run()[0]]
 
     reads, _problems = check_input_actions.run()
     expectations["input_actions"] = [

@@ -206,6 +206,9 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "One Braham|HUD")
 	TObjectPtr<UTextBlock> Text_BleedOut = nullptr;
 
+	/** Fills while a colleague is pulling this player up. Hidden when nobody is. */
+	TObjectPtr<UProgressBar> Bar_Revive = nullptr;
+
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "One Braham|HUD")
 	TObjectPtr<UImage> Image_DamageFlash = nullptr;
 

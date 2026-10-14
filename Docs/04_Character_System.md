@@ -37,34 +37,70 @@ the only order that ever works.
 
 ## 2. `UOneBrahamCharacterMovementComponent`
 
-| Movement | Speed (cm/s) |
+| Movement | Speed |
 | --- | --- |
-| Walk | 220 |
-| Jog (default) | 380 |
-| Sprint (forward only, weapon down) | 620 |
-| Crouch | 165 |
-| ADS | 0.55× current |
-| Strafe | 0.90× base |
-| Backpedal | 0.78× base |
-| Downed crawl | 45 |
+| Walk (slow walk key) | 190 cm/s (`UOneBrahamCharacterMovementComponent::WalkSpeed`) |
+| Jog (default) | 400 cm/s (`UOneBrahamCharacterMovementComponent::JogSpeed`) |
+| Sprint (forward only, weapon down) | 605 cm/s (`UOneBrahamCharacterMovementComponent::SprintSpeed`) |
+| Crouch | 165 cm/s (`UOneBrahamCharacterMovementComponent::CrouchSpeed`) |
+| Crouch and aim | 140 cm/s (`UOneBrahamCharacterMovementComponent::CrouchedAimingSpeed`) |
+| Aim down sights | 250 cm/s (`UOneBrahamCharacterMovementComponent::AimingSpeed`) |
+| Slide | decays from `SprintSpeed` to `WalkSpeed` over `SlideDuration` |
+| Falling | whatever you left the edge with, up to `SprintSpeed * 0.98` |
+| Downed crawl | 60 cm/s (`UOneBrahamCharacterMovementComponent::DownedCrawlSpeed`) |
+
+Every row is a `UOneBrahamCharacterMovementComponent` property read by
+`GetMaxSpeed()`, and there are no direction multipliers anywhere in the movement
+path: a strafe and a jog are the same speed, because in a game where the fights
+are in corridors, the moment strafing is punished is the moment everyone starts
+walking forwards into rooms. This table used to say 220 / 380 / 620 for walk, jog
+and sprint, "0.55× current" for aiming, and 0.90× / 0.78× for strafing and
+backpedalling - five numbers that appear nowhere in the code, in the table a
+designer reads before tuning movement. Crouch-and-aim used to be written as
+"165, 140 crouched and aiming" in one cell; the 140 was `CrouchSpeed * 0.85f`
+written inside `GetMaxSpeed()`, which is a number no tuning pass can find, so it
+is now `CrouchedAimingSpeed` and the table quotes it like every other row.
+
+**Every speed in this table is quoted with the name of the property that defines
+it, and `check_interaction.py` reads these three tables and fails if a number's
+unit is not followed by a source or if the source disagrees with the code.** That
+is the rule the old 4.0 s revive in section 4 needed and did not have.
 
 | Physics | Value |
 | --- | --- |
-| Gravity scale | 1.75 (weight, not float) |
-| Jump Z velocity | 380 |
-| Air control | 0.22 |
-| Braking deceleration, walking | 1,800 |
-| Max step height | 42 cm |
-| Walkable floor angle | 46° |
-| Ledge tolerance | 12 cm |
+| Gravity | the engine's own `DefaultGravityZ` (Config/DefaultEngine.ini); no scale |
+| Jump Z velocity | 380 cm/s (`UOneBrahamCharacterMovementComponent::JumpZVelocity`) |
+| Air control | 0.14 (`UOneBrahamCharacterMovementComponent::GroundAirControl`) |
+| Braking deceleration, walking | 2000 cm/s² (`UOneBrahamCharacterMovementComponent::GroundBrakingDeceleration`) |
+| Max step height | 45 cm (`UOneBrahamCharacterMovementComponent::MaxStepHeight`) |
+| Walkable floor angle | 46° (`UOneBrahamCharacterMovementComponent::SetWalkableFloorAngle`) |
+| Ledge tolerance | 12 cm (`UOneBrahamCharacterMovementComponent::PerchRadiusThreshold`) |
+| Perch additional height | 8 cm (`UOneBrahamCharacterMovementComponent::PerchAdditionalHeight`) |
+
+Two rows here are deliberately unitless: gravity (a config value the project
+never scales) and air control (a dimensionless multiplier). The checker covers
+durations, distances and speeds - the units a wrong number *crashes into* - and
+says so in its docstring rather than pretending to check everything.
+
+The gravity row used to claim a scale of 1.75, "weight, not float". Nothing in
+the project has ever set `GravityScale`, so the game has always fallen at the
+engine's gravity and the jump was tuned against it. The 1.75 was a design note
+that never reached the code, which makes it the same kind of sentence as a
+weapon that is in the design document and not in the game.
 
 The numbers are chosen for one feel: **committing to a movement decision should
-be hard to undo.** Braking at 1,800 cm/s² means a full-speed sprint takes about
-0.34 s to stop — long enough that a player who runs into a room has already
+be hard to undo.** Braking at 2,000 cm/s² means a full-speed sprint takes about
+0.30 s to stop — long enough that a player who runs into a room has already
 decided to be in it.
 
-Sliding, dodging, vaulting and mantling are deliberately absent. The stairwells
-are meant to be walked.
+Sliding and mantling **are** in the game, bound to their own input actions and
+implemented as movement states, not as animations: a slide is 0.85 s
+(`SlideDuration`) off a sprint and drains it, and a mantle reaches 95 cm
+(`MantleReach`) over 0.62 s (`MantleDuration`) with the weapon down. This
+paragraph claimed for most of the project's life that they were "deliberately
+absent", which was a sentence rather than a fact about a build in which
+`Input_Slide` and `Input_Mantle` were both bound. Dodging and vaulting are absent:
+the stairwells are meant to be walked.
 
 ---
 
@@ -90,8 +126,10 @@ Rules:
 2. **No regeneration.** Health comes from a medkit or a colleague. A player who
    survives a fight at 14 HP is at 14 HP for the rest of it, and that is the
    design.
-3. **Degenerate damage kills.** Downed players take 2.5× damage, so finishing
-   somebody is quick and unambiguous.
+3. **Degenerate damage kills.** A downed player is at 1 HP, so any hit at all
+   finishes them, and there is no damage multiplier to get wrong: the deliberate
+   version is the execution (section 4), and the accidental version is the stray
+   round that lands on the carpet.
 4. **Friendly fire is on** in ASCENT (squad-level: you can shoot your own
    squadmate) at **0.5×** and it never downs a squadmate — it drops them to 1 HP,
    which is a punishment without a grief. In FIRE DRILL it is off.
@@ -107,24 +145,51 @@ because a second path is how a shooter ends up with a weapon that ignores armour
 
 | State | Duration |
 | --- | --- |
-| Bleed-out | 45 s, ticking `HealthComponent` to zero |
-| Revive | 4.0 s of uninterruptible interaction |
+| Bleed-out | 60 s (`OneBrahamConstants::BleedOutSeconds`) |
+| Revive | 4.5 s (`OneBrahamConstants::ReviveSeconds`), a hold |
+| Execution | 2 s (`UOneBrahamDownedComponent::ExecuteSeconds`), a hold |
 | Second down while bleeding out | immediate death |
-| Crawl speed | 45 cm/s |
+| Crawl speed | 60 cm/s (`UOneBrahamCharacterMovementComponent::DownedCrawlSpeed`) |
+| Revive outcome | 40 HP (`UOneBrahamDownedComponent::ReviveHealth`), no armour |
+| Invulnerability on revive | 1.25 s (`UOneBrahamDownedComponent::ReviveInvulnerabilitySeconds`) |
 | Movement allowed | crawl only; no firing, no weapon switching, no interaction |
-| What you can do | talk, look, and call for help (`V_HELP_CALL`) |
+| What you can do | talk, look, and call for help (`V_DOWNED_CALL_HELP`, then `V_DOWNED_QUIP`) |
+
+This table described a different game for most of the project's life: a 45-second
+bleed-out, a 4-second revive, a 45 cm/s crawl, a call for help with a line id that
+has never existed, and 30 HP back on revive. All of it was written down somewhere
+as if it were code, and none of it matched `OneBrahamConstants`, which is now
+where three of the four numbers live. `check_interaction.py` compares the numbers
+in the interaction table in Docs/13 against the constants; the constants are the
+source and this table quotes them.
 
 Reviving is a **hold**, not a tap, and the reviver is fully exposed while doing
 it. That single rule is why revives in this game are dramatic: the person helping
 cannot defend themselves, so a third squadmate has to hold the room. The design
 goal is that reviving should be a decision about trust.
 
-On revive: 30 HP, no armour, a 1.5-second grogginess window with reduced
-movement, and the loudest voice line in the game.
+The hold is also **interruptible**, and that is the point rather than a
+limitation: let go, walk away or get shot and the bar empties (it decays at twice
+the rate it fills, so nobody pumps a revive), and the person on the floor watches
+it fall back to nothing.
 
-Downed players can be **finished** — 2.5× damage in a 6-second bleed-out window —
-and can be **carried**? No. Carrying a body is not in this game. Somebody on the
-floor is a problem you solve where they are.
+On revive: 40 HP (`UOneBrahamDownedComponent::ReviveHealth`), no armour, and a
+1.25-second invulnerability window so that a revive in the open is not a free
+kill for the enemy holding the corridor. Then the loudest voice line in the game:
+`V_REVIVED` — "Up. Thank you. Let's move."
+
+A downed player is **the target of an interaction, never the initiator**: you
+cannot open a door, use a terminal or pick anything up from the carpet. Both the
+client's trace and the server's validation check that, because a downed player is
+at 1 HP and `IsAlive()` is perfectly happy about it.
+
+Downed players can be **finished**: hold interact on an enemy for 2 s and they
+are gone, credited to you rather than to whoever put them down. What you cannot
+do is pick them up. Carrying a body is not in this game — somebody on the floor is
+a problem you solve where they are. (The component used to carry a
+`bCarryingBody` flag, a `IsCarryingBody()` getter and a 0.5× speed penalty for a
+feature that does not exist; the flag could never be set by anything, so the
+penalty could never apply, and all three were deleted.)
 
 ---
 

@@ -1623,6 +1623,33 @@ def check_weapon_ids(v, _config_only):
         v.fail("weapon ids", u"[{0}] {1}".format(kind, message))
 
 
+def check_interaction_ids(v, _config_only):
+    """The interaction surface: the classes, the table, the tags and the montages.
+
+    The reviver story, in one line: revive and execute existed, were documented,
+    and could not be reached, because the downed player implemented no interface,
+    the capsule could not be blocked on, and nothing in the build noticed.
+    """
+    try:
+        from onebraham import check_interaction
+    except Exception as exc:  # noqa: BLE001
+        v.warn("interaction ids", u"checker unavailable: {0}".format(exc))
+        return
+
+    checked, problems = check_interaction.run()
+
+    if not problems:
+        v.pass_("interaction ids", u"{0} checks: {1} interactables, {2} tags claimed, "
+                u"{3} declared and waiting".format(
+                    checked, len(check_interaction.table5_rows()),
+                    len(check_interaction.claimed_tags()),
+                    len(check_interaction.table6_rows())))
+        return
+
+    for message, kind in problems:
+        v.fail("interaction ids", u"[{0}] {1}".format(kind, message))
+
+
 def check_audio_ids(v, _config_only):
     """Every cue the game can ask for exists, is heard, or is written down.
 
@@ -1839,6 +1866,7 @@ def build_all(config_only=False):
         ("cosmetic ids", check_cosmetic_ids),
         ("hud strings", check_hud_strings),
         ("audio ids", check_audio_ids),
+        ("interaction ids", check_interaction_ids),
     ]
 
     for label, fn in checks:

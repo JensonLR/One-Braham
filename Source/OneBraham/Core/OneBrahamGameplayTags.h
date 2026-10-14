@@ -70,6 +70,7 @@ namespace OneBrahamTags
 	ONEBRAHAM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Utility);
 	ONEBRAHAM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Medkit);
 	ONEBRAHAM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Revive);
+	ONEBRAHAM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Execute);
 	ONEBRAHAM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Body);
 
 	// --- Weapons ----------------------------------------------------------

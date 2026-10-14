@@ -1209,6 +1209,31 @@ def build_post_process(report, floor_index):
     except Exception:  # noqa: BLE001
         pass
 
+    # The interaction outline. Six interactables in this game set custom-depth
+    # stencil 2 when the player looks at them (SetInteractionHighlight), and
+    # until now nothing on the receiving end read it: the highlight was written
+    # to the depth buffer and consumed by nobody. M_OB_Highlight is the material
+    # that reads it, and this is where it is applied - the material is
+    # build_materials.py's, the volume is this file's.
+    #
+    # Loaded by path and skipped with a warning rather than a failure: a floor
+    # without an outline is still a floor, and the build order already puts
+    # materials first for exactly the case where it is not.
+    try:
+        highlight = unreal.EditorAssetLibrary.load_asset(C.MATERIALS + "/M_OB_Highlight")
+
+        if highlight is None:
+            C.warn(u"  M_OB_Highlight not built yet - no interaction outline on "
+                   u"PostProcess_{0}_F{1:02d} (run build_materials.py first)".format(
+                       area_name, floor_index))
+        else:
+            blendables = unreal.WeightedBlendables()
+            blendables.set_editor_property("array", [unreal.WeightedBlendable(1.0, highlight)])
+            settings.set_editor_property("WeightedBlendables", blendables)
+    except Exception as exc:  # noqa: BLE001
+        C.warn(u"  outline blendable not attachable on PostProcess_{0}_F{1:02d}: {2}".format(
+            area_name, floor_index, exc))
+
 
 def build_audio_zone(report, floor_index):
     """Adds the audio volume that tells the audio director which room you are in.

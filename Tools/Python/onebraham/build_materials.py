@@ -577,7 +577,7 @@ def build_all():
     def _masters(report):
         for key, fn in (("Surface", build_master_surface), ("Glass", build_master_glass),
                         ("Emissive", build_master_emissive), ("Screen", build_master_screen),
-                        ("Decal", build_master_decal)):
+                        ("Decal", build_master_decal), ("Highlight", build_master_highlight)):
             asset = fn(report)
             if asset is not None:
                 masters[key] = asset
@@ -596,3 +596,103 @@ if __name__ == "__main__":
     _report = build_all()
     if not _report.ok():
         raise SystemExit(1)
+
+
+def build_master_highlight(report):
+    """M_OB_Highlight: the interaction outline, as a post-process material.
+
+    Graph:
+        SceneTexture(PostProcessInput0) -------------------------------.
+                                                                        + --> EmissiveColor
+        SceneTexture(CustomStencil) -- Subtract(StencilTarget) -> Abs ->  |
+            Saturate -> OneMinus ---------------------> Multiply(  <----'
+                                                          OutlineColour)
+
+    WHY IT IS A MATERIAL AND NOT AN OUTLINE COMPONENT
+        Six interactables in this game already set a custom-depth stencil when
+        the player looks at them - the keycard sets 2 while highlighted and 1
+        while not, and `SetInteractionHighlight_Implementation` on every other
+        one is a two-line function that does the same. Nothing read those values:
+        the stencil was written to the depth buffer and no material consumed it,
+        so the highlight existed in code, in the docs and in the HUD's intent,
+        and on screen it did nothing at all. This is the half that reads it.
+
+    THE ONE NUMBER THAT CAN BE WRONG WITHOUT LOOKING WRONG
+        `StencilTarget` is a parameter, not a constant, because the units the
+        CustomStencil node hands back are the one thing about this graph that has
+        moved between engine versions (raw 0-255 in 5.5). If the outline ever
+        appears over ordinary geometry - stencil 0 being read as if it were 2 -
+        set StencilTarget to 0.0078 (2/255) on the PostProcess volume's instance
+        and it comes back on the highlighted object. Docs/10 section 2.7 says the
+        same thing next to the picture of the graph.
+    """
+    material, created = _create_asset("M_OB_Highlight", C.MATERIALS, unreal.Material,
+                                      unreal.MaterialFactoryNew())
+    if material is None:
+        report.failed("M_OB_Highlight", "could not create material")
+        return None
+
+    if not _mel():
+        report.failed("M_OB_Highlight", "MaterialEditingLibrary unavailable - cannot "
+                                        "author the node graph in this build")
+        return material
+
+    try:
+        material.set_editor_property("material_domain", unreal.MaterialDomain.MD_POST_PROCESS)
+    except Exception as exc:  # noqa: BLE001
+        C.warn(u"  post-process domain not settable: {0}".format(exc))
+        return material
+
+    _set_shading(material, "MSM_UNLIT")
+    _set_blend(material, "BLEND_OPAQUE")
+
+    # The scene, unchanged: a post-process material replaces what it is handed,
+    # so the pass-through is not decoration, it is the rest of the frame.
+    scene = _expr(material, unreal.MaterialExpressionSceneTexture, -900, -300)
+    try:
+        scene.set_editor_property("scene_texture_id",
+                                  unreal.SceneTextureId.PPI_PostProcessInput0)
+    except Exception as exc:  # noqa: BLE001
+        C.warn(u"  scene texture id not settable: {0}".format(exc))
+
+    stencil = _expr(material, unreal.MaterialExpressionSceneTexture, -900, 0)
+    try:
+        stencil.set_editor_property("scene_texture_id",
+                                    unreal.SceneTextureId.PPI_CustomStencil)
+    except Exception as exc:  # noqa: BLE001
+        C.warn(u"  custom stencil id not settable: {0}".format(exc))
+
+    target = _scalar_param(material, "StencilTarget", 2.0, -900, 260, 0.0, 255.0)
+
+    # 1 - saturate(|S - target|): 1 exactly on the highlighted object, 0 everywhere
+    # else. Written with Abs/Saturate/OneMinus rather than an If node so that it
+    # is four nodes a person can read in the editor, not one node they have to
+    # open.
+    subtract = _expr(material, unreal.MaterialExpressionSubtract, -620, 20)
+    _connect(material, stencil, "Color", subtract, "A")
+    _connect(material, target, "", subtract, "B")
+
+    absolute = _expr(material, unreal.MaterialExpressionAbs, -440, 20)
+    _connect(material, subtract, "", absolute, "")
+
+    clamped = _expr(material, unreal.MaterialExpressionSaturate, -280, 20)
+    _connect(material, absolute, "", clamped, "")
+
+    inverted = _expr(material, unreal.MaterialExpressionOneMinus, -120, 20)
+    _connect(material, clamped, "", inverted, "")
+
+    colour = _vector_param(material, "OutlineColour",
+                           _tint("SignalBlue") + (1.0,), -620, 260)
+
+    tinted = _expr(material, unreal.MaterialExpressionMultiply, 80, 120)
+    _connect(material, inverted, "", tinted, "A")
+    _connect(material, colour, "", tinted, "B")
+
+    combined = _expr(material, unreal.MaterialExpressionAdd, 280, -60)
+    _connect(material, scene, "Color", combined, "A")
+    _connect(material, tinted, "", combined, "B")
+
+    _connect_property(material, combined, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+
+    _finish(material, created, "M_OB_Highlight", report)
+    return material

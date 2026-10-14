@@ -179,7 +179,12 @@ FSlateFontInfo UOneBrahamUIStyle::Font(EOneBrahamTextSize Size, bool bBold)
 	Info.FontObject = BrandFont;
 	Info.Size = SizeToPoints(Size);
 	Info.TypefaceFontName = bBold ? TEXT("Bold") : TEXT("Regular");
-	Info.LetterSpacing = Size >= EOneBrahamTextSize::Header ? 100 : 0; // 1% tracking on headers
+	// 1% tracking on the big type, none below it. Written as a list because a
+	// scoped enum has no >=, which is what the previous version of this line
+	// asked it for.
+	const bool bTracked = Size == EOneBrahamTextSize::Header ||
+		Size == EOneBrahamTextSize::Display;
+	Info.LetterSpacing = bTracked ? 100 : 0;
 
 	return Info;
 }

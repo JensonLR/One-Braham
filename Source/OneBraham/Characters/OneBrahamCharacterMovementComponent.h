@@ -81,6 +81,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Speeds")
 	float CrouchSpeed = 165.f;
 
+	/** Crouched and aiming. Its own number rather than CrouchSpeed * 0.85, because
+	 *  a value written as an expression in a function is a value nobody can find
+	 *  from the tuning table (Docs/04 section 2 quotes this property by name). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Speeds")
+	float CrouchedAimingSpeed = 140.f;
+
 	/** Aiming down sights: deliberately slow so ADS is a commitment. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Speeds")
 	float AimingSpeed = 250.f;
@@ -98,9 +104,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Accel")
 	float GroundBrakingDeceleration = 2000.f;
 
-	/** Air control is intentionally low: no bunny-hopping. */
+	/**
+	 * Air control is intentionally low: no bunny-hopping.
+	 *
+	 * NOT called `AirControl`. That name belongs to UCharacterMovementComponent,
+	 * and this class used to declare its own member with it: the constructor's
+	 * `AirControl = 0.14f;` then wrote to the shadowing member and the engine's
+	 * property stayed at its default 0.05, so every jump in the game had a fifth
+	 * of the control the tuning file and Docs/04 both promised. GetMaxSpeed()
+	 * never read the member either. One name, one owner, and this one is read out
+	 * loud by the constructor: `AirControl = GroundAirControl;`.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Accel")
-	float AirControl = 0.14f;
+	float GroundAirControl = 0.14f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Accel")
 	float AirAcceleration = 300.f;

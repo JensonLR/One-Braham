@@ -21,12 +21,34 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "OneBraham.h"
 #include "Core/OneBrahamTypes.h"
 #include "OneBrahamDownedComponent.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOneBrahamDownedStateChanged, bool, bIsDowned, float, BleedOutRemaining);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOneBrahamReviveProgress, float, Progress, AActor*, Reviver);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOneBrahamExecuted, AActor*, Executor);
+
+/**
+ * What aiming at a downed colleague offers.
+ *
+ * The two verbs are the same interaction with two outcomes, so they are resolved
+ * in one place rather than three: the prompt the client draws, the hold the
+ * server measures, and the state change itself all ask this enum. That is the
+ * difference between a prompt that lies and a prompt that is the rules.
+ */
+UENUM(BlueprintType)
+enum class EOneBrahamDownedInteraction : uint8
+{
+	/** Nothing: not downed, no valid interactor, or a relationship the rules refuse. */
+	None,
+
+	/** Same squad (ASCENT) or same faction (FIRE DRILL), and a revive still banked. */
+	Revive,
+
+	/** Hostile: 2 s, instant, and credited to whoever finished it. */
+	Execute,
+};
 
 UCLASS(ClassGroup = (OneBraham), meta = (BlueprintSpawnableComponent))
 class ONEBRAHAM_API UOneBrahamDownedComponent : public UActorComponent
@@ -44,20 +66,28 @@ public:
 	//  Config
 	// ======================================================================
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Downed")
-	float BleedOutSeconds = 60.f;
+	float BleedOutSeconds = OneBrahamConstants::BleedOutSeconds;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Downed")
-	float ReviveSeconds = 4.5f;
+	float ReviveSeconds = OneBrahamConstants::ReviveSeconds;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Downed")
 	float ReviveHealth = 40.f;
 
+	/** Grace period after a revive so that getting somebody up in the open is not
+	 *  the same as killing them twice. Was `1.25f` written inline, which is a
+	 *  number Docs/04 quotes and no tuning pass can find. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Downed")
+	float ReviveInvulnerabilitySeconds = 1.25f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Downed")
 	float ExecuteSeconds = 2.f;
 
-	/** Downed players get a pistol-out crawl animation but cannot fire. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Downed")
-	float CrawlSpeed = 60.f;
+	// Crawl speed is NOT here. It used to be: a `CrawlSpeed` property on this
+	// component that nothing read, next to the `DownedCrawlSpeed` on
+	// UOneBrahamCharacterMovementComponent that actually moves the pawn. A
+	// designer tuning the one on this component saw nothing happen. One number,
+	// one owner: UOneBrahamCharacterMovementComponent::DownedCrawlSpeed (60 cm/s).
 
 	/** You can be revived through a thin penetrable surface (cubicle wall). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Downed")
@@ -82,10 +112,6 @@ public:
 	UFUNCTION(BlueprintPure, Category = "One Braham|Downed")
 	float GetBleedOutFraction() const { return BleedOutSeconds > 0.f ? FMath::Clamp(BleedOutRemaining / BleedOutSeconds, 0.f, 1.f) : 0.f; }
 
-	/** True while this player is dragging a downed squadmate. */
-	UFUNCTION(BlueprintPure, Category = "One Braham|Downed")
-	bool IsCarryingBody() const { return bCarryingBody; }
-
 	/** Server: decides whether a lethal hit should down the player instead of killing them. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Downed")
 	bool ShouldEnterDownedState(AActor* Killer, const FOneBrahamDamageReport& Report) const;
@@ -94,7 +120,26 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Downed")
 	void EnterDownedState(AActor* Killer, const FOneBrahamDamageReport& Report);
 
-	/** Server: revives the owner (called by the reviver's interact component). */
+	/**
+	 * What this body offers to that interactor: Revive, Execute, or nothing.
+	 *
+	 * The single source of truth for the friendly/hostile rule. The character's
+	 * interaction interface draws the prompt from it, the interact component
+	 * measures the hold from it, and ServerRevive / ServerExecute refuse anything
+	 * that does not agree with it - so a player cannot be shown a prompt that the
+	 * server then rejects, which is the failure that reads as lag.
+	 *
+	 * Safe to call on the server and on the looking client: it reads replicated
+	 * state only.
+	 */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Downed")
+	EOneBrahamDownedInteraction GetInteractionFor(const class AOneBrahamPlayerController* Interactor) const;
+
+	/** Hold length for a verb, in seconds. 0 for None. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Downed")
+	float GetInteractionHoldSeconds(EOneBrahamDownedInteraction Interaction) const;
+
+	/** Server: revives the owner (called by the body's interaction interface). */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Downed")
 	void ServerRevive(AController* ReviverController);
 
@@ -134,9 +179,6 @@ public:
 
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Downed")
 	float ReviveProgress = 0.f;
-
-	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Downed")
-	bool bCarryingBody = false;
 
 	/** Who put us down - credited with the kill if we bleed out. */
 	TWeakObjectPtr<AActor> DownedBy;

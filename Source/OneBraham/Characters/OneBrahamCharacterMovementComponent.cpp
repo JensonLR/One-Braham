@@ -27,7 +27,9 @@ UOneBrahamCharacterMovementComponent::UOneBrahamCharacterMovementComponent()
 	MaxAcceleration = GroundAcceleration;
 	BrakingDecelerationWalking = GroundBrakingDeceleration;
 	GroundFriction = 8.f;
-	AirControl = 0.14f;
+	// The engine's AirControl, explicitly: see the note on GroundAirControl in the
+	// header for the year this project spent writing to a member that shadowed it.
+	AirControl = GroundAirControl;
 
 	// Step-up: the tower is full of 18 cm stair risers and 40 cm desk lips.
 	MaxStepHeight = 45.f;
@@ -139,7 +141,7 @@ float UOneBrahamCharacterMovementComponent::GetMaxSpeed() const
 
 	if (IsCrouching())
 	{
-		return bAiming ? CrouchSpeed * 0.85f : CrouchSpeed;
+		return bAiming ? CrouchedAimingSpeed : CrouchSpeed;
 	}
 	if (bAiming)
 	{

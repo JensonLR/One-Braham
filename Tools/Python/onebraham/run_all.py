@@ -109,6 +109,11 @@ STEPS = [
      "the wardrobe as three places describe it: the slots and options the "
      "character builder generates, the compiled-in default a fresh clone runs "
      "on, and the starter outfit a new profile unlocks"),
+    ("interaction_ids", "onebraham.check_interaction", False,
+     "the interaction surface: every class that implements the interface against "
+     "the table in Docs/13, every number in that table against the constant it "
+     "names, every gameplay tag either claimed by an emitter or written down as "
+     "waiting, and every verb against the montage it plays"),
     ("materials", "onebraham.build_materials", True,
      "master materials, physical materials, surface and brand instances"),
     ("environment", "onebraham.build_environment", True,

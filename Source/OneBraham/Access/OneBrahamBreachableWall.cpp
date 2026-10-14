@@ -23,6 +23,15 @@
 
 namespace
 {
+	/**
+	 * How close a player has to be to plant a charge on a wall, in centimetres.
+	 *
+	 * Named rather than written into the return statement because it is quoted in
+	 * the interaction table in Docs/13 section 9, and check_interaction.py compares
+	 * the two. A number a document quotes is a number that needs a name.
+	 */
+	constexpr float OBBreachInteractionRange = 260.f;
+
 	/** Utility slot index of the breaching charge; see UOneBrahamInventoryComponent. */
 	constexpr int32 BreachChargeUtilityIndex = 3;
 
@@ -418,7 +427,7 @@ float AOneBrahamBreachableWall::GetInteractionRange_Implementation(const AOneBra
 {
 	// Longer than a door: a wall is a wall, and the player is usually standing
 	// back from it slightly to see the whole thing.
-	return 260.f;
+	return OBBreachInteractionRange;
 }
 
 bool AOneBrahamBreachableWall::OnInteractionStart_Implementation(AOneBrahamPlayerController* Interactor)

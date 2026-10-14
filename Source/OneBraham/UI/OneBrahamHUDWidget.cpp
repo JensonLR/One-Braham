@@ -367,6 +367,32 @@ void UOneBrahamHUDWidget::BuildDefaultLayout()
 			BleedSlot->SetAutoSize(false);
 		}
 
+		// The revive bar, under the bleed-out timer.
+		//
+		// The person doing the reviving watches the interaction ring above the
+		// crosshair; the person being revived watches this one. Same colour
+		// (signal blue) because it is the same interaction seen from the two ends
+		// of it, and a player who has been on both ends should not have to learn
+		// two colours for one verb. Wider than the interaction ring and across the
+		// middle of the screen: while you are on the carpet, this is the only
+		// thing worth reading.
+		Bar_Revive = MakeBar(TEXT("Bar_Revive"), UOneBrahamUIStyle::SignalBlue(), 8.f);
+		UCanvasPanelSlot* ReviveSlot = Bar_Revive != nullptr ? Panel_Downed->AddChildToCanvas(Bar_Revive) : nullptr;
+		if (ReviveSlot != nullptr)
+		{
+			ReviveSlot->SetAnchors(FAnchors(0.5f, 0.5f));
+			ReviveSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+			ReviveSlot->SetPosition(FVector2D(0.f, -160.f));
+			ReviveSlot->SetSize(FVector2D(420.f, 8.f));
+			ReviveSlot->SetAutoSize(false);
+		}
+
+		if (Bar_Revive != nullptr)
+		{
+			Bar_Revive->SetPercent(0.f);
+			Bar_Revive->SetVisibility(ESlateVisibility::Collapsed);
+		}
+
 		AddStretched(Panel_Downed);
 	}
 
@@ -914,6 +940,18 @@ void UOneBrahamHUDWidget::UpdateOverlays(const FOneBrahamHUDData& InData)
 				NSLOCTEXT("OneBraham", "HUD_BigValue", "{0}  {1}s"),
 				OneBrahamHUDStrings::Get(TEXT("HUD_Downed_BleedOut")),
 				FText::AsNumber(FMath::CeilToInt(InData.BleedOutRemaining))));
+		}
+
+		if (bDowned && Bar_Revive != nullptr)
+		{
+			// Zero means nobody is helping. The bar appears the moment a hand
+			// touches the player and fills at the server's rate, so a revive that
+			// gets interrupted visibly snaps back to nothing - which is the whole
+			// drama of the moment and worth one element on the screen.
+			const bool bBeingRevived = InData.ReviveProgress01 > 0.f;
+
+			Bar_Revive->SetPercent(FMath::Clamp(InData.ReviveProgress01, 0.f, 1.f));
+			Bar_Revive->SetVisibility(bBeingRevived ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 		}
 	}
 

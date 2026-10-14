@@ -17,7 +17,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | Script | Builds | Needs the editor | Idempotent |
 | --- | --- | --- | --- |
 | `generate_input_ini.py` | `Config/DefaultInput.ini` `[OneBraham.Input]`, 41 actions, 72 bindings | no | yes |
-| `build_materials.py` | 15 physical materials, 5 masters (node graphs), 28 instances | yes | yes |
+| `build_materials.py` | 15 physical materials, 6 masters (node graphs, one of them the post-process interaction outline), 28 instances | yes | yes |
 | `build_environment.py` | the map: 8 areas, 16 levels, 40 rooms, 10 access zones, 5 terminals, 4 breach walls, 28 shutters | yes | yes |
 | `build_props.py` | 12 gameplay blueprints, 4 loot cards, the prop manifest, the dressing pass | yes | yes |
 | `build_weapons.py` | 10 weapon definitions, 10 blueprints, `DA_WeaponRegistry` | yes | yes |
@@ -32,7 +32,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `check_uht_contracts.py` | UE reflection contracts: RPC bodies, RepNotify callbacks, replicated properties named in a `DOREPLIFETIME`, widgets that animate in a `NativeTick` the engine never calls, duplicate type names, `TSoftObjectPtr`s that name a type existing nowhere in the module, and settings fields that no code reads | **no** | yes |
 | `check_soft_paths.py` | every `/Game/` path the C++ loads by name, against the directories and name prefixes the pipeline writes | **no** | yes |
 | `check_calls.py` | call sites whose argument count cannot match the project's own declaration (defaults honoured, qualified calls skipped) | **no** | yes |
-| `check_gameplay_tags.py` | every tag the code requests, declared natively or in `DefaultGame.ini`; resolves `Printf`-assembled tags from local string tables; and every tag the documentation names, the 146-entry registry block in Docs/03 included | **no** | yes |
+| `check_gameplay_tags.py` | every tag the code requests, declared natively or in `DefaultGame.ini`; resolves `Printf`-assembled tags from local string tables; and every tag the documentation names, the 147-entry registry block in Docs/03 included | **no** | yes |
 | `check_building_layout.py` | the floor/area table the map is built from against the floor table the game describes (`DA_BuildingLayout` / its compiled-in default) | **no** | yes |
 | `check_input_actions.py` | every generated `IA_` action against the `UOneBrahamInputConfig` field that points at it, every field against its action, every `DefaultInput.ini` binding and prompt against a real action, and every `InputConfig->Field` read against the fields that exist | **no** | yes |
 | `check_doc_numbers.py` | every count quoted in this document's build report and in the README against the count the tooling produces, and the Docs/13 archetype table against `build_characters.py` field by field | **no** | yes |
@@ -44,6 +44,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `check_audio_ids.py` | the cue list: the bank's rows, what `OneBrahamProceduralAudio` can synthesise (recipes, branches, beds, UI substrings), the audio builder's `AMBIENCE`/`MUSIC` beds, the zone table against the building layout's area ids, the music cue table against `EOneBrahamMusicState`, and the briefs in `Docs/12` - every cue either audible or written down | **no** | yes |
 | `check_hud_strings.py` | the HUD's copy: the `HUD_STRINGS` list `build_ui.py` generates `DT_HUDStrings` from, the rows compiled into `OneBrahamHUDStrings`, the keys the code asks the table for, and the ownership table in `Docs/08` that says which layer shows each one | **no** | yes |
 | `check_cosmetic_ids.py` | the wardrobe: `COSMETIC_SLOTS` / `COSMETIC_OPTIONS` in `build_characters.py`, the compiled-in `CosmeticSlots` default (names, parent bones, offsets), the starter outfit in `UOneBrahamGameInstance`, and the slot table in `Docs/13` - names and option counts | **no** | yes |
+| `check_interaction.py` | the interaction surface: every class that implements `IOneBrahamInteractionInterface` against the table in `Docs/13` section 9, every number in that table against the constant or property default it names, every `OB.Interaction.*` tag either claimed by an emitter or written down as declared-and-waiting, and every verb against the montage `PlayInteractionMontage` would load for it | **no** | yes |
 | `validate_project.py` | the health check and a markdown report | either | yes |
 | `run_all.py` | all of the above, in dependency order, with a report | either | yes |
 
@@ -80,18 +81,18 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 
 ```
 # ONE BRAHAM - content build report
-**28 steps succeeded, 0 failed.**
+**29 steps succeeded, 0 failed.**
 
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
 | input_ini | OK | 0.0 | wrote 41 actions (40 with a default key) |
-| cpp_symbols | OK | 0.1 | 548 declarations, all defined |
-| uht_contracts | OK | 0.5 | 788 UE reflection contracts, all satisfied |
+| cpp_symbols | OK | 0.1 | 558 declarations, all defined |
+| uht_contracts | OK | 0.5 | 791 UE reflection contracts, all satisfied |
 | soft_paths | OK | 0.0 | 37 soft paths, all conventional |
-| calls | OK | 0.2 | 873 call sites, all arities plausible |
-| tags | OK | 0.4 | 6 resolvable tag requests and 146 documented tags, all declared |
+| calls | OK | 0.2 | 877 call sites, all arities plausible |
+| tags | OK | 0.4 | 6 resolvable tag requests and 147 documented tags, all declared |
 | layout | OK | 0.0 | 16 floors, map and layout agree |
-| voice_lines | OK | 0.0 | 41 line references, all declared and documented |
+| voice_lines | OK | 0.0 | 42 line references, all declared and documented |
 | input_actions | OK | 0.0 | 41 actions, 41 fields, 92 reads |
 | doc_numbers | OK | 2.2 | 84 documented numbers, all current |
 | test_names | OK | 0.0 | 23 automation tests, every one documented and resolvable |
@@ -101,7 +102,8 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | cosmetic_ids | OK | 0.1 | 135 cosmetic checks, one wardrobe |
 | hud_strings | OK | 0.1 | 99 HUD-string checks, 31 rows and 11 widgets, every one shown |
 | audio_ids | OK | 0.2 | 305 audio-id checks, every cue audible or documented |
-| materials | OK | 3.1 | 5 masters, 15 physicals, 28 instances |
+| interaction_ids | OK | 0.1 | 110 interaction checks, 6 interactables, every verb, tag and tuning number accounted for |
+| materials | OK | 3.1 | 6 masters, 15 physicals, 28 instances |
 ...
 ```
 
@@ -113,8 +115,8 @@ builders raise `"... must run inside the Unreal Editor."`, which is a fact about
 the machine rather than about the project, and a CI box with no engine install
 should not report a broken build - it should report that it did not run the
 content steps, with their names. On a fresh clone the full run is therefore
-"18 steps succeeded, 0 failed, 10 skipped" and the same run with an editor
-installed is "28 steps succeeded, 0 failed".
+"19 steps succeeded, 0 failed, 10 skipped" and the same run with an editor
+installed is "29 steps succeeded, 0 failed".
 
 ---
 

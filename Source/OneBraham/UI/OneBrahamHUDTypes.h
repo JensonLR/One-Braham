@@ -105,6 +105,16 @@ struct ONEBRAHAM_API FOneBrahamHUDData
 	UPROPERTY(BlueprintReadOnly, Category = "HUD") float BleedOutRemaining = 0.f;
 	UPROPERTY(BlueprintReadOnly, Category = "HUD") int32 RevivesRemaining = 0;
 
+	/**
+	 * How far along the colleague who is pulling you up is, 0..1.
+	 *
+	 * The reviver watches the interaction ring; the player on the carpet watches
+	 * this one, because the only thing a downed player can do is wait and the only
+	 * thing that makes waiting bearable is knowing somebody is there. 0 when
+	 * nobody is, so the widget can hide the whole element on a single comparison.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD") float ReviveProgress01 = 0.f;
+
 	// --- weapon ---------------------------------------------------------
 	UPROPERTY(BlueprintReadOnly, Category = "HUD") FName WeaponId = NAME_None;
 	UPROPERTY(BlueprintReadOnly, Category = "HUD") FText WeaponDisplayName;

@@ -600,6 +600,7 @@ void UOneBrahamHUDComponent::GatherHUDData()
 	if (UOneBrahamDownedComponent* Downed = Character->GetDownedComponent())
 	{
 		Data.BleedOutRemaining = Downed->IsDowned() ? Downed->GetBleedOutRemaining() : 0.f;
+		Data.ReviveProgress01 = Downed->IsDowned() ? Downed->GetReviveProgress() : 0.f;
 	}
 
 	// --- Weapon -----------------------------------------------------------
@@ -653,9 +654,39 @@ void UOneBrahamHUDComponent::GatherHUDData()
 	}
 
 	// --- Interaction ------------------------------------------------------
+	//
+	// Two different questions, two different sources.
+	//
+	// "What could I use right now" belongs to the controller: it owns the 10 Hz
+	// trace, and it is the only thing that knows about a door the player is looking
+	// at but has not pressed anything on. Reading the prompt from there is the line
+	// that put interaction prompts on the screen at all - the data field existed,
+	// the copy existed, and nothing ever filled it, so the game had a prompt system
+	// with no prompts in it.
+	//
+	// "How far through the hold am I" belongs to the interaction component, and it
+	// is replicated, so the ring is honest on a client.
+	if (const AOneBrahamPlayerController* OwningController = Cast<AOneBrahamPlayerController>(GetOwner()))
+	{
+		const FOneBrahamInteractionTarget& Target = OwningController->GetInteractionTarget();
+
+		// "Something to say", not "something under the crosshair": an interactable
+		// that returns an empty prompt has nothing to offer right now (a breached
+		// wall, a colleague who is on their feet), and drawing a blank line where
+		// a verb should be is worse than drawing nothing.
+		Data.bHasInteractionTarget = Target.Actor != nullptr && !Target.Prompt.IsEmpty();
+		Data.InteractionPrompt = Target.Prompt;
+
+		// A target you cannot use yet is not hidden, it is refused: the prompt goes
+		// red and the widget prints the interactable's own refusal sentence
+		// ("Partition - breaching charge required", "Executive badge required"),
+		// which tells the player what to do about it.
+		Data.bInteractionBlocked = Data.bHasInteractionTarget && !Target.bEnabled;
+		Data.InteractionBlockedReason = Data.bInteractionBlocked ? Target.Prompt : FText::GetEmpty();
+	}
+
 	if (UOneBrahamInteractComponent* Interaction = CachedInteraction.Get())
 	{
-		Data.bHasInteractionTarget = Interaction->GetCurrentInteractionTarget() != nullptr;
 		Data.InteractionHoldProgress01 = Interaction->GetHoldProgress();
 	}
 

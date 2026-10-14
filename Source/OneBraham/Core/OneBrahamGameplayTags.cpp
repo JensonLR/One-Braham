@@ -63,6 +63,7 @@ namespace OneBrahamTags
 	UE_DEFINE_GAMEPLAY_TAG(Interaction_Utility, "OB.Interaction.Utility");
 	UE_DEFINE_GAMEPLAY_TAG(Interaction_Medkit, "OB.Interaction.Medkit");
 	UE_DEFINE_GAMEPLAY_TAG(Interaction_Revive, "OB.Interaction.Revive");
+	UE_DEFINE_GAMEPLAY_TAG(Interaction_Execute, "OB.Interaction.Execute");
 	UE_DEFINE_GAMEPLAY_TAG(Interaction_Body, "OB.Interaction.Body");
 
 	// --- Weapons ----------------------------------------------------------

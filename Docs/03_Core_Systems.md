@@ -48,7 +48,7 @@ badly leaves you alive and helpless, which is worse than dying.
 
 `OneBrahamTags` namespace, one `FGameplayTag` per name, declared natively in
 `OneBrahamGameplayTags.h` / `.cpp` and mirrored in `Config/DefaultGame.ini` so
-designers can pick them before the first compile. All 146:
+designers can pick them before the first compile. All 147:
 
 ```
 OB.Access.Method.{Breach, Escalation, Keycard, Override}
@@ -77,6 +77,7 @@ OB.Interaction.Ammo
 OB.Interaction.Body
 OB.Interaction.Door
 OB.Interaction.Door.{Breachable, Secure}
+OB.Interaction.Execute
 OB.Interaction.Extraction
 OB.Interaction.HoldToUnlock
 OB.Interaction.Keycard
