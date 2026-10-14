@@ -557,6 +557,40 @@ AREA_GRADE = {
 }
 
 
+def build_exposed_services(origin_x, origin_y, z, size_x, y_min, y_max, materials, prefix):
+    """The bare-ceiling look of One Braham: steel and services hung under the soffit.
+
+    Steel beams across the span, two big duct runs, three pipe runs at
+    different drops and a cable tray, all running the length of the floor
+    between y_min and y_max (offsets from the floor's centre). Above head
+    height, so it is silhouette and sound, never cover.
+    """
+    metal = materials.get("Metal")
+    underside = z + C.CEILING_HEIGHT_CM
+    length = size_x - 200.0
+    depth = y_max - y_min
+    mid_y = (y_min + y_max) / 2.0
+
+    def run(label, y, width, drop, height):
+        _box((origin_x, origin_y + y, underside - drop - height / 2.0),
+             (length, width, height), metal, "{0}_Services_{1}".format(prefix, label))
+
+    # Beams across the span every 7.5 m.
+    count = int(size_x // 750.0)
+    for index in range(count):
+        x = -size_x / 2.0 + (index + 0.5) * (size_x / count)
+        _box((origin_x + x, origin_y + mid_y, underside - 22.0),
+             (30.0, depth, 45.0), metal, "{0}_Services_Beam_{1}".format(prefix, index + 1))
+
+    run("Duct_A", y_min + depth * 0.28, 90.0, 55.0, 55.0)
+    run("Duct_B", y_min + depth * 0.72, 90.0, 55.0, 55.0)
+    run("Pipe_A", y_min + depth * 0.15, 16.0, 35.0, 16.0)
+    run("Pipe_B", y_min + depth * 0.45, 16.0, 70.0, 16.0)
+    run("Pipe_C", y_min + depth * 0.85, 16.0, 35.0, 16.0)
+    run("Cable_Tray", mid_y, 45.0, 90.0, 8.0)
+    _note_surface("Metal", prefix + "_Services")
+
+
 def build_canteen_fixtures(origin_x, origin_y, z, materials, prefix):
     """The canteen's counters and tables on floor 15, as blockout cover.
 
@@ -645,15 +679,20 @@ def build_floor_shell(report, floor_index, materials):
                   prefix + "_Slab")
 
     # --- Ceiling ----------------------------------------------------------
-    # Floor 15 is roofed only over the canteen; the Skydeck balcony is open sky.
+    # One Braham has no suspended ceilings: the soffit is bare concrete with the
+    # services hung under it (see build_exposed_services). Floor 15 is roofed
+    # only over the canteen; the Skydeck balcony is open sky.
     if area_name == "Skydeck":
         roofed_y = SKYDECK_SCREEN_Y + half_y
         _box((origin_x, origin_y - half_y + roofed_y / 2.0, z + C.CEILING_HEIGHT_CM + 10.0),
-             (size_x, roofed_y, 20.0), plaster, prefix + "_Ceiling")
+             (size_x, roofed_y, 20.0), concrete, prefix + "_Soffit")
+        build_exposed_services(origin_x, origin_y, z, size_x, -half_y, SKYDECK_SCREEN_Y, materials, prefix)
     else:
         _box((origin_x, origin_y, z + C.CEILING_HEIGHT_CM + 10.0),
-             (size_x, size_y, 20.0), plaster, prefix + "_Ceiling")
-    _note_surface("Plasterboard", prefix + "_Ceiling")
+             (size_x, size_y, 20.0), concrete, prefix + "_Soffit")
+        if area_name != "Ground_Plaza":
+            build_exposed_services(origin_x, origin_y, z, size_x, -half_y, half_y, materials, prefix)
+    _note_surface("Concrete", prefix + "_Soffit")
 
     # --- Perimeter glazing (the thing that makes the tower feel like a tower) --
     # Windows are placed as a bank rather than individually: the banded look of a

@@ -192,6 +192,10 @@ lounge programme. Breach walls on 12 and 14.
 
 ### 2.8 Canteen and Skydeck — floor 15
 
+**Ceilings.** None, anywhere in the tower: like the real building ("OB"), every
+floor shows its bare concrete soffit with steel beams, ducts, pipes and cable trays
+hung under it.
+
 **Layout.** 4800 × 4000 cm, split by a glass screen. South of it, under a
 roof, the canteen, laid out from the real building's staff canteen: the till
 and coffee bar on the back (west) wall; to its right the hot-food line, with the
@@ -299,17 +303,17 @@ cheapest way to make a game built inside one building feel like one room.
 | --- | --- |
 | Marble | lobby slab, reception island, turnstile banks, lift lobby |
 | Carpet | desk farms, meeting rooms, corner offices, waiting seating, breakout |
-| Concrete | plaza slab, loading bay, under-stair stores, core, stairwell landings |
-| Metal | lift doors, handrails, riser cupboards |
+| Concrete | plaza slab, loading bay, under-stair stores, core, stairwell landings, every bare soffit |
+| Metal | lift doors, handrails, riser cupboards, the exposed beams, ducts, pipes and cable trays under every soffit, the coffee bar's back wall |
 | Glass / BallisticGlass | the perimeter glazing bands on floors 2–15 |
-| Wood | the boardroom, the exec bar pavilion, the Skydeck bar |
+| Wood | the boardroom, the Skydeck bar, the canteen's servery islands, hot-food counter, till and tables |
 | Puddle | kitchen floor, bike store — deliberately wet, deliberately loud |
 | Grating | plant rooms, power rooms, comms cupboards, the Skydeck plant deck |
 | Fabric | the acoustic meeting pods on the mezzanine and in open plan |
 | ServerRack | the raised floor of the cold aisle, both server rows and the NOC |
-| Plasterboard | every partition, every ceiling, all four breachable walls |
-| Lino | canteen hall, servery, break-out kitchen, print alcove, security desk |
-| Decking | the Skydeck, the helipad, the edge rails, the canteen terrace |
+| Plasterboard | every partition, the kitchen wall, all four breachable walls |
+| Lino | canteen hall, servery, hot-food line, coffee bar, break-out kitchen, print alcove, security desk |
+| Decking | the Skydeck balcony, the helipad, the edge rail |
 | Flesh | gameplay only — a character hit resolves to it; no geometry uses it |
 
 Two of these have gameplay attached, which is why the table matters:
