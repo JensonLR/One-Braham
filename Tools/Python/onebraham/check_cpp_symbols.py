@@ -529,6 +529,9 @@ ENGINE_PRIVATE_ACTOR = {
     "bReplicates": "GetIsReplicated()/SetReplicates()", "bHidden": "IsHidden()",
     "bCanBeDamaged": "CanBeDamaged()/SetCanBeDamaged()",
     "RemoteRole": "GetRemoteRole()", "Role": "GetLocalRole()",
+    # Deprecated for direct access in 5.5; the accessors are the 5.5 API.
+    "NetUpdateFrequency": "GetNetUpdateFrequency()/SetNetUpdateFrequency()",
+    "MinNetUpdateFrequency": "GetMinNetUpdateFrequency()/SetMinNetUpdateFrequency()",
 }
 
 #: `AOneBrahamPlayerState* OtherState`, `const APlayerState* PS`.
