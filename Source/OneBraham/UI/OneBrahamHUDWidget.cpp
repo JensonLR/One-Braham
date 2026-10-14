@@ -740,7 +740,14 @@ void UOneBrahamHUDWidget::UpdateObjectivePanel(const FOneBrahamHUDData& InData)
 	}
 	else
 	{
-		if (Text_Objective != nullptr)
+		if (Text_Objective != nullptr && !InData.ControlPointSummary.IsEmpty())
+		{
+			// FIRE DRILL: the points and the score, the whole objective in a line.
+			Text_Objective->SetText(FText::Format(NSLOCTEXT("OneBraham", "HUD_ControlPoints", "{0}   ({1} - {2})"),
+				InData.ControlPointSummary, FText::AsNumber(InData.ScoreHome), FText::AsNumber(InData.ScoreAway)));
+			Text_Objective->SetColorAndOpacity(FSlateColor(UOneBrahamUIStyle::SafetyYellow()));
+		}
+		else if (Text_Objective != nullptr)
 		{
 			Text_Objective->SetText(FText::Format(NSLOCTEXT("OneBraham", "HUD_AliveCount", "{0} ALIVE  -  {1} SQUADS"),
 				FText::AsNumber(InData.AlivePlayersRemaining), FText::AsNumber(InData.SquadsRemaining)));

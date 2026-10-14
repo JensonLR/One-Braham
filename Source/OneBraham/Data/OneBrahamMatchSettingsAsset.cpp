@@ -89,23 +89,35 @@ void UOneBrahamMatchSettingsAsset::EnsureDefaults()
 		}
 	}
 
+	// FIRE DRILL is played in its own arena, not the tower: three points in a
+	// line, each named for the part of the building it stands in for.
+	if (Mode == EOneBrahamMatchMode::FireDrill && MapName == FName(TEXT("L_Persistent_OneBraham")))
+	{
+		MapName = TEXT("L_FireDrill_Arena");
+	}
+
 	if (ControlPoints.Num() == 0 && Mode == EOneBrahamMatchMode::FireDrill)
 	{
-		auto AddPoint = [this](FName Id, const FString& Name, int32 Floor, float Capture, float ScorePerSec)
+		// Locations are the platforms build_environment.py lays in the arena
+		// (ControlPoint_A_Lobby / B_ServerFloor / C_Canteen, 1400 cm square), and
+		// check_building_layout.py holds the two together.
+		auto AddPoint = [this](FName Id, const FString& Name, int32 Floor, const FVector& Where, float Capture, float ScorePerSec)
 		{
 			FOneBrahamControlPointDef Point;
 			Point.PointId = Id;
 			Point.DisplayName = FText::FromString(Name);
 			Point.FloorIndex = Floor;
+			Point.Location = Where;
+			Point.RadiusCm = 700.f;
 			Point.CaptureSeconds = Capture;
 			Point.ScorePerSecond = ScorePerSec;
-			Point.VolumeActorTag = Id;
 			ControlPoints.Add(Point);
 		};
 
-		AddPoint(TEXT("CP_Lobby"),	TEXT("Reception"),		1, 4.f, 1.0f);
-		AddPoint(TEXT("CP_Server"),	TEXT("Server Floor 9"),	9, 6.f, 1.5f);
-		AddPoint(TEXT("CP_Skydeck"),	TEXT("Skydeck"),		15, 7.f, 2.0f);
+		// The middle point is the hardest to hold and pays the most.
+		AddPoint(TEXT("CP_Lobby"),   TEXT("A - Reception"),    1,  FVector(0.f, -2600.f, 40.f), 4.f, 1.0f);
+		AddPoint(TEXT("CP_Server"),  TEXT("B - Server Floor"), 9,  FVector(0.f, 0.f, 40.f),     6.f, 1.5f);
+		AddPoint(TEXT("CP_Canteen"), TEXT("C - Canteen"),      13, FVector(0.f, 2600.f, 40.f),  5.f, 1.0f);
 	}
 
 	if (FloorLootProfiles.Num() > 0 && FloorLootProfiles.Num() < ONE_BRAHAM_FLOORS + 1)

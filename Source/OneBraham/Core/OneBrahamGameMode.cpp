@@ -30,6 +30,7 @@
 #include "EngineUtils.h"
 #include "GameFramework/GameSession.h"
 #include "Core/OneBrahamGameSession.h"
+#include "Match/OneBrahamControlPoint.h"
 #include "GameFramework/PlayerStart.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/CommandLine.h"
@@ -175,6 +176,7 @@ void AOneBrahamGameMode::StartPlay()
 
 	Super::StartPlay();
 
+	SpawnControlPoints();
 	StartWarmup();
 
 	// Night Shift and bot practice use the AI director; ASCENT explicitly does not.
@@ -245,6 +247,29 @@ void AOneBrahamGameMode::Tick(float DeltaSeconds)
 // ==========================================================================
 //  Match flow
 // ==========================================================================
+void AOneBrahamGameMode::SpawnControlPoints()
+{
+	// FIRE DRILL's objective: one actor per point the settings define. It runs
+	// its own capture and pays this mode through AddTeamScoreByIndex.
+	if (MatchSettings == nullptr || MatchSettings->Mode != EOneBrahamMatchMode::FireDrill)
+	{
+		return;
+	}
+
+	for (const FOneBrahamControlPointDef& Definition : MatchSettings->ControlPoints)
+	{
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		if (AOneBrahamControlPoint* Point = GetWorld()->SpawnActor<AOneBrahamControlPoint>(
+			AOneBrahamControlPoint::StaticClass(), Definition.Location, FRotator::ZeroRotator, Params))
+		{
+			Point->Configure(Definition.PointId, Definition.DisplayName, Definition.RadiusCm,
+				Definition.CaptureSeconds, Definition.ScorePerSecond);
+		}
+	}
+	OB_MATCH_LOG("FIRE DRILL: %d control points.", MatchSettings->ControlPoints.Num());
+}
+
 void AOneBrahamGameMode::SpawnMatchLoot()
 {
 	UOneBrahamLootSubsystem* Loot = GetWorld() != nullptr ? GetWorld()->GetSubsystem<UOneBrahamLootSubsystem>() : nullptr;

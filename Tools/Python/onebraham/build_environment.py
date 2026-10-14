@@ -2255,6 +2255,30 @@ def build_fire_drill_arena(report, materials):
     for team, sy in (("Staff", -3200.0), ("Contractors", 3200.0)):
         _box((0.0, sy, 60.0), (3600.0, 500.0, 120.0), carpet, "SpawnRoom_{0}".format(team))
 
+    # Eight spawns per team along the back of each room, facing the points.
+    # Team affinity keeps each side in its own room; without these, FIRE DRILL
+    # put everybody at the world origin, on point B.
+    spawn_class = getattr(unreal, "OneBrahamSpawnPoint", None)
+    if spawn_class is None:
+        report.failed("FIRE DRILL spawns", "OneBrahamSpawnPoint is not available; compile first")
+    else:
+        for team_name, team_enum, sy, yaw in (("Staff", "INTERNAL_STAFF", -3200.0, 90.0),
+                                              ("Contractors", "EXTERNAL_CONTRACTORS", 3200.0, -90.0)):
+            for index in range(8):
+                x = -1400.0 + index * 400.0
+                actor = _spawn(spawn_class, unreal.Vector(x, sy, 210.0), unreal.Rotator(roll=0.0, pitch=0.0, yaw=yaw))
+                if actor is None:
+                    report.failed("FIRE DRILL spawns", u"could not spawn {0} {1}".format(team_name, index))
+                    continue
+                _label(actor, "FD_Spawn_{0}_{1}".format(team_name, index))
+                try:
+                    actor.set_editor_property("FloorIndex", 1)
+                    actor.set_editor_property("TeamAffinity", getattr(unreal.OneBrahamTeam, team_enum))
+                    actor.set_editor_property("SquadClusterId", 0 if team_name == "Staff" else 1)
+                    actor.set_editor_property("bEnabled", True)
+                except Exception as exc:  # noqa: BLE001
+                    report.failed("FIRE DRILL spawns", u"{0} {1}: {2}".format(team_name, index, exc))
+
     # Lighting: same ceiling grid language as the tower, brighter, colder.
     for ix in range(-2, 3):
         for iy in range(-3, 4):

@@ -168,6 +168,8 @@ struct ONEBRAHAM_API FOneBrahamHUDData
 	UPROPERTY(BlueprintReadOnly, Category = "HUD") int32 ScoreHome = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "HUD") int32 ScoreAway = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "HUD") int32 LocalTeamScore = 0;
+	/** FIRE DRILL: every point's state in one line ("A STAFF  B 40% CONTRACTORS  C CONTESTED"). */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD") FText ControlPointSummary;
 
 	// --- spectating -----------------------------------------------------
 	/** Out of the match and watching: the HUD shows whom, and how to switch. */

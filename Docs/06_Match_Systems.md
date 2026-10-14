@@ -38,6 +38,25 @@ it into two sides pushing a line.
 | Match length | 10 minutes, or first to 200 points |
 | Why it exists | it is how a player learns the map, the weapons and the callouts without losing a 25-minute run to it |
 
+FIRE DRILL is played in its own arena (`L_FireDrill_Arena`), not the tower.
+Its three points stand in a line on the arena's platforms: A Reception, B Server
+Floor, C Canteen. Each is an `AOneBrahamControlPoint` that the game mode spawns
+from the match settings. The rules:
+
+* One team's living players on the point, and no enemy, build a claim over the
+  point's capture time (4, 6 and 5 s). At full, the point is theirs.
+* Both teams on it: contested, and nothing moves. Nobody on it: nothing moves,
+  and a half-built claim waits.
+* Taking the other team's point drains their claim to neutral first, so a flip
+  takes twice as long as a first capture.
+* An owned point pays its owner every second: 1 point for A and C, 1.5 for B,
+  the hardest to hold. Kills pay too, and the first team to 200 wins.
+
+Each point's ring and light take the owner's team colour, or the alarm colour
+while contested. The HUD's objective line shows all three and the score.
+`check_building_layout.py` holds the points' coordinates to the arena's
+platforms.
+
 ### NIGHT SHIFT — post-launch
 
 4-player co-op survival against the building's own systems: lockdowns, purge

@@ -248,6 +248,7 @@ UOneBrahamMatchSettingsAsset* UOneBrahamGameInstance::GetMatchSettings(EOneBraha
 	{
 		if (Configured->Mode == Mode)
 		{
+			Configured->EnsureDefaults();
 			CachedMatchSettings.Add(Mode, Configured);
 
 			return Configured;
@@ -280,6 +281,9 @@ UOneBrahamMatchSettingsAsset* UOneBrahamGameInstance::GetMatchSettings(EOneBraha
 			"Run Tools/Python/create_data_assets.py to author the real asset.", *AssetPath);
 	}
 
+	// An authored asset fills what it leaves empty the same way the game mode
+	// does, so the menu and the travel agree with the match about the map.
+	Settings->EnsureDefaults();
 	CachedMatchSettings.Add(Mode, Settings);
 	return Settings;
 }
@@ -335,7 +339,11 @@ TSharedPtr<FOnlineSessionSettings> UOneBrahamGameInstance::BuildSessionSettings(
 	Settings->Set(FName(TEXT("OB_SERVERNAME")), ServerName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 	Settings->Set(FName(TEXT("OB_VERSION")), FString(ONE_BRAHAM_DISPLAY_NAME), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 	Settings->Set(FName(TEXT("OB_PROTOCOL")), ONE_BRAHAM_NET_PROTOCOL_VERSION, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-	Settings->Set(FName(TEXT("OB_MAP")), FString(TEXT("L_Persistent_OneBraham")), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+	// The map the mode plays on: FIRE DRILL has its own arena.
+	const UOneBrahamMatchSettingsAsset* ModeSettings = const_cast<UOneBrahamGameInstance*>(this)->GetMatchSettings(Mode);
+	const FString MapName = ModeSettings != nullptr && !ModeSettings->MapName.IsNone()
+		? ModeSettings->MapName.ToString() : FString(TEXT("L_Persistent_OneBraham"));
+	Settings->Set(FName(TEXT("OB_MAP")), MapName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 	Settings->Set(FName(TEXT("OB_REGION")), Profile ? Profile->PreferredRegion : FString(TEXT("EU-West")), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 
 	return Settings;

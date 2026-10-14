@@ -1,6 +1,8 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "UI/OneBrahamHUDComponent.h"
+#include "EngineUtils.h"
+#include "Match/OneBrahamControlPoint.h"
 
 #include "UI/OneBrahamHUDStringTable.h"
 
@@ -833,6 +835,50 @@ void UOneBrahamHUDComponent::GatherHUDData()
 		{
 			Data.bLockdownActive = Lockdown->IsLockdownActive();
 			Data.LockdownSecondsRemaining = Lockdown->GetSecondsToNextStage();
+		}
+
+		// FIRE DRILL: the three points, in the order they stand in the arena.
+		Data.ControlPointSummary = FText::GetEmpty();
+		if (GS->MatchMode == EOneBrahamMatchMode::FireDrill)
+		{
+			TArray<const AOneBrahamControlPoint*> Points;
+			for (TActorIterator<AOneBrahamControlPoint> It(GetWorld()); It; ++It)
+			{
+				Points.Add(*It);
+			}
+			Points.Sort([](const AOneBrahamControlPoint& A, const AOneBrahamControlPoint& B)
+			{
+				return A.GetActorLocation().Y < B.GetActorLocation().Y;
+			});
+			const auto TeamWord = [](int32 TeamIndex)
+			{
+				return TeamIndex == 0 ? NSLOCTEXT("OneBraham", "HUD_CP_Staff", "STAFF") : NSLOCTEXT("OneBraham", "HUD_CP_Contractors", "CONTRACTORS");
+			};
+			TArray<FString> Parts;
+			for (const AOneBrahamControlPoint* Point : Points)
+			{
+				const FString Letter = Point->GetDisplayName().ToString().Left(1);
+				FText State;
+				if (Point->IsContested())
+				{
+					State = NSLOCTEXT("OneBraham", "HUD_CP_Contested", "CONTESTED");
+				}
+				else if (Point->GetCapturingTeamIndex() != INDEX_NONE)
+				{
+					State = FText::Format(NSLOCTEXT("OneBraham", "HUD_CP_Capturing", "{0}% {1}"),
+						FText::AsNumber(FMath::RoundToInt(Point->GetProgress01() * 100.f)), TeamWord(Point->GetCapturingTeamIndex()));
+				}
+				else if (Point->GetOwnerTeamIndex() != INDEX_NONE)
+				{
+					State = TeamWord(Point->GetOwnerTeamIndex());
+				}
+				else
+				{
+					State = NSLOCTEXT("OneBraham", "HUD_CP_Neutral", "-");
+				}
+				Parts.Add(FString::Printf(TEXT("%s %s"), *Letter, *State.ToString()));
+			}
+			Data.ControlPointSummary = FText::FromString(FString::Join(Parts, TEXT("   ")));
 		}
 
 		if (const UOneBrahamExtractionComponent* Extraction = GS->GetExtractionComponent())

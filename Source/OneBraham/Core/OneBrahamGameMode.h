@@ -190,6 +190,9 @@ protected:
 	/** Stocks the building from the match settings' loot profiles, once. */
 	void SpawnMatchLoot();
 
+	/** FIRE DRILL: spawns the control points from the match settings. */
+	void SpawnControlPoints();
+
 	/** The warmup's tannoy, one announcement at a time. */
 	void PlayNextLobbyAnnouncement();
 

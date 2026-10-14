@@ -221,6 +221,7 @@ def frame_problems():
     found.extend(loot_capacity_problems())
     found.extend(rotator_problems())
     found.extend(post_process_problems())
+    found.extend(control_point_problems())
     return found
 
 
@@ -257,6 +258,37 @@ STRUCT_COPY = re.compile(r'\b\w+\.settings\b(?!\s*=)')
 
 #: Settings the player owns, which a volume value would override.
 PLAYER_OWNED_PP = re.compile(r'(?i)motion_?blur|film_?grain')
+
+
+#: The arena platforms: points = [("A_Lobby", 0.0, -2600.0), ...]
+ARENA_POINT = re.compile(r'\("([A-Z]_[A-Za-z]+)",\s*(-?[0-9.]+),\s*(-?[0-9.]+)\)')
+
+#: The control points the match settings define: AddPoint(..., FVector(x, y, z), ...)
+SETTINGS_POINT = re.compile(r'AddPoint\(TEXT\("(CP_[A-Za-z]+)"\).*?FVector\((-?[0-9.]+)f,\s*(-?[0-9.]+)f')
+
+
+def control_point_problems():
+    """Every FIRE DRILL control point stands on an arena platform, and every
+    platform has a point: the settings place them by coordinates, the builder
+    lays the platforms by coordinates, and nothing else ties the two."""
+    tools = os.path.join(python_root, "Tools", "Python", "onebraham", "build_environment.py")
+    settings = os.path.join(python_root, "Source", "OneBraham", "Data", "OneBrahamMatchSettingsAsset.cpp")
+    builder = io.open(tools, encoding="utf-8").read()
+    if "def build_fire_drill_arena" not in builder:
+        return [(u"build_fire_drill_arena not found in build_environment.py", None)]
+    arena = builder[builder.index("def build_fire_drill_arena"):]
+    arena = arena[:arena.index("\ndef ", 10)]
+    platforms = set((float(x), float(y)) for _n, x, y in ARENA_POINT.findall(arena))
+    points = set((float(x), float(y))
+                 for _n, x, y in SETTINGS_POINT.findall(io.open(settings, encoding="utf-8").read()))
+    found = []
+    if not points:
+        found.append((u"no control points found in OneBrahamMatchSettingsAsset.cpp", None))
+    for point in sorted(points - platforms):
+        found.append((u"a FIRE DRILL control point at {0} has no arena platform under it".format(point), None))
+    for platform in sorted(platforms - points):
+        found.append((u"the arena platform at {0} has no control point".format(platform), None))
+    return found
 
 
 def post_process_problems():
