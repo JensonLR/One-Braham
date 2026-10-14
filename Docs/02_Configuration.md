@@ -99,10 +99,14 @@ SteamDevAppId=480          ; replaced by the real AppID at release, see Scripts/
 build, and the release checklist says so twice because a shipped build pointing
 at Spacewar is the mistake that cannot be undone.
 
-### World Partition
+### Levels, not World Partition
 
-On for the map, off for the FIRE DRILL arena (which fits in one cell and streams
-worse as a partitioned level than as a plain one).
+Off everywhere. `L_Persistent_OneBraham` holds the shell and every gameplay
+anchor, and each floor is an always-loaded sublevel. World Partition streams by a
+2D grid in XY; sixteen storeys stacked on one 52 × 44 m footprint all fall in the
+same cells, so a partitioned tower could only load all of itself or none of it,
+and a partitioned world cannot hold the per-floor sublevels the builder makes.
+The FIRE DRILL arena is a single plain level.
 
 ---
 
@@ -219,7 +223,7 @@ maps, cloth, and the Skydeck's floodlight shadows.
 | File | Overrides |
 | --- | --- |
 | `Windows/WindowsEngine.ini` | DX12, SM6, hardware GPU scheduling, `r.GTSyncType=2` |
-| `LinuxServer/LinuxServerEngine.ini` | `-nullrhi`, no audio device, World Partition on, `bUseFixedFrameRate=1` |
+| `LinuxServer/LinuxServerEngine.ini` | the headless renderer and audio settings, a 60 Hz net tick, Steam server ports |
 
 The Linux server config is the one that must never be forgotten: a server that
 initialises an audio device is a server that leaks it over a 6-hour session.

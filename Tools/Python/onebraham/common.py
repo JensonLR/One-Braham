@@ -122,7 +122,8 @@ FLOOR_HEIGHT_CM = 400.0
 FLOOR_COUNT = 15
 
 # The eight named areas of the map spec (Docs/09). Each entry is
-# (name, first_floor, last_floor, wing_origin_xy, wing_size_xy).
+# (name, (first_floor, last_floor), min_corner_x, min_corner_y, size_x, size_y):
+# the footprint's MINIMUM corner, not its centre - read rows with area_centre().
 # The tower is a rectangular core with four wings around a central lift core,
 # which is what gives every floor a chokepoint, a flank and a sightline.
 AREAS = [
@@ -138,6 +139,21 @@ AREAS = [
 ]
 
 AREA_NAMES = [a[0] for a in AREAS]
+
+
+def area_centre(area):
+    """(name, floors, centre_x, centre_y, size_x, size_y) for one AREAS row.
+
+    AREAS stores the minimum corner of each footprint: (-2600, -2200) with a
+    5200 x 4400 footprint is a plaza centred on the origin. Every builder places
+    things about the area's *centre* (slabs, rooms, lights, volumes, nav bounds,
+    props), while the lift core, the spawn anchors and the extraction pad are
+    placed about the world origin. Handing the corner to code that wants the
+    centre built every floor half a footprint south-west of its own lifts, so
+    this is the only way the builders read an area.
+    """
+    name, floors, min_x, min_y, size_x, size_y = area
+    return name, floors, min_x + size_x / 2.0, min_y + size_y / 2.0, size_x, size_y
 
 def AREAS_AS_PAIRS():
     """(name, (first_floor, last_floor)) for every area, in build order.
@@ -167,7 +183,9 @@ SPAWN_MIN_ENEMY_DISTANCE_CM = 2000.0
 SPAWN_MIN_SAME_TEAM_DISTANCE_CM = 600.0
 
 # Gameplay anchors.
-EXTRACTION_PAD_LOCATION = (0.0, 0.0, 15.0 * FLOOR_HEIGHT_CM)
+# On the Skydeck slab: floor N stands at (N - 1) x 400 (Docs/09 section 1), so
+# floor 15 is 5600. This was 15 x 400 = 6000, a storey above the deck it sits on.
+EXTRACTION_PAD_LOCATION = (0.0, 0.0, 14.0 * FLOOR_HEIGHT_CM)
 EXTRACTION_HOLD_RADIUS_CM = 900.0
 CANTEEN_SKYDECK_STAIR_XY = (900.0, -700.0)
 

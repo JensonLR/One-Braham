@@ -26,10 +26,6 @@ namespace
 	constexpr float OBFallbackPurgeDps = 18.f;
 	constexpr int32 OBFallbackPurgeCeiling = 13;
 
-	/** Height of one floor in cm. The map is 15 x 400 cm with the lobby at Z=0. */
-	/** One number, defined once: see OneBrahamConstants in OneBraham.h. */
-	constexpr float OBFloorHeightCm = OneBrahamConstants::FloorHeightCm;
-
 	/** Shutter travel time: steel fire shutters are heavy and slow. */
 	constexpr float OBShutterDurationSeconds = 2.75f;
 
@@ -409,7 +405,7 @@ void UOneBrahamLockdownComponent::UpdateHighestOccupiedFloor()
 		}
 
 		const float Z = Pawn->GetActorLocation().Z;
-		const int32 Floor = FMath::Clamp(FMath::FloorToInt(Z / OBFloorHeightCm), 0, OneBrahamConstants::FloorSkydeck);
+		const int32 Floor = OneBrahamConstants::FloorIndexForZ(Z);
 
 		Highest = FMath::Max(Highest, Floor);
 		++Occupants;
@@ -477,8 +473,7 @@ void UOneBrahamLockdownComponent::ServerApplyPurgeDamage(float DeltaTime)
 			continue;
 		}
 
-		const int32 Floor = FMath::Clamp(FMath::FloorToInt(Character->GetActorLocation().Z / OBFloorHeightCm),
-			0, OneBrahamConstants::FloorSkydeck);
+		const int32 Floor = OneBrahamConstants::FloorIndexForZ(Character->GetActorLocation().Z);
 
 		if (!IsFloorBeingPurged(Floor))
 		{

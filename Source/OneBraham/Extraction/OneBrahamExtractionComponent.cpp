@@ -289,8 +289,7 @@ bool UOneBrahamExtractionComponent::ServerCallExtraction(int32 SquadId, AOneBrah
 		// One storey below the Skydeck, from the building's own storey height
 		// rather than a literal 400: this was the second place the number was
 		// written down, and the constant exists so there is only one.
-		const float SkydeckMinZ = static_cast<float>(OneBrahamConstants::FloorSkydeck - 1)
-			* OneBrahamConstants::FloorHeightCm;
+		const float SkydeckMinZ = OneBrahamConstants::FloorZ(OneBrahamConstants::FloorSkydeck);
 		if (Pawn == nullptr || Pawn->GetActorLocation().Z < SkydeckMinZ)
 		{
 			OutRefusal = NSLOCTEXT("OneBraham", "Extraction_TooLow", "Winch terminals are on the Skydeck, fifteenth floor.");

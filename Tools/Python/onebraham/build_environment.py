@@ -372,9 +372,116 @@ def _load(mesh_path):
 _load.misses = set()
 
 
+#: Every actor this script spawns is tagged with this prefix plus the level it
+#: was built into, so a rebuild can remove exactly what an earlier run made and
+#: nothing a designer placed by hand. Without it a second run stacked a second
+#: building on the first.
+GENERATED_TAG_PREFIX = "OB_Generated:"
+_current_build_level = [""]
+
+
 def _spawn(actor_class, location, rotation=None):
     rot = rotation if rotation is not None else unreal.Rotator(0.0, 0.0, 0.0)
-    return _actor_subsystem().spawn_actor_from_class(actor_class, location, rot)
+    actor = _actor_subsystem().spawn_actor_from_class(actor_class, location, rot)
+    if actor is not None and _current_build_level[0]:
+        try:
+            tags = list(actor.tags)
+            tags.append(unreal.Name(GENERATED_TAG_PREFIX + _current_build_level[0]))
+            actor.tags = tags
+        except Exception:  # noqa: BLE001 - a missing tag only costs a clean rebuild
+            pass
+    return actor
+
+
+def _editor_world():
+    return unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
+
+
+def _open_level_for_build(report, level_path):
+    """Opens level_path for building, creating it if it does not exist, and
+    removes the actors an earlier run of this script generated in it.
+
+    Levels are created unpartitioned. World Partition streams by a 2D grid in
+    XY; sixteen storeys stacked on one 52 x 44 m footprint all fall in the same
+    cells, so a partitioned tower can only load all of itself or none of it,
+    and a partitioned world cannot hold the per-floor sublevels at all.
+    """
+    level_subsystem = _level_subsystem()
+    existed = unreal.EditorAssetLibrary.does_asset_exist(level_path)
+
+    try:
+        if existed:
+            ok = level_subsystem.load_level(level_path)
+        else:
+            try:
+                ok = level_subsystem.new_level(level_path, False)
+            except TypeError:
+                ok = level_subsystem.new_level(level_path)
+    except Exception as exc:  # noqa: BLE001
+        report.failed(level_path, u"could not open: {0}".format(exc))
+        return False
+
+    if ok is False:
+        report.failed(level_path, u"could not {0}".format("load" if existed else "create"))
+        return False
+
+    _current_build_level[0] = level_path.rsplit("/", 1)[-1]
+    tag = unreal.Name(GENERATED_TAG_PREFIX + _current_build_level[0])
+
+    removed = 0
+    for actor in list(_actor_subsystem().get_all_level_actors()):
+        try:
+            if tag in list(actor.tags):
+                _actor_subsystem().destroy_actor(actor)
+                removed += 1
+        except Exception:  # noqa: BLE001
+            continue
+
+    if existed:
+        report.updated_asset(level_path)
+        if removed:
+            C.log(u"  {0}: removed {1} actor(s) from the previous build".format(level_path, removed))
+    else:
+        report.created_asset(level_path)
+
+    return True
+
+
+def _save_build_level(report, level_path):
+    try:
+        _level_subsystem().save_current_level()
+        return True
+    except Exception as exc:  # noqa: BLE001
+        report.failed(level_path, u"could not save: {0}".format(exc))
+        return False
+    finally:
+        _current_build_level[0] = ""
+
+
+def _attach_floor_levels(report, persistent_path, floor_paths):
+    """Adds every floor as an always-loaded sublevel of the persistent level.
+
+    Until this the floors were created and never referenced: the persistent
+    map that ships held the shell and the winch, and no building. Always
+    loaded, not distance-streamed: nothing in the game streams floors at
+    runtime, and a floor that is not loaded has no collision to stand on.
+    """
+    if not _open_level_for_build(report, persistent_path):
+        return 0
+
+    world = _editor_world()
+    attached = 0
+    for level_path in floor_paths:
+        package = level_path
+        try:
+            if unreal.GameplayStatics.get_streaming_level(world, unreal.Name(package)) is None:
+                unreal.EditorLevelUtils.add_level_to_world(world, package, unreal.LevelStreamingAlwaysLoaded)
+            attached += 1
+        except Exception as exc:  # noqa: BLE001
+            report.failed(level_path, u"could not attach to the persistent level: {0}".format(exc))
+
+    _save_build_level(report, persistent_path)
+    return attached
 
 
 def _label(actor, label):
@@ -431,9 +538,11 @@ def _floor_z(floor_index):
 
 
 def _area_for_floor(floor_index):
-    for name, (first, last), origin_x, origin_y, size_x, size_y in C.AREAS:
+    """The area on a floor, as (name, centre_x, centre_y, size_x, size_y)."""
+    for area in C.AREAS:
+        name, (first, last), centre_x, centre_y, size_x, size_y = C.area_centre(area)
         if first <= floor_index <= last:
-            return name, origin_x, origin_y, size_x, size_y
+            return name, centre_x, centre_y, size_x, size_y
     return None, 0.0, 0.0, 0.0, 0.0
 
 
@@ -1426,21 +1535,14 @@ def build_skydeck_climate(report):
 # ===========================================================================
 
 def build_floor_level(report, floor_index, materials):
-    """Creates (or updates) the streaming level for one floor."""
+    """Creates or rebuilds the sublevel for one floor. Returns its package path."""
     level_path = "{0}/{1}_F{2:02d}".format(C.MAPS, "L_OneBraham", floor_index)
-    full_path = level_path + "." + os.path.basename(level_path)
 
-    level_subsystem = _level_subsystem()
-
-    if unreal.EditorAssetLibrary.does_asset_exist(level_path):
-        C.log(u"  floor {0:02d}: streaming level already exists, updating".format(floor_index))
-        report.updated_asset(level_path)
-        return level_path
-
-    try:
-        level_subsystem.new_level(level_path)
-    except Exception as exc:  # noqa: BLE001
-        report.failed(level_path, u"could not create streaming level: {0}".format(exc))
+    # An existing floor used to be returned untouched with "updating" in the
+    # log, so a change to a room programme never reached a map that had been
+    # built once. It is now opened, cleared of what the last run made, and
+    # rebuilt.
+    if not _open_level_for_build(report, level_path):
         return None
 
     build_floor_shell(report, floor_index, materials)
@@ -1449,30 +1551,28 @@ def build_floor_level(report, floor_index, materials):
     build_audio_zone(report, floor_index)
     build_nav(report, floor_index)
 
-    try:
-        level_subsystem.save_current_level()
-    except Exception as exc:  # noqa: BLE001
-        report.failed(level_path, u"could not save: {0}".format(exc))
+    if not _save_build_level(report, level_path):
         return None
 
-    report.created_asset(level_path)
     return level_path
 
 
 def build_persistent_level(report, materials, manifest):
     """Creates the persistent level: the shell, the town, and the references."""
-    level_subsystem = _level_subsystem()
     persistent_path = "{0}/{1}".format(C.MAPS, C.MAP_PERSISTENT)
 
-    if unreal.EditorAssetLibrary.does_asset_exist(persistent_path):
-        C.log(u"persistent level exists; rebuilding its persistent actors")
-    else:
-        try:
-            level_subsystem.new_level(persistent_path)
-            report.created_asset(persistent_path)
-        except Exception as exc:  # noqa: BLE001
-            report.failed(persistent_path, u"could not create: {0}".format(exc))
-            return None
+    if not _open_level_for_build(report, persistent_path):
+        return None
+
+    # --- Gameplay anchors -------------------------------------------------
+    # These were placed before this level was opened, into whatever map the
+    # editor happened to have open, so the persistent level shipped with no
+    # spawn points, access zones, terminals, breach walls or shutters.
+    manifest["spawn_anchors"] = C.guard(report, "spawn points", build_spawn_points, report) or []
+    manifest["access_zones"] = C.guard(report, "access zones", build_access_zones, report) or []
+    manifest["terminals"] = C.guard(report, "terminals", build_override_terminals, report) or []
+    manifest["breachable_walls"] = C.guard(report, "breachable walls", build_breachable_walls, report, materials) or []
+    manifest["shutters"] = C.guard(report, "shutters", build_shutters, report) or []
 
     # --- The building shell -----------------------------------------------
     # A single exterior mass so the tower is visible from the Skydeck, the lobby
@@ -1514,11 +1614,7 @@ def build_persistent_level(report, materials, manifest):
 
     manifest["persistent_level"] = persistent_path
 
-    try:
-        level_subsystem.save_current_level()
-    except Exception as exc:  # noqa: BLE001
-        report.failed(persistent_path, u"could not save: {0}".format(exc))
-
+    _save_build_level(report, persistent_path)
     return persistent_path
 
 
@@ -1540,22 +1636,18 @@ def build_all(write_manifest=True):
     C.step(1, 6, "materials")
     materials = C.guard(report, "materials", build_materials, report) or {}
 
-    C.step(2, 6, "gameplay anchors")
+    C.step(2, 6, "room programmes")
     _SURFACE_USAGE.clear()
 
     manifest = {
         "generated_by": "Tools/Python/onebraham/build_environment.py",
         "floor_height_cm": C.FLOOR_HEIGHT_CM,
         "floor_count": C.FLOOR_COUNT,
-        "areas": [{"name": a[0], "floors": list(a[1]), "origin": [a[2], a[3]], "size": [a[4], a[5]]}
+        "areas": [{"name": a[0], "floors": list(a[1]), "min_corner": [a[2], a[3]],
+                   "centre": list(C.area_centre(a)[2:4]), "size": [a[4], a[5]]}
                   for a in C.AREAS],
     }
 
-    manifest["spawn_anchors"] = C.guard(report, "spawn points", build_spawn_points, report) or []
-    manifest["access_zones"] = C.guard(report, "access zones", build_access_zones, report) or []
-    manifest["terminals"] = C.guard(report, "terminals", build_override_terminals, report) or []
-    manifest["breachable_walls"] = C.guard(report, "breachable walls", build_breachable_walls, report, materials) or []
-    manifest["shutters"] = C.guard(report, "shutters", build_shutters, report) or []
     manifest["rooms"] = [
         {"area": area, "name": room[0], "x": room[1], "y": room[2],
          "size": [room[3], room[4]]}
@@ -1572,8 +1664,8 @@ def build_all(write_manifest=True):
         report.failed("rooms", u"only {0} rooms programmed; the map needs 40".format(
             len(manifest["rooms"])))
 
-    C.step(3, 6, "persistent level")
-    C.guard(report, "persistent level", build_persistent_level, report, materials, manifest)
+    C.step(3, 6, "persistent level and gameplay anchors")
+    persistent_path = C.guard(report, "persistent level", build_persistent_level, report, materials, manifest)
 
     C.step(4, 6, "per-floor streaming levels")
     floors = []
@@ -1594,6 +1686,14 @@ def build_all(write_manifest=True):
     if len(floors) != C.FLOOR_COUNT + 1:
         report.failed("floor levels", u"only {0} of {1} floors built".format(
             len(floors), C.FLOOR_COUNT + 1))
+
+    if persistent_path:
+        attached = C.guard(report, "attach floors", _attach_floor_levels, report, persistent_path,
+                           [floor["level"] for floor in floors]) or 0
+        manifest["floors_attached"] = attached
+        if attached != len(floors):
+            report.failed("floor levels", u"{0} of {1} floors attached to {2}".format(
+                attached, len(floors), persistent_path))
 
     C.step(5, 6, "fire drill arena")
     C.guard(report, "fire drill arena", build_fire_drill_arena, report, materials)
@@ -1616,14 +1716,7 @@ def build_fire_drill_arena(report, materials):
     """
     path = "{0}/{1}".format(C.MAPS, C.MAP_FIRE_DRILL)
 
-    if unreal.EditorAssetLibrary.does_asset_exist(path):
-        report.updated_asset(path)
-        return path
-
-    try:
-        _level_subsystem().new_level(path)
-    except Exception as exc:  # noqa: BLE001
-        report.failed(path, u"could not create: {0}".format(exc))
+    if not _open_level_for_build(report, path):
         return None
 
     concrete = materials.get("Concrete")
@@ -1675,13 +1768,9 @@ def build_fire_drill_arena(report, materials):
     _spawn(unreal.NavMeshBoundsVolume, unreal.Vector(0.0, 0.0, 200.0))
     _spawn(unreal.SkyLight, unreal.Vector(0.0, 0.0, 600.0))
 
-    try:
-        _level_subsystem().save_current_level()
-    except Exception as exc:  # noqa: BLE001
-        report.failed(path, u"could not save: {0}".format(exc))
+    if not _save_build_level(report, path):
         return None
 
-    report.created_asset(path)
     C.log(u"FIRE DRILL arena built: three control points, two flanks, one corridor")
     return path
 

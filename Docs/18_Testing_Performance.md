@@ -225,8 +225,9 @@ should be at 4 Hz.
    distance.
 7. **One material master per purpose.** Fifteen surface instances of two masters,
    not fifteen masters.
-8. **World Partition on the server** so the dedicated process loads only what it
-   simulates.
+8. **The whole tower stays loaded on the server.** It is one persistent level
+   and sixteen always-loaded floor sublevels of blockout, small enough to hold
+   at once, and the server simulates every floor a player is on anyway.
 9. **Audio concurrency limits** per cue type, and a per-frame budget on new
    one-shots.
 10. **Shaders are cooked, not compiled on first use.** A shipping build must never

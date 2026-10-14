@@ -114,7 +114,7 @@ cosmetic is earnable.
 
 | Area | What it uses |
 | --- | --- |
-| Engine | UE 5.5, World Partition, level streaming per floor |
+| Engine | UE 5.5; one persistent level with an always-loaded sublevel per floor |
 | Rendering | Lumen GI and reflections, Virtual Shadow Maps, Nanite on architecture, TSR |
 | Language | C++20 for every system; Blueprint for authoring and animation glue |
 | Input | Enhanced Input, 41 actions, four mapping contexts — all generated |

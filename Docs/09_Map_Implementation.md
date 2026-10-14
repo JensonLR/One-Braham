@@ -326,7 +326,7 @@ seventeen-effect table with its call sites; the map's half of it is:
 
 ### 5.3 Lighting, grade and audio, per floor
 
-Each streaming floor level is created by `build_floor_level`, which places four
+Each floor sublevel is created by `build_floor_level`, which places four
 things besides the geometry, so a new floor gets all of them without anyone
 remembering to add them — which is the point of generating the map rather than
 placing it.
@@ -384,6 +384,22 @@ floor, room, spawn anchor, access zone, terminal, breach wall, shutter and
 surface, with locations. That manifest is what `validate_project.py` checks the
 level against, which is how a level edit by hand gets caught before it becomes a
 mystery bug three weeks later.
+
+**What a build makes, in order.** The persistent level is opened (or created)
+first, and the gameplay anchors go into it: spawn points, access zones,
+terminals, breach walls, shutters, the winch and the Skydeck climate. Then each
+floor is built as its own level, and every floor is attached to the persistent
+level as an always-loaded sublevel. Every actor the builder spawns carries an
+`OB_Generated:<level>` tag, and a rebuild removes exactly those before placing
+them again, so running it twice gives one building, not two, and anything
+placed by hand survives.
+
+**One frame.** `AREAS` stores each footprint's minimum corner, and every
+builder reads it through `common.area_centre()`. The lift core, the spawn
+anchors and the pad sit around the world origin, and each floor is centred on
+it too. Floor N's slab is at `(N − 1) × 400` cm, the datum in section 1, and
+the C++ converts with `OneBrahamConstants::FloorZ` and `FloorIndexForZ`, the
+only two conversions.
 
 Adding a floor means adding an entry to `AREAS` and `ROOM_PROGRAMMES` in
 `build_environment.py`. Adding a route up means adding an entry to `ACCESS_ZONES`.

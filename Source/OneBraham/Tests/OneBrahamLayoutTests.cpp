@@ -242,11 +242,19 @@ bool FOneBrahamBuildingLayoutTest::RunTest(const FString& Parameters)
 		static_cast<float>(OneBrahamConstants::FloorSkydeck - 1) * OneBrahamConstants::FloorHeightCm,
 		5600.f, 0.01f);
 
-	// The Skydeck's own floor level, for the riggers: fifteen storeys up the
-	// building's datum.
-	TestNearlyEqual(TEXT("the Skydeck is fifteen storeys up"),
-		static_cast<float>(OneBrahamConstants::FloorSkydeck) * OneBrahamConstants::FloorHeightCm,
-		6000.f, 0.01f);
+	// The datum both ways (Docs/09 section 1): the lobby is floor 1 at Z = 0,
+	// the plaza floor 0, the Skydeck floor 15 at 5600. Every Z / 400 in the
+	// module used to read the lobby as floor 0, so the lockdown purged the
+	// storey above the one it announced.
+	TestNearlyEqual(TEXT("the lobby slab is the datum"), OneBrahamConstants::FloorZ(1), 0.f, 0.01f);
+	TestNearlyEqual(TEXT("the Skydeck slab is at 5600 cm"),
+		OneBrahamConstants::FloorZ(OneBrahamConstants::FloorSkydeck), 5600.f, 0.01f);
+	TestEqual(TEXT("a player in the lobby is on floor 1"), OneBrahamConstants::FloorIndexForZ(90.f), 1);
+	TestEqual(TEXT("a player in the plaza is on floor 0"), OneBrahamConstants::FloorIndexForZ(-310.f), 0);
+	TestEqual(TEXT("a player on the Skydeck is on floor 15"), OneBrahamConstants::FloorIndexForZ(5690.f), 15);
+	TestEqual(TEXT("a player on floor 14 is not on the Skydeck"), OneBrahamConstants::FloorIndexForZ(5290.f), 14);
+	TestEqual(TEXT("floor and Z round-trip on every storey"),
+		OneBrahamConstants::FloorIndexForZ(OneBrahamConstants::FloorZ(9) + 90.f), 9);
 
 	return true;
 }

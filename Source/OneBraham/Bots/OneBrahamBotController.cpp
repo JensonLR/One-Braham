@@ -21,10 +21,6 @@
 
 namespace
 {
-	/** Floor height in cm; the map is fifteen of these with the lobby at Z = 0. */
-	/** One number, defined once: see OneBrahamConstants in OneBraham.h. */
-	constexpr float OBFloorHeightCm = OneBrahamConstants::FloorHeightCm;
-
 	/** How long a bot remembers a target it can no longer see. */
 	constexpr float OBTargetMemorySeconds = 6.f;
 
@@ -255,7 +251,7 @@ void AOneBrahamBotController::Tick(float DeltaSeconds)
 	}
 
 	HomeLocation = HomeLocation.IsNearlyZero() ? Character->GetActorLocation() : HomeLocation;
-	CurrentFloor = FMath::FloorToInt(Character->GetActorLocation().Z / OBFloorHeightCm);
+	CurrentFloor = OneBrahamConstants::FloorIndexForZ(Character->GetActorLocation().Z);
 
 	UpdateCombatState(DeltaSeconds);
 	UpdateMovement(DeltaSeconds);

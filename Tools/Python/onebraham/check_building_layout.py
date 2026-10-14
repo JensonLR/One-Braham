@@ -28,6 +28,9 @@ WHAT IT COMPARES
     * The breachable floors in `BREACHABLE_WALLS` against the asset's
       `bBreachable` flags.
     * The floor count and the extraction floor.
+    * The builder's coordinate frames: every spawn anchor inside its area's
+      footprint, the lift core inside every floor, the pad on the Skydeck slab,
+      and the vertical datum (lobby at Z 0) that the C++ also uses.
 
 WHAT IT CANNOT DO
     It cannot know what the level actually looks like. It checks one hand-written
@@ -171,7 +174,55 @@ def run():
                 u"floors {0} are marked breachable in the layout asset and have no wall in the "
                 u"map - the warning will point at nothing".format(only_asset), None))
 
+    problems.extend(frame_problems())
+
     return len(expected), problems
+
+
+def frame_problems():
+    """The builder's coordinate frames agree with each other.
+
+    AREAS stores footprint corners; the builders place slabs, rooms, lights and
+    volumes about the area centre, and the lift core, spawn anchors and pad
+    about the world origin. When the two frames disagreed every floor was built
+    half a footprint south-west of its own lifts and spawns, and nothing in the
+    engine-free checks could see it. These are the invariants that would have.
+    """
+    from onebraham import build_environment as E
+
+    found = []
+    areas = {row[0]: C.area_centre(row) for row in C.AREAS}
+
+    for area_name, anchors in sorted(E.ANCHORS.items()):
+        area = areas.get(area_name)
+        if area is None:
+            found.append((u"spawn anchors for unknown area '{0}'".format(area_name), None))
+            continue
+
+        _name, _floors, cx, cy, size_x, size_y = area
+        for anchor_name, ax, ay in anchors:
+            if abs(ax - cx) > size_x / 2.0 - 50.0 or abs(ay - cy) > size_y / 2.0 - 50.0:
+                found.append((u"spawn anchor {0} ({1:.0f}, {2:.0f}) is outside the {3} footprint "
+                              u"centred on ({4:.0f}, {5:.0f}), {6:.0f} x {7:.0f}".format(
+                                  anchor_name, ax, ay, area_name, cx, cy, size_x, size_y), None))
+
+    core_half = C.LIFT_CORE_SIZE_CM / 2.0
+    for name, (_floors, cx, cy, size_x, size_y) in sorted(
+            (row[0], (row[1], row[2], row[3], row[4], row[5])) for row in areas.values()):
+        if abs(cx) + core_half > size_x / 2.0 or abs(cy) + core_half > size_y / 2.0:
+            found.append((u"the lift core at the origin does not fit inside the {0} footprint".format(name), None))
+
+    pad_x, pad_y, pad_z = C.EXTRACTION_PAD_LOCATION
+    skydeck_z = E._floor_z(C.FLOOR_COUNT)
+    if abs(pad_z - skydeck_z) > 1.0:
+        found.append((u"the extraction pad is at Z {0:.0f} and the Skydeck slab at {1:.0f}".format(
+            pad_z, skydeck_z), None))
+
+    if E._floor_z(1) != 0.0 or E._floor_z(0) != -C.FLOOR_HEIGHT_CM:
+        found.append((u"_floor_z no longer puts the lobby at Z 0 and the plaza a storey below "
+                      u"(Docs/09 section 1, OneBrahamConstants::FloorZ)", None))
+
+    return found
 
 
 class _LayoutReport(object):
