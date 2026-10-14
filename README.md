@@ -17,11 +17,13 @@ documentation needed to build, package and ship ONE BRAHAM.
 
 ```
 One-Braham/
-├── OneBraham.uproject       UE 5.5, 11 plugins
+├── OneBraham.uproject       UE 5.5, 13 plugins
 ├── Config/                  every ini, hand-authored and commented
-├── Source/                  the C++ module, 14 systems
+├── Source/                  the C++ module: 13 systems and the test suite
 ├── Content/OneBraham/       everything this project authors
-├── Tools/Python/            the content pipeline (16 scripts)
+├── Tools/Python/            the content pipeline: 12 builders, 17 checkers, a report
+├── HANDOVER.md              state of the repository, what is left, how to verify it
+├── PROMPT_NEXT_AGENT.md     the brief for whoever finishes the build
 ├── Scripts/                 build, run, test, package, ship
 ├── Docs/                    21 documents
 └── Saved/                   build and validation reports (not committed)

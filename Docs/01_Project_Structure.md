@@ -9,7 +9,7 @@ navigable at 40,000 files.
 
 ```
 One-Braham/
-├── OneBraham.uproject            the project descriptor (UE 5.5, 11 plugins)
+├── OneBraham.uproject            the project descriptor (UE 5.5, 13 plugins)
 ├── README.md                     build-from-clone instructions
 ├── .gitignore                    UE conventions: no Binaries/, no Intermediate/, no DerivedDataCache/
 ├── Config/                       every ini, all hand-authored, all commented
@@ -23,7 +23,7 @@ One-Braham/
 │   └── {Windows,LinuxServer}/    platform overrides
 ├── Content/
 │   ├── OneBraham/                everything this project authors (see §3)
-│   └── ThirdParty/                marketplace content, never edited in place
+│   └── ThirdParty/                created when marketplace content is imported; see Docs/16
 ├── Docs/                         this documentation set (21 documents)
 ├── Scripts/                      build, run, test, package, ship
 ├── Source/
@@ -31,7 +31,8 @@ One-Braham/
 │   ├── OneBraham.Target.cs
 │   ├── OneBrahamEditor.Target.cs
 │   └── OneBrahamServer.Target.cs
-├── Tools/Python/                 the content pipeline (15 scripts + payloads)
+├── Tools/Python/                 the content pipeline: 12 builders, 17 checkers, a report
+│                                 (`report_uncalled.py`) and 4 library modules
 └── Saved/                        generated reports (not committed, except as build evidence)
 ```
 
@@ -42,7 +43,8 @@ Nothing in `Content/OneBraham` is hand-placed that a script can place. Nothing i
 
 ## 2. The C++ module
 
-`Source/OneBraham` is 14 folders, each one a system with a single owner:
+`Source/OneBraham` is thirteen systems plus the test suite, fourteen folders in
+all. Each one is a system with a single owner:
 
 | Folder | Contents | Belongs to |
 | --- | --- | --- |
@@ -59,6 +61,7 @@ Nothing in `Content/OneBraham` is hand-placed that a script can place. Nothing i
 | `Audio/` | procedural audio, types, bank asset, audio manager component | PART 12 |
 | `VFX/` | VFX statics, camera shake | PART 11 |
 | `Data/` | weapon definition/registry, match settings, character data asset | PART 3 |
+| `Tests/` | the automation suite, one file per system it covers | PART 18 |
 
 Conventions that hold across all of it:
 

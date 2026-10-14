@@ -94,6 +94,24 @@ The functional half of a real project's suite - a match that starts, escalates a
 extracts - is worth writing, and it is worth writing once there is a level to run
 it on. Until then, a test with a mocked match would assert the mock.
 
+One class of bug is invisible to every check above, and this project shipped four
+of them: **the method that exists, is defined, is documented, and that nothing
+calls.** It is not a link error and not a reflection error, so no compiler and no
+checker in the table above reports it. A missing caller has cost this build more
+than any other single category - the anti-cheat speed report (the client was never
+asked to send it), the assist credits (the victim's attackers were tracked and
+never paid), the spawn loadout (the method a respawn called did not exist, and
+nothing else gave a player a weapon), and the extraction state machine (ASCENT's
+win condition, four callers short of working).
+
+`Tools/Python/onebraham/report_uncalled.py` is the answer, and it is deliberately a
+report rather than a gate: it renders every declared-and-defined member with no call
+site anywhere in the module, tags the Blueprint-callable and RPC ones so they can be
+triaged rather than triaged for you, and exits 0. Run it before and after a wiring
+batch. The number coming down is the proof of progress; the number standing still is
+either a Blueprint contract that needs recording in the document that specifies it,
+or a hole nobody has noticed yet.
+
 ---
 
 ## 3. The 12-player smoke run
