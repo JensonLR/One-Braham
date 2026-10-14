@@ -137,8 +137,21 @@ public:
 	UPROPERTY(BlueprintReadWrite, Category = "Progress")
 	float BestAscentTimeSeconds = 0.f;
 
+	/** Extracted from an ASCENT match having dealt no damage at all (Milestone.NoDamageExtract). */
 	UPROPERTY(BlueprintReadWrite, Category = "Progress")
-	bool bExtractedWithoutDamagingSquad = false;
+	bool bExtractedWithoutDealingDamage = false;
+
+	/** Won an ASCENT match as the last squad standing, on the Server & Comms floors (Milestone.ServerFloorWin). */
+	UPROPERTY(BlueprintReadWrite, Category = "Progress")
+	bool bWonOnServerFloors = false;
+
+	/** Achievement API names this profile has earned, Steam or not. */
+	UPROPERTY(BlueprintReadWrite, Category = "Progress")
+	TArray<FName> UnlockedAchievements;
+
+	/** Cosmetic unlock tags earned through achievements (OB.Cosmetic.Unlock.*). */
+	UPROPERTY(BlueprintReadWrite, Category = "Progress")
+	TArray<FName> EarnedUnlockTags;
 
 	// --- Bindings ---------------------------------------------------------
 	/** Key overrides applied on top of the default mapping context, keyed by "IA_Name.Action". */

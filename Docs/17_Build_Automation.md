@@ -87,16 +87,16 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
 | input_ini | OK | 0.0 | wrote 42 actions (41 with a default key) |
-| cpp_symbols | OK | 0.7 | 740 declarations, all defined; compile hygiene clean |
-| uht_contracts | OK | 1.5 | 884 UE reflection contracts, all satisfied |
+| cpp_symbols | OK | 0.7 | 754 declarations, all defined; compile hygiene clean |
+| uht_contracts | OK | 1.5 | 892 UE reflection contracts, all satisfied |
 | soft_paths | OK | 0.0 | 38 soft paths, all conventional |
-| calls | OK | 0.3 | 1167 call sites, all arities plausible |
+| calls | OK | 0.3 | 1185 call sites, all arities plausible |
 | tags | OK | 0.4 | 0 resolvable tag requests and 147 documented tags, all declared |
 | layout | OK | 0.0 | 16 floors, map and layout agree |
 | voice_lines | OK | 0.0 | 118 line references, all declared and documented |
 | input_actions | OK | 0.0 | 42 actions, 42 fields, 96 reads |
 | doc_numbers | OK | 2.2 | 84 documented numbers, all current |
-| test_names | OK | 0.0 | 25 automation tests, every one documented and resolvable |
+| test_names | OK | 0.0 | 27 automation tests, every one documented and resolvable |
 | doc_files | OK | 0.1 | 72 documented paths, all on disk |
 | doc_types | OK | 0.1 | 61 documented type names, all declared |
 | weapon_ids | OK | 0.1 | 122 weapon-id checks, the armoury and the spawn table agree |

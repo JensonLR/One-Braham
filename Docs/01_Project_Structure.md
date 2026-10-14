@@ -61,6 +61,7 @@ all. Each one is a system with a single owner:
 | `Audio/` | procedural audio, types, bank asset, audio manager component | PART 12 |
 | `VFX/` | VFX statics, camera shake | PART 11 |
 | `Data/` | weapon definition/registry, match settings, character data asset | PART 3 |
+| `Online/` | the Steam subsystem: career record, achievements, stats, rich presence, overlay | PART 19 |
 | `Tests/` | the automation suite, one file per system it covers | PART 18 |
 
 Conventions that hold across all of it:

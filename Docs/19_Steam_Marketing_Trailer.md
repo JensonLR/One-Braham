@@ -193,3 +193,75 @@ everybody."*
   comes from the world being real; a marketing line that winks at it undoes that
   in one sentence.
 * Do not promise a roadmap date that is not already built.
+
+## 8. Steam integration in the build
+
+`UOneBrahamSteamSubsystem` (`Source/OneBraham/Online/`) is the game's whole
+conversation with Steam. It is a game-instance subsystem that exists on a
+player's machine only, and every call is a no-op without an online subsystem.
+
+**The career record.** The match result replicates to every machine. When it
+lands, the subsystem finds the local player's own row by player id and folds it
+into the profile (`UOneBrahamSaveSettings`): matches, extractions, kills, downs,
+revives, FIRE DRILL wins, the highest ASCENT floor and the fastest extraction.
+Achievements, stats and cosmetic unlocks are all read from that record, so a
+build without Steam still keeps them.
+
+**The overlay.** The subsystem opens the friends list, the invite dialog and
+the store page through `ShowFriendsOverlay`, `ShowInviteOverlay` and
+`ShowStoreOverlay`. When the overlay opens, every held key is released.
+
+**Rich presence.** The status is recomputed every five seconds and sent only
+when it changes. `steam_display` is one of the tokens in
+`Config/Steam/rich_presence_english.vdf` and `floor` fills its `%floor%`.
+
+## 9. Steamworks partner-site setup
+
+These names must exist on the partner site exactly as written: the game writes
+them and Steam rejects an unknown one. A missing achievement is logged once and
+skipped.
+
+### Achievements
+
+| API name | Title | Earned by | Also unlocks |
+| --- | --- | --- | --- |
+| `ACH_CLOCKED_IN` | Clocked In | finishing a first match | |
+| `ACH_OVERTIME` | Overtime | finishing 100 matches | |
+| `ACH_FIRST_EXTRACT` | Signed Out | a first extraction | |
+| `ACH_EXTRACT_5` | Frequent Flyer | five extractions | `OB.Cosmetic.Unlock.Milestone.Extract5` |
+| `ACH_EXTRACT_25` | Gold Status | 25 extractions | |
+| `ACH_SKYDECK` | Top Floor | reaching floor 15 in ASCENT | |
+| `ACH_EXPRESS_LIFT` | Express Lift | extracting from ASCENT in under ten minutes | |
+| `ACH_CONSCIENTIOUS_OBJECTOR` | Conscientious Objector | extracting having dealt no damage | `OB.Cosmetic.Unlock.Milestone.NoDamageExtract` |
+| `ACH_HOLD_THE_FLOOR` | Hold the Floor | winning ASCENT as the last squad standing on floors 9-11 | `OB.Cosmetic.Unlock.Milestone.ServerFloorWin` |
+| `ACH_HEADCOUNT` | Headcount Reduction | 100 eliminations | |
+| `ACH_FIRST_AIDER` | Designated First Aider | 25 revives | |
+| `ACH_FIRE_WARDEN` | Fire Warden | 50 FIRE DRILL wins | `OB.Cosmetic.Unlock.Achievement.FireDrill50` |
+
+Achievements are written only after Steam has answered the achievement query,
+because Steam refuses a write before that. Each query re-sends anything the
+profile has earned that Steam lacks, so an achievement earned offline or lost
+to a crash goes up at the next start.
+
+### Stats
+
+All six are `INT`, set by the game and never decremented. The game writes the
+career totals rather than deltas, so the next write repairs a lost one. They go
+through the online subsystem's leaderboard write, which is how
+OnlineSubsystemSteam exposes `SetStat` and `StoreStats`.
+
+| API name | Value |
+| --- | --- |
+| `STAT_MATCHES` | matches finished |
+| `STAT_EXTRACTIONS` | extractions |
+| `STAT_KILLS` | eliminations |
+| `STAT_REVIVES` | revives performed |
+| `STAT_FIREDRILL_WINS` | FIRE DRILL wins |
+| `STAT_HIGHEST_FLOOR` | highest ASCENT floor reached |
+
+### Rich presence
+
+Upload `Config/Steam/rich_presence_english.vdf` under Community > Rich Presence.
+The `OneBraham.Online.AchievementTable` test fails if the code sends a token
+that file does not define.
+

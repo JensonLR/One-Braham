@@ -11,6 +11,8 @@
 #include "Lockdown/OneBrahamLockdownComponent.h"
 #include "Extraction/OneBrahamExtractionComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "Online/OneBrahamSteamSubsystem.h"
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerState.h"
 
@@ -121,6 +123,23 @@ void AOneBrahamGameState::OnRep_KillFeed()
 	}
 
 	LastAcknowledgedKillFeedCount = KillFeed.Num();
+}
+
+void AOneBrahamGameState::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// The player's career record, achievements and Steam stats are written from
+	// the result, on the player's own machine: a client hears it through
+	// OnRep_MatchResult, a listen host from the game mode's broadcast. Both
+	// arrive here. A dedicated server has no Steam subsystem.
+	if (const UGameInstance* GameInstance = GetGameInstance())
+	{
+		if (UOneBrahamSteamSubsystem* Steam = GameInstance->GetSubsystem<UOneBrahamSteamSubsystem>())
+		{
+			OnMatchResultReady.AddUniqueDynamic(Steam, &UOneBrahamSteamSubsystem::HandleMatchResult);
+		}
+	}
 }
 
 void AOneBrahamGameState::OnRep_MatchResult()

@@ -185,6 +185,7 @@ FOneBrahamPlayerSummary AOneBrahamPlayerState::MakeSummary() const
 {
 	FOneBrahamPlayerSummary Summary;
 	Summary.PlayerName = GetPlayerName();
+	Summary.PlayerId = GetPlayerId();
 	Summary.ArchetypeTag = ArchetypeTag;
 	Summary.Team = Team;
 	Summary.Kills = Kills;

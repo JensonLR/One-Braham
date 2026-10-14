@@ -147,6 +147,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Session")
 	void DestroyCurrentSession();
 
+	/** True while a matchmaking search is running (rich presence reads it). */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Session")
+	bool IsMatchmaking() const { return bMatchmakingActive; }
+
 	/**
 	 * Dedicated server: advertises this server on the online service so the
 	 * browser and matchmaking can find it. Called by AOneBrahamGameSession.

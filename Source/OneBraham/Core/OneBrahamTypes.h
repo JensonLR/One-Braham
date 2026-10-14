@@ -679,6 +679,10 @@ struct FOneBrahamPlayerSummary
 	UPROPERTY(BlueprintReadOnly, Category = "Stats")
 	FString PlayerName;
 
+	/** APlayerState::GetPlayerId: how a machine finds its own row. Names are not unique. */
+	UPROPERTY(BlueprintReadOnly, Category = "Stats")
+	int32 PlayerId = INDEX_NONE;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Stats")
 	FGameplayTag ArchetypeTag;
 

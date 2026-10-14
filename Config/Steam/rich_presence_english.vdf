@@ -1,0 +1,18 @@
+// ONE BRAHAM - Steam rich presence localisation (english).
+// Upload on the Steamworks partner site: Community > Rich Presence.
+// The game sets "steam_display" to one of these tokens and "floor" to the
+// player's floor; UOneBrahamSteamSubsystem::ComputePresence chooses which.
+"lang"
+{
+	"Language"	"english"
+	"Tokens"
+	{
+		"#Status_Menu"			"In the lobby"
+		"#Status_Searching"		"Looking for a match"
+		"#Status_Ascent"		"ASCENT - floor %floor% of 15"
+		"#Status_FireDrill"		"Running a FIRE DRILL"
+		"#Status_NightShift"	"On the NIGHT SHIFT"
+		"#Status_Spectating"	"Out of it, spectating"
+		"#Status_Results"		"Reading the results"
+	}
+}
