@@ -200,15 +200,53 @@ void AOneBrahamCharacter::Tick(float DeltaSeconds)
 		UpdateFloorIndex(DeltaSeconds);
 	}
 
-	// Anti-cheat speed reporting at 4 Hz. The client sends its own velocity so a
-	// modified client is *forced to lie*, which is detectable; a client that
-	// simply does not report is treated as suspicious by the server.
-	if (HasAuthority() && !IsLocallyControlled())
+	// Anti-cheat, both halves of it, at 4 Hz.
+	//
+	// The client's half: the machine that is actually simulating this pawn sends
+	// its own velocity. A client whose movement has been modified therefore has to
+	// choose between lying to the server - which is compared against the
+	// authoritative cap below - and going quiet, which is a violation in itself on
+	// the server's own clock. That is the whole reason the report exists: it is not
+	// that a cheat cannot lie, it is that it cannot cheaply do neither.
+	if (!HasAuthority() && IsLocallyControlled() && !bBotControlled)
+	{
+		ClientSpeedReportAccumulator += DeltaSeconds;
+		if (ClientSpeedReportAccumulator >= OneBrahamConstants::SpeedReportIntervalSeconds)
+		{
+			ClientSpeedReportAccumulator = 0.f;
+			ServerReportSpeed(GetVelocity().Size2D());
+		}
+	}
+
+	// The server's half: its own simulation against the cap, and the last report
+	// it heard against the clock.
+	if (HasAuthority() && !IsLocallyControlled() && !bBotControlled)
 	{
 		SpeedReportAccumulator += DeltaSeconds;
-		if (SpeedReportAccumulator >= 0.25f)
+		if (SpeedReportAccumulator >= OneBrahamConstants::SpeedReportIntervalSeconds)
 		{
 			SpeedReportAccumulator = 0.f;
+
+			const UWorld* World = GetWorld();
+			const float Now = World != nullptr ? World->GetTimeSeconds() : 0.f;
+
+			// Silence first: a pawn on the other end of a connection that has sent
+			// nothing for eight report intervals is not a pawn with a bad
+			// connection, it is a client that has stopped reporting.
+			if (LastClientSpeedReportTime > 0.f &&
+				(Now - LastClientSpeedReportTime) > OneBrahamConstants::MaxSpeedReportGapSeconds)
+			{
+				if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(GetController()))
+				{
+					PC->ReportViolation(FString::Printf(
+						TEXT("No movement report for %.1f s (expected every %.2f s)"),
+						Now - LastClientSpeedReportTime, OneBrahamConstants::SpeedReportIntervalSeconds), 3.f);
+				}
+
+				// Rate limit: the next flag is another full gap away, so a client
+				// with a genuinely broken report channel is not flagged 4x a second.
+				LastClientSpeedReportTime = Now;
+			}
 
 			const float ServerSpeed = GetVelocity().Size2D();
 			const float Allowed = OBCharacterMovement != nullptr ? OBCharacterMovement->GetAuthoritativeMaxSpeed() : 800.f;
@@ -1074,6 +1112,14 @@ void AOneBrahamCharacter::ServerOnRespawned()
 		return;
 	}
 
+	// A respawn is a fresh 4 Hz clock for the movement report as well: the client
+	// that was mid-hitch when it died must not be flagged for the second it spent
+	// on the death screen.
+	if (const UWorld* World = GetWorld())
+	{
+		LastClientSpeedReportTime = World->GetTimeSeconds();
+	}
+
 	ApplyLifeStateVisuals(EOneBrahamLifeState::Alive);
 
 	if (RagdollComponent != nullptr)
@@ -1351,9 +1397,15 @@ void AOneBrahamCharacter::ServerReportSpeed_Implementation(float ClientSpeed)
 		return;
 	}
 
-	// This is the client's self-report. If a modified client claims a speed above
-	// the authoritative cap, it is auto-flagged by the modified-client handshake
-	// (see Docs/18) but we also log it here for the audit trail.
+	// This is the client's self-report, and its arrival is also the heartbeat the
+	// silence check on the server's tick watches: a pawn whose owner stopped
+	// sending these is flagged on the server's own clock rather than on anything
+	// the client says.
+	if (const UWorld* World = GetWorld())
+	{
+		LastClientSpeedReportTime = World->GetTimeSeconds();
+	}
+
 	if (OBCharacterMovement == nullptr)
 	{
 		return;

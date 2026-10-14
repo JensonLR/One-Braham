@@ -89,7 +89,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | cpp_symbols | OK | 0.7 | 594 declarations, all defined; compile hygiene clean |
 | uht_contracts | OK | 1.5 | 816 UE reflection contracts, all satisfied |
 | soft_paths | OK | 0.0 | 37 soft paths, all conventional |
-| calls | OK | 0.3 | 903 call sites, all arities plausible |
+| calls | OK | 0.3 | 904 call sites, all arities plausible |
 | tags | OK | 0.4 | 6 resolvable tag requests and 147 documented tags, all declared |
 | layout | OK | 0.0 | 16 floors, map and layout agree |
 | voice_lines | OK | 0.0 | 42 line references, all declared and documented |

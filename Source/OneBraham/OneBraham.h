@@ -112,6 +112,20 @@ namespace OneBrahamConstants
 	/** Revive interaction time. */
 	static constexpr float ReviveSeconds = 4.5f;
 
+	/**
+	 * Interval between a client's anti-cheat speed reports, seconds (4 Hz).
+	 *
+	 * Both sides read this: the client to decide how often to send, the server to
+	 * decide how long a silence is worth flagging. One number, or a client could
+	 * pass its own report rate as compliance.
+	 */
+	static constexpr float SpeedReportIntervalSeconds = 0.25f;
+
+	/** A client that has not reported for this long is flagged. Eight missed
+	 *  reports at 4 Hz: long enough to survive a hitch, short enough to catch a
+	 *  client that has stopped reporting on purpose. */
+	static constexpr float MaxSpeedReportGapSeconds = 2.f;
+
 	/** Terminal override hold time (without a keycard). */
 	static constexpr float OverrideHoldSeconds = 12.f;
 

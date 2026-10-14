@@ -312,6 +312,19 @@ skipped:
 - [ ] Voice spam: hold push-to-talk for 60 seconds. The duck must not silence the
       match for everyone else.
 
+The movement report is the one anti-cheat channel that is deliberately two-sided.
+Every `OneBrahamConstants::SpeedReportIntervalSeconds` (250 ms, 4 Hz) the machine
+that is actually simulating a pawn sends its own velocity; the server compares
+that number against the authoritative cap it derives from the movement component
+(`GetAuthoritativeMaxSpeed()` times `MaxMovementSpeedTolerance`), and compares the
+clock against the last report it heard. `MaxSpeedReportGapSeconds` (2 s, eight
+missed intervals) of silence is itself a violation: a modified client can lie
+about its speed, and it can stop reporting, but it cannot cheaply do neither. The
+server takes the report as corroboration and never as evidence - a sustained
+overspeed in its *own* simulation snaps the pawn back to legal velocity and logs
+the violation, which is what the teleport and speed checkboxes below are really
+testing.
+
 ---
 
 ## 8. Regression policy

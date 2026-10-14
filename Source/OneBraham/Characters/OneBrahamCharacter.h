@@ -441,5 +441,18 @@ protected:
 private:
 	/** Accumulators for the 2 Hz/10 Hz subsystems. */
 	float FloorCheckAccumulator = 0.f;
+
+	/** Server: the accumulator for the 4 Hz authoritative movement check. */
 	float SpeedReportAccumulator = 0.f;
+
+	/** Client: the accumulator for the 4 Hz self-report. */
+	float ClientSpeedReportAccumulator = 0.f;
+
+	/**
+	 * Server: when this pawn last heard a speed report from the machine driving
+	 * it, on the world clock. Set when the pawn begins play, refreshed by
+	 * `ServerReportSpeed`, and the silence itself is the violation when it goes
+	 * stale.
+	 */
+	float LastClientSpeedReportTime = -1.f;
 };
