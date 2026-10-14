@@ -223,6 +223,35 @@ def frame_problems():
                       u"(Docs/09 section 1, OneBrahamConstants::FloorZ)", None))
 
     found.extend(loot_capacity_problems())
+    found.extend(rotator_problems())
+    return found
+
+
+#: `unreal.Rotator(a, b, c)` with plain positional numbers.
+POSITIONAL_ROTATOR = re.compile(
+    r'unreal\.Rotator\(\s*(-?[0-9.]+)\s*,\s*(-?[0-9.]+)\s*,\s*([^)]+?)\s*\)')
+
+
+def rotator_problems():
+    """No builder passes a pitch or a roll positionally.
+
+    unreal.Rotator's positional order is (roll, pitch, yaw). Written the C++
+    way round, (pitch, yaw, roll), a ceiling light aimed down shines sideways
+    and nothing errors: four calls in build_environment were like that. Only a
+    pure yaw, `Rotator(0.0, 0.0, yaw)`, is unambiguous enough to pass
+    positionally; anything else uses keywords.
+    """
+    found = []
+    tools = os.path.join(python_root, "Tools", "Python", "onebraham")
+    for name in sorted(os.listdir(tools)):
+        if not (name.startswith("build_") and name.endswith(".py")):
+            continue
+        text = io.open(os.path.join(tools, name), encoding="utf-8").read()
+        for match in POSITIONAL_ROTATOR.finditer(text):
+            if float(match.group(1)) != 0.0 or float(match.group(2)) != 0.0:
+                line = text[:match.start()].count("\n") + 1
+                found.append((u"{0}:{1} {2} passes roll/pitch positionally; unreal.Rotator is "
+                              u"(roll, pitch, yaw) - use keywords".format(name, line, match.group(0)), None))
     return found
 
 

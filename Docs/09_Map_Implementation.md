@@ -195,8 +195,18 @@ it *feels* like that.
 ### 2.8 Skydeck — floor 15
 
 **Layout.** 4800 × 4000 cm. Extraction pad (900 cm hold radius) marked in safety
-yellow, the winch rig, three air-handling units, four floodlight masts, a steel
-balustrade, planters, a winch control room.
+yellow, the winch rig, three air-handling units, four floodlight masts, planters,
+a winch control room. It has no ceiling and no glazing: it is the roof, open to
+the sky.
+
+**The edge.** A 110 cm frameless glass balustrade runs round all four sides,
+inset 40 cm from the slab edge. It is 72 `AOneBrahamBreakableGlass` panes from
+`skydeck_balustrade_panes()`, each about 240 cm wide. The glass breaks like any
+other pane, so shooting it out behind the holding squad makes the pad a cliff
+edge. A fall from the deck is lethal on landing (`AOneBrahamCharacter::Landed`).
+Anything that leaves the map entirely passes the level's KillZ, 1200 cm below
+the plaza, and dies through `FellOutOfWorld`. The curtain-wall facades stop at
+the underside of the deck slab.
 
 **Fights here.** The ending, and the only place the game deliberately holds a
 player still. The pad is exposed on three sides with cover on one: the AHU boxes.

@@ -246,6 +246,10 @@ ROOM_PROGRAMMES = {
     ],
 }
 
+# Rooms that are areas of open deck rather than enclosed rooms: no partitions,
+# no door, and the edge rails are where the balustrade runs.
+OPEN_AIR_ROOMS = {"Helipad", "Edge_Rail_North", "Edge_Rail_South"}
+
 # Anchors: named, gameplay-relevant positions per area. The manifest this script
 # writes is the authoritative list the C++ and Docs reference.
 ANCHORS = {
@@ -381,6 +385,10 @@ _current_build_level = [""]
 
 
 def _spawn(actor_class, location, rotation=None):
+    # unreal.Rotator's positional order is (roll, pitch, yaw), not the
+    # (pitch, yaw, roll) of FRotator in C++. Four calls here had it the C++
+    # way round: the ceiling lights shone sideways, the winch console faced the
+    # floor and the sun was rolled. Pass rotations by keyword.
     rot = rotation if rotation is not None else unreal.Rotator(0.0, 0.0, 0.0)
     actor = _actor_subsystem().spawn_actor_from_class(actor_class, location, rot)
     if actor is not None and _current_build_level[0]:
@@ -683,15 +691,20 @@ def build_floor_shell(report, floor_index, materials):
                   prefix + "_Slab")
 
     # --- Ceiling ----------------------------------------------------------
-    _box((origin_x, origin_y, z + C.CEILING_HEIGHT_CM + 10.0),
-         (size_x, size_y, 20.0), plaster, prefix + "_Ceiling")
-    _note_surface("Plasterboard", prefix + "_Ceiling")
+    # Not on the Skydeck: it is the roof, open to the sky, and the one floor
+    # where the weather is real. It used to get the office ceiling and the
+    # office glazing like every other floor, which made the ending of the game
+    # a sixteenth open-plan office with a helicopter pad painted on the carpet.
+    if area_name != "Skydeck":
+        _box((origin_x, origin_y, z + C.CEILING_HEIGHT_CM + 10.0),
+             (size_x, size_y, 20.0), plaster, prefix + "_Ceiling")
+        _note_surface("Plasterboard", prefix + "_Ceiling")
 
     # --- Perimeter glazing (the thing that makes the tower feel like a tower) --
     # Windows are placed as a bank rather than individually: the banded look of a
     # curtain-wall office is what sells the building from inside *and* it is what
     # makes a floor edge dangerous to walk near.
-    if area_name not in ("ServerComms", "Ground_Plaza"):
+    if area_name not in ("ServerComms", "Ground_Plaza", "Skydeck"):
         window_h = C.CEILING_HEIGHT_CM - 120.0
         _box((origin_x, origin_y - half_y, z + window_h / 2.0 + 60.0),
              (size_x - 200.0, 12.0, window_h), glass, prefix + "_Glazing_South")
@@ -716,6 +729,11 @@ def build_floor_shell(report, floor_index, materials):
     for room_name, rx, ry, rsx, rsy in rooms:
         cx = origin_x + rx
         cy = origin_y + ry
+
+        # Open-air rooms have no partitions: a helipad with plaster walls round
+        # it is a box, and an "edge rail" walled in plasterboard is not an edge.
+        if room_name in OPEN_AIR_ROOMS:
+            continue
 
         # Partitions around every room except its entrance side. Entrances are
         # placed facing the core, which is what makes every room approachable from
@@ -1354,7 +1372,7 @@ def build_extraction(report):
              "Winch_Console_Blockout", static=False)
     else:
         console = _spawn(console_class, unreal.Vector(console_x, console_y, console_z),
-                         unreal.Rotator(0.0, -90.0, 0.0))
+                         unreal.Rotator(roll=0.0, pitch=0.0, yaw=-90.0))
         if console is not None:
             _label(console, "Winch_Control_Console")
             try:
@@ -1410,7 +1428,7 @@ def build_lighting(report, floor_index):
             ly = origin_y - size_y / 2.0 + (iy + 0.5) * (size_y / grid_y)
 
             light = _spawn(unreal.RectLight, unreal.Vector(lx, ly, ceiling_z),
-                           unreal.Rotator(0.0, 0.0, -90.0))
+                           unreal.Rotator(roll=0.0, pitch=-90.0, yaw=0.0))  # facing down
             if light is None:
                 continue
 
@@ -1571,6 +1589,9 @@ def build_skydeck_climate(report):
     """
     deck_z = _floor_z(15)
 
+    build_skydeck_edge(report)
+    _set_kill_z(report, _floor_z(0) - 1200.0)
+
     sky = _spawn(unreal.SkyAtmosphere, unreal.Vector(0.0, 0.0, deck_z))
     if sky is None:
         report.failed("SkyAtmosphere", "could not spawn")
@@ -1578,7 +1599,7 @@ def build_skydeck_climate(report):
         _label(sky, "Sky_OneBraham")
 
     sun = _spawn(unreal.DirectionalLight, unreal.Vector(0.0, 0.0, deck_z + 2000.0),
-                 unreal.Rotator(-38.0, 145.0, 0.0))
+                 unreal.Rotator(roll=0.0, pitch=-38.0, yaw=145.0))
     if sun is not None:
         _label(sun, "Sun_London_Overcast")
         try:
@@ -1629,6 +1650,84 @@ def build_skydeck_climate(report):
             settings.set_editor_property("AutoExposureMaxBrightness", 1.6)
         except Exception as exc:  # noqa: BLE001
             report.failed("Post-process volume", str(exc))
+
+
+#: The Skydeck balustrade: frameless glass, 110 cm, the height a real roof
+#: terrace has. Breakable, because the fall is the deck's one environmental
+#: story: a squad that shoots out the glass behind the holding squad has made
+#: the pad a cliff edge, and Landed / FellOutOfWorld do the rest.
+BALUSTRADE_HEIGHT_CM = 110.0
+BALUSTRADE_PANE_WIDTH_CM = 240.0
+BALUSTRADE_INSET_CM = 40.0
+
+
+
+def skydeck_balustrade_panes():
+    """(pane id, centre x, centre y, yaw) for every pane round the deck edge.
+
+    Pure, so the engine-free check can see that the deck has an edge on all four
+    sides before an editor ever runs.
+    """
+    area = next(a for a in C.AREAS if a[0] == "Skydeck")
+    _name, _floors, cx, cy, size_x, size_y = C.area_centre(area)
+    half_x = size_x / 2.0 - BALUSTRADE_INSET_CM
+    half_y = size_y / 2.0 - BALUSTRADE_INSET_CM
+
+    panes = []
+    for side, (start, end, fixed, along_x) in (
+            ("North", (-half_x, half_x, cy + half_y, True)),
+            ("South", (-half_x, half_x, cy - half_y, True)),
+            ("East", (-half_y, half_y, cx + half_x, False)),
+            ("West", (-half_y, half_y, cx - half_x, False))):
+        length = end - start
+        count = max(1, int(round(length / BALUSTRADE_PANE_WIDTH_CM)))
+        width = length / count
+        for index in range(count):
+            along = start + (index + 0.5) * width
+            if along_x:
+                panes.append(("Pane_Skydeck_{0}_{1:02d}".format(side, index), cx + along, fixed, 0.0, width))
+            else:
+                panes.append(("Pane_Skydeck_{0}_{1:02d}".format(side, index), fixed, cy + along, 90.0, width))
+    return panes
+
+
+def build_skydeck_edge(report):
+    """Places the deck's glass balustrade as AOneBrahamBreakableGlass panes."""
+    glass_class = getattr(unreal, "OneBrahamBreakableGlass", None)
+    if glass_class is None:
+        report.failed("Skydeck balustrade", "OneBrahamBreakableGlass is not reflected; compile the module first")
+        return []
+
+    deck_z = _floor_z(C.FLOOR_COUNT)
+    placed = []
+    for pane_id, x, y, yaw, width in skydeck_balustrade_panes():
+        actor = _spawn(glass_class, unreal.Vector(x, y, deck_z + BALUSTRADE_HEIGHT_CM / 2.0),
+                       unreal.Rotator(0.0, 0.0, yaw))
+        if actor is None:
+            continue
+
+        _label(actor, pane_id)
+        try:
+            actor.set_editor_property("PaneId", unreal.Name(pane_id))
+            actor.set_editor_property("PaneSizeCm", unreal.Vector2D(width, BALUSTRADE_HEIGHT_CM))
+            actor.set_editor_property("FloorIndex", C.FLOOR_COUNT)
+        except Exception as exc:  # noqa: BLE001
+            report.failed(pane_id, str(exc))
+            continue
+        placed.append(pane_id)
+
+    C.log(u"  Skydeck: {0} balustrade panes".format(len(placed)))
+    return placed
+
+
+def _set_kill_z(report, kill_z):
+    """Below the plaza, so anything that leaves the map dies rather than falling
+    for ever; FellOutOfWorld turns it into a death the kill feed can name."""
+    try:
+        settings = _editor_world().get_world_settings()
+        settings.set_editor_property("kill_z", kill_z)
+    except Exception as exc:  # noqa: BLE001
+        report.failed("KillZ", str(exc))
 
 
 # ===========================================================================
@@ -1686,11 +1785,17 @@ def build_persistent_level(report, materials, manifest):
     # mass rather than fifteen stacked bands: the interior floors have their own
     # glazing, and this is the silhouette the players see in the trailer.
     glass = materials.get("BallisticGlass") or materials.get("Glass")
-    total_height = (C.FLOOR_COUNT + 1) * C.FLOOR_HEIGHT_CM
-    _box((0.0, -4200.0, total_height / 2.0 - 400.0), (8600.0, 60.0, total_height), glass, "Facade_South")
-    _box((0.0, 4200.0, total_height / 2.0 - 400.0), (8600.0, 60.0, total_height), glass, "Facade_North")
-    _box((-4400.0, 0.0, total_height / 2.0 - 400.0), (60.0, 8600.0, total_height), glass, "Facade_West")
-    _box((4400.0, 0.0, total_height / 2.0 - 400.0), (60.0, 8600.0, total_height), glass, "Facade_East")
+    # From the plaza to the underside of the Skydeck slab and no higher: the
+    # curtain wall used to run a storey past the deck, so the roof was a glass
+    # box and nobody could see out of the ending or fall off it.
+    facade_bottom = _floor_z(0)
+    facade_top = _floor_z(C.FLOOR_COUNT) - 20.0
+    total_height = facade_top - facade_bottom
+    facade_z = facade_bottom + total_height / 2.0
+    _box((0.0, -4200.0, facade_z), (8600.0, 60.0, total_height), glass, "Facade_South")
+    _box((0.0, 4200.0, facade_z), (8600.0, 60.0, total_height), glass, "Facade_North")
+    _box((-4400.0, 0.0, facade_z), (60.0, 8600.0, total_height), glass, "Facade_West")
+    _box((4400.0, 0.0, facade_z), (60.0, 8600.0, total_height), glass, "Facade_East")
 
     # --- Ground: the plaza and Aldgate ------------------------------------
     # Asphalt, kerbs, a road with markings, and the low buildings opposite:
@@ -1855,7 +1960,7 @@ def build_fire_drill_arena(report, materials):
     for ix in range(-2, 3):
         for iy in range(-3, 4):
             light = _spawn(unreal.RectLight, unreal.Vector(ix * 1000.0, iy * 1000.0, 380.0),
-                           unreal.Rotator(0.0, 0.0, -90.0))
+                           unreal.Rotator(roll=0.0, pitch=-90.0, yaw=0.0))  # facing down
             if light is None:
                 continue
             try:
