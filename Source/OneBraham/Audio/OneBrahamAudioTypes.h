@@ -181,13 +181,40 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Bank|Mix")
 	FVector2D DownedLowPassRange = FVector2D(900.f, 20000.f);
 
-	/** Music beds by director state. Null entries simply mean "keep playing". */
+	/**
+	 * The cue each director state plays.
+	 *
+	 * Cue ids, not soft pointers, because a bed is played by id: the authoring
+	 * route for music is the row for `MUS_MatchMid` in `Entries` (or the wave the
+	 * recording brief names), the same route every other cue in the game uses.
+	 * This map used to hold soft object paths instead, with no reader anywhere -
+	 * a second mechanism for something that already had one.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Bank|Music")
-	TMap<EOneBrahamMusicState, TSoftObjectPtr<USoundBase>> MusicByState;
+	TMap<EOneBrahamMusicState, FName> MusicCueByState;
 
-	/** Loop beds by zone id (see the map spec in Docs/08_Map_Implementation.md). */
+	/** The cue for a director state; the lobby bed for a state we do not know. */
+	FName GetMusicCueForState(EOneBrahamMusicState State) const;
+
+	/**
+	 * Zone id -> the cue that plays in it.
+	 *
+	 * The zone ids are the building layout's area ids - Ground_Plaza, Lobby,
+	 * Mezzanine, OpenPlan, ServerComms, Executive, Canteen, Skydeck - plus
+	 * Stairwell, because that is where you are between two of them. They are the
+	 * same ids OneBrahamBuildingLayoutAsset returns, so the audio director cannot
+	 * end up with a vocabulary of its own: this table and the layout are checked
+	 * against each other by `check_audio_ids.py`.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Bank|Ambience")
-	TMap<FName, TSoftObjectPtr<USoundBase>> AmbienceByZone;
+	TMap<FName, FName> AmbienceCueByZone;
+
+	/** The zone used when a floor has no area: the stairwell. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio Bank|Ambience")
+	FName AmbienceFallbackZone = FName(TEXT("Stairwell"));
+
+	/** The cue id for a zone; the generic city bed for a zone we do not know. */
+	FName GetAmbienceCueForZone(FName ZoneId) const;
 
 	/** Finds a row. Returns null when the id is not in the bank. */
 	const FOneBrahamSoundBankEntry* FindEntry(FName SoundId) const;

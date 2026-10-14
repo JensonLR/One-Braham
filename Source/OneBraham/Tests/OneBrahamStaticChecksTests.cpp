@@ -54,7 +54,8 @@ namespace
 		{ TEXT("check_doc_types"),     TEXT("every type name the documentation uses is a type this project declares") },
 		{ TEXT("check_weapon_ids"),    TEXT("the armoury table, the loot spawn table, the default loadout and Docs/05 are one list") },
 		{ TEXT("check_cosmetic_ids"),  TEXT("the wardrobe, the compiled-in slots, the starter outfit and Docs/13 are one wardrobe") },
-		{ TEXT("check_hud_strings"),   TEXT("the HUD's copy table, the builder that writes it and the keys the code reads are one list") }
+		{ TEXT("check_hud_strings"),   TEXT("the HUD's copy table, the builder that writes it and the keys the code reads are one list") },
+		{ TEXT("check_audio_ids"),     TEXT("the cue list: the bank, the synthesiser, the audio builder's beds and the briefs in Docs/12 are one list") }
 
 		// Deliberately absent: validate_project.py, and check_soft_paths.py in its
 		// full (non-config) form. Both shell out to UnrealBuildTool or UnrealPak,

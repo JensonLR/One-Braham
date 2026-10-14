@@ -1623,6 +1623,34 @@ def check_weapon_ids(v, _config_only):
         v.fail("weapon ids", u"[{0}] {1}".format(kind, message))
 
 
+def check_audio_ids(v, _config_only):
+    """Every cue the game can ask for exists, is heard, or is written down.
+
+    Four files describe the audio and they disagreed: the bank (126 rows), the
+    synthesiser's whitelist (which named three cues nothing plays while reporting
+    the hit marker, kill confirm and low-ammo tick as silent), the audio builder's
+    bed lists, and Docs/12 (which named ten cues the bank has never contained).
+    """
+    try:
+        from onebraham import check_audio_ids
+    except Exception as exc:  # noqa: BLE001
+        v.warn("audio ids", u"checker unavailable: {0}".format(exc))
+        return
+
+    checked, problems = check_audio_ids.run()
+
+    if not problems:
+        rows = check_audio_ids.bank_rows()
+        known = check_audio_ids.synthesised_ids()
+        audible = sum(1 for r in rows if check_audio_ids.is_synthesised(r, known))
+        v.pass_("audio ids", u"{0} checks: {1} cues, {2} synthesised, {3} briefed".format(
+            checked, len(rows), audible, len(rows) - audible))
+        return
+
+    for message, kind in problems:
+        v.fail("audio ids", u"[{0}] {1}".format(kind, message))
+
+
 def check_hud_strings(v, _config_only):
     """The HUD's copy table is real and every row is shown by something.
 
@@ -1810,6 +1838,7 @@ def build_all(config_only=False):
         ("weapon ids", check_weapon_ids),
         ("cosmetic ids", check_cosmetic_ids),
         ("hud strings", check_hud_strings),
+        ("audio ids", check_audio_ids),
     ]
 
     for label, fn in checks:

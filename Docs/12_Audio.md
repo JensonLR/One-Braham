@@ -120,22 +120,45 @@ continuous change rather than a switch.
 
 ## 4. Ambience beds (11)
 
-| Id | Where | What it is |
-| --- | --- | --- |
-| `AMB_Plaza` | ground | traffic, weather, a door somewhere |
-| `AMB_Lobby` | floor 1 | the atrium's own hum, two lifts, a tannoy at rest |
-| `AMB_Mezzanine` | floor 2 | carpet, one printer, a conversation two rooms away |
-| `AMB_OpenPlan` | 3–8 | fluorescent hum, keyboards, a distant meeting |
-| `AMB_ServerRoom` | 9–11 | fans. Very loud. This is a deliberate in-game disadvantage |
-| `AMB_Executive` | 12 | near-silence, air handling, a clock |
-| `AMB_Canteen` | 13–14 | extraction hood, trolley wheels, cutlery |
-| `AMB_Stairwell` | all | wind down the shaft, doors, footsteps from other floors |
-| `AMB_Skydeck` | 15 | wind, the decking flexing, London below |
-| `AMB_LiftShaft` | core | motors through the wall, cable, a car passing |
-| `AMB_AlarmBed` | any | the fire alarm, on its own bus, layered over everything else |
+One bed per place the audio director can be standing in. The ids, the briefs and
+the mix levels live in `Tools/Python/onebraham/build_audio.py` (`AMBIENCE`) and in
+the bank's core table; the zone each one plays in is the building layout's own
+area id, because a room is described in one place in this project.
 
-The alarm bed is not a one-shot. It loops for as long as the lockdown lasts, at
-a level that makes speech uncomfortable — which is the point of an alarm.
+| Id | Zone (layout area id) | What it is |
+| --- | --- | --- |
+| `AMB_Plaza_Street` | `Ground_Plaza` | Aldgate traffic, buses, rain on the canopy |
+| `AMB_Lobby` | `Lobby` | marble hall: footstep reverb tail, reception hum |
+| `AMB_Lift_Lobby` | `Mezzanine` | lift motors, chimes, the draught of a shaft |
+| `AMB_Office_Hum` | `OpenPlan` | HVAC, monitors, the odd chair |
+| `AMB_Server_Room` | `ServerComms` | a fan wall, cold-aisle rush, alarm chirps. Very loud, and a deliberate in-game disadvantage |
+| `AMB_Executive` | `Executive` | near-silence, distant lifts, a clock |
+| `AMB_Canteen` | `Canteen` | extractor hoods, fridges, distant clatter |
+| `AMB_Skydeck_Wind` | `Skydeck` | wind past the parapet, the city far below |
+| `AMB_Stairwell_Door` | `Stairwell` (and any floor with no area) | a concrete tube, fire doors, your own breathing |
+| `AMB_Plaza_Rain` | — | rain on glass, drains, a wet forecourt. Layered over the street bed when it rains |
+| `AMB_London_Bed` | any unknown zone | the generic city bed. A zone nobody mapped plays this rather than nothing |
+
+All eleven are **synthesised** today: `OneBrahamProceduralAudio.cpp` holds a
+recipe per bed (noise colour, two plant tones, one repeating event, a gust) and
+bakes a seamless loop, so no room in the building is ever silent, with content or
+without. A recorded wave at
+`/Game/OneBraham/Audio/Ambience/<Id>` replaces the synthesis the moment it
+exists.
+
+The fire alarm is not a bed of its own. It is `SFX_FireAlarm`, held on the
+lockdown bed by the manager for as long as the stage lasts, at a level that makes
+speech uncomfortable — which is the point of an alarm.
+
+### The zone table, and why it is checked
+
+`AmbienceCueByZone` on `DA_AudioBank` maps the layout's area ids to these beds.
+It has been the weak point of this system twice: it was once keyed
+`Zone_Plaza`/`Zone_Office`/`Zone_ServerRoom`, a third vocabulary nothing else in
+the project used, and the audio manager carried a fourth (`Plaza`, `Offices`,
+`ServerRoom`) in a setter that nothing called. `check_audio_ids.py` now compares
+the table, the layout asset and the manager: one area id per bed, no orphans in
+either direction.
 
 ---
 
@@ -212,7 +235,7 @@ sprint produces loud, close ones, with no asset duplication.
 | Carpet, Fabric | `SFX_Footstep_Carpet` | absorbed, short |
 | Concrete, Plasterboard | `SFX_Footstep_Hard` | pitch −6% |
 | Metal, Grating, Decking, ServerRack | `SFX_Footstep_Metal` | the giveaway surface |
-| Glass, BallisticGlass | `SFX_Step_Glass` | creak and crunch |
+| Glass, BallisticGlass | `SFX_Footstep_Hard` | creak and crunch. The break itself is `SFX_Window_Break`, played as a one-shot, not as a footstep |
 | Wood | `SFX_Footstep_Hard` | pitch −10% |
 | Puddle | `SFX_Footstep_Water` | splash, plus a wet footprint decal |
 
@@ -254,6 +277,70 @@ The briefs are the shopping list. Each one specifies duration, character,
 frequency target, and what it must *communicate* — because "record a shutter
 sound" produces a shutter sound nobody can locate in a building.
 
+
+### The rest of the shipping list
+
+Every other cue in `DA_AudioBank` that has neither a wave nor a synthesis. These
+are one line each because the first twenty above are the ones worth a
+conversation; the point of listing them is that no cue in the bank is
+undocumented. `check_audio_ids.py` enforces exactly that: every row is either
+synthesised or named in this document.
+
+| Cue | Brief |
+| --- | --- |
+| `SFX_Land_Soft` | 0.35 s. Feet meeting carpet or a raised floor. Quiet by design: landing softly should cost you nothing |
+| `SFX_Land_Hard` | 0.45 s. Two feet and a grunt on concrete. Every player within 25 m should look up |
+| `SFX_Mantle` | 0.55 s. Fabric on a ledge, one scuff, one breath. Should be locatable to a wall |
+| `SFX_Slide` | 0.70 s. Boot rubber over a smooth floor, rising then released |
+| `SFX_Crouch_Down` | 0.25 s. Knees, one creak of a strap. Audible at 6 m |
+| `SFX_Crouch_Up` | 0.22 s. The same in reverse, ending on a step |
+| `SFX_Cloth_Move` | loopable. A jacket shifting on its owner. Sits under footsteps and is never louder than them |
+| `SFX_Gear_Rattle` | 0.5 s. Webbing and a magazine in a pouch. The sound that gives away a sprint |
+| `SFX_DryFire` | 0.12 s. Firing pin on an empty chamber, close-mic'd. Must cut through a firefight |
+| `SFX_Weapon_Draw` | 0.35 s. Sling tension, fabric, the slide of a holster |
+| `SFX_Shell_Drop` | 0.3 s per shell. Brass on carpet should be almost nothing; brass on metal should be a giveaway |
+| `SFX_FireMode_Switch` | 0.2 s. A selector detent, two clicks apart |
+| `SFX_Laser_On` | 0.15 s. A click and a faint high whine. The whine is the tell |
+| `SFX_Laser_Off` | 0.12 s. The whine gone, the click after it |
+| `SFX_Melee_Swing` | 0.3 s. Air and a sleeve. The impact is `SFX_Melee_Thud` |
+| `SFX_Bullet_Impact_Concrete` | 0.4 s. Chip and dust. The default impact for most of this building |
+| `SFX_Bullet_Impact_Metal` | 0.5 s. A bright ring with a short tail. Server floor and stairwells |
+| `SFX_Bullet_Impact_Wood` | 0.4 s. A dull knock with splinters |
+| `SFX_Bullet_Impact_Glass` | 0.6 s. Crack, then a scatter of fragments on a hard floor |
+| `SFX_Bullet_Impact_Carpet` | 0.25 s. Almost nothing: fibre and a thud. The quietest surface to be shot into |
+| `SFX_Bullet_Impact_Flesh` | 0.3 s. Wet, close, and unpleasant. It should be instantly distinguishable from armour |
+| `SFX_Bullet_Whizz` | 0.2 s. A near-miss. Doppler a little, so direction is readable |
+| `SFX_Helmet_Ping` | 0.25 s. A round glancing off a hard hat. Dryly comic, played completely straight |
+| `SFX_Utility_Throw` | 0.2 s. A full-body throw: cloth, a grunt, the object released |
+| `SFX_Medkit_Use` | 0.6 s. Zip, tape, a breath. The meal-deal wrapper is this cue |
+| `SFX_Medkit_Complete` | 0.4 s. A satisfied breath and a pack being stood on |
+| `SFX_Revive_Start` | 0.3 s. Knee down on the floor beside someone. The rest of the revive is `SFX_Bandage_Loop` |
+| `SFX_Bandage_Loop` | loopable at any pitch. Dressing on a wound, used for the 4.5 s revive hold |
+| `SFX_Door_Open` | 0.9 s. Office door on a soft-close arm, seal dragging. Location within half a metre |
+| `SFX_Door_Close` | 0.7 s. The same door, closing, with a latch |
+| `SFX_Door_Locked` | 0.4 s. A handle that stops, and a badge reader refusing. This is the sound of a plan failing |
+| `SFX_Lift_Arrive` | 1.1 s. A car settling and a chime. Two notes, not one: a single note reads as a microwave |
+| `SFX_Lift_Doors` | 1.4 s. Runners, then a draught of shaft air |
+| `SFX_Power_Down` | 1.8 s. A plant room spinning down: floor hum falling a fifth |
+| `UI_Damage_Taken` | 0.2 s. A short low thud in the head, not a sting. Should never be confused with the hit marker |
+| `UI_LowHealth` | loopable. A thin filtered tone under everything below 30 HP. Annoying on purpose |
+| `UI_Banner` | 0.35 s. A soft tick for a line of text arriving. Nothing more |
+| `UI_Countdown` | 0.3 s per tick, rising for the last three. The extraction hold is this cue |
+| `UI_Objective_Capture` | 0.9 s. A resolved pair of notes. The only cue in the game allowed to sound pleased |
+| `UI_Objective_Lost` | 0.9 s. The same interval, flattened |
+| `UI_Match_Win` | 1.2 s. Three notes, resolving. It should sound earned, not triumphant |
+| `UI_Match_Lose` | 1.2 s. The same three notes, the last one left hanging |
+| `UI_LevelUp` | 1.0 s. The account layer, not the match: warmer than anything else in the game |
+| `UI_Unlock` | 0.8 s. A drawer opening. Cosmetics are the reward, not a fanfare |
+| `UI_Voice_Connected` | 0.4 s. Radio on, a click in the ear |
+| `UI_Voice_Disconnected` | 0.4 s. The same click, closed |
+| `UI_Voice_ChannelSwitch` | 0.2 s. One detent, higher for squad, lower for proximity, so the channel is readable without looking |
+| `UI_Voice_Muted` | 0.2 s. A dead click. Somebody has stopped listening |
+| `UI_Voice_Radio_Open` | 0.15 s. Push to talk down. Sits under the first syllable, never on top of it |
+| `UI_Voice_Radio_Close` | 0.15 s. Push to talk up |
+| `UI_TeamPing` | 0.35 s. A two-note mark, played from the ping's world position |
+| `UI_Ping_Enemy` | 0.35 s. The same figure a third up and sharper. Enemy is a different word, not a louder one |
+
 The 20 cues with the highest gameplay value, in the order they should be
 recorded:
 
@@ -276,9 +363,9 @@ recorded:
 | 15 | `SFX_Keycard_Use` | 0.3 s reader chirp |
 | 16 | `SFX_Footstep_Carpet` | 0.2 s, dull, must be nearly inaudible past 6 m |
 | 17 | `SFX_Gunshot_Suppressed` | 0.5 s, mechanical action dominant, must be unlocatable past 30 m |
-| 18 | `SFX_Glass_Shatter` / `SFX_Window_Break` | 1.5 s, office partition, cascading |
+| 18 | `SFX_Window_Break` | 1.5 s, office partition, cascading |
 | 19 | `SFX_Security_Purge` | 12 s, rising, hostile, industrial |
-| 20 | `SFX_Meal_Deal` | 0.6 s. Plastic tray. This is the one sound in the game that is allowed to be funny, for exactly one second |
+| 20 | `SFX_Medkit_Use` | 0.6 s. Zip, then tape. The meal deal's wrapper is this cue: it is the one sound in the game allowed to be funny, for exactly one second |
 
 ---
 

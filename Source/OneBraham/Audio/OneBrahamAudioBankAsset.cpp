@@ -32,6 +32,27 @@ namespace
 	}
 }
 
+FName UOneBrahamAudioBankAsset::GetMusicCueForState(EOneBrahamMusicState State) const
+{
+	const FName* Found = MusicCueByState.Find(State);
+
+	return Found != nullptr ? *Found : FName(TEXT("MUS_Lobby"));
+}
+
+FName UOneBrahamAudioBankAsset::GetAmbienceCueForZone(FName ZoneId) const
+{
+	const FName* Found = AmbienceCueByZone.Find(ZoneId);
+
+	if (Found == nullptr)
+	{
+		// The generic city bed rather than silence: an unknown zone is a bug, but
+		// a bug the player hears as "outside", not as a dead room.
+		return FName(TEXT("AMB_London_Bed"));
+	}
+
+	return *Found;
+}
+
 const FOneBrahamSoundBankEntry* UOneBrahamAudioBankAsset::FindEntry(FName SoundId) const
 {
 	return Entries.FindByPredicate([SoundId](const FOneBrahamSoundBankEntry& Entry)
@@ -206,44 +227,51 @@ void UOneBrahamAudioBankAsset::EnsureCoreEntries()
 		}
 	}
 
-	// Music bed wiring: point the director states at the minted ids so the asset
-	// works even when a designer only pressed "Ensure Core Entries".
-	if (MusicByState.Num() == 0)
+	// Ambience by zone: the building layout's own area ids, plus the stairwell.
+	//
+	// This used to be keyed Zone_Plaza, Zone_Office, ... - a third vocabulary
+	// that neither the map nor the layout nor the audio manager used. The manager
+	// had a fourth (bare "Plaza", "Offices", "ServerRoom"), nothing called the
+	// setter that read either, and the beds themselves were briefs with no
+	// synthesis, so the building had no ambience at all. One vocabulary now, and
+	// it is the layout's.
+	if (AmbienceCueByZone.Num() == 0)
 	{
-		MusicByState.Add(EOneBrahamMusicState::Lobby,		TSoftObjectPtr<USoundBase>(FSoftObjectPath(TEXT("/Game/OneBraham/Audio/Music/MUS_Lobby.MUS_Lobby"))));
-		MusicByState.Add(EOneBrahamMusicState::MatchEarly,	TSoftObjectPtr<USoundBase>(FSoftObjectPath(TEXT("/Game/OneBraham/Audio/Music/MUS_MatchEarly.MUS_MatchEarly"))));
-		MusicByState.Add(EOneBrahamMusicState::MatchMid,	TSoftObjectPtr<USoundBase>(FSoftObjectPath(TEXT("/Game/OneBraham/Audio/Music/MUS_MatchMid.MUS_MatchMid"))));
-		MusicByState.Add(EOneBrahamMusicState::MatchLate,	TSoftObjectPtr<USoundBase>(FSoftObjectPath(TEXT("/Game/OneBraham/Audio/Music/MUS_MatchLate.MUS_MatchLate"))));
-		MusicByState.Add(EOneBrahamMusicState::Lockdown,	TSoftObjectPtr<USoundBase>(FSoftObjectPath(TEXT("/Game/OneBraham/Audio/Music/MUS_Lockdown.MUS_Lockdown"))));
-		MusicByState.Add(EOneBrahamMusicState::Extraction,	TSoftObjectPtr<USoundBase>(FSoftObjectPath(TEXT("/Game/OneBraham/Audio/Music/MUS_Extraction.MUS_Extraction"))));
-		MusicByState.Add(EOneBrahamMusicState::Downed,		TSoftObjectPtr<USoundBase>(FSoftObjectPath(TEXT("/Game/OneBraham/Audio/Music/MUS_Downed.MUS_Downed"))));
-		MusicByState.Add(EOneBrahamMusicState::Results,		TSoftObjectPtr<USoundBase>(FSoftObjectPath(TEXT("/Game/OneBraham/Audio/Music/MUS_Results.MUS_Results"))));
-	}
-
-	// Ambience by zone id: exactly the eight playable areas plus the stairwell.
-	if (AmbienceByZone.Num() == 0)
-	{
-		const TPair<FName, const TCHAR*> Defaults[] = {
-			{ TEXT("Zone_Plaza"),		TEXT("AMB_Plaza_Street") },
-			{ TEXT("Zone_Lobby"),		TEXT("AMB_Lobby") },
-			{ TEXT("Zone_Mezzanine"),	TEXT("AMB_Lift_Lobby") },
-			{ TEXT("Zone_Office"),		TEXT("AMB_Office_Hum") },
-			{ TEXT("Zone_Server"),		TEXT("AMB_Server_Room") },
-			{ TEXT("Zone_Executive"),	TEXT("AMB_Executive") },
-			{ TEXT("Zone_Canteen"),		TEXT("AMB_Canteen") },
-			{ TEXT("Zone_Skydeck"),		TEXT("AMB_Skydeck_Wind") },
-			{ TEXT("Zone_Stairwell"),	TEXT("AMB_Stairwell_Door") }
+		const TPair<FName, const TCHAR*> ZoneCues[] = {
+			{ TEXT("Ground_Plaza"), TEXT("AMB_Plaza_Street") },
+			{ TEXT("Lobby"),        TEXT("AMB_Lobby") },
+			{ TEXT("Mezzanine"),    TEXT("AMB_Lift_Lobby") },
+			{ TEXT("OpenPlan"),     TEXT("AMB_Office_Hum") },
+			{ TEXT("ServerComms"),  TEXT("AMB_Server_Room") },
+			{ TEXT("Executive"),    TEXT("AMB_Executive") },
+			{ TEXT("Canteen"),      TEXT("AMB_Canteen") },
+			{ TEXT("Skydeck"),      TEXT("AMB_Skydeck_Wind") },
+			{ TEXT("Stairwell"),    TEXT("AMB_Stairwell_Door") }
 		};
 
-		for (const TPair<FName, const TCHAR*>& Pair : Defaults)
+		for (const TPair<FName, const TCHAR*>& Pair : ZoneCues)
 		{
-			const FName BedId = Pair.Value;
-			const FOneBrahamSoundBankEntry* Entry = FindEntry(BedId);
-			if (Entry != nullptr && Entry->Sound.IsValid())
-			{
-				AmbienceByZone.Add(Pair.Key, Entry->Sound);
-			}
+			AmbienceCueByZone.Add(Pair.Key, FName(Pair.Value));
 		}
+	}
+
+	// The stairwell is not a floor: it is the concrete between two of them, so
+	// the layout has no area id for it and the director uses it whenever a floor
+	// has no area at all.
+	AmbienceFallbackZone = FName(TEXT("Stairwell"));
+
+	// Music bed wiring: the director states point at the minted cue ids, so the
+	// asset works the moment a designer presses "Ensure Core Entries".
+	if (MusicCueByState.Num() == 0)
+	{
+		MusicCueByState.Add(EOneBrahamMusicState::Lobby,      FName(TEXT("MUS_Lobby")));
+		MusicCueByState.Add(EOneBrahamMusicState::MatchEarly, FName(TEXT("MUS_MatchEarly")));
+		MusicCueByState.Add(EOneBrahamMusicState::MatchMid,   FName(TEXT("MUS_MatchMid")));
+		MusicCueByState.Add(EOneBrahamMusicState::MatchLate,  FName(TEXT("MUS_MatchLate")));
+		MusicCueByState.Add(EOneBrahamMusicState::Lockdown,   FName(TEXT("MUS_Lockdown")));
+		MusicCueByState.Add(EOneBrahamMusicState::Extraction, FName(TEXT("MUS_Extraction")));
+		MusicCueByState.Add(EOneBrahamMusicState::Downed,     FName(TEXT("MUS_Downed")));
+		MusicCueByState.Add(EOneBrahamMusicState::Results,    FName(TEXT("MUS_Results")));
 	}
 
 	// Resolve the mix assets the audio manager expects. These are created by the
@@ -299,24 +327,48 @@ bool UOneBrahamAudioBankAsset::ValidateBank(TArray<FString>& OutProblems) const
 				*Entry.SoundId.ToString()));
 		}
 
-		if (Entry.Category != EOneBrahamAudioCategory::Interface && Entry.MaxDistanceCm <= 0.f)
+		// A 2D cue has no distance by design. Interface and Loop are the two 2D
+		// categories - UI is heard in the head, a bed is the room - so this rule
+		// used to report all eleven ambience beds and all eight music beds as
+		// broken, on top of the silent-cue report for the same rows.
+		const bool bIs2D = Entry.Category == EOneBrahamAudioCategory::Interface
+			|| Entry.Category == EOneBrahamAudioCategory::Loop;
+
+		if (!bIs2D && Entry.MaxDistanceCm <= 0.f)
 		{
 			OutProblems.Add(FString::Printf(TEXT("'%s' is positional but has MaxDistanceCm = 0."),
 				*Entry.SoundId.ToString()));
 		}
 	}
 
-	// Every music state must name a track, otherwise the director silently keeps
-	// whatever is already playing and the match never changes mood.
+	// Every music state must name a cue that exists, otherwise the director
+	// silently keeps whatever is already playing and the match never changes
+	// mood. This used to ask for a soft object path in a second map with no
+	// reader; the cue is what actually gets played, so the cue is what is checked.
 	for (uint8 StateIndex = 0; StateIndex <= static_cast<uint8>(EOneBrahamMusicState::Results); ++StateIndex)
 	{
 		const EOneBrahamMusicState State = static_cast<EOneBrahamMusicState>(StateIndex);
-		const TSoftObjectPtr<USoundBase>* Found = MusicByState.Find(State);
+		const FName* Found = MusicCueByState.Find(State);
 
-		if (Found == nullptr || Found->ToSoftObjectPath().IsNull())
+		if (Found == nullptr || Found->IsNone())
 		{
-			OutProblems.Add(FString::Printf(TEXT("Music state '%s' has no track assigned."),
+			OutProblems.Add(FString::Printf(TEXT("Music state '%s' has no cue id."),
 				*UEnum::GetDisplayValueAsText(State).ToString()));
+		}
+		else if (FindEntry(*Found) == nullptr)
+		{
+			OutProblems.Add(FString::Printf(TEXT("Music state '%s' plays '%s', which is not a bank row."),
+				*UEnum::GetDisplayValueAsText(State).ToString(), *Found->ToString()));
+		}
+	}
+
+	// Every zone must name a cue that exists, for the same reason.
+	for (const TPair<FName, FName>& Pair : AmbienceCueByZone)
+	{
+		if (FindEntry(Pair.Value) == nullptr)
+		{
+			OutProblems.Add(FString::Printf(TEXT("Zone '%s' plays '%s', which is not a bank row."),
+				*Pair.Key.ToString(), *Pair.Value.ToString()));
 		}
 	}
 

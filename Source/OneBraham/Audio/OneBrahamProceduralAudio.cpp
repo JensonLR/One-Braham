@@ -402,6 +402,158 @@ namespace OneBrahamProceduralAudio
 		return false;
 	}
 
+	// -----------------------------------------------------------------------
+	//  Ambience beds
+	//
+	//  A room with no bed is a silent room, and in a game where everything a
+	//  player knows about a fight two floors up arrives as sound, a silent room
+	//  is a broken room. This is one parameterised recipe rather than eleven
+	//  hand-written loops: a zone is a small set of numbers saying what its air
+	//  is doing, which is how Docs/12 describes the beds anyway.
+	//
+	//  An authored wave at the path the bank names always wins. These are what
+	//  plays until then, and on a fresh clone they are the difference between an
+	//  empty building and One Braham at four in the afternoon.
+	// -----------------------------------------------------------------------
+	struct FAmbienceRecipe
+	{
+		/** Bed length. Long enough that the loop point is inaudible. */
+		float Duration = 6.f;
+
+		/** Noise colour: 0 = a dark rumble, 1 = bright hiss (rain, fan walls). */
+		float Colour = 0.5f;
+		float NoiseLevel = 0.5f;
+
+		/** Two continuous tones: plant hum, extractor, wind sub. */
+		float ToneLowHz = 0.f;
+		float ToneHighHz = 0.f;
+		float ToneLevel = 0.f;
+
+		/** A repeating event: a lift arriving, a clock, a fridge cycling, a
+		 *  distant room alarm. A period of 0 disables it. */
+		float EventPeriodSeconds = 0.f;
+		float EventHz = 0.f;
+		float EventLevel = 0.f;
+
+		/** Slow gust on the noise layer, so the bed breathes. 0 = steady. */
+		float GustHz = 0.f;
+		float GustDepth = 0.f;
+	};
+
+	/** The bed for an id, or null when the id is not one of ours. */
+	const FAmbienceRecipe* GetAmbienceRecipe(FName SoundId)
+	{
+		// Ordered as the bank is, so the two read side by side.
+		static const TPair<FName, FAmbienceRecipe> Recipes[] = {
+			// Street: rain on the canopy over traffic, and a bus idling.
+			{ TEXT("AMB_Plaza_Street"),   { 7.f, 0.62f, 0.55f, 38.f, 57.f, 0.16f, 3.6f, 118.f, 0.20f, 0.22f, 0.30f } },
+			// The same weather on glass, close and brighter, no traffic.
+			{ TEXT("AMB_Plaza_Rain"),     { 6.f, 0.88f, 0.60f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.35f, 0.16f } },
+			// Marble hall: nothing moving, and the room itself.
+			{ TEXT("AMB_Lobby"),          { 8.f, 0.30f, 0.40f, 96.f, 143.f, 0.13f, 0.f, 0.f, 0.f, 0.10f, 0.20f } },
+			// Lift lobby: shaft machinery, and a car arriving every four seconds.
+			{ TEXT("AMB_Lift_Lobby"),     { 8.f, 0.34f, 0.42f, 52.f, 78.f, 0.24f, 4.f, 660.f, 0.22f, 0.08f, 0.14f } },
+			// Open plan: HVAC, and the monitors nobody turned off.
+			{ TEXT("AMB_Office_Hum"),     { 6.f, 0.44f, 0.46f, 120.f, 315.f, 0.15f, 0.f, 0.f, 0.f, 0.06f, 0.12f } },
+			// Server floor: a wall of fans with a room alarm chirping off-beat.
+			{ TEXT("AMB_Server_Room"),    { 6.f, 0.74f, 0.66f, 120.f, 240.f, 0.18f, 5.5f, 1980.f, 0.12f, 0.05f, 0.10f } },
+			// Executive: the quietest room in the building, and a clock.
+			{ TEXT("AMB_Executive"),      { 8.f, 0.22f, 0.24f, 62.f, 0.f, 0.10f, 1.f, 1320.f, 0.10f, 0.f, 0.f } },
+			// Canteen: extractor hoods over a fridge cycling under the counter.
+			{ TEXT("AMB_Canteen"),        { 6.f, 0.68f, 0.58f, 88.f, 176.f, 0.18f, 1.5f, 0.f, 0.26f, 0.12f, 0.18f } },
+			// Skydeck: wind past the parapet, and London a long way underneath.
+			{ TEXT("AMB_Skydeck_Wind"),   { 8.f, 0.52f, 0.78f, 24.f, 41.f, 0.20f, 0.f, 0.f, 0.f, 0.14f, 0.52f } },
+			// Stairwell: a concrete tube, and a fire door someone else closed.
+			{ TEXT("AMB_Stairwell_Door"), { 8.f, 0.26f, 0.30f, 44.f, 0.f, 0.14f, 11.f, 92.f, 0.28f, 0.04f, 0.08f } },
+			// The fallback bed: a city, heard from inside.
+			{ TEXT("AMB_London_Bed"),     { 8.f, 0.40f, 0.44f, 45.f, 71.f, 0.14f, 0.f, 0.f, 0.f, 0.09f, 0.20f } }
+		};
+
+		for (const TPair<FName, FAmbienceRecipe>& Pair : Recipes)
+		{
+			if (Pair.Key == SoundId)
+			{
+				return &Pair.Value;
+			}
+		}
+
+		return nullptr;
+	}
+
+	bool IsSynthesisedAmbience(FName SoundId)
+	{
+		return GetAmbienceRecipe(SoundId) != nullptr;
+	}
+
+	USoundWaveProcedural* MakeAmbienceLoop(FName SoundId)
+	{
+		const FAmbienceRecipe* Recipe = GetAmbienceRecipe(SoundId);
+
+		if (Recipe == nullptr)
+		{
+			return nullptr;
+		}
+
+		FBuffer Buffer(Recipe->Duration);
+		FNoise Noise;
+		float LowState = 0.f;
+		float EventState = 0.f;
+
+		const float EventPeriod = Recipe->EventPeriodSeconds;
+		const float EventDecay = 0.09f;
+
+		for (int32 Index = 0; Index < Buffer.Num(); ++Index)
+		{
+			const float Time = static_cast<float>(Index) / static_cast<float>(SampleRate);
+
+			const float Gust = Recipe->GustDepth > 0.f
+				? 1.f + Recipe->GustDepth * FMath::Sin(2.f * PI * Recipe->GustHz * Time)
+				: 1.f;
+			const float Bed = LowPass(Noise.Next(), LowState, Recipe->Colour) * Recipe->NoiseLevel * Gust;
+
+			float Tone = 0.f;
+			if (Recipe->ToneLowHz > 0.f)
+			{
+				Tone += FMath::Sin(2.f * PI * Recipe->ToneLowHz * Time) * 0.6f;
+			}
+			if (Recipe->ToneHighHz > 0.f)
+			{
+				Tone += FMath::Sin(2.f * PI * Recipe->ToneHighHz * Time) * 0.4f;
+			}
+			Tone *= Recipe->ToneLevel;
+
+			// The repeating event: a short knock through the noise bed, with an
+			// optional ring on it (a lift chime, a clock, an alarm chirp).
+			float Event = 0.f;
+			if (EventPeriod > 0.f && Recipe->EventLevel > 0.f)
+			{
+				const float Phase = FMath::Fmod(Time, EventPeriod);
+				const float Knock = DecayGain(Phase, EventDecay) * LowPass(Noise.Next(), EventState, 0.55f);
+				const float Ring = Recipe->EventHz > 0.f
+					? FMath::Sin(2.f * PI * Recipe->EventHz * Phase) * DecayGain(Phase, EventDecay * 4.f)
+					: 0.f;
+				Event = (Knock + Ring * 0.7f) * Recipe->EventLevel;
+			}
+
+			Buffer.Add(Index, Bed + Tone + Event);
+		}
+
+		// Crossfade the tail into the head. Without this the bed ticks once a
+		// loop, which is the sort of detail that makes a game feel cheap.
+		const int32 FadeCount = FMath::Min(Buffer.Num() / 4, FMath::RoundToInt(0.05f * SampleRate));
+		for (int32 Index = 0; Index < FadeCount; ++Index)
+		{
+			const float Alpha = static_cast<float>(Index) / static_cast<float>(FadeCount);
+			const int32 TailIndex = Buffer.Num() - FadeCount + Index;
+			const float Head = Buffer.Samples[Index];
+			const float Tail = Buffer.Samples[TailIndex];
+
+			Buffer.Samples[TailIndex] = FMath::Lerp(Head, Tail, Alpha);
+		}
+
+		return Bake(Buffer, 0.42f, true);
+	}
+
 	USoundWaveProcedural* MakeUISound(FName SoundId)
 	{
 		const FString Id = SoundId.ToString();
@@ -469,7 +621,7 @@ namespace OneBrahamProceduralAudio
 			TEXT("SFX_Flashbang_Ring"), TEXT("SFX_Flashbang_Bang"), TEXT("SFX_Frag_Explosion"),
 			TEXT("SFX_Breach_Explosion"), TEXT("SFX_Breach_Plant"), TEXT("SFX_Smoke_Deploy"),
 			TEXT("SFX_Wall_Collapse"), TEXT("SFX_Shutter_Close"),
-			TEXT("SFX_Gunshot"), TEXT("SFX_Gunshot_Suppressed"),
+			TEXT("SFX_Gunshot_Suppressed"),
 			TEXT("SFX_Helicopter_Rotor"), TEXT("SFX_FireAlarm"), TEXT("SFX_Lockdown_Siren"),
 			TEXT("SFX_Melee_Thud"), TEXT("SFX_Reload_Mag_Out"), TEXT("SFX_Reload_Mag_In"),
 			TEXT("SFX_Reload_Bolt"), TEXT("SFX_Revive_Complete"), TEXT("SFX_Downed_Tinnitus"),
@@ -481,6 +633,14 @@ namespace OneBrahamProceduralAudio
 		};
 
 		if (Known.Contains(SoundId))
+		{
+			return true;
+		}
+
+		// The eleven ambience beds. Answering yes here is what stops the bank
+		// validator reporting every room in the building as a silent cue - which
+		// it did, because beds were briefs and nothing else.
+		if (IsSynthesisedAmbience(SoundId))
 		{
 			return true;
 		}
@@ -522,7 +682,11 @@ namespace OneBrahamProceduralAudio
 		else if (Id == TEXT("SFX_Shutter_Close"))		{ Wave = MakeNoiseBurst(1.10f, 0.34f, 0.70f, 0.004f, 0.16f); }
 		else if (Id == TEXT("SFX_Breach_Plant"))		{ Wave = MakeTone(1480.f, 0.28f, EOneBrahamToneShape::Square, 0.30f, 0.26f); }
 		else if (Id == TEXT("SFX_Smoke_Deploy"))		{ Wave = MakeNoiseBurst(1.30f, 0.90f, 0.42f, 0.02f, 0.35f); }
-		else if (Id == TEXT("SFX_Gunshot"))				{ Wave = MakeGunshot(1.0f, false); }
+		// SFX_Gunshot and SFX_LowAmmo_Click used to have branches here. Neither is
+		// a bank row and nothing in the project plays either: weapons ask for
+		// SFX_Gunshot_<Calibre> per category, and the low-ammo cue is
+		// UI_LowAmmo_Click, which the substring synthesiser below answers. Both
+		// were recipes for a cue that could not be requested.
 		else if (Id == TEXT("SFX_Gunshot_Pistol"))		{ Wave = MakeGunshot(0.55f, false); }
 		else if (Id == TEXT("SFX_Gunshot_SMG"))			{ Wave = MakeGunshot(0.75f, false); }
 		else if (Id == TEXT("SFX_Gunshot_Shotgun"))		{ Wave = MakeGunshot(1.5f, false); }
@@ -547,7 +711,9 @@ namespace OneBrahamProceduralAudio
 		else if (Id == TEXT("SFX_Footstep_Hard"))		{ Wave = MakeNoiseBurst(0.11f, 0.55f, 0.28f, 0.001f, 0.008f); }
 		else if (Id == TEXT("SFX_Footstep_Metal"))		{ Wave = Bake(MakeClickBuffer(0.20f, 0.35f, 2740.f, 0.45f), 0.30f, false); }
 		else if (Id == TEXT("SFX_Footstep_Water"))		{ Wave = MakeNoiseBurst(0.22f, 0.80f, 0.34f, 0.003f, 0.05f); }
-		else if (Id == TEXT("SFX_LowAmmo_Click"))		{ Wave = MakeTone(2100.f, 0.05f, EOneBrahamToneShape::Square, 0.20f, 0.04f); }
+		// Ambience beds: the room you are standing in, before any wave is
+		// authored. Eleven of these cover the whole building.
+		else if (IsSynthesisedAmbience(SoundId))	{ Wave = MakeAmbienceLoop(SoundId); }
 		else											{ Wave = MakeUISound(SoundId); }
 
 		if (Wave == nullptr)

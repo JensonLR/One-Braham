@@ -267,6 +267,15 @@ protected:
 	/** Music director: watches match phase, survivors and lockdown. */
 	void UpdateMusicDirector(float DeltaTime);
 
+	/**
+	 * Ambience director: the room the listener is standing in.
+	 *
+	 * Runs at the music director's 2 Hz, and only does work when the floor
+	 * changes. The zone id is the building layout's area id, which is the one
+	 * vocabulary the map, the spawner and the HUD already share.
+	 */
+	void UpdateAmbienceZone();
+
 	/** Empties cooldown/concurrency tables of dead components. */
 	void PruneCueTables();
 

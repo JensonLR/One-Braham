@@ -2,6 +2,9 @@
 
 #include "Audio/OneBrahamAudioManagerComponent.h"
 
+#include "Characters/OneBrahamCharacter.h"
+#include "Data/OneBrahamBuildingLayoutAsset.h"
+
 #include "Audio/OneBrahamAudioTypes.h"
 #include "Audio/OneBrahamProceduralAudio.h"
 #include "Components/AudioComponent.h"
@@ -128,6 +131,7 @@ void UOneBrahamAudioManagerComponent::TickComponent(float DeltaTime, ELevelTick 
 	{
 		MusicDirectorAccumulator = 0.f;
 		UpdateMusicDirector(DeltaTime);
+		UpdateAmbienceZone();
 		PruneCueTables();
 	}
 
@@ -1240,31 +1244,60 @@ void UOneBrahamAudioManagerComponent::SetAmbienceZone(FName ZoneId, float FadeSe
 
 	CurrentAmbienceZone = ZoneId;
 
-	// Zone ids are the map's audio zones ("Lobby", "Skydeck", "ServerRoom", ...).
-	// The bank maps them to authored beds; the fallback map covers a clean checkout.
-	static const TMap<FName, FName> ZoneToCue =
-	{
-		{ FName(TEXT("Plaza")),			FName(TEXT("AMB_Plaza_Street")) },
-		{ FName(TEXT("Lobby")),			FName(TEXT("AMB_Lobby")) },
-		{ FName(TEXT("Mezzanine")),		FName(TEXT("AMB_Lift_Lobby")) },
-		{ FName(TEXT("Offices")),		FName(TEXT("AMB_Office_Hum")) },
-		{ FName(TEXT("ServerRoom")),	FName(TEXT("AMB_Server_Room")) },
-		{ FName(TEXT("Executive")),		FName(TEXT("AMB_Executive")) },
-		{ FName(TEXT("Canteen")),		FName(TEXT("AMB_Canteen")) },
-		{ FName(TEXT("Skydeck")),		FName(TEXT("AMB_Skydeck_Wind")) },
-		{ FName(TEXT("Stairwell")),		FName(TEXT("AMB_Stairwell_Door")) }
-	};
-
 	if (ZoneId.IsNone())
 	{
 		StopBed(BedAmbience, FadeSeconds);
 		return;
 	}
 
-	const FName* Cue = ZoneToCue.Find(ZoneId);
-	const FName SoundId = Cue != nullptr ? *Cue : FName(TEXT("AMB_London_Bed"));
+	// The zone vocabulary lives in the bank, keyed by the building layout's area
+	// ids, because it is content: a designer should be able to point a zone at a
+	// different bed without a recompile. This function used to carry a second,
+	// private table in a fourth vocabulary ("Plaza", "Offices", "ServerRoom")
+	// that no other file used, and nothing called it - so the building had no
+	// ambience bed at all, in any zone, with content or without.
+	EnsureBankLoaded();
 
-	AcquireBed(BedAmbience, SoundId, false, FVector::ZeroVector, GetBusVolume(EOneBrahamAudioBus::Ambience), FadeSeconds);
+	const FName CueId = Bank != nullptr ? Bank->GetAmbienceCueForZone(ZoneId)
+		: FName(TEXT("AMB_London_Bed"));
+
+	AcquireBed(BedAmbience, CueId, false, FVector::ZeroVector,
+		GetBusVolume(EOneBrahamAudioBus::Ambience), FadeSeconds);
+}
+
+void UOneBrahamAudioManagerComponent::UpdateAmbienceZone()
+{
+	// Where is the listener? The floor index is the character's, the area id is
+	// the building layout's - the same one floor-to-area table the HUD, the
+	// spawner and the objective lines all read from.
+	const APlayerController* PC = Cast<APlayerController>(GetOwner());
+	const AOneBrahamCharacter* Character = PC != nullptr ? Cast<AOneBrahamCharacter>(PC->GetPawn()) : nullptr;
+
+	// A dedicated server has no listener and an unpossessed controller has no
+	// room; the bed is per-client, so there is nothing to play.
+	if (Character == nullptr)
+	{
+		SetAmbienceZone(NAME_None);
+		return;
+	}
+
+	// The layout has no area for the stairwell: it is the concrete between two
+	// floors, so it is what plays whenever a floor has no area of its own. The
+	// bank names it, so a designer can rename it without touching this file.
+	const FName FallbackZone = Bank != nullptr ? Bank->AmbienceFallbackZone
+		: FName(TEXT("Stairwell"));
+
+	const UOneBrahamBuildingLayoutAsset* Layout = UOneBrahamBuildingLayoutAsset::Get(Character);
+
+	if (Layout == nullptr)
+	{
+		SetAmbienceZone(FallbackZone);
+		return;
+	}
+
+	const FName AreaId = Layout->GetAreaIdForFloor(Character->GetCurrentFloorIndex());
+
+	SetAmbienceZone(AreaId.IsNone() ? FallbackZone : AreaId);
 }
 
 void UOneBrahamAudioManagerComponent::SetMusicState(EOneBrahamMusicState NewState, bool bForce)
@@ -1295,19 +1328,13 @@ void UOneBrahamAudioManagerComponent::SetMusicState(EOneBrahamMusicState NewStat
 	RequestedMusicState = NewState;
 	CurrentMusicState = NewState;
 
-	FName SoundId = FName(TEXT("MUS_Lobby"));
-	switch (NewState)
-	{
-	case EOneBrahamMusicState::Lobby:		SoundId = FName(TEXT("MUS_Lobby")); break;
-	case EOneBrahamMusicState::MatchEarly:	SoundId = FName(TEXT("MUS_MatchEarly")); break;
-	case EOneBrahamMusicState::MatchMid:	SoundId = FName(TEXT("MUS_MatchMid")); break;
-	case EOneBrahamMusicState::MatchLate:	SoundId = FName(TEXT("MUS_MatchLate")); break;
-	case EOneBrahamMusicState::Lockdown:	SoundId = FName(TEXT("MUS_Lockdown")); break;
-	case EOneBrahamMusicState::Extraction:	SoundId = FName(TEXT("MUS_Extraction")); break;
-	case EOneBrahamMusicState::Downed:		SoundId = FName(TEXT("MUS_Downed")); break;
-	case EOneBrahamMusicState::Results:		SoundId = FName(TEXT("MUS_Results")); break;
-	default:								SoundId = FName(TEXT("MUS_Lobby")); break;
-	}
+	// The bank owns the state -> cue table, so the director's mood and the cue
+	// the mix was built around cannot drift apart. This switch was a second copy
+	// of the same eight names.
+	EnsureBankLoaded();
+
+	const FName SoundId = Bank != nullptr ? Bank->GetMusicCueForState(NewState)
+		: FName(TEXT("MUS_Lobby"));
 
 	// Cross-fade: stop the old bed with a slightly shorter fade than the new one
 	// takes to arrive, so the transition breathes instead of cutting.
