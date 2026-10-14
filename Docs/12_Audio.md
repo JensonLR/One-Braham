@@ -219,6 +219,16 @@ architecture between them. Firing a rifle into a stairwell should sound like
 firing a rifle into a stairwell; the two-sample approach is what does that
 without fifty wave assets.
 
+**Whose mix plays a weapon.** Every weapon cue is played by the *listener's*
+audio manager (`UOneBrahamAudioManagerComponent::GetLocal`), never the shooter's:
+the cues arrive by multicast on every machine, and on every machine but the
+shooter's own the shooter's pawn has no controller. An authored per-weapon sound
+plays as authored; without one, the bank's cue plays through the mix:
+`SFX_Weapon_Draw` on equip, `SFX_DryFire` on an empty trigger, and the reload as
+three cues timed against that reload's own length - `SFX_Reload_Mag_Out` at the
+start, `SFX_Reload_Mag_In` at 55 %, and `SFX_Reload_Bolt` at 85 % when the
+magazine was empty. A shell-by-shell shotgun reload plays only the first.
+
 ---
 
 ## 7. Footsteps
@@ -311,7 +321,7 @@ synthesised or named in this document.
 | `SFX_Bullet_Impact_Glass` | 0.6 s. Crack, then a scatter of fragments on a hard floor |
 | `SFX_Bullet_Impact_Carpet` | 0.25 s. Almost nothing: fibre and a thud. The quietest surface to be shot into |
 | `SFX_Bullet_Impact_Flesh` | 0.3 s. Wet, close, and unpleasant. It should be instantly distinguishable from armour |
-| `SFX_Bullet_Whizz` | 0.2 s. A near-miss. Doppler a little, so direction is readable |
+| `SFX_Bullet_Whizz` | 0.2 s. A near-miss. Doppler a little, so direction is readable. Plays where another player's shot passed within 2 m of your head with nothing solid in between (`AOneBrahamWeaponBase::PlayNearMissForLocalListener`) |
 | `SFX_Helmet_Ping` | 0.25 s. A round glancing off a hard hat. Dryly comic, played completely straight |
 | `SFX_Utility_Throw` | 0.2 s. A full-body throw: cloth, a grunt, the object released |
 | `SFX_Medkit_Use` | 0.6 s. Zip, tape, a breath. The meal-deal wrapper is this cue |

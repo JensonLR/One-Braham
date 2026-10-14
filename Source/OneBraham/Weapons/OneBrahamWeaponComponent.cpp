@@ -621,9 +621,10 @@ void UOneBrahamWeaponComponent::EquipSlot(EOneBrahamWeaponSlot Slot)
 		// not feel laggy at 100 ms ping.
 		if (TObjectPtr<AOneBrahamWeaponBase>* Found = OwnedWeapons.Find(Slot))
 		{
+			AOneBrahamWeaponBase* Predicted = CurrentWeapon;
 			CurrentWeapon = *Found;
 			CurrentSlot = Slot;
-			OnRep_CurrentWeapon();
+			OnRep_CurrentWeapon(Predicted);
 		}
 		return;
 	}
@@ -1849,18 +1850,28 @@ void UOneBrahamWeaponComponent::ServerRequestToggleAttachment_Implementation(boo
 // ==========================================================================
 //  Replication
 // ==========================================================================
-void UOneBrahamWeaponComponent::OnRep_CurrentWeapon()
+void UOneBrahamWeaponComponent::OnRep_CurrentWeapon(AOneBrahamWeaponBase* PreviousWeapon)
 {
-	AOneBrahamWeaponBase* Previous = nullptr;
-	UE_UNUSED(Previous);
+	// The predicted switch already did this, and the server's value has now
+	// arrived and agrees: a second equip would play the draw twice.
+	if (PreviousWeapon == CurrentWeapon)
+	{
+		return;
+	}
+
+	if (PreviousWeapon != nullptr)
+	{
+		PreviousWeapon->OnUnequipped();
+	}
 
 	if (CurrentWeapon != nullptr)
 	{
 		CurrentWeapon->SetOwningWeaponComponent(this);
+		CurrentWeapon->OnEquippedBy(GetCharacter());
 		SanitiseFireMode();
 	}
 
-	OnWeaponChanged.Broadcast(CurrentWeapon, nullptr);
+	OnWeaponChanged.Broadcast(CurrentWeapon, PreviousWeapon);
 }
 
 void UOneBrahamWeaponComponent::OnRep_Reloading()

@@ -58,6 +58,14 @@ enum class EOneBrahamAudioPriority : uint8
 	Critical = 5
 };
 
+/** The three sounds of a magazine reload, in the order they happen. */
+enum class EOneBrahamReloadCue : uint8
+{
+	MagOut,
+	MagIn,
+	Bolt
+};
+
 UCLASS(ClassGroup = (OneBraham), meta = (BlueprintSpawnableComponent))
 class ONEBRAHAM_API UOneBrahamAudioManagerComponent : public UActorComponent
 {
@@ -65,6 +73,17 @@ class ONEBRAHAM_API UOneBrahamAudioManagerComponent : public UActorComponent
 
 public:
 	UOneBrahamAudioManagerComponent();
+
+	/**
+	 * The audio manager of this machine's listener: the first local player's.
+	 * Null on a dedicated server, which has nobody to play to.
+	 *
+	 * Use this from a multicast, never the shooter's controller: on every
+	 * machine but the shooter's own, a remote pawn has no controller, so a shot
+	 * looked up that way skipped the mix everywhere it mattered - and on a clean
+	 * checkout, with no authored sound to fall back on, it was silent.
+	 */
+	static UOneBrahamAudioManagerComponent* GetLocal(const UObject* WorldContextObject);
 
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -100,8 +119,12 @@ public:
 	/** Mechanical weapon foley: bolt, mag out, mag in, charge handle, dry fire, safety. */
 	void PlayWeaponMechanics(FName SoundId, AActor* Shooter, bool bLocalOnly = false);
 
-	/** Reload stage cue, keyed by "Start" / "MagIn" / "Charge" / "Complete" / "Abort". */
-	void PlayReloadCue(FName Stage, AActor* Shooter);
+	/**
+	 * One reload sound: magazine out, magazine in, or the bolt after an empty
+	 * magazine. AOneBrahamWeaponBase schedules the three against the reload's own
+	 * length when the weapon has no authored single-take reload.
+	 */
+	void PlayReloadCue(EOneBrahamReloadCue Cue, AActor* Shooter);
 
 	/** Impact foley resolved from the physical material of whatever was hit. */
 	void PlayImpact(FName SoundIdPrefix, const FHitResult& Hit, float VolumeScale = 1.f, AActor* IgnoredActor = nullptr);

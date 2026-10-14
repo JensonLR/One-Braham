@@ -397,7 +397,13 @@ public:
 	TMap<EOneBrahamWeaponSlot, TObjectPtr<AOneBrahamWeaponBase>> OwnedWeapons;
 
 protected:
-	UFUNCTION() void OnRep_CurrentWeapon();
+	/**
+	 * Clients: equip and unequip exactly as the server did. OnEquippedBy used to
+	 * run only on the server, so on every client the weapon never knew its owner
+	 * (OwningCharacter stayed null), never moved to the owner's first-person
+	 * hands, kept its pickup mesh, and drew silently.
+	 */
+	UFUNCTION() void OnRep_CurrentWeapon(AOneBrahamWeaponBase* PreviousWeapon);
 	UFUNCTION() void OnRep_Reloading();
 
 	/** Server: hands this player what they carry this life, from the player state

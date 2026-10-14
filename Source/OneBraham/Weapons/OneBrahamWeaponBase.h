@@ -200,8 +200,9 @@ public:
 	UFUNCTION(NetMulticast, Unreliable, Category = "One Braham|Weapon")
 	void MulticastPlayImpactFX(const TArray<FOneBrahamImpactInfo>& Impacts);
 
+	/** Stage: "Start", "Complete" or "Abort". Montage and reload foley on every machine. */
 	UFUNCTION(NetMulticast, Reliable, Category = "One Braham|Weapon")
-	void MulticastPlayReloadFX(bool bStarted);
+	void MulticastPlayReloadFX(FName Stage);
 
 public:
 	/** Total length of the current reload, seconds. 0 when not reloading. */
@@ -218,6 +219,12 @@ protected:
 
 	/** Plays the tracer as a travelling projectile-like effect the client sees. */
 	void PlayTracerLocal(const FVector& Start, const FVector& End, bool bSuppressed);
+
+	/**
+	 * A remote shot whose line passes close to this machine's player, with
+	 * nothing solid in between, plays the whizz where it passed. Local only.
+	 */
+	void PlayNearMissForLocalListener(const FVector& MuzzleLocation, const FVector& Direction) const;
 
 	// ======================================================================
 	//  State
@@ -350,6 +357,10 @@ protected:
 
 	/** Timer handle for the reload completion. */
 	FTimerHandle ReloadTimerHandle;
+
+	/** Local: the magazine-in and bolt cues of a reload, scheduled on every machine. */
+	FTimerHandle ReloadMagInCueHandle;
+	FTimerHandle ReloadChargeCueHandle;
 	FTimerHandle MeleeTimerHandle;
 
 	/** Server-side shot counter, used to index the recoil pattern. */

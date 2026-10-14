@@ -75,6 +75,21 @@ UOneBrahamAudioManagerComponent::UOneBrahamAudioManagerComponent()
 	SetIsReplicatedByDefault(false);
 }
 
+UOneBrahamAudioManagerComponent* UOneBrahamAudioManagerComponent::GetLocal(const UObject* WorldContextObject)
+{
+	UWorld* World = GEngine != nullptr
+		? GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::ReturnNull)
+		: nullptr;
+
+	if (World == nullptr || World->GetNetMode() == NM_DedicatedServer)
+	{
+		return nullptr;
+	}
+
+	const AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(GEngine->GetFirstLocalPlayerController(World));
+	return PC != nullptr ? PC->GetAudioManager() : nullptr;
+}
+
 void UOneBrahamAudioManagerComponent::BeginPlay()
 {
 	Super::BeginPlay();
@@ -753,35 +768,25 @@ void UOneBrahamAudioManagerComponent::PlayWeaponMechanics(FName SoundId, AActor*
 	PlaySoundAtLocation(SoundId, Shooter->GetActorLocation(), 1.f, FMath::FRandRange(0.97f, 1.03f), Shooter);
 }
 
-void UOneBrahamAudioManagerComponent::PlayReloadCue(FName Stage, AActor* Shooter)
+void UOneBrahamAudioManagerComponent::PlayReloadCue(EOneBrahamReloadCue Cue, AActor* Shooter)
 {
-	static const FName StartStage(TEXT("Start"));
-	static const FName MagInStage(TEXT("MagIn"));
-	static const FName ChargeStage(TEXT("Charge"));
-	static const FName CompleteStage(TEXT("Complete"));
-	static const FName AbortStage(TEXT("Abort"));
-
+	// There used to be "Complete" and "Abort" stages, a fire-selector click and a
+	// weapon draw. A finished reload ends on the magazine or the bolt, and a
+	// cancelled one is a weapon swap that plays its own draw: both were a second
+	// sound on top of the right one.
 	FName SoundId = FName(TEXT("SFX_Reload_Mag_In"));
 
-	if (Stage == StartStage)
+	switch (Cue)
 	{
+	case EOneBrahamReloadCue::MagOut:
 		SoundId = FName(TEXT("SFX_Reload_Mag_Out"));
-	}
-	else if (Stage == ChargeStage)
-	{
+		break;
+	case EOneBrahamReloadCue::Bolt:
 		SoundId = FName(TEXT("SFX_Reload_Bolt"));
-	}
-	else if (Stage == CompleteStage)
-	{
-		SoundId = FName(TEXT("SFX_FireMode_Switch"));
-	}
-	else if (Stage == AbortStage)
-	{
-		SoundId = FName(TEXT("SFX_Weapon_Draw"));
-	}
-	else if (Stage == MagInStage)
-	{
-		SoundId = FName(TEXT("SFX_Reload_Mag_In"));
+		break;
+	case EOneBrahamReloadCue::MagIn:
+	default:
+		break;
 	}
 
 	PlayWeaponMechanics(SoundId, Shooter, false);

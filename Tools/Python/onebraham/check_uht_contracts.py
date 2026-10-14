@@ -26,7 +26,9 @@ WHY THIS EXISTS
          C++, which UHT rejects and which is always a leftover.
 
       5. `ReplicatedUsing = OnRep_Thing` naming something that is not a
-         UFUNCTION, or is nothing at all.
+         UFUNCTION, or is nothing at all - or a RepNotify that takes a
+         parameter of any type but the property's own (the previous value),
+         which UHT rejects. `TObjectPtr<T>` is passed as `T*`.
 
       6. **A Replicated specifier on a struct member.** A struct is not a
          replication unit; it travels as one property on the object that
@@ -167,6 +169,20 @@ def _property_name(declaration):
     return match.group(1) if match else None
 
 
+def _normalised_type(text):
+    """A C++ type for comparison: no const, no reference, no spaces; TObjectPtr<T> is T*."""
+    text = re.sub(r'\bconst\b', "", text).replace("&", "")
+    text = re.sub(r'TObjectPtr\s*<\s*([^>]+?)\s*>', r'\1*', text)
+    return re.sub(r'\s+', "", text)
+
+
+def _parameter_list(declaration):
+    """The text between a declaration's outermost parentheses."""
+    start = declaration.find("(")
+    end = declaration.rfind(")")
+    return declaration[start + 1:end].strip() if 0 <= start < end else ""
+
+
 def _function_name(declaration):
     """The name of a function declaration, or None."""
     open_index = declaration.find("(")
@@ -216,6 +232,7 @@ def run(source_root=None):
     # Every function declared with UFUNCTION, anywhere in the module. Used for
     # RepNotify callbacks, which may legitimately live on a base class.
     ufunction_names = set()
+    ufunction_params = {}
 
     for text in (header_text,):
         for _class_name, body, _is_interface in class_bodies(text):
@@ -225,6 +242,8 @@ def run(source_root=None):
                 name = _function_name(statement)
                 if name:
                     ufunction_names.add(name)
+                    ufunction_params.setdefault(name, []).append(
+                        _parameter_list(" ".join(statement.split())))
 
     # --- two names, one type ------------------------------------------------
     # UHT rejects a second UCLASS/USTRUCT/UENUM with a name that is already
@@ -421,6 +440,27 @@ def run(source_root=None):
                             problems.append((rel, class_name,
                                              u"ReplicatedUsing = {0}, which is not declared as a "
                                              u"UFUNCTION anywhere in the module".format(callback)))
+                            continue
+
+                        # A RepNotify may take the previous value, and only as
+                        # the property's own type.
+                        prop_type = _normalised_type(text[:text.find(property_name)].strip()
+                                                     if property_name in text else "")
+
+                        def _accepts(params):
+                            if not params or params == "void":
+                                return True
+                            if "," in params:
+                                return False
+                            param_type = re.sub(r'\b[A-Za-z_][A-Za-z0-9_]*\s*$', "", params)
+                            return _normalised_type(param_type) == prop_type
+
+                        if prop_type and not any(_accepts(p) for p in ufunction_params.get(callback, [])):
+                            problems.append((rel, class_name,
+                                             u"{0} is the RepNotify for '{1}' ({2}) but its parameter "
+                                             u"is not that type - UHT only passes the previous value "
+                                             u"of the property itself".format(
+                                                 callback, property_name, prop_type)))
 
                 # ---------------------------------------------------------
                 #  UFUNCTION contracts
