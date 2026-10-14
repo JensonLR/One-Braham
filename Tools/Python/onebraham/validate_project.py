@@ -1013,6 +1013,39 @@ def check_targets(v, _config_only):
         v.pass_("targets", u"{0} targets, none changes the shared build environment".format(targets))
 
 
+#: unreal.* names the content builders have used that the editor's Python API
+#: does not have, and what to write instead. Python strips only the U/A/F
+#: prefix, so UInputAction_Factory is unreal.InputAction_Factory.
+UNREAL_PYTHON_MISNAMES = {
+    "InputActionFactory": "InputAction_Factory",
+    "InputMappingContextFactory": "InputMappingContext_Factory",
+    "GameplayTagLibrary": "common.make_gameplay_tag (UOneBrahamGameplayStatics::RequestTag)",
+}
+
+
+def check_python_api_names(v, _config_only):
+    """No builder calls an unreal.* name the editor's Python does not have.
+
+    The builders run only inside the editor, so a wrong name surfaces on the
+    first content build, often inside a try block that turns it into a silent
+    skip. Every input asset and every archetype tag went missing that way.
+    """
+    tools = os.path.join(REPO_ROOT, "Tools", "Python", "onebraham")
+    problems = []
+    for name in sorted(os.listdir(tools)):
+        if not name.endswith(".py") or name == "validate_project.py":
+            continue
+        text = read_text(os.path.join(tools, name))
+        for bad, good in sorted(UNREAL_PYTHON_MISNAMES.items()):
+            for match in re.finditer(r"\bunreal\." + bad + r"\b", text):
+                problems.append(u"{0}:{1} uses unreal.{2}; use {3}".format(
+                    name, text[:match.start()].count("\n") + 1, bad, good))
+    if problems:
+        v.fail("python api", u"; ".join(problems))
+    else:
+        v.pass_("python api", u"no builder uses a known-missing unreal.* name")
+
+
 def check_config(v, _config_only):
     game_ini = read_text(os.path.join(CONFIG_DIR, "DefaultGame.ini"))
     engine_ini = read_text(os.path.join(CONFIG_DIR, "DefaultEngine.ini"))
@@ -2056,6 +2089,7 @@ def build_all(config_only=False):
         ("performance", check_performance),
         ("config", check_config),
         ("targets", check_targets),
+        ("python api", check_python_api_names),
         ("cpp symbols", check_cpp_symbols),
         ("cpp includes", check_cpp_includes),
         ("log categories", check_log_categories),

@@ -615,3 +615,23 @@ def guard(report, label, fn, *args, **kwargs):
     except Exception as exc:  # noqa: BLE001 - deliberately broad at the boundary
         report.failed(label, u"{0}\n{1}".format(exc, traceback.format_exc()))
         return None
+
+
+def make_gameplay_tag(tag_string):
+    """'OB.Zone.Lobby' -> the registered unreal.GameplayTag, or None.
+
+    The engine's Python API has no tag-from-string function, so the module
+    exposes one (UOneBrahamGameplayStatics::RequestTag). None means the tag is
+    not registered: the C++ module did not load, or the name is not in
+    DefaultGame.ini's tag list. The caller reports that; it is never silently
+    an empty tag.
+    """
+    library = getattr(unreal, "OneBrahamGameplayStatics", None) if IN_EDITOR else None
+    if library is None:
+        return None
+    tag = library.request_tag(unreal.Name(tag_string))
+    try:
+        valid = unreal.BlueprintGameplayTagLibrary.is_gameplay_tag_valid(tag)
+    except Exception:  # noqa: BLE001
+        valid = str(tag_string) in tag.export_text()
+    return tag if valid else None

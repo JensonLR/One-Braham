@@ -12,6 +12,7 @@
 
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
+#include "GameplayTagContainer.h"
 #include "Core/OneBrahamTypes.h"
 #include "OneBrahamGameplayStatics.generated.h"
 
@@ -61,4 +62,13 @@ public:
 	/** True when two actors' players are on the same side under the current mode's rules. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Statics")
 	static bool AreFriendly(const AActor* A, const AActor* B);
+
+	/**
+	 * The registered tag with this name, or the empty tag. The content builders
+	 * call it from Python (unreal.OneBrahamGameplayStatics.request_tag): the
+	 * engine exposes no way to make a tag from a string there, and the two
+	 * builders that guessed at one were silently writing empty tags.
+	 */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Statics")
+	static FGameplayTag RequestTag(FName TagName);
 };

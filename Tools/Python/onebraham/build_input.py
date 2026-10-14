@@ -210,7 +210,7 @@ def build_actions(report):
             report.updated_asset(path)
             continue
 
-        factory = unreal.InputActionFactory()
+        factory = unreal.InputAction_Factory()
         action = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
             name, C.INPUT, unreal.InputAction, factory)
 
@@ -260,7 +260,7 @@ def build_contexts(report, actions):
             contexts[name] = unreal.EditorAssetLibrary.load_asset(path)
             report.updated_asset(path)
         else:
-            factory = unreal.InputMappingContextFactory()
+            factory = unreal.InputMappingContext_Factory()
             context = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
                 name, C.INPUT, unreal.InputMappingContext, factory)
 

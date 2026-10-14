@@ -108,17 +108,8 @@ def ensure_registry(report):
 
 
 def _make_tag(tag_string):
-    """OB.Character.Archetype.Analyst -> the reflected FGameplayTag."""
-    try:
-        return unreal.GameplayTagLibrary.request_gameplay_tag(unreal.GameplayTag(),
-                                                              unreal.Name(tag_string))
-    except Exception:  # noqa: BLE001
-        try:
-            tag = unreal.GameplayTag()
-            tag.tag_name = unreal.Name(tag_string)
-            return tag
-        except Exception:  # noqa: BLE001
-            return None
+    """OB.Character.Archetype.Analyst -> the reflected FGameplayTag, or None."""
+    return C.make_gameplay_tag(tag_string)
 
 
 def build_archetype_struct(report, registry, entry):
@@ -158,6 +149,12 @@ def build_archetype_struct(report, registry, entry):
     tag = _make_tag(tag_string)
     if tag is not None:
         _set("archetype_tag", tag)
+    else:
+        # The archetype tag is the archetype's identity; without it the cast
+        # cannot be told apart, so this is a failure, not a skip.
+        report.failed(entry.get("id", "?"), u"archetype tag '{0}' is not registered in this editor "
+                      u"session (is the OneBraham module loaded, and the tag in DefaultGame.ini?)"
+                      .format(tag_string))
 
     _set("display_name", unreal.Text(entry.get("display_name", entry.get("id", ""))))
     _set("biography", unreal.Text(entry.get("biography", "")))

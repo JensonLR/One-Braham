@@ -89,3 +89,10 @@ bool UOneBrahamGameplayStatics::AreFriendly(const AActor* A, const AActor* B)
 	const AOneBrahamPlayerState* StateB = GetPlayerStateOf(B);
 	return StateA != nullptr && StateA->IsFriendlyWith(StateB);
 }
+
+FGameplayTag UOneBrahamGameplayStatics::RequestTag(FName TagName)
+{
+	// bErrorIfNotFound false: an unknown name is the empty tag, which the
+	// caller checks with IsValid, not an ensure in the middle of a build.
+	return FGameplayTag::RequestGameplayTag(TagName, /*bErrorIfNotFound*/ false);
+}

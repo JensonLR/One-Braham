@@ -1192,12 +1192,12 @@ def build_spawn_points(report):
                 # compiled into this editor session, leave it unset rather than
                 # failing the build. An untagged spawn point is a spawn point the
                 # game mode weights less; it is not a broken map.
-                try:
-                    tag = unreal.GameplayTagLibrary.request_gameplay_tag(zone_tag_name)
-                    if tag is not None and tag.is_valid:
-                        actor.set_editor_property("ZoneTag", tag)
-                except Exception:  # noqa: BLE001
-                    pass
+                tag = C.make_gameplay_tag(zone_tag_name)
+                if tag is not None:
+                    actor.set_editor_property("ZoneTag", tag)
+                else:
+                    report.skipped_asset(anchor_name, u"zone tag {0} is not registered in this "
+                                         u"editor session".format(zone_tag_name))
 
             except Exception as exc:  # noqa: BLE001
                 report.failed("spawn point " + anchor_name, str(exc))
