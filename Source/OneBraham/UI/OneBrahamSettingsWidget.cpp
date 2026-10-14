@@ -92,7 +92,8 @@ void UOneBrahamSettingsWidget::BuildPage()
 void UOneBrahamSettingsWidget::BuildTabs()
 {
 	UHorizontalBox* Tabs = AddRow();
-	const TPair<EOneBrahamSettingsPage, FText> Entries[] =
+	struct FTab { EOneBrahamSettingsPage Target; FText Label; };
+	const FTab Entries[] =
 	{
 		{ EOneBrahamSettingsPage::Video, NSLOCTEXT("OneBraham", "Settings_Video", "Video") },
 		{ EOneBrahamSettingsPage::Audio, NSLOCTEXT("OneBraham", "Settings_Audio", "Audio") },
@@ -100,10 +101,10 @@ void UOneBrahamSettingsWidget::BuildTabs()
 		{ EOneBrahamSettingsPage::Gameplay, NSLOCTEXT("OneBraham", "Settings_Gameplay", "Gameplay") },
 		{ EOneBrahamSettingsPage::Accessibility, NSLOCTEXT("OneBraham", "Settings_Access", "Access") },
 	};
-	for (const TPair<EOneBrahamSettingsPage, FText>& Entry : Entries)
+	for (const FTab& Entry : Entries)
 	{
-		const EOneBrahamSettingsPage Target = Entry.Key;
-		AddButton(Entry.Value, [this, Target]() { Page = Target; ShowPage(); }, Tabs, Page != Target);
+		const EOneBrahamSettingsPage Target = Entry.Target;
+		AddButton(Entry.Label, [this, Target]() { Page = Target; ShowPage(); }, Tabs, Page != Target);
 	}
 }
 
@@ -194,7 +195,8 @@ void UOneBrahamSettingsWidget::BuildVideo()
 		[](float Value) { return FText::Format(NSLOCTEXT("OneBraham", "Settings_PercentWhole", "{0}%"), FText::AsNumber(FMath::RoundToInt(Value))); });
 
 	AddHeading(NSLOCTEXT("OneBraham", "Settings_PostProcess", "Image"));
-	const TPair<FName, FText> Effects[] =
+	struct FNamedOption { FName Name; FText Label; };
+	const FNamedOption Effects[] =
 	{
 		{ TEXT("MotionBlur"), NSLOCTEXT("OneBraham", "Settings_MotionBlur", "Motion blur") },
 		{ TEXT("DepthOfField"), NSLOCTEXT("OneBraham", "Settings_DOF", "Depth of field") },
@@ -206,8 +208,8 @@ void UOneBrahamSettingsWidget::BuildVideo()
 	const bool States[] = { S->bMotionBlur, S->bDepthOfField, S->bFilmGrain, S->bChromaticAberration, S->bBloom, S->bLensFlare };
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Effects); ++Index)
 	{
-		const FName Option = Effects[Index].Key;
-		AddToggle(Effects[Index].Value, States[Index], [S, Option](bool bOn)
+		const FName Option = Effects[Index].Name;
+		AddToggle(Effects[Index].Label, States[Index], [S, Option](bool bOn)
 		{
 			S->SetAdvancedGraphicOption(Option, bOn ? 1 : 0);
 		});
@@ -226,7 +228,8 @@ void UOneBrahamSettingsWidget::BuildAudio()
 	}
 
 	AddHeading(NSLOCTEXT("OneBraham", "Settings_Volume", "Volume"));
-	const TPair<FName, FText> Buses[] =
+	struct FBus { FName Name; FText Label; };
+	const FBus Buses[] =
 	{
 		{ TEXT("Master"), NSLOCTEXT("OneBraham", "Bus_Master", "Master") },
 		{ TEXT("Music"), NSLOCTEXT("OneBraham", "Bus_Music", "Music") },
@@ -239,10 +242,10 @@ void UOneBrahamSettingsWidget::BuildAudio()
 		{ TEXT("UI"), NSLOCTEXT("OneBraham", "Bus_UI", "Interface") },
 		{ TEXT("Voice"), NSLOCTEXT("OneBraham", "Bus_Voice", "Voice chat") },
 	};
-	for (const TPair<FName, FText>& Bus : Buses)
+	for (const FBus& Bus : Buses)
 	{
-		const FName BusName = Bus.Key;
-		AddSlider(Bus.Value, 0.f, 1.f, 0.05f, S->GetVolume(BusName), [S, BusName](float Value) { S->SetVolume(BusName, Value); }, Percent);
+		const FName BusName = Bus.Name;
+		AddSlider(Bus.Label, 0.f, 1.f, 0.05f, S->GetVolume(BusName), [S, BusName](float Value) { S->SetVolume(BusName, Value); }, Percent);
 	}
 
 	AddHeading(NSLOCTEXT("OneBraham", "Settings_VoiceChat", "Voice chat"));
