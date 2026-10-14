@@ -11,6 +11,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
+#include "Components/SafeZone.h"
 #include "Core/OneBrahamPlayerController.h"
 #include "Styling/SlateTypes.h"
 #include "Components/CanvasPanelSlot.h"
@@ -198,12 +199,13 @@ UProgressBar* UOneBrahamHUDWidget::MakeBar(FName Name, const FLinearColor& FillC
 void UOneBrahamHUDWidget::AddToCanvas(UWidget* Widget, const FVector2D& Position, const FVector2D& Size,
 	const FAnchors& Anchor, const FVector2D& Alignment)
 {
-	if (Widget == nullptr || RootCanvas == nullptr)
+	UCanvasPanel* Canvas = SafeCanvas != nullptr ? SafeCanvas.Get() : RootCanvas.Get();
+	if (Widget == nullptr || Canvas == nullptr)
 	{
 		return;
 	}
 
-	UCanvasPanelSlot* Slot = RootCanvas->AddChildToCanvas(Widget);
+	UCanvasPanelSlot* Slot = Canvas->AddChildToCanvas(Widget);
 	if (Slot == nullptr)
 	{
 		return;
@@ -243,6 +245,13 @@ void UOneBrahamHUDWidget::BuildDefaultLayout()
 
 	RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("HUDRoot"));
 	WidgetTree->RootWidget = RootCanvas;
+
+	// Title-safe area: the readouts sit inside it, the full-screen overlays
+	// (AddStretched) stay on the root so they still reach the edges.
+	USafeZone* SafeZone = WidgetTree->ConstructWidget<USafeZone>(USafeZone::StaticClass(), TEXT("HUDSafeZone"));
+	SafeCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("HUDSafeCanvas"));
+	SafeZone->SetContent(SafeCanvas);
+	AddStretched(SafeZone);
 
 	const FAnchors TopLeft(0.f, 0.f);
 	const FAnchors TopCentre(0.5f, 0.f);

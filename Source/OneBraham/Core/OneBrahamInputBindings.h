@@ -72,6 +72,15 @@ public:
 	static FText GetActionDescription(FName Action);
 
 	/** True when a key may be bound on a device at all. */
+	/**
+	 * What a prompt or the rebind screen calls a key. Pad buttons get the names
+	 * printed on an Xbox controller (A, RB, LT, View); the engine's own names
+	 * ("Gamepad Face Button Bottom") mean nothing to a player. Everything else
+	 * is the engine's short display name.
+	 */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Input")
+	static FText GetKeyLabel(const FKey& Key);
+
 	UFUNCTION(BlueprintPure, Category = "One Braham|Input")
 	static bool IsKeyBindable(const FKey& Key, bool bGamepad);
 

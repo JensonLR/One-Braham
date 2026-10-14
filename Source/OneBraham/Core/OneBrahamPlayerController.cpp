@@ -709,7 +709,7 @@ FText AOneBrahamPlayerController::ResolvePromptKeys(const FText& Prompt) const
 
 	const FKey Key = Preferred.IsValid() ? Preferred : Fallback;
 	const FText Label = Key.IsValid()
-		? Key.GetDisplayName(/*bLongDisplayName*/ false)
+		? UOneBrahamInputBindings::GetKeyLabel(Key)
 		: NSLOCTEXT("OneBraham", "Prompt_UnboundInteract", "Interact");
 
 	// A string replace, not FText::FormatNamed: the prompt has already been

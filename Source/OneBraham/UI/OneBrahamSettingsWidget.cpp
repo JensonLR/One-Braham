@@ -327,7 +327,7 @@ void UOneBrahamSettingsWidget::BuildControls()
 			}
 			const FKey Key = Binding.Key;
 			const bool bListening = bCapturing && CaptureAction == Action && CaptureOldKey == Key;
-			AddButton(bListening ? NSLOCTEXT("OneBraham", "Settings_Listening", "...") : Key.GetDisplayName(false),
+			AddButton(bListening ? NSLOCTEXT("OneBraham", "Settings_Listening", "...") : UOneBrahamInputBindings::GetKeyLabel(Key),
 				[this, Action, Key]() { BeginCapture(Action, Key); }, Keys);
 			++KeyCount;
 		}
@@ -362,7 +362,7 @@ void UOneBrahamSettingsWidget::FinishCapture(const FKey& Key)
 	}
 	else if (!UOneBrahamInputBindings::IsKeyBindable(Key, bGamepadBindings))
 	{
-		RebindStatus = FText::Format(NSLOCTEXT("OneBraham", "Settings_KeyRefused", "{0} cannot be bound here."), Key.GetDisplayName(false));
+		RebindStatus = FText::Format(NSLOCTEXT("OneBraham", "Settings_KeyRefused", "{0} cannot be bound here."), UOneBrahamInputBindings::GetKeyLabel(Key));
 	}
 	else
 	{
@@ -371,11 +371,11 @@ void UOneBrahamSettingsWidget::FinishCapture(const FKey& Key)
 		{
 			RebindStatus = Swapped.IsNone()
 				? FText::Format(NSLOCTEXT("OneBraham", "Settings_Rebound", "{0} is now {1}."),
-					UOneBrahamInputBindings::GetActionDescription(CaptureAction), Key.GetDisplayName(false))
+					UOneBrahamInputBindings::GetActionDescription(CaptureAction), UOneBrahamInputBindings::GetKeyLabel(Key))
 				: FText::Format(NSLOCTEXT("OneBraham", "Settings_Swapped", "{0} is now {1}. {2} took {3}."),
-					UOneBrahamInputBindings::GetActionDescription(CaptureAction), Key.GetDisplayName(false),
+					UOneBrahamInputBindings::GetActionDescription(CaptureAction), UOneBrahamInputBindings::GetKeyLabel(Key),
 					UOneBrahamInputBindings::GetActionDescription(Swapped),
-					CaptureOldKey.IsValid() ? CaptureOldKey.GetDisplayName(false) : NSLOCTEXT("OneBraham", "Settings_NoKey", "nothing"));
+					CaptureOldKey.IsValid() ? UOneBrahamInputBindings::GetKeyLabel(CaptureOldKey) : NSLOCTEXT("OneBraham", "Settings_NoKey", "nothing"));
 		}
 		else
 		{

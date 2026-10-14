@@ -383,4 +383,21 @@ bool FOneBrahamAimAssistTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamKeyLabelTest, "OneBraham.Input.KeyLabels",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamKeyLabelTest::RunTest(const FString& Parameters)
+{
+	// Pad buttons read the way they are printed on the controller.
+	TestEqual(TEXT("bottom face button is A"), UOneBrahamInputBindings::GetKeyLabel(EKeys::Gamepad_FaceButton_Bottom).ToString(), FString(TEXT("A")));
+	TestEqual(TEXT("right shoulder is RB"), UOneBrahamInputBindings::GetKeyLabel(EKeys::Gamepad_RightShoulder).ToString(), FString(TEXT("RB")));
+	TestEqual(TEXT("left trigger is LT"), UOneBrahamInputBindings::GetKeyLabel(EKeys::Gamepad_LeftTrigger).ToString(), FString(TEXT("LT")));
+	TestEqual(TEXT("right special is Menu"), UOneBrahamInputBindings::GetKeyLabel(EKeys::Gamepad_Special_Right).ToString(), FString(TEXT("Menu")));
+
+	// Everything else keeps the engine's short name.
+	TestTrue(TEXT("keyboard keys are the engine's name"),
+		UOneBrahamInputBindings::GetKeyLabel(EKeys::F).EqualTo(EKeys::F.GetDisplayName(false)));
+	return true;
+}
+
 #endif // WITH_AUTOMATION_TESTS

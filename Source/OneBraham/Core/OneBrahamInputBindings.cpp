@@ -153,6 +153,41 @@ FText UOneBrahamInputBindings::GetActionDescription(FName Action)
 	return FText::FromName(Action);
 }
 
+FText UOneBrahamInputBindings::GetKeyLabel(const FKey& Key)
+{
+	struct FPadLabel { FKey Key; const TCHAR* Label; };
+	static const FPadLabel PadLabels[] =
+	{
+		{ EKeys::Gamepad_FaceButton_Bottom, TEXT("A") },
+		{ EKeys::Gamepad_FaceButton_Right, TEXT("B") },
+		{ EKeys::Gamepad_FaceButton_Left, TEXT("X") },
+		{ EKeys::Gamepad_FaceButton_Top, TEXT("Y") },
+		{ EKeys::Gamepad_LeftShoulder, TEXT("LB") },
+		{ EKeys::Gamepad_RightShoulder, TEXT("RB") },
+		{ EKeys::Gamepad_LeftTrigger, TEXT("LT") },
+		{ EKeys::Gamepad_RightTrigger, TEXT("RT") },
+		{ EKeys::Gamepad_LeftTriggerAxis, TEXT("LT") },
+		{ EKeys::Gamepad_RightTriggerAxis, TEXT("RT") },
+		{ EKeys::Gamepad_LeftThumbstick, TEXT("LS") },
+		{ EKeys::Gamepad_RightThumbstick, TEXT("RS") },
+		{ EKeys::Gamepad_Special_Left, TEXT("View") },
+		{ EKeys::Gamepad_Special_Right, TEXT("Menu") },
+		{ EKeys::Gamepad_DPad_Up, TEXT("D-pad Up") },
+		{ EKeys::Gamepad_DPad_Down, TEXT("D-pad Down") },
+		{ EKeys::Gamepad_DPad_Left, TEXT("D-pad Left") },
+		{ EKeys::Gamepad_DPad_Right, TEXT("D-pad Right") },
+	};
+
+	for (const FPadLabel& Pad : PadLabels)
+	{
+		if (Pad.Key == Key)
+		{
+			return FText::FromString(Pad.Label);
+		}
+	}
+	return Key.GetDisplayName(/*bLongDisplayName*/ false);
+}
+
 bool UOneBrahamInputBindings::IsKeyBindable(const FKey& Key, bool bGamepad)
 {
 	if (!Key.IsValid() || Key.IsGamepadKey() != bGamepad)

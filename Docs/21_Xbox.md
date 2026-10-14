@@ -53,9 +53,11 @@ subsystem without a rewrite, but that is unverified until it runs on a kit.
 | Communication privilege | voice subsystem, proximity voice component | an account that may not talk online neither sends nor hears voice, whatever the game's own setting is |
 | Block list | `UOneBrahamPlatformSubsystem::IsBlocked` | voice from a player on the platform block list is dropped on arrival |
 | Crossplay | session keys `OB_PLATFORM`, `OB_CROSSPLAY`; Settings → Gameplay → Online | another platform's lobby is listed only when both sides allow crossplay. Dedicated servers carry no platform and suit everyone. The platform's own crossplay privilege overrides the setting. |
+| Controller prompts | `UOneBrahamInputBindings::GetKeyLabel` | interaction prompts and the rebind screen name pad buttons A, B, X, Y, LB, RB, LT, RT, View, Menu |
+| Title-safe area | `UOneBrahamHUDWidget::SafeCanvas` | the HUD readouts sit inside the platform safe zone; overlays still reach the edges |
 | Disconnect reasons | `UOneBrahamPlatformSubsystem::DescribeNetworkFailure` | a dropped or refused connection lands back on the main menu with a line saying why |
 
-`OneBraham.Online.PlatformRules` and `OneBraham.Input.AimAssist` test the pure halves of these.
+`OneBraham.Online.PlatformRules`, `OneBraham.Input.AimAssist` and `OneBraham.Input.KeyLabels` test the pure halves of these.
 
 ## 4. What is left, and needs the GDK
 
@@ -67,9 +69,12 @@ subsystem without a rewrite, but that is unverified until it runs on a kit.
   `Config/Steam/rich_presence_english.vdf` are the list to copy.
 - **Sign-in and user switching.** The user signs in on the title screen and the
   game handles a sign-out mid-session. That needs the GDK's identity flow.
-- **Pad button glyphs.** Prompts already switch to the pad's keys. They show the
-  key names, not Xbox button art. Glyph textures are a content task.
-- **Title-safe area.** Every HUD panel should sit inside a `USafeZone`. Check on a TV at 90% safe area.
+- **Pad button art.** Prompts and the rebind screen already name pad buttons
+  as printed on the controller (A, RB, LT, View: `UOneBrahamInputBindings::GetKeyLabel`).
+  Button icons in place of letters are a content task.
+- **Title-safe area.** Every HUD readout already sits inside a `USafeZone`
+  (`UOneBrahamHUDWidget::SafeCanvas`); full-screen overlays stay on the root.
+  Check it on a TV at the platform's safe-area setting.
 - **Performance targets.** Series S is the floor. Set the scalability preset per
   device in the platform's ini, which lives in the NDA folder.
 - **Certification.** Microsoft's Xbox Requirements are under the NDA. Run the

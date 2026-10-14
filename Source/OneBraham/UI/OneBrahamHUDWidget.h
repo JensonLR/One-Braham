@@ -257,9 +257,18 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "One Braham|HUD")
 	TObjectPtr<UCanvasPanel> Panel_Downed = nullptr;
 
-	/** The canvas everything else is added to. */
+	/** The full-screen canvas: overlays that must reach every edge (death screen, pause backdrop) go here. */
 	UPROPERTY(BlueprintReadOnly, Category = "One Braham|HUD")
 	TObjectPtr<UCanvasPanel> RootCanvas = nullptr;
+
+	/**
+	 * The canvas inside the platform's title-safe area: every anchored readout
+	 * (ammo, compass, squad panel, feed) goes here, so a TV that crops the
+	 * picture's edges does not crop the HUD. On a monitor the safe area is the
+	 * whole screen and this is the same size as RootCanvas.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|HUD")
+	TObjectPtr<UCanvasPanel> SafeCanvas = nullptr;
 
 	// --- state ------------------------------------------------------------
 	FOneBrahamHUDData Data;
