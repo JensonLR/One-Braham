@@ -1258,6 +1258,7 @@ void AOneBrahamCharacter::Landed(const FHitResult& Hit)
 	Report.BaseDamage = Damage;
 	Report.FinalDamage = Damage;
 	Report.HitZone = EOneBrahamHitZone::LowerLeg;
+	Report.CauseId = TEXT("Fall");
 	Report.HitLocation = GetActorLocation();
 	Report.ShotDirection = FVector(0.f, 0.f, -1.f);
 	Report.bLethal = Damage >= HealthComponent->GetHealth();

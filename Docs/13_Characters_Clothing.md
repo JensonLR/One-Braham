@@ -263,6 +263,8 @@ and the only way a match could end was elimination.
 | `AOneBrahamKeycard` | "Take {tier} badge - issued floor {n}", or "Take {tier} ({name})" for a dropped card | `OB.Interaction.Keycard` | tap | 210 cm (`AOneBrahamKeycard::CardPickupRangeCm`) | `AM_OB_Interact_Keycard` |
 | `AOneBrahamOverrideTerminal` | "Hold {Interact} - override", "Already released", "Access panel offline", "Unlinked panel" | `OB.Interaction.Terminal` | 12 s (`UOneBrahamAccessZoneComponent::OverrideSeconds`) solo, 3 s (`UOneBrahamAccessZoneComponent::OverrideTwoPersonSeconds`) paired | 200 cm (`AOneBrahamOverrideTerminal::OBTerminalInteractionRange`) | `AM_OB_Interact_Terminal` |
 | `AOneBrahamPickupBase` | "Take {weapon}" | `OB.Interaction.Weapon` | tap | 220 cm (`AOneBrahamPickupBase::PickupRangeCm`) | `AM_OB_Interact_Door` |
+| `AOneBrahamLift` | "Lift to floor {n}" for a rider; "Lift - staff badge required", "Lift in transit", "Lifts out of service - lockdown" | `OB.Interaction.Lift` | tap | 200 cm (`AOneBrahamLift::PanelRangeCm`) | `AM_OB_Interact_LiftPanel` |
+| `AOneBrahamLiftCallPanel` | "Call lift", "Lift is here", or the lift's refusal | `OB.Interaction.Lift` | tap | 200 cm (`AOneBrahamLift::PanelRangeCm`) | `AM_OB_Interact_LiftPanel` |
 | `AOneBrahamSupplyPickup` | "Take ammunition", "Take frag grenade" (and the other three utilities), "Take medkit"; refused, and left where it is, when the pouch is full | `OB.Interaction.Ammo`, `OB.Interaction.Utility`, `OB.Interaction.Medkit` | tap | 210 cm (`AOneBrahamSupplyPickup::PickupRangeCm`) | `AM_OB_Interact_Loot` |
 | `AOneBrahamExtractionTerminal` | "Hold {Interact} - call the winch", or the state of the winch: "Called - helicopter inbound", "Winch live - hold the pad", "Winch aborted - stands by" | `OB.Interaction.Extraction` | 1.4 s (`AOneBrahamExtractionTerminal::CallHoldSeconds`) | 220 cm (`AOneBrahamExtractionTerminal::InteractionRangeCm`) | `AM_OB_Interact_Radio` |
 | `AOneBrahamCharacter` | "Hold {Interact} - revive {name}" for a squadmate, "Hold {Interact} - finish {name}" for an enemy | `OB.Interaction.Revive`, `OB.Interaction.Execute` | 4.5 s (`OneBrahamConstants::ReviveSeconds`), 2 s (`UOneBrahamDownedComponent::ExecuteSeconds`) | 220 cm (`OneBrahamConstants::InteractRangeCm`) | `AM_OB_Interact_Revive`, `AM_OB_Interact_Execute` |
@@ -291,7 +293,7 @@ conventions:
 
 **Table 6 — declared, and not yet emitted**
 
-Four interaction tags are declared in the native registry and mirrored in
+Three interaction tags are declared in the native registry and mirrored in
 `Config/DefaultGame.ini`, and nothing in the game emits them yet. They are listed here rather than deleted because each is
 the designed vocabulary of content that has not been built, and because the
 montage contract in section 7 already reserves an animation family for several of
@@ -301,7 +303,6 @@ which side of the line the tag belongs on.
 
 | Tag | Why nothing emits it | What it is waiting on |
 | --- | --- | --- |
-| `OB.Interaction.Lift` | the two lift cores are access zones, so their doors return `OB.Interaction.Door.*` and the lift-panel montage is unreachable | a lift actor (call panel, car, floor indicator) rather than a door in the core |
 | `OB.Interaction.Body` | nothing is lootable: a corpse is a ragdoll, not a container | the death-bag pass (searchable bodies and dropped bags) |
 | `OB.Interaction.HoldToUnlock` | the HUD verb category for a hold: `RequiresHold()` already answers this in C++, so nothing emits the tag | a decision - either the widget reads it or the tag goes |
 | `OB.Interaction.TapToUse` | the same, for a tap | the same decision |

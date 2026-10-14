@@ -188,59 +188,62 @@ AREA_DEFAULT_FINISH = {
 # with a break-out area and two meeting pods, a server floor with four rows and a
 # cold aisle, and an executive floor with a boardroom and a corner office.
 ROOM_PROGRAMMES = {
+    # Every room is placed around the service core (common.CORE_BAND) and clear
+    # of the corridor in front of it (common.CORE_CORRIDOR); check_building_layout
+    # fails on any overlap, between rooms or with the core.
     "Ground_Plaza": [
-        ("Reception_Island", 0, 0, 700, 400),
-        ("Turnstile_Bank_1", -900, 600, 500, 160),
-        ("Turnstile_Bank_2", 900, 600, 500, 160),
-        ("Security_Desk", 0, 900, 600, 300),
+        ("Reception_Island", 0, -200, 700, 400),
+        ("Turnstile_Bank_1", -900, 150, 500, 160),
+        ("Turnstile_Bank_2", 900, 150, 500, 160),
+        ("Security_Desk", -2000, 900, 600, 300),
         ("Bike_Store", -1700, -1200, 900, 600),
         ("Loading_Bay", 1500, -1300, 1400, 700),
     ],
     "Lobby": [
-        ("Reception_Desk", 0, 300, 900, 350),
+        ("Reception_Desk", 0, -100, 900, 350),
         ("Waiting_Seating", 0, -700, 1200, 400),
         ("Coffee_Point", 1100, 0, 500, 350),
-        ("Lift_Lobby", 0, 0, 900, 500),
+        ("Lift_Lobby", 0, 200, 1000, 200),
         ("Under_Stair_Store", -1300, -1000, 500, 400),
     ],
     "Mezzanine": [
-        ("Breakout_Area", 0, 0, 1400, 800),
-        ("Bridge_To_Core", 0, 900, 500, 500),
+        ("Breakout_Area", 0, -500, 1400, 800),
+        ("Bridge_To_Core", 0, 200, 500, 200),
         ("Vending_Alcove", 1200, -900, 400, 350),
     ],
     "OpenPlan": [
         ("Desk_Farm_A", -900, -700, 1400, 1100),
         ("Desk_Farm_B", 900, -700, 1400, 1100),
-        ("Meeting_Pod_1", -900, 900, 600, 500),
-        ("Meeting_Pod_2", 900, 900, 600, 500),
-        ("Break_Out_Kitchen", 0, 1300, 900, 500),
-        ("Print_Alcove", -1700, 0, 450, 350),
+        ("Meeting_Pod_1", -1850, 900, 500, 500),
+        ("Meeting_Pod_2", 1850, 900, 500, 500),
+        ("Break_Out_Kitchen", 1850, 0, 500, 700),
+        ("Print_Alcove", -1900, 300, 450, 350),
     ],
     "ServerComms": [
-        ("Cold_Aisle", 0, -600, 900, 1200),
-        ("Server_Row_1", -700, -600, 200, 1200),
-        ("Server_Row_2", 700, -600, 200, 1200),
-        ("NOC", 0, 700, 1200, 600),
-        ("Power_Room", -1000, 900, 500, 450),
-        ("Comms_Cupboard", 1000, 900, 350, 320),
+        ("Cold_Aisle", 0, -800, 900, 900),
+        ("Server_Row_1", -700, -800, 200, 900),
+        ("Server_Row_2", 700, -800, 200, 900),
+        ("NOC", 0, 100, 1200, 300),
+        ("Power_Room", -1350, -1050, 400, 500),
+        ("Comms_Cupboard", 1350, -1050, 400, 500),
     ],
     "Executive": [
-        ("Boardroom", 0, 0, 1600, 1000),
-        ("Corner_Office", -1000, 900, 700, 600),
-        ("Exec_PA_Desk", 900, 900, 500, 400),
-        ("West_Lounge", 1200, -700, 700, 700),
+        ("Boardroom", 0, -650, 1600, 900),
+        ("Corner_Office", -1350, 0, 700, 400),
+        ("Exec_PA_Desk", 1300, 0, 500, 400),
+        ("West_Lounge", 1300, -850, 700, 700),
     ],
     "Canteen": [
-        ("Canteen_Hall", 0, 0, 1800, 1400),
-        ("Servery", 0, 1000, 1400, 400),
-        ("Kitchen", -1200, 900, 700, 500),
-        ("Terrace", 1300, 300, 600, 900),
+        ("Canteen_Hall", 0, -650, 1800, 1100),
+        ("Servery", 0, 150, 1400, 300),
+        ("Kitchen", -1750, 900, 500, 700),
+        ("Terrace", 1750, 900, 500, 700),
     ],
     "Skydeck": [
-        ("Helipad", 0, 0, 1800, 1800),
-        ("Plant_Room", 1800, 0, 700, 900),
-        ("Winch_Control", -1500, 400, 600, 500),
-        ("Bar_Pavilion", 0, 1500, 1200, 600),
+        ("Helipad", 0, -800, 1800, 1800),
+        ("Plant_Room", 1950, -800, 700, 700),
+        ("Winch_Control", -1950, -500, 600, 500),
+        ("Bar_Pavilion", 0, 1600, 1200, 400),
         ("Edge_Rail_North", 0, 1900, 4200, 120),
         ("Edge_Rail_South", 0, -1900, 4200, 120),
     ],
@@ -248,7 +251,10 @@ ROOM_PROGRAMMES = {
 
 # Rooms that are areas of open deck rather than enclosed rooms: no partitions,
 # no door, and the edge rails are where the balustrade runs.
-OPEN_AIR_ROOMS = {"Helipad", "Edge_Rail_North", "Edge_Rail_South"}
+OPEN_AIR_ROOMS = {"Helipad", "Edge_Rail_North", "Edge_Rail_South",
+                  # Not rooms but the lift-lobby threshold: walled, they would
+                  # wall off the lifts.
+                  "Lift_Lobby", "Bridge_To_Core"}
 
 # Anchors: named, gameplay-relevant positions per area. The manifest this script
 # writes is the authoritative list the C++ and Docs reference.
@@ -261,7 +267,7 @@ ANCHORS = {
     "Lobby": [
         ("Lobby_Spawn_A", -1800, -1200),
         ("Lobby_Spawn_B", 1800, -1200),
-        ("Lobby_Spawn_C", 0, 1000),
+        ("Lobby_Spawn_C", 0, 1500),
     ],
     "Mezzanine": [
         ("Mezz_Spawn_A", -1500, 0),
@@ -275,59 +281,61 @@ ANCHORS = {
         ("Office_Spawn_D", 1800, 1400),
    ],
     "ServerComms": [
-        ("Server_Spawn_A", -1300, -1000),
-        ("Server_Spawn_B", 1300, -1000),
-        ("Server_Spawn_C", 0, 1100),
+        ("Server_Spawn_A", -1100, -250),
+        ("Server_Spawn_B", 1100, -250),
+        ("Server_Spawn_C", 0, -1330),
     ],
     "Executive": [
         ("Exec_Spawn_A", -1500, -1100),
-        ("Exec_Spawn_B", 1500, -1100),
-        ("Exec_Spawn_C", 0, 1000),
+        ("Exec_Spawn_B", 1600, -1350),
+        ("Exec_Spawn_C", 0, 1400),
     ],
     "Canteen": [
         ("Canteen_Spawn_A", -1600, -1200),
         ("Canteen_Spawn_B", 1600, -1200),
-        ("Canteen_Spawn_C", 0, 1100),
+        ("Canteen_Spawn_C", 0, 1450),
     ],
     "Skydeck": [
         ("Deck_Spawn_West", -2000, 0),
         ("Deck_Spawn_East", 2000, 0),
-        ("Deck_Spawn_North", 0, -1600),
-        ("Deck_Spawn_South", 0, 1600),
+        ("Deck_Spawn_North", -1300, -1600),
+        ("Deck_Spawn_South", 1300, 1600),
     ],
 }
 
 # Access zones: the locked doors that define ASCENT's progression. Each entry is
 # (zone_id, floor, tier, x, y, paired_zone_id, breachable, escalation_opens).
 ACCESS_ZONES = [
-    ("Core_Lift_Lobby",         1,  "Public",    0,    0,    "Core_Lift_Mezzanine", False, True),
-    ("Core_Lift_Mezzanine",     2,  "Staff",     0,    0,    "Core_Lift_Lobby",     False, True),
-    ("Stair_A_F03",             3,  "Staff",   -1300,  0,    None,                  True,  True),
-    ("Stair_B_F03",             3,  "Staff",    1300,  0,    None,                  True,  True),
-    ("Office_Floor09",          9,  "Secure",    0,   -900,  None,                  True,  True),
-    ("Server_Floor09",          9,  "Secure",   -900,   0,    None,                  True,  True),
-    ("Executive_Floor12",      12,  "Executive", 0,    0,    "Executive_Wing_East", True,  True),
-    ("Executive_Wing_East",    12,  "Executive", 900,  900,  "Executive_Floor12",   True,  True),
-    ("Canteen_Floor15",        15,  "Staff",     0,    0,    "Skydeck_Gate",        True,  False),
-    ("Skydeck_Gate",           15,  "Skydeck", 900, -700,  "Canteen_Floor15",     True,  False),
+    ("Core_Lift_Lobby",         1,  "Public",    0,    300,  "Core_Lift_Mezzanine", False, True),
+    ("Core_Lift_Mezzanine",     2,  "Staff",     0,    300,  "Core_Lift_Lobby",     False, True),
+    ("Stair_A_F03",             3,  "Staff",   -1100,  470,  None,                  True,  True),
+    ("Stair_B_F03",             3,  "Staff",    1100,  470,  None,                  True,  True),
+    ("Office_Floor09",          9,  "Secure",    0,    -50,  None,                  True,  True),
+    ("Server_Floor09",          9,  "Secure",    0,  -1250,  None,                  True,  True),
+    ("Executive_Floor12",      12,  "Executive", 0,  -1100,  "Executive_Wing_East", True,  True),
+    ("Executive_Wing_East",    12,  "Executive", 1300, -200, "Executive_Floor12",   True,  True),
+    ("Canteen_Floor15",        15,  "Staff",   -1100,  470,  "Skydeck_Gate",        True,  False),
+    ("Skydeck_Gate",           15,  "Skydeck",  1100,  470,  "Canteen_Floor15",     True,  False),
 ]
 
 # Override terminals: hold-to-open. Two-panel pairs are what make the co-op push
 # into the Skydeck a real coordination problem.
 OVERRIDE_TERMINALS = [
-    ("Terminal_Office09_PanelA", 9,  -500, -1100, "Terminal_Office09_PanelB"),
-    ("Terminal_Office09_PanelB", 9,   500, -1100, "Terminal_Office09_PanelA"),
-    ("Terminal_Executive12",     12,   0,    700,  None),
-    ("Terminal_Canteen15",       15,  -700,   0,   "Terminal_Skydeck15"),
-    ("Terminal_Skydeck15",       15,   700,   0,   "Terminal_Canteen15"),
+    ("Terminal_Office09_PanelA", 9,  -400, -1350, "Terminal_Office09_PanelB"),
+    ("Terminal_Office09_PanelB", 9,   400, -1350, "Terminal_Office09_PanelA"),
+    ("Terminal_Executive12",     12,  300, -1250,  None),
+    ("Terminal_Canteen15",       15, -1600,  300, "Terminal_Skydeck15"),
+    ("Terminal_Skydeck15",       15,  1600,  300, "Terminal_Canteen15"),
 ]
 
 # Breachable walls: plasterboard and service partitions that a charge opens. Each
 # is (id, floor, x, y, yoke_axis, width, height, surface).
 BREACHABLE_WALLS = [
-    ("Breach_Office05_Partition", 5,  0,  700, "X", 600, 400, "Plasterboard"),
+    ("Breach_Office05_Partition", 5,  0,   -700, "Y", 1000, 400, "Plasterboard"),
     ("Breach_Server09_Riser",     9,  900, -600, "Y", 200, 400, "Plasterboard"),
-    ("Breach_Exec12_StairLock",  12, -900,  0,   "X", 250, 400, "Metal"),
+    # In front of stairwell A's door on floor 12: the stair is locked until
+    # somebody spends a charge on it. That floor has no shutter on stair A.
+    ("Breach_Exec12_StairLock",  12, -1100, 470, "X", 250, 400, "Metal"),
     ("Breach_Canteen14_Wall",    14,  0,   -900, "X", 700, 400, "Plasterboard"),
 ]
 
@@ -683,7 +691,12 @@ def build_floor_shell(report, floor_index, materials):
 
     # 20 cm of slab so floors read as floors from the stairwell, and so a round
     # that misses a stairwell rail has something to stop in.
-    _box((origin_x, origin_y, z - 10.0), (size_x, size_y, 20.0), slab_material, prefix + "_Slab")
+    # Cut round the core: the stairwells behind their landings and the lift
+    # shafts, so the flights and the cars come up through it.
+    footprint = (origin_x - half_x, origin_x + half_x, origin_y - half_y, origin_y + half_y)
+    for index, (x0, x1, y0, y1) in enumerate(C.subtract_rects(footprint, C.core_holes(floor_index))):
+        _box(((x0 + x1) / 2.0, (y0 + y1) / 2.0, z - 10.0), (x1 - x0, y1 - y0, 20.0),
+             slab_material, "{0}_Slab_{1:02d}".format(prefix, index))
     created.append((prefix + "_Slab", (origin_x, origin_y, z - 10.0)))
     _note_surface("Marble" if area_name == "Lobby" else
                   ("Concrete" if area_name == "Ground_Plaza" else
@@ -696,8 +709,12 @@ def build_floor_shell(report, floor_index, materials):
     # office glazing like every other floor, which made the ending of the game
     # a sixteenth open-plan office with a helicopter pad painted on the carpet.
     if area_name != "Skydeck":
-        _box((origin_x, origin_y, z + C.CEILING_HEIGHT_CM + 10.0),
-             (size_x, size_y, 20.0), plaster, prefix + "_Ceiling")
+        # The ceiling is the underside of the floor above, so it has that
+        # floor's holes: a stair capped by a plasterboard ceiling is a wall.
+        for index, (x0, x1, y0, y1) in enumerate(
+                C.subtract_rects(footprint, C.core_holes(floor_index + 1))):
+            _box(((x0 + x1) / 2.0, (y0 + y1) / 2.0, z + C.CEILING_HEIGHT_CM - 30.0),
+                 (x1 - x0, y1 - y0, 20.0), plaster, "{0}_Ceiling_{1:02d}".format(prefix, index))
         _note_surface("Plasterboard", prefix + "_Ceiling")
 
     # --- Perimeter glazing (the thing that makes the tower feel like a tower) --
@@ -713,16 +730,8 @@ def build_floor_shell(report, floor_index, materials):
         _note_surface("BallisticGlass" if materials.get("BallisticGlass") is not None else "Glass",
                       prefix + "_Glazing")
 
-    # --- Core walls (the lift core is a hole in the middle of every floor) ---
-    core = C.LIFT_CORE_SIZE_CM
-    core_wall = 20.0
-    _box((origin_x - core / 2.0, origin_y, z + C.CEILING_HEIGHT_CM / 2.0),
-         (core_wall, core, C.CEILING_HEIGHT_CM), concrete, prefix + "_Core_West")
-    _box((origin_x + core / 2.0, origin_y, z + C.CEILING_HEIGHT_CM / 2.0),
-         (core_wall, core, C.CEILING_HEIGHT_CM), concrete, prefix + "_Core_East")
-    _box((origin_x, origin_y - core / 2.0, z + C.CEILING_HEIGHT_CM / 2.0),
-         (core, core_wall, C.CEILING_HEIGHT_CM), concrete, prefix + "_Core_South")
-    # The north face is left open on most floors: that is the door into the core.
+    # --- The service core ------------------------------------------------
+    created.extend(build_core(report, floor_index, materials))
 
     # --- Room partitions --------------------------------------------------
     rooms = ROOM_PROGRAMMES.get(area_name, [])
@@ -788,62 +797,156 @@ def build_floor_shell(report, floor_index, materials):
         created.append(("{0}_{1}_Finish".format(prefix, room_name), (fx, fy, z - 0.6)))
         _note_surface(finish_name, "{0}/{1}".format(prefix, room_name))
 
-    # --- Circulation: stairwells and the lift doors -----------------------
-    stair_x = -1300.0
-    stair_y = 0.0
-    _box((origin_x + stair_x, origin_y + stair_y, z + 60.0),
-         (C.STAIRWELL_SIZE_CM, C.STAIRWELL_SIZE_CM, 120.0), concrete, prefix + "_Stair_A_Landing")
-    _box((origin_x - stair_x, origin_y + stair_y, z + 60.0),
-         (C.STAIRWELL_SIZE_CM, C.STAIRWELL_SIZE_CM, 120.0), concrete, prefix + "_Stair_B_Landing")
-
-    # Lift doors on the core's north face: two shafts, 110 cm doors, which is the
-    # chokepoint the whole map is balanced around.
-    for i, offset in enumerate((-260.0, 260.0)):
-        _box((origin_x + offset, origin_y + core / 2.0, z + 110.0),
-             (C.DOOR_WIDTH_CM, 20.0, 220.0), metal, "{0}_Lift_Door_{1}".format(prefix, i + 1))
-    _note_surface("Metal", prefix + "_Lift_Door")
-    _note_surface("Concrete", prefix + "_Stair_Landing")
     _note_surface("Plasterboard", prefix + "_Partitions")
 
     return created
 
 
-def build_vertical_circulation(report, materials):
-    """Builds the stair flights and lift shafts through all fifteen floors.
+def stair_flights(floor_index):
+    """The stairs from floor_index to the floor above, as boxes.
 
-    Stairs are the spine of ASCENT: the lockdown seals them, the breach opens
-    them, and the whole game is a decision about when to stop climbing. Each
-    flight is a run of steps, built as real geometry so the character movement
-    component's mantle and step-up logic has something honest to work with.
+    (label, centre x, centre y, centre z, size x, size y, size z) for every step
+    and the mid-landing of both stairwells. Two flights a storey: the first up
+    the west half of the well from the floor-level landing to a mid-landing at
+    the back, the second back down the east half to the landing of the floor
+    above. Each step is a block two risers deep, so the flight stacked above
+    leaves full headroom. Pure, so the engine-free check can walk the stair.
     """
+    if floor_index >= C.FLOOR_COUNT:
+        return []
+
+    z0 = _floor_z(floor_index)
+    rise = (C.FLOOR_HEIGHT_CM / 2.0) / C.STAIR_RISERS_PER_FLIGHT
+    tread = C.STAIR_TREAD_CM
+    well = C.STAIRWELL_SIZE_CM
+    y_start = C.CORE_BAND[2] + C.STAIR_LANDING_DEPTH_CM
+    y_turn = y_start + C.STAIR_RISERS_PER_FLIGHT * tread
+    flight_width = well / 2.0 - 20.0
+
+    boxes = []
+    for name, cx in C.STAIRWELLS:
+        west = cx - well / 4.0 - 5.0
+        east = cx + well / 4.0 + 5.0
+        for step in range(C.STAIR_RISERS_PER_FLIGHT):
+            top = z0 + (step + 1) * rise
+            depth = min(2.0 * rise, top - z0)
+            boxes.append(("Stair_{0}_F{1:02d}_Up1_{2:02d}".format(name, floor_index, step),
+                          west, y_start + (step + 0.5) * tread, top - depth / 2.0,
+                          flight_width, tread, depth))
+
+            top2 = z0 + C.FLOOR_HEIGHT_CM / 2.0 + (step + 1) * rise
+            boxes.append(("Stair_{0}_F{1:02d}_Up2_{2:02d}".format(name, floor_index, step),
+                          east, y_turn - (step + 0.5) * tread, top2 - 2.0 * rise / 2.0,
+                          flight_width, tread, 2.0 * rise))
+
+        landing_depth = C.CORE_BAND[3] - y_turn
+        boxes.append(("Stair_{0}_F{1:02d}_MidLanding".format(name, floor_index),
+                      cx, y_turn + landing_depth / 2.0, z0 + C.FLOOR_HEIGHT_CM / 2.0 - 10.0,
+                      well, landing_depth, 20.0))
+    return boxes
+
+
+def build_core(report, floor_index, materials):
+    """One floor of the service core: stairwell walls and flights, the lift
+    shafts with their landing openings, and the solid risers between them."""
     concrete = materials.get("Concrete")
     metal = materials.get("Metal")
+    z = _floor_z(floor_index)
+    is_deck = floor_index == C.FLOOR_COUNT
+    wall_h = 300.0 if is_deck else C.FLOOR_HEIGHT_CM
+    wall_z = z + wall_h / 2.0
+    prefix = "F{0:02d}_Core".format(floor_index)
+    band_x0, band_x1, band_y0, band_y1 = C.CORE_BAND
+    well = C.STAIRWELL_SIZE_CM
+    t = 20.0
+    created = []
 
-    stair_x = 1300.0
-    step_count = 12
-    step_rise = C.FLOOR_HEIGHT_CM / step_count
-    step_run = 26.0
+    def wall(label, x0, x1, y0, y1, material=concrete, height=wall_h, base=z):
+        _box(((x0 + x1) / 2.0, (y0 + y1) / 2.0, base + height / 2.0), (x1 - x0, y1 - y0, height),
+             material, "{0}_{1}".format(prefix, label))
 
-    for floor_index in range(0, C.FLOOR_COUNT):
-        z0 = _floor_z(floor_index)
-        z1 = _floor_z(floor_index + 1)
+    # Stairwells: three solid walls and a south wall with the door in it.
+    for name, cx in C.STAIRWELLS:
+        x0, x1 = cx - well / 2.0, cx + well / 2.0
+        wall("Stair_{0}_W".format(name), x0 - t, x0, band_y0, band_y1)
+        wall("Stair_{0}_E".format(name), x1, x1 + t, band_y0, band_y1)
+        wall("Stair_{0}_N".format(name), x0 - t, x1 + t, band_y1, band_y1 + t)
+        door = C.DOOR_WIDTH_CM / 2.0
+        wall("Stair_{0}_S_W".format(name), x0, cx - door, band_y0 - t, band_y0)
+        wall("Stair_{0}_S_E".format(name), cx + door, x1, band_y0 - t, band_y0)
+        wall("Stair_{0}_S_Head".format(name), cx - door, cx + door, band_y0 - t, band_y0,
+             height=wall_h - C.DOOR_HEIGHT_CM, base=z + C.DOOR_HEIGHT_CM)
+        if is_deck:
+            # The stair head on the roof: a lid over the well.
+            wall("Stair_{0}_Roof".format(name), x0 - t, x1 + t, band_y0 - t, band_y1 + t,
+                 height=20.0, base=z + wall_h)
+        created.append(("{0}_Stair_{1}".format(prefix, name), (cx, (band_y0 + band_y1) / 2.0, z)))
 
-        for side in (-1.0, 1.0):
-            x = stair_x * side
-            for i in range(step_count):
-                step_z = z0 + step_rise * (i + 1)
-                step_y = i * step_run
-                _box((x, step_y, step_z - step_rise / 2.0),
-                     (120.0, step_run, step_rise), concrete,
-                     "Stair_{0}_{1}_Step_{2}".format("A" if side < 0 else "B", floor_index, i))
+    for label, x, y, bz, sx, sy, sz in stair_flights(floor_index):
+        _box((x, y, bz), (sx, sy, sz), concrete, label)
+    _note_surface("Concrete", prefix + "_Stairs")
 
-        # Lift shaft: an open tube with a car floor at every level, so the lifts
-        # can be animated without a separate mesh.
-        for shaft in (-260.0, 260.0):
-            _box((shaft, 0.0, (z0 + z1) / 2.0), (C.LIFT_CAR_SIZE_CM, C.LIFT_CAR_SIZE_CM, C.FLOOR_HEIGHT_CM),
-                 metal, "Lift_Shaft_{0}_{1}".format(int(shaft), floor_index))
+    # Risers between the stairwells and the lift lobby.
+    lobby_x0, lobby_x1, _lobby_y0, lobby_y1 = C.LIFT_LOBBY
+    first_well_x1 = C.STAIRWELLS[0][1] + well / 2.0 + t
+    last_well_x0 = C.STAIRWELLS[-1][1] - well / 2.0 - t
+    wall("Riser_W", first_well_x1, lobby_x0, band_y0, band_y1)
+    wall("Riser_E", lobby_x1, last_well_x0, band_y0, band_y1)
 
-    return True
+    has_shafts = C.LIFT_FLOORS[0] <= floor_index <= C.LIFT_FLOORS[1]
+    if not has_shafts:
+        wall("Riser_Centre", lobby_x0, lobby_x1, lobby_y1, band_y1)
+        return created
+
+    # Lift shafts: walls round each, an opening on its lobby face at a stop.
+    half = C.LIFT_SHAFT_SIZE_CM / 2.0
+    shaft_y0 = C.LIFT_SHAFTS[0][2] - half
+    shaft_y1 = C.LIFT_SHAFTS[0][2] + half
+    wall("Shaft_Back", lobby_x0, lobby_x1, shaft_y1, band_y1)
+    wall("Shaft_W", lobby_x0, C.LIFT_SHAFTS[0][1] - half, shaft_y0, shaft_y1)
+    wall("Shaft_E", C.LIFT_SHAFTS[-1][1] + half, lobby_x1, shaft_y0, shaft_y1)
+    wall("Shaft_Mid", C.LIFT_SHAFTS[0][1] + half, C.LIFT_SHAFTS[-1][1] - half, shaft_y0, shaft_y1)
+
+    stop = floor_index in C.LIFT_STOPS
+    for name, cx, _cy in C.LIFT_SHAFTS:
+        if stop:
+            # The landing doors themselves belong to AOneBrahamLift; the wall
+            # only leaves them a hole the width of the car.
+            gap = C.LIFT_CAR_SIZE_CM / 2.0
+            wall("Shaft_{0}_Front_W".format(name), cx - half, cx - gap, shaft_y0 - t, shaft_y0, metal)
+            wall("Shaft_{0}_Front_E".format(name), cx + gap, cx + half, shaft_y0 - t, shaft_y0, metal)
+            wall("Shaft_{0}_Front_Head".format(name), cx - gap, cx + gap, shaft_y0 - t, shaft_y0, metal,
+                 height=wall_h - C.DOOR_HEIGHT_CM, base=z + C.DOOR_HEIGHT_CM)
+        else:
+            wall("Shaft_{0}_Front".format(name), cx - half, cx + half, shaft_y0 - t, shaft_y0, metal)
+    _note_surface("Metal", prefix + "_Lift")
+    return created
+
+
+def build_vertical_circulation(report, materials):
+    """Places the lifts. The stairs and shafts are part of each floor's core
+    (build_core); a lift is one actor that spans the floors it serves."""
+    lift_class = getattr(unreal, "OneBrahamLift", None)
+    if lift_class is None:
+        report.failed("OneBrahamLift", "the C++ class is not available; compile the module first")
+        return []
+
+    placed = []
+    for name, cx, cy in C.LIFT_SHAFTS:
+        actor = _spawn(lift_class, unreal.Vector(cx, cy, _floor_z(C.LIFT_FLOORS[0])))
+        if actor is None:
+            report.failed("Lift " + name, "could not spawn")
+            continue
+        _label(actor, "Lift_" + name)
+        try:
+            actor.set_editor_property("LiftId", unreal.Name("Lift_" + name))
+            actor.set_editor_property("StopFloors", list(C.LIFT_STOPS))
+            actor.set_editor_property("DoorFacingY", -1.0)
+        except Exception as exc:  # noqa: BLE001
+            report.failed("Lift " + name, str(exc))
+            continue
+        placed.append("Lift_" + name)
+    return placed
 
 
 # ===========================================================================
@@ -1258,19 +1361,22 @@ def build_shutters(report):
     for floor in SHUTTER_FLOORS:
         z = _floor_z(floor) + C.DOOR_HEIGHT_CM / 2.0
 
-        for side in (-1.0, 1.0):
-            x = 1300.0 * side
-            side_name = "A" if side < 0 else "B"
+        for side_name, x in C.STAIRWELLS:
+            # In the corridor, in front of the stairwell door.
+            y = C.STAIRWELL_DOOR_Y - 30.0
+            if any(row[1] == floor and abs(row[2] - x) < 1.0 and abs(row[3] - y) < 60.0
+                   for row in BREACHABLE_WALLS):
+                continue
 
             if shutter_class is None:
                 report.skipped_asset(
                     "AOneBrahamFireShutter",
                     "fire shutter class is not loaded; stair opening " + side_name +
                     " on floor " + str(floor) + " cannot be sealed by the lockdown.")
-                _box((x, 0.0, z), (C.DOOR_WIDTH_CM + 40.0, 30.0, C.DOOR_HEIGHT_CM),
+                _box((x, y, z), (C.DOOR_WIDTH_CM + 40.0, 30.0, C.DOOR_HEIGHT_CM),
                      None, "Shutter_{0}_F{1:02d}".format(side_name, floor), static=False)
             else:
-                shutter = _spawn(shutter_class, unreal.Vector(x, 0.0, z))
+                shutter = _spawn(shutter_class, unreal.Vector(x, y, z))
                 if shutter is not None:
                     _label(shutter, "Shutter_{0}_F{1:02d}".format(side_name, floor))
                     try:

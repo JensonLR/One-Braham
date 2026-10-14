@@ -29,6 +29,36 @@ Floor to floor is 400 cm. That is a real floor height, and it is what makes the
 stairwells the vertical spine of the game: from any stairwell landing you can
 hear a firefight two floors up and hear a fire door close one floor down.
 
+### The service core
+
+Every floor, plaza to Skydeck, has the same core: a band along the north of the
+floor (`common.CORE_BAND`, x −1500 to 1500, y 500 to 1300) behind a corridor
+that no room may occupy (`CORE_CORRIDOR`, y 300 to 500).
+
+* **Stairwells.** Stairwell A is at x −1100 and stairwell B at x 1100. Each is
+  800 cm square, with its door in the middle of its corridor wall. Every storey
+  is two flights of 11 risers (18.2 cm) and 11 treads (28 cm). The first flight
+  climbs the west half from a 200 cm landing by the door to a mid-landing at
+  the back; the second comes down the east half to the landing of the floor
+  above. Each slab is cut behind its landing so the flights from below come up
+  through it, and the ceilings are cut to match.
+* **Lifts.** Two glass cars between the stairwells (`AOneBrahamLift`) run floors
+  1 to 9 and open at 1, 3 and 9. Each floor a car stops at has a call panel
+  (`AOneBrahamLiftCallPanel`) beside the landing doors.
+* **Risers.** Solid between the stairwells and the lift lobby, and behind the
+  shafts.
+
+`check_building_layout.py` fails if a room, spawn, door, terminal or breach wall
+is built into the band, if two rooms overlap, if a room's doorway opens onto a
+wall, or if a flight does not arrive at the next floor.
+
+**The lift's traps.** The doors close on whoever is standing in them, for 35
+damage (`AOneBrahamLift::DoorCrushDamage`). They then reopen and try again two
+seconds later, and the kill feed names `LiftDoors`. From the Lockdown stage on,
+a car finishes its run, opens and stays open: the lifts are out of service. A
+car costs a Staff badge, chimes on arrival on the floor it stops at, and is a
+lit glass box: the fastest route up, and the most visible.
+
 ### Routes up
 
 | Route | Cost | Cost in practice |

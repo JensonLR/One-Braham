@@ -171,12 +171,96 @@ LIFT_CAR_SIZE_CM = 220.0
 CORRIDOR_WIDTH_CM = 260.0
 DOOR_WIDTH_CM = 110.0
 DOOR_HEIGHT_CM = 215.0
-STAIRWELL_SIZE_CM = 900.0
+STAIRWELL_SIZE_CM = 800.0
 STAIRWELL_FLIGHTS_PER_FLOOR = 2
 SERVER_ROW_SPACING_CM = 180.0
 DESK_GRID_CM = 180.0
 CEILING_HEIGHT_CM = 400.0
 WINDOW_SPACING_CM = 300.0
+
+# ---------------------------------------------------------------------------
+#  The service core: the same on every floor, plaza to Skydeck.
+#
+#  The game is a climb, and the core is how the climb works: two stairwells and
+#  a lift bank in one band along the north of every floor, behind a corridor
+#  that every floor keeps clear. Rooms, spawns, doors and terminals are laid out
+#  around it, and check_building_layout fails if anything is placed inside it
+#  that is not part of it. (The first layout put a 12 m core in the middle of
+#  every floor, under the boardroom, the canteen and the helipad, with solid
+#  boxes for stair landings and lift doors and no hole in any slab: nobody
+#  could get from one floor to the next.)
+# ---------------------------------------------------------------------------
+#: (x min, x max, y min, y max) of the core band.
+CORE_BAND = (-1500.0, 1500.0, 500.0, 1300.0)
+#: The corridor in front of the core, kept clear of rooms on every floor.
+CORE_CORRIDOR = (-1500.0, 1500.0, 300.0, 500.0)
+
+#: Stairwells: (name, centre x). Each is STAIRWELL_SIZE_CM square, centred in
+#: the band's depth, with its door in the middle of its south (corridor) wall.
+STAIRWELLS = [("A", -1100.0), ("B", 1100.0)]
+STAIRWELL_DOOR_Y = CORE_BAND[2]
+
+#: Two flights a storey: 11 risers of 18.2 cm and 11 treads of 28 cm each, a
+#: 200 cm floor-level landing by the door and a mid-landing at the back.
+STAIR_RISERS_PER_FLIGHT = 11
+STAIR_TREAD_CM = 28.0
+STAIR_LANDING_DEPTH_CM = 200.0
+
+#: Lift shafts: (name, centre x, centre y), each LIFT_SHAFT_SIZE_CM square
+#: inside, running LIFT_FLOORS and opening onto the corridor at LIFT_STOPS.
+LIFT_SHAFT_SIZE_CM = 260.0
+LIFT_SHAFTS = [("L1", -150.0, 930.0), ("L2", 150.0, 930.0)]
+LIFT_FLOORS = (1, 9)
+LIFT_STOPS = (1, 3, 9)
+#: The lift lobby: the alcove in front of the shafts, x and y range.
+LIFT_LOBBY = (-300.0, 300.0, 500.0, 800.0)
+
+
+def core_holes(floor_index):
+    """(x0, x1, y0, y1) holes this floor's slab needs.
+
+    A stairwell's slab is cut behind its floor-level landing, so the flights
+    from the storey below come up through it. A lift shaft is cut on every
+    floor the shaft passes, so the car can.
+    """
+    holes = []
+    if floor_index > 0:
+        for _name, cx in STAIRWELLS:
+            holes.append((cx - STAIRWELL_SIZE_CM / 2.0, cx + STAIRWELL_SIZE_CM / 2.0,
+                          CORE_BAND[2] + STAIR_LANDING_DEPTH_CM, CORE_BAND[3]))
+    if LIFT_FLOORS[0] < floor_index <= LIFT_FLOORS[1]:
+        for _name, cx, cy in LIFT_SHAFTS:
+            half = LIFT_SHAFT_SIZE_CM / 2.0
+            holes.append((cx - half, cx + half, cy - half, cy + half))
+    return holes
+
+
+def subtract_rects(rect, holes):
+    """rect minus every hole, as a list of rectangles. All are (x0, x1, y0, y1).
+
+    Used for the slabs and the ceilings: a box per remaining piece is real,
+    walkable geometry with no boolean meshes.
+    """
+    pieces = [rect]
+    for hx0, hx1, hy0, hy1 in holes:
+        next_pieces = []
+        for x0, x1, y0, y1 in pieces:
+            if hx1 <= x0 or hx0 >= x1 or hy1 <= y0 or hy0 >= y1:
+                next_pieces.append((x0, x1, y0, y1))
+                continue
+            cx0, cx1 = max(x0, hx0), min(x1, hx1)
+            cy0, cy1 = max(y0, hy0), min(y1, hy1)
+            if y0 < cy0:
+                next_pieces.append((x0, x1, y0, cy0))
+            if cy1 < y1:
+                next_pieces.append((x0, x1, cy1, y1))
+            if x0 < cx0:
+                next_pieces.append((x0, cx0, cy0, cy1))
+            if cx1 < x1:
+                next_pieces.append((cx1, x1, cy0, cy1))
+        pieces = next_pieces
+    return [p for p in pieces if p[1] - p[0] > 1.0 and p[3] - p[2] > 1.0]
+
 
 # Spawn safety: no spawn point may be within this distance of an enemy's.
 SPAWN_MIN_ENEMY_DISTANCE_CM = 2000.0
@@ -185,7 +269,7 @@ SPAWN_MIN_SAME_TEAM_DISTANCE_CM = 600.0
 # Gameplay anchors.
 # On the Skydeck slab: floor N stands at (N - 1) x 400 (Docs/09 section 1), so
 # floor 15 is 5600. This was 15 x 400 = 6000, a storey above the deck it sits on.
-EXTRACTION_PAD_LOCATION = (0.0, 0.0, 14.0 * FLOOR_HEIGHT_CM)
+EXTRACTION_PAD_LOCATION = (0.0, -800.0, 14.0 * FLOOR_HEIGHT_CM)
 EXTRACTION_HOLD_RADIUS_CM = 900.0
 CANTEEN_SKYDECK_STAIR_XY = (900.0, -700.0)
 

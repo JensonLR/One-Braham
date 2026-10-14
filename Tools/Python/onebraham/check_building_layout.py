@@ -206,11 +206,7 @@ def frame_problems():
                               u"centred on ({4:.0f}, {5:.0f}), {6:.0f} x {7:.0f}".format(
                                   anchor_name, ax, ay, area_name, cx, cy, size_x, size_y), None))
 
-    core_half = C.LIFT_CORE_SIZE_CM / 2.0
-    for name, (_floors, cx, cy, size_x, size_y) in sorted(
-            (row[0], (row[1], row[2], row[3], row[4], row[5])) for row in areas.values()):
-        if abs(cx) + core_half > size_x / 2.0 or abs(cy) + core_half > size_y / 2.0:
-            found.append((u"the lift core at the origin does not fit inside the {0} footprint".format(name), None))
+    found.extend(core_problems(E, areas))
 
     pad_x, pad_y, pad_z = C.EXTRACTION_PAD_LOCATION
     skydeck_z = E._floor_z(C.FLOOR_COUNT)
@@ -252,6 +248,106 @@ def rotator_problems():
                 line = text[:match.start()].count("\n") + 1
                 found.append((u"{0}:{1} {2} passes roll/pitch positionally; unreal.Rotator is "
                               u"(roll, pitch, yaw) - use keywords".format(name, line, match.group(0)), None))
+    return found
+
+
+def _rect(cx, cy, sx, sy):
+    return (cx - sx / 2.0, cx + sx / 2.0, cy - sy / 2.0, cy + sy / 2.0)
+
+
+def _overlaps(a, b):
+    return a[0] < b[1] - 1.0 and b[0] < a[1] - 1.0 and a[2] < b[3] - 1.0 and b[2] < a[3] - 1.0
+
+
+def _inside(point, rect):
+    return rect[0] < point[0] < rect[1] and rect[2] < point[1] < rect[3]
+
+
+def core_problems(E, areas):
+    """The service core works on every floor and nothing is built in its way.
+
+    The first layout put a 12 m core in the middle of every floor under the
+    boardroom, the canteen and the helipad, gave the stairs solid landings and
+    the lifts solid doors, and cut no slab: there was no way from one floor to
+    the next. These are the rules that make a climb possible.
+    """
+    found = []
+    band = C.CORE_BAND
+    corridor = C.CORE_CORRIDOR
+    floor_area = {}
+
+    for name, (first, last), cx, cy, size_x, size_y in areas.values():
+        footprint = _rect(cx, cy, size_x, size_y)
+        for floor in range(first, last + 1):
+            floor_area[floor] = (name, footprint)
+
+        if not (footprint[0] <= band[0] and band[1] <= footprint[1]
+                and footprint[2] <= corridor[2] and band[3] <= footprint[3]):
+            found.append((u"the core band and its corridor do not fit inside the {0} footprint".format(name), None))
+
+        rooms = E.ROOM_PROGRAMMES.get(name, [])
+        walled = [r for r in rooms if r[0] not in E.OPEN_AIR_ROOMS]
+        for room in rooms:
+            rect = _rect(room[1], room[2], room[3], room[4])
+            if room[0] in ("Edge_Rail_North", "Edge_Rail_South"):
+                continue
+            if rect[0] < footprint[0] or rect[1] > footprint[1] or rect[2] < footprint[2] or rect[3] > footprint[3]:
+                found.append((u"{0}/{1} is outside the floor".format(name, room[0]), None))
+            if _overlaps(rect, band) or _overlaps(rect, corridor):
+                found.append((u"{0}/{1} is built into the service core or its corridor".format(name, room[0]), None))
+
+        for index, room in enumerate(rooms):
+            for other in rooms[index + 1:]:
+                if _overlaps(_rect(*room[1:]), _rect(*other[1:])):
+                    found.append((u"{0}: {1} and {2} overlap".format(name, room[0], other[0]), None))
+
+        # Every walled room's doorway is in the middle of its south wall; the
+        # floor in front of it has to be floor, not another room or the core.
+        for room in walled:
+            door = (room[1] - C.DOOR_WIDTH_CM / 2.0, room[1] + C.DOOR_WIDTH_CM / 2.0,
+                    room[2] - room[4] / 2.0 - 90.0, room[2] - room[4] / 2.0 - 5.0)
+            blocked = door[2] < footprint[2] or _overlaps(door, band)
+            blocked = blocked or any(_overlaps(door, _rect(*other[1:])) for other in walled if other is not room)
+            if blocked:
+                found.append((u"{0}/{1}: its doorway opens onto a wall".format(name, room[0]), None))
+
+        for anchor, ax, ay in E.ANCHORS.get(name, []):
+            if _inside((ax, ay), band) or _inside((ax, ay), corridor):
+                found.append((u"spawn {0} is in the service core".format(anchor), None))
+            for room in walled:
+                if _inside((ax, ay), _rect(*room[1:])):
+                    found.append((u"spawn {0} is inside {1}".format(anchor, room[0]), None))
+
+    placed = [(row[0], row[1], row[3], row[4]) for row in E.ACCESS_ZONES]
+    placed += [(row[0], row[1], row[2], row[3]) for row in E.OVERRIDE_TERMINALS]
+    placed += [(row[0], row[1], row[2], row[3]) for row in E.BREACHABLE_WALLS]
+    for ident, floor, x, y in placed:
+        if floor not in floor_area:
+            found.append((u"{0} is on floor {1}, which the map does not build".format(ident, floor), None))
+            continue
+        name, footprint = floor_area[floor]
+        if not _inside((x, y), footprint):
+            found.append((u"{0} is outside the {1} footprint".format(ident, name), None))
+        if _inside((x, y), band):
+            found.append((u"{0} is inside the service core".format(ident), None))
+
+    # The stairs climb a storey, flight by flight, with steps a person can use.
+    rise = (C.FLOOR_HEIGHT_CM / 2.0) / C.STAIR_RISERS_PER_FLIGHT
+    if not (15.0 <= rise <= 20.0 and 25.0 <= C.STAIR_TREAD_CM <= 32.0):
+        found.append((u"stair risers are {0:.1f} cm and treads {1:.1f} cm".format(rise, C.STAIR_TREAD_CM), None))
+    if C.CORE_BAND[2] + C.STAIR_LANDING_DEPTH_CM + C.STAIR_RISERS_PER_FLIGHT * C.STAIR_TREAD_CM \
+            > C.CORE_BAND[3] - 150.0:
+        found.append((u"the stair flights leave less than 150 cm for the mid-landing", None))
+    for floor in range(0, C.FLOOR_COUNT):
+        boxes = E.stair_flights(floor)
+        for stair, _cx in C.STAIRWELLS:
+            tops = [b[3] + b[6] / 2.0 for b in boxes if b[0].startswith("Stair_{0}_F{1:02d}_Up2".format(stair, floor))]
+            if not tops or abs(max(tops) - E._floor_z(floor + 1)) > 0.5:
+                found.append((u"stair {0} from floor {1} does not arrive at floor {2}".format(stair, floor, floor + 1), None))
+        holes = C.core_holes(floor + 1)
+        if len([h for h in holes if h[1] - h[0] == C.STAIRWELL_SIZE_CM]) != len(C.STAIRWELLS):
+            found.append((u"floor {0}'s slab is not cut for the stairs from below".format(floor + 1), None))
+
     return found
 
 

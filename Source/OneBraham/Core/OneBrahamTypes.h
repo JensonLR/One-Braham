@@ -310,6 +310,11 @@ struct FOneBrahamDamageReport
 
 	UPROPERTY(BlueprintReadOnly, Category = "Damage")
 	bool bLethal = false;
+
+	/** For damage with no instigating player: what in the building did it
+	 *  ("LiftDoors", "Fall", "Purge"). The kill feed names it. */
+	UPROPERTY(BlueprintReadOnly, Category = "Damage")
+	FName CauseId = NAME_None;
 };
 
 /** Everything the server and client need to describe a hit for VFX/audio/sound-occlusion. */

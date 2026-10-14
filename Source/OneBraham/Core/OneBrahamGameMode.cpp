@@ -685,6 +685,11 @@ FOneBrahamKillFeedEntry AOneBrahamGameMode::RegisterKill(AActor* Victim, AContro
 	Entry.Verb = ChooseKillVerb(bKilledByBuilding, bSelfKill, Entry.bWasDowned, Report.HitZone);
 
 	Entry.WeaponId = GetKillWeaponId(KillerController);
+	if (bKilledByBuilding && !Report.CauseId.IsNone())
+	{
+		// The building's own weapons: the feed says what it was, not "no weapon".
+		Entry.WeaponId = Report.CauseId;
+	}
 
 	// Assists. The health component has been watching who took what off this
 	// player since it was written - everyone who has accounted for at least 20%
