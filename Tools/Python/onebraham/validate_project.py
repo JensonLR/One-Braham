@@ -970,6 +970,15 @@ def check_project_config_keys(v):
 
 
 
+#: Engine plugin names (the .uplugin file names) the project may enable, each
+#: checked against https://dev.epicgames.com/documentation/unreal-engine/API/PluginIndex.
+VERIFIED_ENGINE_PLUGINS = frozenset((
+    "EnhancedInput", "CommonUI", "Niagara", "ChaosCloth", "HairStrands", "SoundUtilities",
+    "Synthesis", "Metasound", "OnlineSubsystem", "OnlineSubsystemUtils", "OnlineSubsystemSteam",
+    "ModelingToolsEditorMode", "EditorScriptingUtilities", "DataValidation", "PythonScriptPlugin",
+))
+
+
 def check_targets(v, _config_only):
     """No target changes the shared build environment unless it owns one.
 
@@ -1035,6 +1044,19 @@ def check_config(v, _config_only):
     except (IOError, OSError, ValueError) as exc:
         plugins = {}
         v.fail("config", u"OneBraham.uproject could not be read: {0}".format(exc))
+    # A plugin is named by its .uplugin file, and a name the engine has no file
+    # for stops the editor at startup. "ChaosClothPlugin" (the file is
+    # ChaosCloth.uplugin) did exactly that. Every engine plugin the project
+    # enables must be one of these names, each checked against Epic's plugin
+    # index; a project plugin must exist under Plugins/.
+    unknown_plugins = [name for name in plugins
+                       if name not in VERIFIED_ENGINE_PLUGINS
+                       and not os.path.isdir(os.path.join(os.path.dirname(CONFIG_DIR), "Plugins", name))]
+    if unknown_plugins:
+        v.fail("config", u"OneBraham.uproject enables {0}, which is not a verified engine plugin name "
+               u"or a folder under Plugins/".format(u", ".join(sorted(unknown_plugins))),
+               u"use the .uplugin file's name (Epic's plugin index shows it as the link's last segment), "
+               u"then add it to VERIFIED_ENGINE_PLUGINS")
     missing_plugins = [name for name in ("PythonScriptPlugin", "EditorScriptingUtilities") if not plugins.get(name)]
     if missing_plugins:
         v.fail("config", u"OneBraham.uproject does not enable {0}".format(u", ".join(missing_plugins)),

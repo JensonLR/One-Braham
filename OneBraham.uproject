@@ -29,7 +29,7 @@
 			"Enabled": true
 		},
 		{
-			"Name": "ChaosClothPlugin",
+			"Name": "ChaosCloth",
 			"Enabled": true
 		},
 		{

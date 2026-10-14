@@ -59,11 +59,8 @@ public class OneBraham : ModuleRules
 		{
 			"SlateCore",
 			"Projects",
-			"MoviePlayer",
-			"AudioMixer",
-			"PreLoadScreen",
-			"PakFile",
-			"RSAEncryption" // only touched by editor-only validation helpers, guarded by WITH_EDITOR
+			"MoviePlayer",	// the Slate loading screen (UOneBrahamGameInstance::ShowLoadingScreen)
+			"AudioMixer"
 		});
 
 		if (Target.bBuildEditor)
