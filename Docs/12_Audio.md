@@ -256,6 +256,8 @@ they come out of the table rather than out of a designer's memory.
 | Low health | `GetBusVolume` consumers | heartbeat and breathing scale from 40 HP down |
 | Purge | `SetLockdownAudio` | alarm bed + sprinkler, and the purge tick tone every 0.2 s |
 | Extraction | `SetExtractionAudio` | rotor bed, 2D sub-layer, positioned on the pad, speeding up from `Broadcast` to `Arriving` |
+
+`SetExtractionAudio` is driven by `UOneBrahamExtractionComponent::ApplyLocalExtractionAudio` on every machine that has a local player, from the replicated state and the arrival alpha the floodlight already uses (`Docs/09` section 2.8): called at 10 Hz, pushed only when the state changes or the approach moves by half a percent. The winch being called is the loudest cue in the mode and it is the one that tells the rest of the building where the squad is, which is the whole point of the ten-second broadcast that precedes the flight.
 | Occlusion | every attenuation object | 900 Hz low-pass, 0.15 s trace interval per listener |
 | Concurrency | the manager | per-cue limits: 4 gunshots, 6 impacts, 2 explosions, 8 footsteps |
 

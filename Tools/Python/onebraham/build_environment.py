@@ -1099,12 +1099,77 @@ def build_extraction(report):
         except Exception as exc:  # noqa: BLE001
             report.failed("Extraction beacon light", str(exc))
 
+    # The winch itself: the pad volume that tells the extraction component where
+    # the wire is, and the console that calls it. Both are actors because both
+    # carry rules the map cannot express as geometry - the pad measures the hold,
+    # and the console is the only caller of ServerCallExtraction in the project.
+    # (Before they were placed, the winch could not be called at all: the whole
+    # broadcast/arrival/hold sequence had no entry point.)
+    pad_class = getattr(unreal, "OneBrahamExtractionPad", None)
+    console_class = getattr(unreal, "OneBrahamExtractionTerminal", None)
+
+    if pad_class is None:
+        report.skipped_asset(
+            "AOneBrahamExtractionPad",
+            "winch pad actor is not loaded: the map has the painted square and no "
+            "hold rule, so 'on the pad' is measured against the component's default "
+            "point. Rebuild the C++ module, then re-run this script.")
+        _box((px, py, deck_z + 1.0), (C.EXTRACTION_HOLD_RADIUS_CM * 2.0,
+             C.EXTRACTION_HOLD_RADIUS_CM * 2.0, 2.0), None, "Winch_Pad_Blockout")
+    else:
+        pad = _spawn(pad_class, unreal.Vector(px, py, deck_z))
+        if pad is not None:
+            _label(pad, "Winch_Pad")
+            try:
+                pad.set_editor_property("PadId", unreal.Name("Skydeck_Winch_Pad"))
+                pad.set_editor_property("HoldRadiusCm", C.EXTRACTION_HOLD_RADIUS_CM)
+                pad.set_editor_property("ZoneHeightCm", 300.0)
+                pad.set_editor_property("SearchlightHeightCm", 600.0)
+            except Exception as exc:  # noqa: BLE001
+                report.failed("winch pad", str(exc))
+
+    # The console stands against the pad-facing wall of the winch control shell,
+    # facing the deck: calling the winch means turning your back on the pad, which
+    # is the decision the mode is built around.
+    console_x = -1140.0
+    console_y = 400.0
+    console_z = deck_z + 20.0
+
+    if console_class is None:
+        report.skipped_asset(
+            "AOneBrahamExtractionTerminal",
+            "winch console class is not loaded: nothing in the level can call the "
+            "winch. Rebuild the C++ module, then re-run this script.")
+        _box((console_x, console_y, deck_z + 55.0), (140.0, 70.0, 110.0), None,
+             "Winch_Console_Blockout", static=False)
+    else:
+        console = _spawn(console_class, unreal.Vector(console_x, console_y, console_z),
+                         unreal.Rotator(0.0, -90.0, 0.0))
+        if console is not None:
+            _label(console, "Winch_Control_Console")
+            try:
+                console.set_editor_property("TerminalId", unreal.Name("Winch_Control_Console"))
+                console.set_editor_property("TerminalDisplayName",
+                    unreal.Text("WINCH CONTROL"))
+                console.set_editor_property("CallHoldSeconds", 1.4)
+                console.set_editor_property("InteractionRangeCm", 220.0)
+            except Exception as exc:  # noqa: BLE001
+                report.failed("winch console", str(exc))
+
     C.log(u"  extraction pad built at {0} (hold radius {1} cm)".format(
         C.EXTRACTION_PAD_LOCATION, C.EXTRACTION_HOLD_RADIUS_CM))
+    C.log(u"  winch pad actor: {0}; console: {1} (hold {2} s)".format(
+        u"placed" if pad_class is not None else u"BLOCKOUT ONLY",
+        u"placed" if console_class is not None else u"BLOCKOUT ONLY",
+        1.4))
 
     return {
         "pad_location": list(C.EXTRACTION_PAD_LOCATION),
         "hold_radius": C.EXTRACTION_HOLD_RADIUS_CM,
+        "pad_actor": pad_class is not None,
+        "console_actor": console_class is not None,
+        "console_location": [console_x, console_y, console_z],
+        "console_hold_seconds": 1.4,
     }
 
 
@@ -1435,7 +1500,15 @@ def build_persistent_level(report, materials, manifest):
         _box((offset, 7000.0, -395.0), (900.0, 40.0, 4.0), None, "Road_Crossing_{0}".format(i))
 
     # --- Persistent gameplay actors ---------------------------------------
-    build_extraction(report)
+    # The winch's return value goes into the manifest: whether the pad and the
+    # console are actors or blockout, where the console stands, and how long the
+    # call takes. A content build that could not place the console has a map in
+    # which the winch cannot be called at all, and that has to be readable in the
+    # manifest rather than inferred from a log line.
+    winch = build_extraction(report)
+    if winch:
+        manifest["extraction"] = winch
+
     build_skydeck_climate(report)
     build_vertical_circulation(report, materials)
 

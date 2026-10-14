@@ -68,7 +68,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Extraction")
 	void ServerSetHelipadLocation(const FVector& Location, float HoldRadiusCm = 900.f);
 
-	/** Debug / QA: jumps the state machine forward. Bound to `ob.Extraction.Fast`. */
+	/** Debug / QA: jumps the state machine forward. Bound to `ob.extraction.fast`,
+	 *  which calls the winch first when nothing has called it yet - a QA pass
+	 *  that has to walk to the Skydeck and hold a console is a QA pass nobody
+	 *  runs. `ob.extraction.abort` exercises the failure path. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Extraction")
 	void ServerSkipToHolding();
 
@@ -165,6 +168,15 @@ protected:
 	/** True when the calling squad still has someone on their feet. */
 	bool IsClaimingSquadAlive() const;
 
+	/**
+	 * Pushes the replicated state into this machine's audio director: the rotor bed
+	 * on the pad, its volume and pitch tracking the approach, and the music state.
+	 * Local only and a no-op on a dedicated server. Same shape as the lockdown's
+	 * local stage effects: one replicated state, and every machine that has a local
+	 * player turns it into sound, rather than an RPC per client per state change.
+	 */
+	void ApplyLocalExtractionAudio();
+
 	/** Plays the squad voice lines and the local stings for a state change. */
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastExtractionStateChanged(EOneBrahamExtractionState NewState, int32 SquadId, float DurationSeconds, int32 CallerPlayerId);
@@ -225,6 +237,11 @@ protected:
 
 	/** Total time spent in the current state, for the arrival alpha. */
 	float TimeInState = 0.f;
+
+	// --- local ------------------------------------------------------------
+	/** What the local audio director was last told; sound is a per-machine thing. */
+	bool bPushedExtractionAudio = false;
+	float PushedApproach01 = -1.f;
 
 	/** Cached for the loudest possible announcement. */
 	UPROPERTY(Transient)

@@ -114,7 +114,8 @@ STEPS = [
      "the interaction surface: every class that implements the interface against "
      "the table in Docs/13, every number in that table against the constant it "
      "names, every gameplay tag either claimed by an emitter or written down as "
-     "waiting, and every verb against the montage it plays"),
+     "waiting, every verb against the montage it plays, and every class's own "
+     "overrides against the interface's signatures"),
     ("materials", "onebraham.build_materials", True,
      "master materials, physical materials, surface and brand instances"),
     ("environment", "onebraham.build_environment", True,

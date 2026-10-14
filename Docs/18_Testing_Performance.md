@@ -241,6 +241,8 @@ documented here rather than discovered in the source:
 | `ob.give <WeaponId>` | puts a weapon in the local player's hands. Cheat, development builds only. |
 | `ob.lockdown [stage]` | forces the lockdown to a stage, or with no argument advances it one. Server only. |
 | `ob.endmatch [team]` | ends the match with a result. Server only. |
+| `ob.extraction.fast` | calls the winch for the squad of whoever typed it (if nobody has called one yet) and jumps the sequence to the 30 s hold. Server only, ASCENT only. The winch is a 55 s sequence behind a console on the Skydeck; this is how a QA pass reaches the last 30 seconds of it. |
+| `ob.extraction.abort` | aborts the live attempt as `CONTESTED`, which is the failure path with the end-of-match copy on it. Server only. |
 
 Test hardware is recorded with every benchmark run - the report has blank lines
 for it - because a budget measured on a developer's overclocked machine is not a

@@ -210,6 +210,23 @@ frame in the game and it is the one that goes on the store page.
 contested) → `Complete`. A failed run ends on this deck, in view of the
 helicopter, which is the correct place for it.
 
+**Interactables.** Two actors, and the mode is unplayable without them. The winch
+console (`AOneBrahamExtractionTerminal`) is bolted to the pad-facing wall of the
+winch control room, facing the deck, and it is the only caller of
+`ServerCallExtraction` in the project: hold `E` for 1.4 s
+(`AOneBrahamExtractionTerminal::CallHoldSeconds`, the length of
+`AM_OB_Interact_Radio`) and the winch is called. Stand with your back to the pad
+to use it, which is the decision the whole mode is built around. The winch pad
+(`AOneBrahamExtractionPad`) is the 900 cm hold volume
+(`C.EXTRACTION_HOLD_RADIUS_CM`, the same number as
+`UOneBrahamMatchSettingsAsset::ExtractionZoneRadiusCm`): it registers the wire's
+position with the extraction component at BeginPlay, and its floodlight is the
+only light on the deck that moves — dark on standby, sweeping while the
+helicopter is inbound, hard on the pad while a squad holds it, red while it is
+contested. The console's screen mesh wants `M_OB_Screen` from the art pass
+(`Docs/10` section 2): its `ScreenTint` parameter is what the console writes, and
+with any other material the four states are told through the screen light alone.
+
 ---
 
 ## 3. The rooms, as data

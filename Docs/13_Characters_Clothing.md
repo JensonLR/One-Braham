@@ -219,7 +219,15 @@ hole in it the size of a person: revive and execute were implemented, documented
 in three places, and impossible to reach, because the downed player did not
 implement the interface and the interact ray could not see a body on the floor.
 Two tables, both checked by `check_interaction.py` against the classes, the
-gameplay tags, the hold constants and the montage table above.
+gameplay tags, the hold constants, the montage table above and each class's own
+declaration of the interface's eleven events. The last of those is the check that
+matters most here: an interface method spelled slightly differently is not an
+override, it is a virtual function nothing calls, and there is no compiler in
+this loop to say so. The winch console
+is the row that shows what the check is for: `ServerCallExtraction` and the whole
+five-state extraction sequence had no caller anywhere in the project until the
+console was placed on the Skydeck, so the win condition of ASCENT was unreachable
+and the only way a match could end was elimination.
 
 **Table 5 — the interaction table**
 
@@ -230,6 +238,7 @@ gameplay tags, the hold constants and the montage table above.
 | `AOneBrahamKeycard` | "Take {tier} badge - issued floor {n}", or "Take {tier} ({name})" for a dropped card | `OB.Interaction.Keycard` | tap | 210 cm (`AOneBrahamKeycard::CardPickupRangeCm`) | `AM_OB_Interact_Keycard` |
 | `AOneBrahamOverrideTerminal` | "Hold E - override", "Already released", "Access panel offline", "Unlinked panel" | `OB.Interaction.Terminal` | 12 s (`UOneBrahamAccessZoneComponent::OverrideSeconds`) solo, 3 s (`UOneBrahamAccessZoneComponent::OverrideTwoPersonSeconds`) paired | 200 cm (`AOneBrahamOverrideTerminal::OBTerminalInteractionRange`) | `AM_OB_Interact_Terminal` |
 | `AOneBrahamPickupBase` | "Take {weapon}" | `OB.Interaction.Weapon` | tap | 220 cm (`AOneBrahamPickupBase::PickupRangeCm`) | `AM_OB_Interact_Door` |
+| `AOneBrahamExtractionTerminal` | "Hold E - call the winch", or the state of the winch: "Called - helicopter inbound", "Winch live - hold the pad", "Winch aborted - stands by" | `OB.Interaction.Extraction` | 1.4 s (`AOneBrahamExtractionTerminal::CallHoldSeconds`) | 220 cm (`AOneBrahamExtractionTerminal::InteractionRangeCm`) | `AM_OB_Interact_Radio` |
 | `AOneBrahamCharacter` | "Hold E - revive {name}" for a squadmate, "Hold E - finish {name}" for an enemy | `OB.Interaction.Revive`, `OB.Interaction.Execute` | 4.5 s (`OneBrahamConstants::ReviveSeconds`), 2 s (`UOneBrahamDownedComponent::ExecuteSeconds`) | 220 cm (`OneBrahamConstants::InteractRangeCm`) | `AM_OB_Interact_Revive`, `AM_OB_Interact_Execute` |
 
 Three rules the table encodes, and the reasons they are rules rather than
@@ -256,8 +265,8 @@ conventions:
 
 **Table 6 — declared, and not yet emitted**
 
-Eight interaction tags are declared in `Config/DefaultGame.ini` and nothing in
-the game emits them yet. They are listed here rather than deleted because each is
+Seven interaction tags are declared in the native registry and mirrored in
+`Config/DefaultGame.ini`, and nothing in the game emits them yet. They are listed here rather than deleted because each is
 the designed vocabulary of content that has not been built, and because the
 montage contract in section 7 already reserves an animation family for several of
 them. `check_interaction.py` fails if a tag is in neither this table nor Table 5,
@@ -271,7 +280,6 @@ which side of the line the tag belongs on.
 | `OB.Interaction.Utility` | utility is granted by the loadout and found as a floor pickup, not picked up as utility | a utility pickup actor |
 | `OB.Interaction.Medkit` | the meal deal is used from the inventory wheel, never off a surface | a placed consumable |
 | `OB.Interaction.Body` | nothing is lootable: a corpse is a ragdoll, not a container | the death-bag pass (searchable bodies and dropped bags) |
-| `OB.Interaction.Extraction` | the pad is a thirty-second hold volume, not something you press; the winch control room is scenery | the winch control console as an interactable |
 | `OB.Interaction.HoldToUnlock` | the HUD verb category for a hold: `RequiresHold()` already answers this in C++, so nothing emits the tag | a decision - either the widget reads it or the tag goes |
 | `OB.Interaction.TapToUse` | the same, for a tap | the same decision |
 

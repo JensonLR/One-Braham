@@ -2,8 +2,10 @@
 
 #include "Extraction/OneBrahamExtractionComponent.h"
 
+#include "Audio/OneBrahamAudioManagerComponent.h"
 #include "Characters/OneBrahamCharacter.h"
 #include "Core/OneBrahamGameState.h"
+#include "Core/OneBrahamPlayerController.h"
 #include "Core/OneBrahamPlayerState.h"
 #include "Data/OneBrahamMatchSettingsAsset.h"
 #include "Engine/World.h"
@@ -99,8 +101,14 @@ void UOneBrahamExtractionComponent::TickComponent(float DeltaTime, ELevelTick Ti
 				ArrivalAlpha01 = FMath::Clamp(ArrivalAlpha01 + DeltaTime / FMath::Max(1.f, ArrivalWindow), 0.f, 1.f);
 			}
 		}
+
+		// After the interpolation, so the rotor's volume is driven by the same
+		// number the floodlight on the pad is using.
+		ApplyLocalExtractionAudio();
 		return;
 	}
+
+	ApplyLocalExtractionAudio();
 
 	TimeInState += DeltaTime;
 	ReplicationAccumulator += DeltaTime;
@@ -555,6 +563,39 @@ void UOneBrahamExtractionComponent::CountPlayersInZone(int32& OutClaimants, int3
 			++OutContesters;
 		}
 	}
+}
+
+void UOneBrahamExtractionComponent::ApplyLocalExtractionAudio()
+{
+	const UWorld* World = GetWorld();
+	if (World == nullptr || World->GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	// Active means the helicopter is on its way or on the wire. COMPLETE drops the
+	// rotor (it is climbing out, and `SFX_Helicopter_Leave` covers it); FAILED and
+	// INACTIVE drop it too, because an aborted run has to sound like a lift home.
+	const bool bActive = IsExtractionActive();
+
+	// Half a percent of the flight is the smallest change anyone could hear, and
+	// this runs at 10 Hz on every machine in the match.
+	const bool bApproachMoved = FMath::Abs(ArrivalAlpha01 - PushedApproach01) >= 0.005f;
+	if (bActive == bPushedExtractionAudio && !bApproachMoved)
+	{
+		return;
+	}
+
+	AOneBrahamPlayerController* PC = World->GetFirstPlayerController<AOneBrahamPlayerController>();
+	UOneBrahamAudioManagerComponent* Audio = PC ? PC->GetAudioManager() : nullptr;
+	if (Audio == nullptr)
+	{
+		return;
+	}
+
+	Audio->SetExtractionAudio(bActive, HelipadLocation, ArrivalAlpha01);
+	bPushedExtractionAudio = bActive;
+	PushedApproach01 = ArrivalAlpha01;
 }
 
 bool UOneBrahamExtractionComponent::IsExtractionActive() const

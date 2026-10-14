@@ -30,6 +30,8 @@ public:
 	void OBGiveWeapon(const FString& WeaponId);
 	void OBSetLockdownStage(int32 Stage);
 	void OBEndMatch(int32 WinningTeamIndex);
+	void OBExtractionFast();
+	void OBExtractionAbort();
 	void OBReportNetBudget();
 	void OBDumpAudio();
 	void OBBenchSkydeck(float SecondsPerLeg);

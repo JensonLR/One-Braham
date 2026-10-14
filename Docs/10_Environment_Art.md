@@ -139,11 +139,11 @@ unbound `PostProcessVolume` by `build_environment.py`.
                                    player is looking at and 0 on everything else
 ```
 
-Why it exists: **six interactables already write this stencil and nothing read
+Why it exists: **seven interactables already write this stencil and nothing read
 it.** `AOneBrahamKeycard` sets custom-depth stencil 2 while highlighted and 1
 while not; `SetInteractionHighlight_Implementation` on the access zone, the
-breachable wall, the override terminal, the pickup and `AOneBrahamCharacter` sets
-2 on the highlighted case. `AOneBrahamPlayerController::UpdateInteractionTarget`
+breachable wall, the override terminal, the pickup, `AOneBrahamCharacter` and the
+winch console on the Skydeck sets 2 on the highlighted case. `AOneBrahamPlayerController::UpdateInteractionTarget`
 calls it as the trace target changes. All of that ran on a value that no material
 consumed, which is why the outline was in the code, in three documents and in the
 HUD, and nowhere on screen.
@@ -225,7 +225,11 @@ player what happened before they arrived:
 * **Floor 13–14**: the canteen is mid-service. It is the only warm room in the
   building and the only one with food on the tables.
 * **Floor 15**: the roof is a working plant deck. Nothing has been staged there.
-  The only human trace is the winch control room, which is on.
+  The only human trace is the winch control room, which is on: a lit console
+  screen against an unlit deck. That screen is the single most saturated surface
+  on the Skydeck and its colour is the game's clearest state read - standby blue,
+  amber once the winch is called, green on the wire, red when the attempt is
+  contested or aborted. It is deliberately the only thing up there that changes.
 * **Ground floor**: the turnstiles are stuck in the open position. Someone
   released them.
 

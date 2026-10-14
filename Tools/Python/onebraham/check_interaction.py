@@ -5,7 +5,8 @@ onebraham.check_interaction
 
 Checks that the interaction surface is one surface: the classes that implement
 it, the table in Docs/13 section 9, the gameplay tags, the hold and reach
-constants those tables quote, and the montage contract in section 7.
+constants those tables quote, the montage contract in section 7, and the way
+every class's overrides line up with the interface it claims to implement.
 
 WHY THIS EXISTS
     Revive and execute were implemented, tuned, logged, documented in three
@@ -52,7 +53,17 @@ WHY THIS EXISTS
        editor's tag picker, and it is where a tag explains itself. Rule 5 makes
        the two registers one list, in both directions, so a tag cannot arrive in
        one of them and not the other.
-    6. Every duration, distance and speed in the three tuning tables in Docs/04
+    6. Every override in every implementer is the interface's signature, exactly:
+       same return type, same parameter types, same const-ness. An interface
+       method that a class spells slightly differently is not a warning, it is
+       `does not override any member function`, and because nothing in this
+       project is compiled by the tooling that checks it, a wrong signature
+       survives every gate. Three methods are additionally required of anything
+       that claims the interface - `CanInteract`, `GetInteractionPrompt`,
+       `GetInteractionTag` - because a class without them is either inert or
+       invisible, and it was that pair of failures that made a colleague on the
+       floor unhittable and unrevivable.
+    7. Every duration, distance and speed in the three tuning tables in Docs/04
        (movement, physics, the downed state) carries the name of the property
        that defines it, and the two agree. Docs/04 section 4 said a revive was
        4.0 s and left the player on 30 HP for most of this project's life while
@@ -106,6 +117,20 @@ TABLE5_ROW = re.compile(r'^\|\s*`([AU][A-Za-z0-9_]+)`\s*\|(.+?)\|\s*$', re.MULTI
 #: A row of Table 6: the tag cell is a single backticked tag.
 TABLE6_ROW = re.compile(r'^\|\s*`(OB\.[A-Za-z0-9_.]+)`\s*\|(.+?)\|\s*$', re.MULTILINE)
 
+#: `FText GetInteractionPrompt(const class AOneBrahamPlayerController* Interactor) const;`
+#: in the interface itself. The body follows on the next line, so the terminator
+#: is allowed to be a brace, a semicolon, or nothing at all.
+INTERFACE_EVENT = re.compile(
+    r'^\s*(?:UFUNCTION\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s+'
+    r'([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*(const)?\s*(?:\{|;|$)',
+    re.MULTILINE)
+
+#: The same thing as an implementer declares it, in a header, under a name that
+#: the interface's BlueprintNativeEvent generates.
+IMPLEMENTATION_DECL = re.compile(
+    r'virtual\s+([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)_Implementation'
+    r'\s*\(([^)]*)\)\s*(const\s+)?override\s*;')
+
 #: A montage row in section 7's Table 4.
 MONTAGE_ROW = re.compile(r'^\|\s*`(AM_[A-Za-z0-9_]+)`\s*\|', re.MULTILINE)
 
@@ -148,13 +173,17 @@ INI_TAG = re.compile(r'\+GameplayTagList\s*=\s*\(\s*Tag\s*=\s*"(OB\.Interaction\
 NATIVE_TAG = re.compile(
     r'UE_DEFINE_GAMEPLAY_TAG(?:_COMMENT)?\s*\(\s*[A-Za-z0-9_]+\s*,\s*"(OB\.Interaction\.[A-Za-z0-9_.]+)"')
 
-#: How many tags Table 6 may list. Asserted so the list can only shrink on
+#: How many rows Table 5 must have, and how many tags Table 6 may list. Both are
+#: asserted so that a change to either is a decision somebody makes in this file
+#: as well as in the document: the winch console took Table 5 from six rows to
+#: seven and the ledger from eight tags to seven, and an edit like that should not
+#: be possible by accident. Asserted so the list can only shrink on
 #: purpose: the day a tag leaves it, somebody has built the thing it was waiting
 #: for, and the day one arrives, somebody has decided it is not emit-able yet.
-LEDGER_SIZE = 8
+LEDGER_SIZE = 7
 
 #: How many rows Table 5 must have. The six classes that implement the interface.
-TABLE5_SIZE = 6
+TABLE5_SIZE = 7
 
 #: `60 cm/s (`UOneBrahamCharacterMovementComponent::DownedCrawlSpeed`)`: a number,
 #: its unit, and the name of the property that defines it. `\u00b2` is written as
@@ -228,6 +257,78 @@ def slice_of(text, start_marker, end_marker):
 def docs_slice(start_marker, end_marker):
     """The text between two markers in Docs/13, or '' when either is missing."""
     return slice_of(docs_text(), start_marker, end_marker)
+
+
+def param_types(params):
+    """Parameter types only: names off, `class`/`struct` keywords off.
+
+    `const AOneBrahamPlayerController* Interactor` and
+    `const AOneBrahamPlayerController*` are the same parameter. A trailing
+    identifier is a name, and a name is not part of a signature - the only
+    exception being a type that ends in a pointer or reference, where there is
+    nothing left to strip.
+    """
+    out = []
+
+    for raw in params.split(u","):
+        text = u" ".join(raw.split()).replace(u"class ", u"").replace(u"struct ", u"")
+
+        if not text:
+            continue
+
+        tokens = text.split(u" ")
+
+        if len(tokens) >= 2 and not tokens[-1].endswith((u"*", u"&", u">")):
+            tokens = tokens[:-1]
+
+        out.append(u" ".join(tokens))
+
+    return out
+
+
+def interface_contract():
+    """event -> (return type, parameter types, is const), from the interface itself."""
+    path = os.path.join(SOURCE_ROOT, "Interaction", "OneBrahamInteractionInterface.h")
+    text = strip_comments(read(path))
+    out = {}
+
+    # Only from inside the interface class body, so the UINTERFACE above it and
+    # any helper declared later cannot be mistaken for an event.
+    start = text.find(u"IOneBrahamInteractionInterface")
+    start = text.find(u"{", start) if start >= 0 else -1
+
+    if start < 0:
+        return out
+
+    for match in INTERFACE_EVENT.finditer(text[start:]):
+        return_type, name, params, is_const = match.groups()
+
+        # `return FGameplayTag();` inside an inline default body has the same
+        # shape as a declaration, and is the reason this is not a naive parse.
+        if return_type in (u"class", u"struct", u"public", u"return", u"if", u"while",
+                           u"for", u"switch", u"case", u"else", u"do") \
+                or name in (u"UINTERFACE", u"GENERATED_BODY"):
+            continue
+
+        # The interface's own inline default bodies match the same shape; the
+        # event they belong to is the one without the suffix.
+        if name.endswith(u"_Implementation"):
+            continue
+
+        out[name] = (return_type, param_types(params), bool(is_const))
+
+    return out
+
+
+def implementation_decls(header):
+    """event -> (return type, parameter types, is const), from one implementer."""
+    out = {}
+
+    for match in IMPLEMENTATION_DECL.finditer(strip_comments(header)):
+        out[match.group(2)] = (match.group(1), param_types(match.group(3)),
+                              bool(match.group(4)))
+
+    return out
 
 
 def implementers():
@@ -700,6 +801,61 @@ def run():
                     u"row leaves by somebody deciding its number no longer needs one"
                     .format(label, found, expected),
                     u"table size"))
+
+
+    # --- 6. Every implementer's overrides are the interface's signatures ---
+    # A BlueprintNativeEvent is overridden by name, and a signature that differs
+    # in a return type, a parameter type or a `const` is not an override at all:
+    # it is a virtual function nothing calls, or a compile error. There is no
+    # engine here to say which, so this is the only thing that will.
+    contract = interface_contract()
+
+    if not contract:
+        checks += 1
+        problems.append((u"{0} declares no events, or the parse missed them".format(
+            INTERFACE_NAME), u"parse failure"))
+
+    for class_name in sorted(classes):
+        declared = implementation_decls(read(classes[class_name]))
+
+        for event in sorted(contract):
+            checks += 1
+
+            # Not overriding an event is legal: the interface ships a body for
+            # every one of them, and a default that does the safe thing is the
+            # reason the defaults exist. A *wrong* override is never legal.
+            if event not in declared:
+                continue
+
+            if declared[event] != contract[event]:
+                problems.append((
+                    u"{0}::{1}_Implementation is {2}({3}){4} and the interface declares "
+                    u"{5}({6}){7}, so it overrides nothing".format(
+                        class_name, event,
+                        declared[event][0], u", ".join(declared[event][1]),
+                        u" const" if declared[event][2] else u"",
+                        contract[event][0], u", ".join(contract[event][1]),
+                        u" const" if contract[event][2] else u""),
+                    u"interface mismatch"))
+
+        # The three that decide whether a player can see it and use it.
+        for required in (u"CanInteract", u"GetInteractionPrompt", u"GetInteractionTag"):
+            checks += 1
+
+            if required not in declared:
+                problems.append((
+                    u"{0} implements {1} without {2}_Implementation, so the prompt "
+                    u"for it is never drawn or the interaction is always refused".format(
+                        class_name, INTERFACE_NAME, required),
+                    u"missing override"))
+
+        # A hold with no duration is a hold the server invents.
+        checks += 1
+
+        if u"RequiresHold" in declared and u"GetHoldDuration" not in declared:
+            problems.append((
+                u"{0} asks for a hold and never says how long one is".format(class_name),
+                u"missing override"))
 
     return checks, problems
 

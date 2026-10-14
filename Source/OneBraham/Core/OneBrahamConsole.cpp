@@ -9,6 +9,7 @@
 #include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamPlayerController.h"
 #include "Characters/OneBrahamCharacter.h"
+#include "Extraction/OneBrahamExtractionComponent.h"
 #include "Weapons/OneBrahamWeaponComponent.h"
 #include "Lockdown/OneBrahamLockdownComponent.h"
 #include "Engine/Canvas.h"
@@ -66,6 +67,16 @@ bool UOneBrahamConsole::ConsoleCommand(const FString& Command)
 		if (Verb == TEXT("ob.endmatch"))
 		{
 			OBEndMatch(ArgList.Num() > 0 ? FCString::Atoi(*ArgList[0]) : -1);
+			return true;
+		}
+		if (Verb == TEXT("ob.extraction.fast"))
+		{
+			OBExtractionFast();
+			return true;
+		}
+		if (Verb == TEXT("ob.extraction.abort"))
+		{
+			OBExtractionAbort();
 			return true;
 		}
 		if (Verb == TEXT("ob.netbudget"))
@@ -209,6 +220,68 @@ void UOneBrahamConsole::OBEndMatch(int32 WinningTeamIndex)
 
 	GM->DebugForceMatchResult(WinningTeamIndex);
 	OB_LOG("ob.endmatch: forced result for team index %d.", WinningTeamIndex);
+}
+
+void UOneBrahamConsole::OBExtractionFast()
+{
+	UWorld* World = GetWorld();
+	AOneBrahamGameState* GS = World ? World->GetGameState<AOneBrahamGameState>() : nullptr;
+	UOneBrahamExtractionComponent* Extraction = GS ? GS->GetExtractionComponent() : nullptr;
+
+	if (Extraction == nullptr)
+	{
+		OB_WARN("ob.extraction.fast: no One Braham game state.");
+		return;
+	}
+
+	if (GS->MatchMode != EOneBrahamMatchMode::Ascent)
+	{
+		OB_WARN("ob.extraction.fast: this mode has no winch. ASCENT only.");
+		return;
+	}
+
+	// One command, not three. A QA pass that has to walk to the Skydeck, hold a
+	// console for 1.4 seconds and then wait 55 seconds of helicopter is a QA pass
+	// nobody runs, so this calls the winch for whoever typed the command and then
+	// jumps the state machine straight to the hold.
+	if (Extraction->GetExtractionState() == EOneBrahamExtractionState::Inactive)
+	{
+		AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(
+			World->GetFirstPlayerController());
+		AOneBrahamPlayerState* PS = PC ? PC->GetPlayerState<AOneBrahamPlayerState>() : nullptr;
+		const int32 SquadId = PS ? GS->GetSquadIdForPlayer(PS->GetPlayerId()) : INDEX_NONE;
+
+		FText Refusal;
+		if (!Extraction->ServerCallExtraction(SquadId, PS, Refusal))
+		{
+			OB_WARN("ob.extraction.fast: %s", *Refusal.ToString());
+			return;
+		}
+
+		OB_LOG("ob.extraction.fast: called the winch for squad %d.", SquadId);
+	}
+
+	Extraction->ServerSkipToHolding();
+	OB_LOG("ob.extraction.fast: squad %d is on the wire, holding.",
+		Extraction->GetClaimingSquadId());
+}
+
+void UOneBrahamConsole::OBExtractionAbort()
+{
+	UWorld* World = GetWorld();
+	AOneBrahamGameState* GS = World ? World->GetGameState<AOneBrahamGameState>() : nullptr;
+	UOneBrahamExtractionComponent* Extraction = GS ? GS->GetExtractionComponent() : nullptr;
+
+	if (Extraction == nullptr)
+	{
+		OB_WARN("ob.extraction.abort: no One Braham game state.");
+		return;
+	}
+
+	// The failure path is the one that never gets tested by playing the game
+	// honestly, and it is the path with the end-of-match copy on it.
+	Extraction->ServerAbortExtraction(EOneBrahamExtractionFailReason::Contested);
+	OB_LOG("ob.extraction.abort: attempt aborted as CONTESTED.");
 }
 
 void UOneBrahamConsole::OBReportNetBudget()
