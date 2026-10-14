@@ -55,8 +55,9 @@ WIDGETS = [
      "Archetype carousel, loadout selection, squad display, ready-up."),
     ("WBP_Wardrobe",        C.UI + "/Menus", None,
      "Cosmetics. Cosmetic-only monetisation: nothing here changes gameplay."),
-    ("WBP_Settings",        C.UI + "/Menus", None,
-     "Video, audio, controls, gameplay, accessibility. Every setting persists."),
+    ("WBP_Settings",        C.UI + "/Menus", "OneBrahamSettingsWidget",
+     "Video, audio, controls, gameplay, accessibility. Subclasses the C++ "
+     "screen, which builds every page and the rebinding list; empty by default."),
     ("WBP_Results",         C.UI + "/Menus", None,
      "End-of-match: survivors, damage, objectives, progression."),
     ("WBP_LoadingScreen",   C.UI + "/Menus", None,

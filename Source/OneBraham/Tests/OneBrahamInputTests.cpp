@@ -23,6 +23,9 @@
 #include "UObject/UnrealType.h"
 
 #include "Core/OneBrahamGameSettings.h"
+#include "Core/OneBrahamInputBindings.h"
+#include "Misc/ConfigCacheIni.h"
+#include "Misc/ScopeExit.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "OneBraham.h"
@@ -223,6 +226,90 @@ bool FOneBrahamInputContextsTest::RunTest(const FString& Parameters)
 		UOneBrahamInputConfig::StaticClass(), TEXT("ClipMarker"));
 	TestNotNull(TEXT("ClipMarker exists"), ClipMarker);
 
+	return true;
+}
+
+// ===========================================================================
+//  Rebinding: the write path the controls screen uses
+// ===========================================================================
+namespace
+{
+	TArray<FKey> KeysOf(const TArray<FOneBrahamKeyBinding>& Bindings, const TCHAR* Action)
+	{
+		TArray<FKey> Keys;
+		for (const FOneBrahamKeyBinding& Binding : Bindings)
+		{
+			if (Binding.Action == FName(Action))
+			{
+				Keys.Add(Binding.Key);
+			}
+		}
+		return Keys;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamInputRebindTest, "OneBraham.Input.Rebind",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamInputRebindTest::RunTest(const FString& Parameters)
+{
+	// The player's own keyboard rows are put back afterwards, whatever happens.
+	TArray<FString> Saved;
+	GConfig->GetArray(TEXT("OneBraham.Input"), TEXT("KeyboardBinding"), Saved, GGameUserSettingsIni);
+	ON_SCOPE_EXIT
+	{
+		if (Saved.Num() > 0)
+		{
+			GConfig->SetArray(TEXT("OneBraham.Input"), TEXT("KeyboardBinding"), Saved, GGameUserSettingsIni);
+		}
+		else
+		{
+			GConfig->RemoveKey(TEXT("OneBraham.Input"), TEXT("KeyboardBinding"), GGameUserSettingsIni);
+		}
+	};
+
+	UOneBrahamInputBindings::ResetBindings(false);
+	TestTrue(TEXT("defaults: Reload is R"), KeysOf(UOneBrahamInputBindings::GetBindings(false), TEXT("IA_Reload")) == TArray<FKey>{ EKeys::R });
+
+	// A plain rebind replaces the key and nothing else.
+	FName Swapped;
+	TestTrue(TEXT("R -> T"), UOneBrahamInputBindings::Rebind(TEXT("IA_Reload"), EKeys::R, EKeys::T, false, Swapped));
+	TestTrue(TEXT("nothing swapped"), Swapped.IsNone());
+	TestTrue(TEXT("Reload is T"), KeysOf(UOneBrahamInputBindings::GetBindings(false), TEXT("IA_Reload")) == TArray<FKey>{ EKeys::T });
+
+	// Taking another action's key swaps: Interact gets the key Reload gave up.
+	TestTrue(TEXT("T -> F"), UOneBrahamInputBindings::Rebind(TEXT("IA_Reload"), EKeys::T, EKeys::F, false, Swapped));
+	TestTrue(TEXT("swapped with Interact"), Swapped == FName(TEXT("IA_Interact")));
+	const TArray<FOneBrahamKeyBinding> AfterSwap = UOneBrahamInputBindings::GetBindings(false);
+	TestTrue(TEXT("Reload is F"), KeysOf(AfterSwap, TEXT("IA_Reload")) == TArray<FKey>{ EKeys::F });
+	TestTrue(TEXT("Interact is T"), KeysOf(AfterSwap, TEXT("IA_Interact")) == TArray<FKey>{ EKeys::T });
+	TestTrue(TEXT("nothing else holds F"), UOneBrahamInputBindings::FindConflict(EKeys::F, false, TEXT("IA_Reload")).IsNone());
+
+	// Rebinding one key of Move writes all four, modifiers intact.
+	TestTrue(TEXT("W -> Up"), UOneBrahamInputBindings::Rebind(TEXT("IA_Move"), EKeys::W, EKeys::Up, false, Swapped));
+	int32 MoveRows = 0;
+	for (const FOneBrahamKeyBinding& Binding : UOneBrahamInputBindings::GetBindings(false))
+	{
+		if (Binding.Action == FName(TEXT("IA_Move")))
+		{
+			++MoveRows;
+			TestTrue(TEXT("W no longer moves"), Binding.Key != EKeys::W);
+			if (Binding.Key == EKeys::Up)
+			{
+				TestTrue(TEXT("Up keeps W's swizzle"), Binding.Modifiers == TArray<FString>{ TEXT("Swizzle") });
+			}
+		}
+	}
+	TestEqual(TEXT("Move keeps four keys"), MoveRows, 4);
+
+	// Keys a device cannot bind are refused, and the look axes are fixed.
+	TestFalse(TEXT("a pad button is not a keyboard key"), UOneBrahamInputBindings::Rebind(TEXT("IA_Jump"), EKeys::SpaceBar, EKeys::Gamepad_FaceButton_Bottom, false, Swapped));
+	TestFalse(TEXT("the console key is the console's"), UOneBrahamInputBindings::IsKeyBindable(EKeys::Tilde, false));
+	TestFalse(TEXT("look is not rebindable"), UOneBrahamInputBindings::GetRebindableActions().Contains(FName(TEXT("IA_Look"))));
+
+	// Reset gives the defaults back.
+	UOneBrahamInputBindings::ResetBindings(false);
+	TestTrue(TEXT("reset: Interact is F"), KeysOf(UOneBrahamInputBindings::GetBindings(false), TEXT("IA_Interact")) == TArray<FKey>{ EKeys::F });
 	return true;
 }
 

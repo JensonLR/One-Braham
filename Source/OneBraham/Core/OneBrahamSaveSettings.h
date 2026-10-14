@@ -153,15 +153,12 @@ public:
 	UPROPERTY(BlueprintReadWrite, Category = "Progress")
 	TArray<FName> EarnedUnlockTags;
 
-	// --- Bindings ---------------------------------------------------------
-	/** Key overrides applied on top of the default mapping context, keyed by "IA_Name.Action". */
-	UPROPERTY(BlueprintReadWrite, Category = "Controls")
-	TMap<FName, FString> KeyOverrides;
+	// --- Controls ---------------------------------------------------------
+	// Key bindings are not here: a rebind is [OneBraham.Input] in
+	// GameUserSettings.ini, written by UOneBrahamInputBindings, so it belongs to
+	// the machine and the controls, like the rest of the input settings.
 
-	UPROPERTY(BlueprintReadWrite, Category = "Controls")
-	TMap<FName, FKey> GamepadOverrides;
-
-	/** Raw mouse/gamepad sensitivity, duplicated here so the custom controls screen owns them. */
+	/** The first-run screen (sensitivity, subtitles, colour-blind mode) has been shown. */
 	UPROPERTY(BlueprintReadWrite, Category = "Controls")
 	bool bHasSeenFirstRunSetup = false;
 

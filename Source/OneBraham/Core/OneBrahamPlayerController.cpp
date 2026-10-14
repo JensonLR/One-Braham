@@ -9,6 +9,8 @@
 #include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamGameplayTags.h"
 #include "Core/OneBrahamGameUserSettings.h"
+#include "Core/OneBrahamInputBindings.h"
+#include "UI/OneBrahamSettingsWidget.h"
 #include "Core/OneBrahamPlayerState.h"
 #include "Core/OneBrahamSaveSettings.h"
 #include "Data/OneBrahamCosmeticDataAsset.h"
@@ -480,86 +482,6 @@ void AOneBrahamPlayerController::PushMappingContext(UInputMappingContext* Contex
 
 namespace
 {
-	/** One [OneBraham.Input] value: `IA_Move,S,Swizzle+Negate`. */
-	struct FOBKeyBinding
-	{
-		FName Action;
-		FKey Key;
-		TArray<FString> Modifiers;
-	};
-
-	bool ParseKeyBinding(const FString& Value, FOBKeyBinding& Out)
-	{
-		TArray<FString> Parts;
-		Value.ParseIntoArray(Parts, TEXT(","), /*bCullEmpty*/ true);
-
-		if (Parts.Num() < 2)
-		{
-			return false;
-		}
-
-		Out.Action = FName(*Parts[0].TrimStartAndEnd());
-		Out.Key = FKey(FName(*Parts[1].TrimStartAndEnd()));
-		Out.Modifiers.Reset();
-
-		if (Parts.Num() > 2)
-		{
-			Parts[2].TrimStartAndEnd().ParseIntoArray(Out.Modifiers, TEXT("+"), /*bCullEmpty*/ true);
-		}
-
-		return Out.Key.IsValid();
-	}
-
-	/**
-	 * One device's bindings. An action the player has rebound is taken wholly from
-	 * their file and none of its defaults survive, so the rebind screen writes
-	 * every key of an action it changes - the four of Move included - and a
-	 * rebound W never leaves the old W pressing forward as well.
-	 */
-	void GatherKeyBindings(const TCHAR* ArrayKey, TArray<FOBKeyBinding>& Out)
-	{
-		if (GConfig == nullptr)
-		{
-			return;
-		}
-
-		TArray<FString> Defaults;
-		TArray<FString> Rebinds;
-		GConfig->GetArray(TEXT("OneBraham.Input"), ArrayKey, Defaults, GInputIni);
-		GConfig->GetArray(TEXT("OneBraham.Input"), ArrayKey, Rebinds, GGameUserSettingsIni);
-
-		TSet<FName> Rebound;
-		TArray<FOBKeyBinding> Player;
-
-		for (const FString& Value : Rebinds)
-		{
-			FOBKeyBinding Binding;
-			if (ParseKeyBinding(Value, Binding))
-			{
-				Rebound.Add(Binding.Action);
-				Player.Add(MoveTemp(Binding));
-			}
-		}
-
-		for (const FString& Value : Defaults)
-		{
-			FOBKeyBinding Binding;
-			if (ParseKeyBinding(Value, Binding) && !Rebound.Contains(Binding.Action))
-			{
-				Out.Add(MoveTemp(Binding));
-			}
-			else if (!Binding.Key.IsValid())
-			{
-				OB_WARN("[OneBraham.Input] %s=%s names a key this engine does not have; skipped.", ArrayKey, *Value);
-			}
-		}
-
-		Out.Append(MoveTemp(Player));
-	}
-}
-
-namespace
-{
 	/** What a key may do while a menu is up: close it, and talk to the squad. */
 	const TSet<FName>& MenuActions()
 	{
@@ -665,9 +587,10 @@ UInputMappingContext* AOneBrahamPlayerController::BuildBindingsContext(const TSe
 		return nullptr;
 	}
 
-	TArray<FOBKeyBinding> Bindings;
-	GatherKeyBindings(TEXT("KeyboardBinding"), Bindings);
-	GatherKeyBindings(TEXT("GamepadBinding"), Bindings);
+	// The defaults and the player's rebinds, merged by the same reader the
+	// controls screen writes through (UOneBrahamInputBindings).
+	TArray<FOneBrahamKeyBinding> Bindings = UOneBrahamInputBindings::GetBindings(false);
+	Bindings.Append(UOneBrahamInputBindings::GetBindings(true));
 
 	// A unique name: the context is rebuilt on every rebind, and NewObject with a
 	// name already taken under the same outer replaces the live one in place.
@@ -675,7 +598,7 @@ UInputMappingContext* AOneBrahamPlayerController::BuildBindingsContext(const TSe
 		MakeUniqueObjectName(this, UInputMappingContext::StaticClass(), FName(ContextName)), RF_Transient);
 	int32 Mapped = 0;
 
-	for (const FOBKeyBinding& Binding : Bindings)
+	for (const FOneBrahamKeyBinding& Binding : Bindings)
 	{
 		if (OnlyActions != nullptr && !OnlyActions->Contains(Binding.Action))
 		{
@@ -1703,16 +1626,14 @@ void AOneBrahamPlayerController::OpenSettingsMenu()
 
 	if (SettingsWidget == nullptr)
 	{
-		if (UClass* WidgetClass = SettingsWidgetClass.LoadSynchronous())
-		{
-			SettingsWidget = CreateWidget<UUserWidget>(this, WidgetClass);
-		}
+		// WBP_Settings when the UI build has made it; the C++ screen it subclasses
+		// when it has not, so a clean checkout has working settings.
+		UClass* WidgetClass = SettingsWidgetClass.IsNull() ? nullptr : SettingsWidgetClass.LoadSynchronous();
+		SettingsWidget = CreateWidget<UUserWidget>(this, WidgetClass != nullptr ? WidgetClass : UOneBrahamSettingsWidget::StaticClass());
 	}
 
 	if (SettingsWidget == nullptr)
 	{
-		OB_WARN("OpenSettingsMenu: no settings widget at %s. Run Tools/Python/onebraham/build_ui.py.",
-			*SettingsWidgetClass.ToString());
 		return;
 	}
 
