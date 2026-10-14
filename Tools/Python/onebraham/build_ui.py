@@ -71,10 +71,6 @@ WIDGETS = [
      "The floor plan: fifteen floors, sealed floors, squad positions, the "
      "extraction. Code-drawn by the C++ widget; this exists to add anything "
      "the design wants around it."),
-    ("WBP_VoiceWheel",      C.UI + "/HUD", None,
-     "Legacy stub kept so existing Blueprint references (and the reference in "
-     "Docs/08) do not break. WBP_QuickLineWheel is the one the code loads: if "
-     "you are reading this as a designer, that is the file to open."),
 ]
 
 # HUD copy lives in a data table so it can be localised and so a wordsmith can

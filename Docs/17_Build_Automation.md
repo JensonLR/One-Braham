@@ -25,7 +25,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `apply_cast_payload.py` | writes the payload onto `DA_CharacterRegistry`, verifies 6 archetypes | yes | yes |
 | `build_audio.py` | 12 sound classes, 3 submixes, 4 mixes, 8 attenuations, 11 ambience, 8 music, `DA_AudioBank` | yes | yes |
 | `build_input.py` | 41 input actions, 4 mapping contexts, `DA_InputConfig` | yes | yes |
-| `build_ui.py` | 12 widget blueprints, the HUD string table, the font slot, the palette check | yes | yes |
+| `build_ui.py` | 11 widget blueprints, the HUD string table, the font slot, the palette check | yes | yes |
 | `build_vfx.py` | 17 Niagara systems, 3 camera shakes, 6 decal materials, the authoring sheet | yes | yes |
 | `import_font.py` | font faces from `Content/UI/Fonts` | yes | yes |
 | `check_cpp_symbols.py` | reads `Source/OneBraham` and reports every member function declared with no definition | **no** | yes |
@@ -99,7 +99,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | doc_types | OK | 0.1 | 61 documented type names, all declared |
 | weapon_ids | OK | 0.1 | 116 weapon-id checks, the armoury and the spawn table agree |
 | cosmetic_ids | OK | 0.1 | 135 cosmetic checks, one wardrobe |
-| hud_strings | OK | 0.1 | 83 HUD-string checks, 31 rows, every one shown |
+| hud_strings | OK | 0.1 | 99 HUD-string checks, 31 rows and 11 widgets, every one shown |
 | audio_ids | OK | 0.2 | 305 audio-id checks, every cue audible or documented |
 | materials | OK | 3.1 | 5 masters, 15 physicals, 28 instances |
 ...

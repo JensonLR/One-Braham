@@ -52,6 +52,7 @@ python_root = os.path.normpath(os.path.join(
 
 SOURCE_ROOT = os.path.join(python_root, "Source")
 BUILDER = os.path.join(python_root, "Tools", "Python", "onebraham", "build_ui.py")
+
 TABLE_H = os.path.join(python_root, "Source", "OneBraham", "UI", "OneBrahamHUDStringTable.h")
 TABLE_CPP = os.path.join(python_root, "Source", "OneBraham", "UI", "OneBrahamHUDStringTable.cpp")
 DOCS_08 = os.path.join(python_root, "Docs", "08_UI.md")
@@ -88,6 +89,17 @@ CSV_HEADER = re.compile(r'fill_data_table_from_csv_string\(\s*\w+\s*,\s*"([^"]+)
 
 #: The document's Blueprint-layer table rows: | `HUD_A`, `HUD_B` | shown by ... |
 DOC_ROW = re.compile(r'^\|\s*((?:`HUD_[A-Za-z0-9_]+`[,\s]*)+)\s*\|', re.MULTILINE)
+
+#: One entry of build_ui.py's WIDGETS list: ("WBP_X", folder, "Parent"|None,
+#: "purpose").
+WIDGET_ENTRY = re.compile(
+    r'\(\s*"(WBP_[A-Za-z0-9_]+)"\s*,\s*[^,]+,\s*(?:"([A-Za-z0-9_]+)"|None)\s*,', re.S)
+
+#: The C++ widget class each WBP_* subclasses, as the code loads it.
+WIDGET_CLASS = re.compile(r'\b(UOneBraham[A-Za-z0-9]*Widget)\b')
+
+#: The document's own count: "creates 11 widget blueprints".
+DOC_WIDGET_COUNT = re.compile(r'creates\s+(\d+)\s+widget blueprints')
 
 
 def read(path):
@@ -296,6 +308,63 @@ def run(source_root=None):
     if "FTableRowBase" not in read(TABLE_H):
         problems.append((u"FOneBrahamHUDStringRow does not derive from FTableRowBase, so "
                          u"no DataTable can be built on it", u"row struct"))
+
+    # 7. every widget the builder makes is accounted for
+    #
+    # Two halves, because a widget can be reached two ways. A widget with a C++
+    # parent is loaded by that class when a Blueprint subclass is set; a widget
+    # without one is opened from the menu stack in L_MainMenu, which is authored
+    # content. Either way it has to be described in Docs/08, and a parent it names
+    # has to exist - WBP_VoiceWheel was a blueprint the builder created, with no
+    # parent, no reference anywhere in the project and no mention in the document,
+    # kept alive only by the doc saying it was kept alive.
+    widgets = WIDGET_ENTRY.findall(read(BUILDER))
+    widget_names = [name for name, _parent in widgets]
+
+    cpp_classes = set()
+
+    for dirpath, _dirs, files in os.walk(SOURCE_ROOT):
+        for name in sorted(files):
+            if name.endswith(".h"):
+                cpp_classes |= set(WIDGET_CLASS.findall(read(os.path.join(dirpath, name))))
+
+    doc_text = read(DOCS_08)
+
+    for name, parent in widgets:
+        checks += 1
+
+        if name not in doc_text:
+            problems.append((
+                u"'{0}' is created by build_ui.py and never mentioned in Docs/08, so "
+                u"nothing says who opens it".format(name), u"undocumented widget"))
+
+        if not parent:
+            continue
+
+        checks += 1
+
+        # The builder names the class without the U prefix; UHT adds it.
+        if parent not in cpp_classes and ("U" + parent) not in cpp_classes:
+            problems.append((
+                u"'{0}' declares the parent class '{1}', which does not exist in "
+                u"Source/ - the Blueprint would be created with a missing parent"
+                .format(name, parent), u"missing widget parent"))
+
+    # 8. the document's widget count
+    count_match = DOC_WIDGET_COUNT.search(doc_text)
+    checks += 1
+
+    if count_match is None:
+        problems.append((u"Docs/08 no longer states how many widget blueprints the UI "
+                         u"build creates", u"documentation"))
+    else:
+        documented_count = int(count_match.group(1))
+
+        if documented_count != len(widget_names):
+            problems.append((
+                u"Docs/08 says the UI build creates {0} widget blueprints and "
+                u"build_ui.py declares {1}".format(documented_count, len(widget_names)),
+                u"documentation"))
 
     return checks, problems
 
