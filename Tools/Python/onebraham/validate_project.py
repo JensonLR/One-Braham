@@ -1186,6 +1186,15 @@ def check_cpp_includes(v, _config_only):
                 if target.endswith(".generated.h"):
                     continue
 
+                # A module's Public/, Private/ and Classes/ folders are its include
+                # roots, so a path through one never resolves: the include is
+                # written from the folder below them ("InputAction.h", not
+                # "EnhancedInput/Public/InputAction.h").
+                if re.search(r'(^|/)(Public|Private|Classes)/', target):
+                    checked += 1
+                    missing.append((os.path.relpath(path, SOURCE_DIR), target))
+                    continue
+
                 base = os.path.basename(target)
                 first = target.split("/")[0]
 

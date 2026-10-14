@@ -3,7 +3,7 @@
 #include "Core/OneBrahamGameSettings.h"
 
 #include "OneBraham.h"
-#include "EnhancedInput/Public/InputAction.h"
+#include "InputAction.h"
 
 UOneBrahamGameSettings::UOneBrahamGameSettings()
 {
