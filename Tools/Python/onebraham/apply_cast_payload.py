@@ -97,7 +97,7 @@ def ensure_registry(report):
         unreal.EditorAssetLibrary.make_directory(folder)
 
     registry = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
-        "DA_CharacterRegistry", folder, registry_class, unreal.DataAssetFactory())
+        "DA_CharacterRegistry", folder, registry_class, C.data_asset_factory(registry_class))
 
     if registry is None:
         report.failed("DA_CharacterRegistry", "could not create the registry asset")

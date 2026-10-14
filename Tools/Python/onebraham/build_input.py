@@ -300,7 +300,7 @@ def build_input_config(report, actions):
         report.updated_asset(path)
     else:
         config = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
-            "DA_InputConfig", C.DATA, config_class, unreal.DataAssetFactory())
+            "DA_InputConfig", C.DATA, config_class, C.data_asset_factory(config_class))
 
         if config is None:
             report.failed("DA_InputConfig", "could not create the input config")

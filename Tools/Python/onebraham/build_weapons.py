@@ -352,7 +352,7 @@ def build_weapon_definitions(report, blueprints):
             continue
 
         asset = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
-            asset_name, WEAPONS_ROOT, definition_class, unreal.DataAssetFactory())
+            asset_name, WEAPONS_ROOT, definition_class, C.data_asset_factory(definition_class))
 
         if asset is None:
             report.failed(asset_name, "could not create weapon definition")

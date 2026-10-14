@@ -635,3 +635,15 @@ def make_gameplay_tag(tag_string):
     except Exception:  # noqa: BLE001
         valid = str(tag_string) in tag.export_text()
     return tag if valid else None
+
+
+def data_asset_factory(asset_class):
+    """A DataAssetFactory that makes exactly this class.
+
+    The factory falls back to the class create_asset is given, but naming it
+    on the factory as well is what the engine's own UI does, and leaves no
+    path where an abstract base class is instantiated instead.
+    """
+    factory = unreal.DataAssetFactory()
+    factory.set_editor_property("DataAssetClass", asset_class)
+    return factory
