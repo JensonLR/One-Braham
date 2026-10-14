@@ -179,6 +179,12 @@ design.
 
 ## 5. Bot behaviour — FIRE DRILL and offline only
 
+**Smoke blinds bots.** A smoke grenade's cloud is recorded on every machine as
+well as drawn (`UOneBrahamSmokeSubsystem`: centre, a radius that reaches most of
+its size in the first second, an end time). A bot's sight check asks it after
+the visibility trace, so a bot cannot see or shoot through smoke, and smoke is
+worth throwing at them. The thin outer tenth of a cloud does not block.
+
 Bots are **not in ASCENT**. They exist so that FIRE DRILL, the offline mode and
 the tutorial work, and so the game can be tested without twelve people.
 

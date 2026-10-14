@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Weapons/OneBrahamProjectileBase.h"
+#include "Match/OneBrahamSmokeSubsystem.h"
 #include "Voice/OneBrahamVoiceDirector.h"
 #include "Access/OneBrahamDestructibleProp.h"
 #include "EngineUtils.h"
@@ -367,6 +368,12 @@ void AOneBrahamProjectileBase::MulticastDetonationFeedback_Implementation(FVecto
 
 	case EOneBrahamUtilityType::Smoke:
 		UOneBrahamVFXStatics::SpawnSmokeCloud(this, DetonationLocation, SmokeRadius, SmokeDuration);
+		// The cloud as a fact as well as a picture: sight lines through it are
+		// blocked for anything that asks (the bots, before they shoot).
+		if (UOneBrahamSmokeSubsystem* Smoke = GetWorld() ? GetWorld()->GetSubsystem<UOneBrahamSmokeSubsystem>() : nullptr)
+		{
+			Smoke->AddCloud(DetonationLocation, SmokeRadius, SmokeDuration);
+		}
 		break;
 
 	default:

@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Bots/OneBrahamBotController.h"
+#include "Match/OneBrahamSmokeSubsystem.h"
 
 #include "Characters/OneBrahamCharacter.h"
 #include "Characters/OneBrahamHealthComponent.h"
@@ -658,7 +659,14 @@ bool AOneBrahamBotController::HasLineOfSight(const AActor* Other) const
 	// Visibility channel: opaque geometry only. Glass blocks it, which is correct
 	// for "can I shoot this person" (see the trace channel table in Docs/18).
 	const bool bBlocked = World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params);
-	return !bBlocked;
+	if (bBlocked)
+	{
+		return false;
+	}
+
+	// Smoke stops sight even though no trace channel sees it.
+	const UOneBrahamSmokeSubsystem* Smoke = World->GetSubsystem<UOneBrahamSmokeSubsystem>();
+	return Smoke == nullptr || !Smoke->IsSightBlocked(Start, End);
 }
 
 bool AOneBrahamBotController::IsFriendly(const AActor* Other) const

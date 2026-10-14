@@ -10,6 +10,7 @@
 #include "Misc/AutomationTest.h"
 
 #include "Match/OneBrahamControlPoint.h"
+#include "Match/OneBrahamSmokeSubsystem.h"
 
 #if WITH_AUTOMATION_TESTS
 
@@ -51,6 +52,37 @@ bool FOneBrahamControlPointCaptureTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("contractors capturing"), Capturer, 1);
 	AOneBrahamControlPoint::StepCapture(0, 3, 4.f, 4.f, Owner, Capturer, Progress, bContested);
 	TestEqual(TEXT("contractors own it: a flip is twice a capture"), Owner, 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamSmokeSightTest, "OneBraham.Match.SmokeBlocksSight",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamSmokeSightTest::RunTest(const FString& Parameters)
+{
+	const FVector Cloud(0.f, 0.f, 100.f);
+	const float Radius = 500.f;
+
+	// Straight through the middle: blocked.
+	TestTrue(TEXT("through the cloud"), UOneBrahamSmokeSubsystem::SegmentHitsCloud(
+		FVector(-2000.f, 0.f, 100.f), FVector(2000.f, 0.f, 100.f), Cloud, Radius));
+	// Passing well wide: clear.
+	TestFalse(TEXT("wide of the cloud"), UOneBrahamSmokeSubsystem::SegmentHitsCloud(
+		FVector(-2000.f, 800.f, 100.f), FVector(2000.f, 800.f, 100.f), Cloud, Radius));
+	// Grazing the thin outer edge: still seen.
+	TestFalse(TEXT("grazing the edge"), UOneBrahamSmokeSubsystem::SegmentHitsCloud(
+		FVector(-2000.f, 470.f, 100.f), FVector(2000.f, 470.f, 100.f), Cloud, Radius));
+	// Both ends short of the cloud: the segment stops before it.
+	TestFalse(TEXT("stopping short"), UOneBrahamSmokeSubsystem::SegmentHitsCloud(
+		FVector(-2000.f, 0.f, 100.f), FVector(-700.f, 0.f, 100.f), Cloud, Radius));
+	// Standing inside it: blind.
+	TestTrue(TEXT("inside the cloud"), UOneBrahamSmokeSubsystem::SegmentHitsCloud(
+		FVector(0.f, 0.f, 100.f), FVector(2000.f, 0.f, 100.f), Cloud, Radius));
+
+	// The cloud grows: nothing at the pop, most of it in the first second, all of it by GrowSeconds.
+	TestEqual(TEXT("nothing at the pop"), UOneBrahamSmokeSubsystem::CloudRadiusAt(Radius, 0.f), 0.f);
+	TestTrue(TEXT("most of it after a second"), UOneBrahamSmokeSubsystem::CloudRadiusAt(Radius, 1.f) > Radius * 0.6f);
+	TestEqual(TEXT("full size"), UOneBrahamSmokeSubsystem::CloudRadiusAt(Radius, UOneBrahamSmokeSubsystem::GrowSeconds + 1.f), Radius);
 	return true;
 }
 
