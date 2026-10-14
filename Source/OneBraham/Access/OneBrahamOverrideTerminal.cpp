@@ -295,7 +295,7 @@ FText AOneBrahamOverrideTerminal::GetInteractionPrompt_Implementation(const AOne
 
 	if (IsPairedPanelHeld())
 	{
-		return NSLOCTEXT("OneBraham", "Terminal_Paired", "Hold E - paired override (3s)");
+		return NSLOCTEXT("OneBraham", "Terminal_Paired", "Hold {Interact} - paired override (3s)");
 	}
 
 	return ZoneComponent->GetInteractionPrompt(Interactor);

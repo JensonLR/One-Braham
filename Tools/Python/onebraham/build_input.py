@@ -50,22 +50,37 @@ if C.IN_EDITOR:
 # value_type, name, description, KBM default keys, gamepad default keys
 # Managed by default: everything. Unbound by default: ClipMarker (the player
 # picks a key in Settings, because a clip key has no universal default).
+#
+# A key may carry Enhanced Input modifiers after a bar: "S|Swizzle+Negate". That
+# is how four buttons become one 2D axis (W/S on Y, A/D on X) and two buttons one
+# signed lean. The modifier belongs to the binding slot, not to the key, so a
+# player who rebinds "S" to "Down" keeps the negate.
+#
+# One key, one verb, per device. The only keys shared by two actions are the
+# pairs in SHARED_KEY_GROUPS below, and check_input_actions.py fails the build on
+# any other pair: E was lean-right *and* interact, so peeking a corner next to a
+# door opened it, and seven pad buttons did two things at once.
 ACTIONS = [
     # --- Movement ---------------------------------------------------------
     ("Axis2D", "IA_Move", "Walk, jog, sprint, backpedal",
-     ["W", "S", "A", "D"], ["Gamepad_Left2D"]),
-    ("Axis2D", "IA_Look", "Mouse or stick look (sensitivity from settings)",
+     ["W|Swizzle", "S|Swizzle+Negate", "A|Negate", "D"], ["Gamepad_Left2D"]),
+    # Two look actions, because a mouse and a stick are different instruments: the
+    # mouse reports a distance moved this frame, the stick a rate to turn at. One
+    # action for both scaled one of them wrongly at every frame rate but one.
+    ("Axis2D", "IA_Look", "Mouse look (sensitivity from settings)",
+     ["Mouse2D"], []),
+    ("Axis2D", "IA_LookGamepad", "Stick look (turn rate from settings)",
      [], ["Gamepad_Right2D"]),
     ("Boolean", "IA_Jump", "Jump / vault / mantle upward",
      ["SpaceBar"], ["Gamepad_FaceButton_Bottom"]),
     ("Boolean", "IA_Sprint", "Sprint while held, or toggle",
      ["LeftShift"], ["Gamepad_LeftThumbstick"]),
     ("Boolean", "IA_Walk", "Slow walk: quiet, and your aim recovers faster",
-     ["LeftAlt"], ["Gamepad_LeftShoulder"]),
+     ["LeftAlt"], []),
     ("Boolean", "IA_Crouch", "Crouch, stay crouched",
-     ["LeftControl", "C"], ["Gamepad_RightThumbstick"]),
+     ["LeftControl", "C"], ["Gamepad_FaceButton_Right"]),
     ("Axis1D", "IA_Lean", "Peek around cover without exposing your whole body",
-     ["Q", "E"], []),
+     ["Q|Negate", "E"], []),
     ("Boolean", "IA_Mantle", "Climb: desks, counters, planters, the ledge on 12",
      ["SpaceBar"], ["Gamepad_FaceButton_Bottom"]),
     ("Boolean", "IA_Slide", "Slide. Only from a sprint, and it costs you your aim",
@@ -84,35 +99,37 @@ ACTIONS = [
      ["I"], []),
 
     # --- Inventory --------------------------------------------------------
-    ("Boolean", "IA_WeaponSlotPrimary", "Primary weapon", ["One"], ["Gamepad_DPad_Left"]),
-    ("Boolean", "IA_WeaponSlotSidearm", "Sidearm", ["Two"], ["Gamepad_DPad_Right"]),
-    ("Boolean", "IA_WeaponSlotMelee", "Melee tool", ["Three"], ["Gamepad_DPad_Down"]),
+    # The pad cycles rather than picking a slot: four d-pad directions are worth
+    # more as medkit, utility, fire mode and radio than as three slot keys.
+    ("Boolean", "IA_WeaponSlotPrimary", "Primary weapon", ["One"], []),
+    ("Boolean", "IA_WeaponSlotSidearm", "Sidearm", ["Two"], []),
+    ("Boolean", "IA_WeaponSlotMelee", "Melee tool", ["Three"], []),
     ("Boolean", "IA_WeaponCycleNext", "Next weapon", ["MouseScrollDown"], ["Gamepad_RightShoulder"]),
     ("Boolean", "IA_WeaponCyclePrev", "Previous weapon", ["MouseScrollUp"], []),
     ("Boolean", "IA_ThrowGrenade", "Throw the selected utility", ["G"], ["Gamepad_LeftShoulder"]),
     ("Boolean", "IA_UseUtility", "Place or use the selected utility (breach charge)",
-     ["F"], ["Gamepad_RightShoulder"]),
+     ["H"], ["Gamepad_DPad_Left"]),
     ("Boolean", "IA_UseMedkit", "Medkit, or a meal deal if you have one",
-     ["Four"], ["Gamepad_DPad_Left"]),
+     ["Four"], ["Gamepad_DPad_Down"]),
     ("Boolean", "IA_DropWeapon", "Drop the current weapon for a teammate",
      ["BackSpace"], []),
 
     # --- Interaction ------------------------------------------------------
-    ("Boolean", "IA_Interact", "Tap: doors, pickups, revives", ["E"], ["Gamepad_FaceButton_Right"]),
+    ("Boolean", "IA_Interact", "Tap: doors, pickups, revives", ["F"], ["Gamepad_FaceButton_Top"]),
     ("Boolean", "IA_InteractHold", "Hold: terminals, overrides, finishers",
-     ["E"], ["Gamepad_FaceButton_Right"]),
+     ["F"], ["Gamepad_FaceButton_Top"]),
     ("Boolean", "IA_ToggleFlashlight", "Weapon light", ["T"], []),
     ("Boolean", "IA_ToggleLaser", "Laser sight", ["Y"], []),
 
     # --- Voice ------------------------------------------------------------
     ("Boolean", "IA_PushToTalk", "Push to talk, on the current channel",
-     ["LeftAlt"], ["Gamepad_LeftThumbstick"]),
+     ["CapsLock"], ["Gamepad_DPad_Right"]),
     ("Boolean", "IA_VoiceChannelCycle", "Proximity / squad / team",
-     ["Z"], ["Gamepad_DPad_Right"]),
+     ["Z"], []),
     ("Boolean", "IA_VoiceMuteSelf", "Mute yourself", ["N"], []),
 
     # --- Interface --------------------------------------------------------
-    ("Boolean", "IA_Scoreboard", "Hold for the scoreboard", ["Tab"], ["Gamepad_Back"]),
+    ("Boolean", "IA_Scoreboard", "Hold for the scoreboard", ["Tab"], ["Gamepad_Special_Left"]),
     ("Boolean", "IA_PauseMenu", "Pause / system menu", ["Escape"], ["Gamepad_Special_Right"]),
     ("Boolean", "IA_Ping", "World ping: enemy, item, move here",
      ["MiddleMouseButton"], []),
@@ -129,6 +146,19 @@ ACTIONS = [
     ("Boolean", "IA_Map", "Floor plan overlay", ["M"], []),
     ("Boolean", "IA_VoiceLineMenu", "Quick voice line wheel", ["X"], []),
     ("Boolean", "IA_ToggleHUD", "Hide the HUD (screenshots, immersion)", ["F1"], []),
+]
+
+# Pairs of actions that share a default key on purpose. Each is one physical
+# gesture whose meaning the game decides from context, never two verbs that both
+# fire: you cannot spectate while you have a body, a mantle is a jump at a ledge,
+# a slide is a crouch from a sprint, and a tap and a hold are the same press told
+# apart by how long it lasts (the controller drops the second begin in a frame).
+SHARED_KEY_GROUPS = [
+    ("IA_Jump", "IA_Mantle", "IA_SpectateToggleFreeCam"),
+    ("IA_Crouch", "IA_Slide"),
+    ("IA_Fire", "IA_SpectateNextPlayer"),
+    ("IA_Aim", "IA_SpectatePrevPlayer"),
+    ("IA_Interact", "IA_InteractHold"),
 ]
 
 MAPPING_CONTEXTS = [
@@ -148,7 +178,7 @@ VALUE_TYPE_ENUM = {
 
 # The C++ field name is the action name without the IA_ prefix.
 INPUT_CONFIG_FIELD_ORDER = [
-    "Move", "Look", "Jump", "Sprint", "Walk", "Crouch", "Lean", "Mantle", "Slide",
+    "Move", "Look", "LookGamepad", "Jump", "Sprint", "Walk", "Crouch", "Lean", "Mantle", "Slide",
     "Fire", "Aim", "Reload", "FireModeSwitch", "Melee", "Inspect",
     "WeaponSlotPrimary", "WeaponSlotSidearm", "WeaponSlotMelee",
     "WeaponCycleNext", "WeaponCyclePrev", "ThrowGrenade", "UseUtility", "UseMedkit",

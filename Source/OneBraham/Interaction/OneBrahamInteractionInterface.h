@@ -47,7 +47,11 @@ class ONEBRAHAM_API IOneBrahamInteractionInterface
 	GENERATED_BODY()
 
 public:
-	/** Text shown in the HUD prompt ("Hold E - Override terminal", "F - Open door"). */
+	/**
+	 * Text shown in the HUD prompt ("Hold {Interact} - override", "Open door").
+	 * Never name a key: write {Interact} and the HUD puts in whatever key does it
+	 * on the device the player is holding, after any rebind.
+	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "One Braham|Interaction")
 	FText GetInteractionPrompt(const class AOneBrahamPlayerController* Interactor) const;
 	virtual FText GetInteractionPrompt_Implementation(const AOneBrahamPlayerController*) const

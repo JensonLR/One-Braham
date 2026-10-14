@@ -122,6 +122,11 @@ order:
 | 2 | the conventional path (`/Game/OneBraham/Data/DA_WeaponRegistry`, `/Game/OneBraham/Voice/DA_VoiceLines`, `DA_MatchSettings_<Mode>`) | the normal case: the pipeline writes there |
 | 3 | a compiled-in or runtime default with a warning in the log | a code-only checkout with no content built yet |
 
+The two mapping-context fields are the exception to step 2: there is no
+conventional path, because the generated `IMC_` assets carry no keys. Keys come
+from `[OneBraham.Input]` through the runtime bindings context the controller
+builds (`Docs/03` section 7), which is also step 3 for input.
+
 Step 3 is why the game is playable before anybody runs the content pipeline; step
 1 is why a designer never has to touch C++ to move an asset. Both existed here,
 and four of the six fields were read by nobody: `WeaponRegistry`,

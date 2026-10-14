@@ -236,8 +236,6 @@ public:
 	UPROPERTY(config) FString AudioInputDeviceId;
 	UPROPERTY(config) FString VoiceInputDeviceId;
 	UPROPERTY(config) bool bUsePushToTalk = true;
-	UPROPERTY(config) FKey PushToTalkKey;
-	UPROPERTY(config) FKey PushToTalkGamepadKey;
 	UPROPERTY(config) bool bVoiceChannelCycleEnabled = true;
 
 	// Gameplay / accessibility

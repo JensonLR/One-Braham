@@ -738,10 +738,10 @@ FText AOneBrahamCharacter::GetInteractionPrompt_Implementation(const AOneBrahamP
 		// The prompt names them because you are deciding whose sixty seconds to
 		// spend four and a half of your own on, and because a squad that talks
 		// says "get Okonkwo up", not "revive the body".
-		return FText::Format(NSLOCTEXT("OneBraham", "Downed_Prompt_Revive", "Hold E - revive {0}"), Name);
+		return FText::Format(NSLOCTEXT("OneBraham", "Downed_Prompt_Revive", "Hold {Interact} - revive {0}"), Name);
 
 	case EOneBrahamDownedInteraction::Execute:
-		return FText::Format(NSLOCTEXT("OneBraham", "Downed_Prompt_Execute", "Hold E - finish {0}"), Name);
+		return FText::Format(NSLOCTEXT("OneBraham", "Downed_Prompt_Execute", "Hold {Interact} - finish {0}"), Name);
 
 	default:
 		// An empty prompt draws nothing at all: a standing colleague, a body seen

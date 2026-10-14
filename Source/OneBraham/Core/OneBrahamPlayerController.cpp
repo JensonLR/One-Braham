@@ -30,6 +30,9 @@
 #include "InputMappingContext.h"
 #include "InputAction.h"
 #include "InputActionValue.h"
+#include "InputModifiers.h"
+#include "Misc/ConfigCacheIni.h"
+#include "UObject/UnrealType.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Camera/PlayerCameraManager.h"
@@ -118,6 +121,10 @@ void AOneBrahamPlayerController::BeginPlay()
 	{
 		GameplayMappingContext = UOneBrahamGameSettings::Get().DefaultMappingContext.LoadSynchronous();
 	}
+
+	// The keys first, at the bottom of the stack: an asset context a designer has
+	// authored keys into sits above it and wins.
+	RefreshBindingsContext();
 
 	// Install the local mapping contexts.
 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
@@ -250,9 +257,14 @@ void AOneBrahamPlayerController::BindInputActions()
 	if (InputConfig->Move)			EIC->BindAction(InputConfig->Move, ETriggerEvent::Triggered, this, &AOneBrahamPlayerController::Input_Move);
 	if (InputConfig->Look)
 	{
-		// Mouse and gamepad share the action but use different handlers so the
-		// aim-assist curve only applies to the stick.
+		// Mouse only. The stick has its own action below, because a mouse reports
+		// a distance and a stick reports a rate: one handler for both was right
+		// for one of them at exactly one frame rate.
 		EIC->BindAction(InputConfig->Look, ETriggerEvent::Triggered, this, &AOneBrahamPlayerController::Input_Look);
+	}
+	if (InputConfig->LookGamepad)
+	{
+		EIC->BindAction(InputConfig->LookGamepad, ETriggerEvent::Triggered, this, &AOneBrahamPlayerController::Input_LookGamepad);
 	}
 	if (InputConfig->Jump)
 	{
@@ -360,6 +372,217 @@ void AOneBrahamPlayerController::PushMappingContext(UInputMappingContext* Contex
 	}
 }
 
+namespace
+{
+	/** One [OneBraham.Input] value: `IA_Move,S,Swizzle+Negate`. */
+	struct FOBKeyBinding
+	{
+		FName Action;
+		FKey Key;
+		TArray<FString> Modifiers;
+	};
+
+	bool ParseKeyBinding(const FString& Value, FOBKeyBinding& Out)
+	{
+		TArray<FString> Parts;
+		Value.ParseIntoArray(Parts, TEXT(","), /*bCullEmpty*/ true);
+
+		if (Parts.Num() < 2)
+		{
+			return false;
+		}
+
+		Out.Action = FName(*Parts[0].TrimStartAndEnd());
+		Out.Key = FKey(FName(*Parts[1].TrimStartAndEnd()));
+		Out.Modifiers.Reset();
+
+		if (Parts.Num() > 2)
+		{
+			Parts[2].TrimStartAndEnd().ParseIntoArray(Out.Modifiers, TEXT("+"), /*bCullEmpty*/ true);
+		}
+
+		return Out.Key.IsValid();
+	}
+
+	/**
+	 * One device's bindings. An action the player has rebound is taken wholly from
+	 * their file and none of its defaults survive, so the rebind screen writes
+	 * every key of an action it changes - the four of Move included - and a
+	 * rebound W never leaves the old W pressing forward as well.
+	 */
+	void GatherKeyBindings(const TCHAR* ArrayKey, TArray<FOBKeyBinding>& Out)
+	{
+		if (GConfig == nullptr)
+		{
+			return;
+		}
+
+		TArray<FString> Defaults;
+		TArray<FString> Rebinds;
+		GConfig->GetArray(TEXT("OneBraham.Input"), ArrayKey, Defaults, GInputIni);
+		GConfig->GetArray(TEXT("OneBraham.Input"), ArrayKey, Rebinds, GGameUserSettingsIni);
+
+		TSet<FName> Rebound;
+		TArray<FOBKeyBinding> Player;
+
+		for (const FString& Value : Rebinds)
+		{
+			FOBKeyBinding Binding;
+			if (ParseKeyBinding(Value, Binding))
+			{
+				Rebound.Add(Binding.Action);
+				Player.Add(MoveTemp(Binding));
+			}
+		}
+
+		for (const FString& Value : Defaults)
+		{
+			FOBKeyBinding Binding;
+			if (ParseKeyBinding(Value, Binding) && !Rebound.Contains(Binding.Action))
+			{
+				Out.Add(MoveTemp(Binding));
+			}
+			else if (!Binding.Key.IsValid())
+			{
+				OB_WARN("[OneBraham.Input] %s=%s names a key this engine does not have; skipped.", ArrayKey, *Value);
+			}
+		}
+
+		Out.Append(MoveTemp(Player));
+	}
+}
+
+void AOneBrahamPlayerController::RefreshBindingsContext()
+{
+	if (!IsLocalController())
+	{
+		return;
+	}
+
+	UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer());
+	if (Subsystem == nullptr)
+	{
+		return;
+	}
+
+	if (BindingsMappingContext != nullptr)
+	{
+		Subsystem->RemoveMappingContext(BindingsMappingContext);
+	}
+
+	BindingsMappingContext = BuildBindingsContext();
+
+	if (BindingsMappingContext != nullptr)
+	{
+		Subsystem->AddMappingContext(BindingsMappingContext, 0);
+	}
+}
+
+UInputMappingContext* AOneBrahamPlayerController::BuildBindingsContext()
+{
+	if (InputConfig == nullptr)
+	{
+		return nullptr;
+	}
+
+	TArray<FOBKeyBinding> Bindings;
+	GatherKeyBindings(TEXT("KeyboardBinding"), Bindings);
+	GatherKeyBindings(TEXT("GamepadBinding"), Bindings);
+
+	UInputMappingContext* Context = NewObject<UInputMappingContext>(this, TEXT("IMC_OneBraham_Bindings"), RF_Transient);
+	int32 Mapped = 0;
+
+	for (const FOBKeyBinding& Binding : Bindings)
+	{
+		// IA_Move -> the Move field: the naming rule build_input.py assigns by,
+		// read through reflection so a new action needs no new line here.
+		const FString ActionName = Binding.Action.ToString();
+		const FObjectProperty* Property = ActionName.StartsWith(TEXT("IA_"))
+			? FindFProperty<FObjectProperty>(UOneBrahamInputConfig::StaticClass(), FName(*ActionName.RightChop(3)))
+			: nullptr;
+		const UInputAction* Action = Property != nullptr
+			? Cast<UInputAction>(Property->GetObjectPropertyValue_InContainer(InputConfig))
+			: nullptr;
+
+		if (Action == nullptr)
+		{
+			OB_WARN("[OneBraham.Input] binds %s to %s, and %s has no such action; skipped.",
+				*Binding.Key.ToString(), *ActionName, *InputConfig->GetName());
+			continue;
+		}
+
+		FEnhancedActionKeyMapping& Mapping = Context->MapKey(Action, Binding.Key);
+
+		for (const FString& Modifier : Binding.Modifiers)
+		{
+			if (Modifier == TEXT("Swizzle"))
+			{
+				// Default order YXZ: a one-dimensional key press lands on Y, which
+				// is what makes W "forward" on the same 2D action as A and D.
+				Mapping.Modifiers.Add(NewObject<UInputModifierSwizzleAxis>(Context));
+			}
+			else if (Modifier == TEXT("Negate"))
+			{
+				Mapping.Modifiers.Add(NewObject<UInputModifierNegate>(Context));
+			}
+			else
+			{
+				OB_WARN("[OneBraham.Input] %s on %s asks for modifier '%s', which is not built; the key is bound without it.",
+					*ActionName, *Binding.Key.ToString(), *Modifier);
+			}
+		}
+
+		++Mapped;
+	}
+
+	OB_LOG("Input: %d key binding(s) from [OneBraham.Input].", Mapped);
+	return Context;
+}
+
+FText AOneBrahamPlayerController::ResolvePromptKeys(const FText& Prompt) const
+{
+	static const FString Token = TEXT("{Interact}");
+	const FString Text = Prompt.ToString();
+
+	if (!Text.Contains(Token))
+	{
+		return Prompt;
+	}
+
+	FKey Preferred;
+	FKey Fallback;
+
+	if (BindingsMappingContext != nullptr && InputConfig != nullptr && InputConfig->Interact != nullptr)
+	{
+		for (const FEnhancedActionKeyMapping& Mapping : BindingsMappingContext->GetMappings())
+		{
+			if (Mapping.Action != InputConfig->Interact || !Mapping.Key.IsValid())
+			{
+				continue;
+			}
+
+			if (Mapping.Key.IsGamepadKey() == bPromptsShowGamepad && !Preferred.IsValid())
+			{
+				Preferred = Mapping.Key;
+			}
+			else if (!Fallback.IsValid())
+			{
+				Fallback = Mapping.Key;
+			}
+		}
+	}
+
+	const FKey Key = Preferred.IsValid() ? Preferred : Fallback;
+	const FText Label = Key.IsValid()
+		? Key.GetDisplayName(/*bLongDisplayName*/ false)
+		: NSLOCTEXT("OneBraham", "Prompt_UnboundInteract", "Interact");
+
+	// A string replace, not FText::FormatNamed: the prompt has already been
+	// formatted with a zone or a player name, and a name with a brace in it must
+	// not be read as an argument.
+	return FText::FromString(Text.Replace(*Token, *Label.ToString()));
+}
+
 void AOneBrahamPlayerController::PopMappingContext(UInputMappingContext* Context)
 {
 	if (Context == nullptr)
@@ -432,6 +655,8 @@ void AOneBrahamPlayerController::Input_Look(const FInputActionValue& Value)
 	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
 	const float Scale = Settings != nullptr ? EffectiveSensitivity : 0.07f;
 
+	bPromptsShowGamepad = false;
+
 	// Mouse: direct 1:1 rotation, no acceleration (bViewAccelerationEnabled=False).
 	AddYawInput(Axis.X * Scale * 20.f);
 	AddPitchInput((Settings != nullptr && Settings->bInvertMouseY ? Axis.Y : -Axis.Y) * Scale * 20.f);
@@ -444,6 +669,8 @@ void AOneBrahamPlayerController::Input_LookGamepad(const FInputActionValue& Valu
 	{
 		return;
 	}
+
+	bPromptsShowGamepad = true;
 
 	const FVector2D Axis = Value.Get<FVector2D>();
 	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
@@ -922,6 +1149,13 @@ void AOneBrahamPlayerController::NotifyInteractionStarted()
 		return;
 	}
 
+	// Interact and InteractHold share a key: one press, one begin.
+	if (LastInteractionStartFrame == GFrameCounter)
+	{
+		return;
+	}
+	LastInteractionStartFrame = GFrameCounter;
+
 	if (UOneBrahamInteractComponent* Interactor = Character->GetInteractComponent())
 	{
 		Interactor->BeginInteraction(CurrentInteractionTarget.Actor, CurrentInteractionTarget.InteractionTag, /*bIsHold*/ true);
@@ -1313,6 +1547,10 @@ void AOneBrahamPlayerController::HandleSettingsChanged()
 	{
 		HUDComponent->ApplyAccessibilitySettings();
 	}
+
+	// The rebind screen writes [OneBraham.Input] to GameUserSettings.ini and
+	// then broadcasts; rebuilding here is what makes the new key work now.
+	RefreshBindingsContext();
 }
 
 // ==========================================================================

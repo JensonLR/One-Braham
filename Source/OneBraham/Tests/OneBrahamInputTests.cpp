@@ -32,7 +32,7 @@
 namespace
 {
 	/** The number of Input Actions the shipped game binds. */
-	constexpr int32 ExpectedActionCount = 41;
+	constexpr int32 ExpectedActionCount = 42;
 
 	/**
 	 * Every reflected UInputAction property on the config class, in declaration

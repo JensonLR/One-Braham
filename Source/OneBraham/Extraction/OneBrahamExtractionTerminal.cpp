@@ -170,7 +170,7 @@ FText AOneBrahamExtractionTerminal::GetInteractionPrompt_Implementation(const AO
 	switch (Extraction->GetExtractionState())
 	{
 	case EOneBrahamExtractionState::Inactive:
-		return NSLOCTEXT("OneBraham", "Winch_Ready", "Hold E - call the winch");
+		return NSLOCTEXT("OneBraham", "Winch_Ready", "Hold {Interact} - call the winch");
 
 	case EOneBrahamExtractionState::Broadcast:
 		return NSLOCTEXT("OneBraham", "Winch_Called", "Called - ten seconds");

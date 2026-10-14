@@ -22,10 +22,9 @@
 
 UOneBrahamGameUserSettings::UOneBrahamGameUserSettings()
 {
-	// Sensible non-zero defaults so a first launch before any save exists still
-	// gives the player a keyboard-bindable push-to-talk key.
-	PushToTalkKey = EKeys::V;
-	PushToTalkGamepadKey = EKeys::Gamepad_LeftThumbstick;
+	// Push to talk has no key setting here. It is IA_PushToTalk, bound in
+	// [OneBraham.Input] like every other action: a second key setting was a
+	// second source of truth that nothing read (V, which is melee).
 }
 
 UOneBrahamGameUserSettings* UOneBrahamGameUserSettings::GetOneBrahamSettings()

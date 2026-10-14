@@ -666,23 +666,25 @@ void UOneBrahamHUDComponent::GatherHUDData()
 	//
 	// "How far through the hold am I" belongs to the interaction component, and it
 	// is replicated, so the ring is honest on a client.
-	if (const AOneBrahamPlayerController* OwningController = Cast<AOneBrahamPlayerController>(GetOwner()))
+	// Named Controller, not OwningController: that is the member, and a local that
+	// shadows a member is an error under UE5's default shadow-variable level.
+	if (const AOneBrahamPlayerController* Controller = Cast<AOneBrahamPlayerController>(GetOwner()))
 	{
-		const FOneBrahamInteractionTarget& Target = OwningController->GetInteractionTarget();
+		const FOneBrahamInteractionTarget& Target = Controller->GetInteractionTarget();
 
 		// "Something to say", not "something under the crosshair": an interactable
 		// that returns an empty prompt has nothing to offer right now (a breached
 		// wall, a colleague who is on their feet), and drawing a blank line where
 		// a verb should be is worse than drawing nothing.
 		Data.bHasInteractionTarget = Target.Actor != nullptr && !Target.Prompt.IsEmpty();
-		Data.InteractionPrompt = Target.Prompt;
+		Data.InteractionPrompt = Controller->ResolvePromptKeys(Target.Prompt);
 
 		// A target you cannot use yet is not hidden, it is refused: the prompt goes
 		// red and the widget prints the interactable's own refusal sentence
 		// ("Partition - breaching charge required", "Executive badge required"),
 		// which tells the player what to do about it.
 		Data.bInteractionBlocked = Data.bHasInteractionTarget && !Target.bEnabled;
-		Data.InteractionBlockedReason = Data.bInteractionBlocked ? Target.Prompt : FText::GetEmpty();
+		Data.InteractionBlockedReason = Data.bInteractionBlocked ? Data.InteractionPrompt : FText::GetEmpty();
 	}
 
 	if (UOneBrahamInteractComponent* Interaction = CachedInteraction.Get())

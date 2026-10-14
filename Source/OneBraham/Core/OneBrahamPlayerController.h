@@ -389,6 +389,33 @@ protected:
 	/** Binds every action in InputConfig to the handlers above. */
 	void BindInputActions();
 
+	/**
+	 * Installs the mapping context that carries the keys, replacing the previous
+	 * one. Local controllers only. Called at BeginPlay and again whenever the
+	 * settings change, so a rebind is live without a level load.
+	 */
+	void RefreshBindingsContext();
+
+public:
+	/**
+	 * The prompt with {Interact} replaced by the key that interacts on the device
+	 * the player last looked with: "Hold F - override" on a keyboard, "Hold
+	 * Gamepad Face Button Top" on a pad, and whatever they rebound it to. Prompts
+	 * used to say "Hold E", which was the lean key.
+	 */
+	FText ResolvePromptKeys(const FText& Prompt) const;
+
+protected:
+
+	/**
+	 * Builds that context from the [OneBraham.Input] section: the shipped defaults
+	 * in DefaultInput.ini, with the player's GameUserSettings.ini taking an action's
+	 * place device by device. The IMC_ assets the pipeline generates carry no keys
+	 * by design (keys are data, rebindable; shape is design), so without this
+	 * context no key in the game would do anything.
+	 */
+	UInputMappingContext* BuildBindingsContext();
+
 	UFUNCTION()
 	void OnRep_Spectating();
 
@@ -417,6 +444,20 @@ protected:
 	int32 ViolationScore = 0;
 
 	float InteractionTraceAccumulator = 0.f;
+
+	/** The context RefreshBindingsContext last installed; transient, rebuilt on rebind. */
+	UPROPERTY(Transient)
+	TObjectPtr<UInputMappingContext> BindingsMappingContext;
+
+	/**
+	 * GFrameCounter of the last interaction begin. Tap and hold share a key by
+	 * design, so one press fires both actions; the second begin in the same frame
+	 * is dropped, or a door would open and close again on a single press.
+	 */
+	uint64 LastInteractionStartFrame = 0;
+
+	/** Which device's key the prompts name: whichever the player last looked with. */
+	bool bPromptsShowGamepad = false;
 	static constexpr float InteractionTraceInterval = 0.1f;
 
 	/** Whether the pause menu is currently up (blocks gameplay input). */
