@@ -206,6 +206,22 @@ def build_archetype_struct(report, registry, entry):
             except Exception:  # noqa: BLE001
                 pass
 
+    # The animation class: the authored ABP (parented on UOneBrahamAnimInstance
+    # by build_characters), or the C++ instance itself until the ABP exists, so
+    # the body's locomotion, aim and life-state values are computed either way.
+    anim_class = None
+    abp = unreal.EditorAssetLibrary.load_asset(C.CHARACTERS + "/ABP_OneBrahamCharacter")
+    if abp is not None:
+        anim_class = unreal.BlueprintEditorLibrary.generated_class(abp)
+    if anim_class is None:
+        anim_class = getattr(unreal, "OneBrahamAnimInstance", None)
+        anim_class = anim_class.static_class() if anim_class is not None else None
+    if anim_class is not None:
+        try:
+            archetype.set_editor_property("anim_instance_class", anim_class)
+        except Exception as exc:  # noqa: BLE001
+            report.failed(entry.get("id", "?"), u"anim instance class: {0}".format(exc))
+
     return archetype
 
 

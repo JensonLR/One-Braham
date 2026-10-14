@@ -319,9 +319,24 @@ def build_animation_blueprint(report):
     at once.
     """
     path = u"{0}/ABP_OneBrahamCharacter".format(C.CHARACTERS)
+    parent = getattr(unreal, "OneBrahamAnimInstance", None)
+    if parent is None:
+        report.failed(path, "UOneBrahamAnimInstance is not reflected; compile the module first")
+        return None
+
     if unreal.EditorAssetLibrary.does_asset_exist(path):
+        existing = unreal.EditorAssetLibrary.load_asset(path)
+        # An ABP made before the C++ instance existed has no parent to read its
+        # values from: reparent it, which keeps the graph an animator built.
+        try:
+            if existing is not None and existing.get_editor_property("parent_class") != parent:
+                unreal.BlueprintEditorLibrary.reparent_blueprint(existing, parent)
+                unreal.BlueprintEditorLibrary.compile_blueprint(existing)
+                unreal.EditorAssetLibrary.save_loaded_asset(existing)
+        except Exception as exc:  # noqa: BLE001
+            report.failed(path, u"could not reparent onto UOneBrahamAnimInstance: {0}".format(exc))
         report.updated_asset(path)
-        return unreal.EditorAssetLibrary.load_asset(path)
+        return existing
 
     skeleton = unreal.EditorAssetLibrary.load_asset(
         C.CHARACTERS + "/Meshes/SK_OB_Body_0_Skeleton")
@@ -335,6 +350,7 @@ def build_animation_blueprint(report):
 
     factory = unreal.AnimBlueprintFactory()
     factory.set_editor_property("TargetSkeleton", skeleton)
+    factory.set_editor_property("ParentClass", parent)
     factory.set_editor_property("PreviewSkeletalMesh",
                                 unreal.EditorAssetLibrary.load_asset(C.CHARACTERS + "/Meshes/SK_OB_Body_0"))
 
@@ -345,15 +361,10 @@ def build_animation_blueprint(report):
         report.failed(path, "could not create the animation blueprint")
         return None
 
-    # The personality parameters the data asset drives. Declared here so the anim
-    # graph can be built against names that are already guaranteed to exist.
-    for param_name, default in (("WalkRateScale", 1.0), ("ArmSwingScale", 1.0),
-                                ("WeaponHandlingScale", 1.0), ("IdleLeanScale", 0.5),
-                                ("SprintHunch", 0.0), ("CrouchComposure", 0.5),
-                                ("ArchetypeIndex", 0.0), ("bIsDowned", 0.0),
-                                ("bIsAiming", 0.0), ("bIsSprinting", 0.0),
-                                ("Speed", 0.0), ("Lean", 0.0)):
-        C.log(u"  anim parameter {0} = {1}".format(param_name, default))
+    # Every value the graph reads (Speed, Direction, GaitPlayRate, AimPitch,
+    # AimYaw, ADSAlpha, Lean, bIsDowned, WeaponPose, the personality...) is a
+    # UPROPERTY on the parent, UOneBrahamAnimInstance, computed in C++ each
+    # frame. This loop used to "declare" them by printing their names.
 
     unreal.EditorAssetLibrary.save_asset(path)
     report.created_asset(path)

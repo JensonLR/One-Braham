@@ -316,6 +316,25 @@ void AOneBrahamWeaponBase::OnEquippedBy(AOneBrahamCharacter* NewOwnerCharacter)
 		}
 	}
 
+	// The draw itself, on whichever mesh this machine shows: the arms for the
+	// player holding it, the body for everyone else. Timed to the weapon's own
+	// DrawTime, so the animation always ends when the weapon is ready to fire.
+	// DrawMontage was authored for every weapon and played by nothing.
+	if (NewOwnerCharacter != nullptr && Definition != nullptr && !Definition->DrawMontage.IsNull())
+	{
+		USkeletalMeshComponent* AnimMesh = NewOwnerCharacter->IsLocallyControlled()
+			? NewOwnerCharacter->GetFirstPersonMesh()
+			: NewOwnerCharacter->GetThirdPersonMesh();
+		UAnimInstance* AnimInstance = AnimMesh != nullptr ? AnimMesh->GetAnimInstance() : nullptr;
+		UAnimMontage* Montage = AnimInstance != nullptr ? Definition->DrawMontage.LoadSynchronous() : nullptr;
+		if (Montage != nullptr)
+		{
+			const float Length = Montage->GetPlayLength();
+			const float Rate = Definition->DrawTime > 0.05f && Length > 0.f ? Length / Definition->DrawTime : 1.f;
+			AnimInstance->Montage_Play(Montage, Rate);
+		}
+	}
+
 	// Draw sound: the authored one, else the bank's sling-and-holster foley.
 	if (Definition != nullptr && !Definition->DrawSound.IsNull())
 	{

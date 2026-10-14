@@ -687,6 +687,15 @@ void AOneBrahamCharacter::ApplyArchetype(FGameplayTag ArchetypeTag)
 		GetMesh()->SetAnimInstanceClass(Definition->AnimInstanceClass);
 	}
 
+	// Height: a cosmetic uniform scale on the body about its feet, from the
+	// archetype's offset on a 180 cm reference. The capsule does not change, so
+	// nobody is easier or harder to hit for being tall. Read by nothing until now.
+	if (GetMesh() != nullptr)
+	{
+		const float HeightScale = (180.f + FMath::Clamp(Definition->HeightOffsetCm, -8.f, 8.f)) / 180.f;
+		GetMesh()->SetRelativeScale3D(FVector(HeightScale));
+	}
+
 	if (!Definition->FirstPersonMesh.IsNull() && FirstPersonMesh != nullptr)
 	{
 		if (USkeletalMesh* ArmsMesh = Definition->FirstPersonMesh.LoadSynchronous())
