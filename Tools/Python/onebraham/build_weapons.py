@@ -34,7 +34,7 @@ EVERY WEAPON IS A REAL DECISION
 
 WHAT IT CREATES
     /Game/OneBraham/Data/Weapons/DA_Weapon_<Name>     UOneBrahamWeaponDefinition
-    /Game/OneBraham/Weapons/BP_OB_Weapon_<Name>       AOneBrahamWeaponBase subclass
+    /Game/OneBraham/Weapons/BP_OB_Weapon_<Name>       AOneBrahamPickupBase subclass
     /Game/OneBraham/Data/DA_WeaponRegistry            UOneBrahamWeaponRegistry
 
 USAGE
@@ -271,13 +271,19 @@ def _text(value):
 
 
 def build_weapon_blueprints(report):
-    """One Blueprint per weapon, subclassing AOneBrahamWeaponBase.
+    """One Blueprint per weapon, subclassing AOneBrahamPickupBase.
+
+    A pickup, not a bare AOneBrahamWeaponBase: the same actor is held, dropped on
+    a swap, and left at a body on death, and only a pickup can lie on the floor.
+    With the bare weapon as the parent every death drop was given a thirty
+    second lifespan instead, so nobody ever looted a body. A Blueprint made by
+    an earlier run with the old parent is reparented in place.
 
     The Blueprint is where the meshes, sockets and animations get attached; the
     data asset is where the behaviour gets tuned. Keeping them apart is what lets
     artists work on a weapon without touching its ballistics.
     """
-    parent = getattr(unreal, "OneBrahamWeaponBase", None)
+    parent = getattr(unreal, "OneBrahamPickupBase", None)
     blueprints = {}
 
     for weapon in WEAPONS:
@@ -285,7 +291,20 @@ def build_weapon_blueprints(report):
         path = u"{0}/{1}".format(BP_WEAPONS_ROOT, name)
 
         if unreal.EditorAssetLibrary.does_asset_exist(path):
-            blueprints[weapon["id"]] = unreal.EditorAssetLibrary.load_asset(path)
+            existing = unreal.EditorAssetLibrary.load_asset(path)
+            if parent is not None and existing is not None:
+                try:
+                    current = existing.get_editor_property("parent_class")
+                except Exception:  # noqa: BLE001
+                    current = None
+                if current != parent:
+                    if unreal.BlueprintEditorLibrary.reparent_blueprint(existing, parent):
+                        unreal.BlueprintEditorLibrary.compile_blueprint(existing)
+                        unreal.EditorAssetLibrary.save_loaded_asset(existing)
+                    else:
+                        report.failed(name, "could not reparent to AOneBrahamPickupBase; delete the "
+                                            "Blueprint and re-run this script")
+            blueprints[weapon["id"]] = existing
             report.updated_asset(path)
             continue
 
@@ -293,7 +312,7 @@ def build_weapon_blueprints(report):
         if parent is not None:
             factory.set_editor_property("parent_class", parent)
         else:
-            report.failed(name, "AOneBrahamWeaponBase is not reflected yet - compile the "
+            report.failed(name, "AOneBrahamPickupBase is not reflected yet - compile the "
                                 "OneBraham module, then re-run this script")
 
         asset = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
@@ -523,15 +542,16 @@ def _apply_definition(report, asset, weapon, blueprints):
     _set(asset, "max_floor", max_floor, report, context)
 
     # --- classes ---------------------------------------------------------
+    # The definition names its own Blueprint. This used to be wrapped in a bare
+    # "except: pass" against a property the definition did not have, so every
+    # weapon silently spawned as the registry default (unset: the C++ base).
     blueprint = blueprints.get(weapon_id)
     if blueprint is not None:
-        try:
-            asset.set_editor_property("weapon_actor_class", blueprint.get_editor_property("generated_class")
-                                      if hasattr(blueprint, "generated_class") else blueprint)
-        except Exception:  # noqa: BLE001
-            # The class reference resolves from the Blueprint's generated class at
-            # runtime; recording it here is a convenience for the editor.
-            pass
+        generated = unreal.BlueprintEditorLibrary.generated_class(blueprint)
+        if generated is not None:
+            _set(asset, "weapon_actor_class", generated, report, context)
+        else:
+            report.failed(context, "BP for {0} has no generated class - compile it".format(weapon_id))
 
 
 def build_registry(report, definitions):

@@ -459,6 +459,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot")
 	int32 MaxFloor = 15;
 
+	// --- Class ------------------------------------------------------------
+	/** This weapon's own Blueprint (BP_OB_Weapon_<Name>, an AOneBrahamPickupBase
+	 *  subclass), carrying its meshes and sockets. Null falls back to the
+	 *  registry's WeaponActorClass, then to AOneBrahamPickupBase. It has to be a
+	 *  pickup: a weapon that is not one cannot lie on the floor, and every death
+	 *  drop used to vanish after thirty seconds for that reason. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Classes")
+	TSoftClassPtr<AOneBrahamWeaponBase> WeaponActorClass;
+
 	// --- Helpers ----------------------------------------------------------
 	/** Seconds between shots, server-enforced. */
 	UFUNCTION(BlueprintPure, Category = "Weapon")

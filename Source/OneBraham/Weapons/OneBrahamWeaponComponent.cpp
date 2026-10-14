@@ -233,9 +233,27 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerGiveWeapon(FName WeaponId
 	UWorld* World = GetWorld();
 	const FTransform SpawnTransform = Character->GetActorTransform();
 
-	TSubclassOf<AOneBrahamWeaponBase> SpawnClass = !WeaponRegistry->WeaponActorClass.IsNull()
-		? WeaponRegistry->WeaponActorClass.LoadSynchronous()
-		: AOneBrahamWeaponBase::StaticClass();
+	// The weapon's own Blueprint, then the registry's default, then the C++
+	// pickup. Whatever is chosen must be a pickup, so that it can be dropped at
+	// a body or on a swap: a plain AOneBrahamWeaponBase cannot lie on the floor.
+	TSubclassOf<AOneBrahamWeaponBase> SpawnClass = nullptr;
+	if (!Definition->WeaponActorClass.IsNull())
+	{
+		SpawnClass = Definition->WeaponActorClass.LoadSynchronous();
+	}
+	if (SpawnClass == nullptr && !WeaponRegistry->WeaponActorClass.IsNull())
+	{
+		SpawnClass = WeaponRegistry->WeaponActorClass.LoadSynchronous();
+	}
+	if (SpawnClass == nullptr || !SpawnClass->IsChildOf(AOneBrahamPickupBase::StaticClass()))
+	{
+		if (SpawnClass != nullptr)
+		{
+			OB_WARN("Weapon '%s' spawns as %s, which is not an AOneBrahamPickupBase; using the C++ pickup so it "
+				"can be dropped. Re-run build_weapons to reparent the Blueprint.", *WeaponId.ToString(), *SpawnClass->GetName());
+		}
+		SpawnClass = AOneBrahamPickupBase::StaticClass();
+	}
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.Owner = Character;
