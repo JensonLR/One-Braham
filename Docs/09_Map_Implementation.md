@@ -80,7 +80,10 @@ the extraction component's replicated state and time remaining, so it is
 exactly as far out as the HUD timer says. During the approach it comes in over
 the City and settles into a hover 18 m above the pad. While a squad holds, its
 searchlight stays on the pad and the winch line is down. When the match ends
-either way, it climbs out the way it came.
+either way, it climbs out the way it came. It carries aviation lighting, which is
+how a squad first picks it out in the rain: steady red to port, steady green to
+starboard, a red anti-collision beacon flashing once a second on the belly, and
+a white tail strobe flashing half a second out of phase with it.
 
 ### Routes up
 

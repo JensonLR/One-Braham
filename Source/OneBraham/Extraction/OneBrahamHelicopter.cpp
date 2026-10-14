@@ -2,6 +2,7 @@
 
 #include "Extraction/OneBrahamHelicopter.h"
 
+#include "Components/PointLightComponent.h"
 #include "Components/SpotLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Core/OneBrahamGameState.h"
@@ -69,6 +70,23 @@ AOneBrahamHelicopter::AOneBrahamHelicopter()
 	Searchlight->SetLightColor(FLinearColor(0.92f, 0.95f, 1.f));
 	Searchlight->SetCastShadows(true);
 	Searchlight->SetVisibility(false);
+
+	const auto MakeNavLight = [this](const TCHAR* Name, const FVector& Offset, const FLinearColor& Colour, float Intensity)
+	{
+		UPointLightComponent* Light = CreateDefaultSubobject<UPointLightComponent>(Name);
+		Light->SetupAttachment(Root);
+		Light->SetRelativeLocation(Offset);
+		Light->SetLightColor(Colour);
+		Light->SetIntensity(Intensity);
+		Light->SetAttenuationRadius(900.f);
+		Light->SetCastShadows(false);
+		Light->SetVisibility(false);
+		return Light;
+	};
+	PortLight = MakeNavLight(TEXT("PortLight"), FVector(0.f, -150.f, 40.f), FLinearColor(1.f, 0.05f, 0.03f), 9000.f);
+	StarboardLight = MakeNavLight(TEXT("StarboardLight"), FVector(0.f, 150.f, 40.f), FLinearColor(0.05f, 1.f, 0.2f), 9000.f);
+	AntiCollisionBeacon = MakeNavLight(TEXT("AntiCollisionBeacon"), FVector(0.f, 0.f, -150.f), FLinearColor(1.f, 0.08f, 0.02f), 30000.f);
+	TailStrobe = MakeNavLight(TEXT("TailStrobe"), FVector(-1300.f, 0.f, 90.f), FLinearColor(1.f, 1.f, 1.f), 40000.f);
 }
 
 void AOneBrahamHelicopter::BeginPlay()
@@ -146,6 +164,14 @@ void AOneBrahamHelicopter::Tick(float DeltaSeconds)
 
 	SetActorHiddenInGame(!bAirborne);
 	Searchlight->SetVisibility(bAirborne && State != EOneBrahamExtractionState::Complete);
+
+	// Steady nav lights while airborne; the beacon and strobe flash out of
+	// phase, a short flash each second, the way a real aircraft's do.
+	const double Cycle = FMath::Fmod(Now * BeaconHz, 1.0);
+	PortLight->SetVisibility(bAirborne);
+	StarboardLight->SetVisibility(bAirborne);
+	AntiCollisionBeacon->SetVisibility(bAirborne && Cycle < 0.12);
+	TailStrobe->SetVisibility(bAirborne && Cycle >= 0.5 && Cycle < 0.56);
 	WinchLine->SetVisibility(State == EOneBrahamExtractionState::Holding);
 
 	if (!bAirborne)

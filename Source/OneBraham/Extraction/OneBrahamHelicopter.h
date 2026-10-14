@@ -86,6 +86,24 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "One Braham|Components")
 	TObjectPtr<USpotLightComponent> Searchlight = nullptr;
 
+	/** Aviation lighting: steady red to port, steady green to starboard, a
+	 *  flashing red anti-collision beacon on the belly and a white tail strobe.
+	 *  The first thing a squad on the Skydeck sees of its ride, through rain. */
+	UPROPERTY(VisibleAnywhere, Category = "One Braham|Components")
+	TObjectPtr<class UPointLightComponent> PortLight = nullptr;
+
+	UPROPERTY(VisibleAnywhere, Category = "One Braham|Components")
+	TObjectPtr<class UPointLightComponent> StarboardLight = nullptr;
+
+	UPROPERTY(VisibleAnywhere, Category = "One Braham|Components")
+	TObjectPtr<class UPointLightComponent> AntiCollisionBeacon = nullptr;
+
+	UPROPERTY(VisibleAnywhere, Category = "One Braham|Components")
+	TObjectPtr<class UPointLightComponent> TailStrobe = nullptr;
+
+	/** Flashes per second for the beacon and the strobe (aviation rules: 40-100 a minute). */
+	static constexpr float BeaconHz = 1.f;
+
 	/** The state last seen, and the local time it was entered, for the departure clock. */
 	EOneBrahamExtractionState LastState = EOneBrahamExtractionState::Inactive;
 	double StateEnteredTime = 0.0;
