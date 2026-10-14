@@ -15,7 +15,7 @@ script; each one stops on the first failure and logs to `Saved/Logs/Scripts/`.
 | | |
 | --- | --- |
 | Windows 10/11 x64 | the client is Windows-first; the server also builds for Linux. A Mac can develop the game but not package it (see Working on a Mac) |
-| Unreal Engine 5.5 or newer | Epic Games Launcher, with the "Linux" target platform if you want a Linux server |
+| Unreal Engine 5.5 or newer | the Epic Games Launcher install builds the editor, the client and the content. **The dedicated server (step 7) needs a source build** of the engine from Epic's GitHub ([Epic: dedicated servers](https://dev.epicgames.com/documentation/en-us/unreal-engine/setting-up-dedicated-servers-in-unreal-engine)), plus the Linux cross-compile toolchain for a Linux server |
 | Visual Studio 2022 | the "Game development with C++" workload, and the .NET desktop components UBT uses |
 | Python 3.9+ | on `PATH`, for the engine-free checks |
 | Steam client | running, for the overlay and invites in development |

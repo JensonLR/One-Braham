@@ -16,13 +16,10 @@ public class OneBrahamEditorTarget : TargetRules
 		IncludeOrderVersion = EngineIncludeOrderVersion.Latest;
 		ExtraModuleNames.AddRange(new string[] { "OneBraham" });
 
-		// Editor builds keep full logging + checks so QA can read logs directly.
-		bUseLoggingInShipping = false;
-		bUseChecksInShipping = false;
-
-		if (Target.Platform == UnrealTargetPlatform.Win64)
-		{
-			WindowsPlatform.bStrictConformanceMode = false;
-		}
+		// Nothing here may change the shared build environment (compiler flags,
+		// global definitions, logging or checks in Shipping): this target builds
+		// against the Launcher engine's prebuilt modules, and UBT refuses a target
+		// that would need them rebuilt. The project's C++ is standards-conforming,
+		// so the engine's /permissive- default stands.
 	}
 }

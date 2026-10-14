@@ -95,11 +95,5 @@ public class OneBraham : ModuleRules
 		PublicDefinitions.Add("ONE_BRAHAM_FLOORS=15");
 		PublicDefinitions.Add("ONE_BRAHAM_MAX_VOICE_FRAME_BYTES=1024");
 		PublicDefinitions.Add("ONE_BRAHAM_VOICE_SAMPLE_RATE=16000");
-
-		// Voice capture requires an input device; dedicated servers get a stub.
-		if (Target.Type == TargetType.Server)
-		{
-			PublicDefinitions.Add("ONE_BRAHAM_HEADLESS_VOICE=1");
-		}
 	}
 }

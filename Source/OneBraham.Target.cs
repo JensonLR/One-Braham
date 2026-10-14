@@ -5,8 +5,7 @@ using System.Collections.Generic;
 
 /// <summary>
 /// Standalone game target (client). Shipped to Steam as "OneBraham.exe".
-/// Ships with the shooter handshake so clients cannot be spoofed by plain
-/// editor builds, and includes the cooked asset registry for streaming levels.
+/// Builds against the Launcher engine; see README_BUILD.md.
 /// </summary>
 public class OneBrahamTarget : TargetRules
 {
@@ -18,18 +17,13 @@ public class OneBrahamTarget : TargetRules
 		ExtraModuleNames.AddRange(new string[] { "OneBraham" });
 
 		// --- ONE BRAHAM shipping configuration -------------------------------
-		// Server-authoritative shooter: we never trust the client, so we keep the
-		// shooter handshake on for all non-shipping builds and the packaged client.
-		bUseLoggingInShipping = false;
-		bUseChecksInShipping = false;
+		// Nothing here may change the shared build environment (compiler flags,
+		// global definitions, logging or checks in Shipping): the client builds
+		// against the Launcher engine's prebuilt modules, and UBT refuses a target
+		// that would need them rebuilt. The project's C++ is standards-conforming,
+		// so the engine's /permissive- default stands.
 
-		// Steam build: build with -cryptokeys & pak signing in PackageClient.ps1.
-		bUsesSteam = false; // Steamworks is loaded through OnlineSubsystemSteam plugin.
-
-		if (Target.Platform == UnrealTargetPlatform.Win64)
-		{
-			// Windows client requirements: D3D12 SM6 + Lumen/Nanite.
-			WindowsPlatform.bStrictConformanceMode = false;
-		}
+		// Steamworks comes in through the OnlineSubsystemSteam plugin, so the
+		// target's own bUsesSteam stays at its default (off).
 	}
 }

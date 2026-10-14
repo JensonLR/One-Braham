@@ -970,6 +970,40 @@ def check_project_config_keys(v):
 
 
 
+def check_targets(v, _config_only):
+    """No target changes the shared build environment unless it owns one.
+
+    A Game or Editor target built against the Launcher engine shares the
+    engine's prebuilt modules, and UBT stops the build outright when a target
+    changes how they would be compiled: global definitions, Windows compiler
+    switches, logging or checks in Shipping. All three of this project's
+    targets did, and none of it was used. A target may change them only after
+    declaring BuildEnvironment = TargetBuildEnvironment.Unique, which needs a
+    source build of the engine (the dedicated server needs one anyway).
+    """
+    forbidden = ("GlobalDefinitions", "bStrictConformanceMode", "bUseLoggingInShipping",
+                 "bUseChecksInShipping", "bOverrideBuildEnvironment", "AdditionalCompilerArguments",
+                 "bUseUnityBuild", "bForceEnableExceptions", "bForceEnableRTTI")
+    source = os.path.join(REPO_ROOT, "Source")
+    problems, targets = [], 0
+    for name in sorted(os.listdir(source)):
+        if not name.endswith(".Target.cs"):
+            continue
+        targets += 1
+        text = re.sub(r"//[^\n]*", "", read_text(os.path.join(source, name)))
+        if "TargetBuildEnvironment.Unique" in text:
+            continue
+        for setting in forbidden:
+            if re.search(r"\b" + setting + r"\b", text):
+                problems.append(u"{0} sets {1} on the shared build environment".format(name, setting))
+    if problems:
+        v.fail("targets", u"; ".join(problems),
+               u"UBT refuses this against the Launcher engine; remove it, or give the target "
+               u"BuildEnvironment = TargetBuildEnvironment.Unique (source engine only)")
+    else:
+        v.pass_("targets", u"{0} targets, none changes the shared build environment".format(targets))
+
+
 def check_config(v, _config_only):
     game_ini = read_text(os.path.join(CONFIG_DIR, "DefaultGame.ini"))
     engine_ini = read_text(os.path.join(CONFIG_DIR, "DefaultEngine.ini"))
@@ -1990,6 +2024,7 @@ def build_all(config_only=False):
         ("cosmetics", check_cosmetics),
         ("performance", check_performance),
         ("config", check_config),
+        ("targets", check_targets),
         ("cpp symbols", check_cpp_symbols),
         ("cpp includes", check_cpp_includes),
         ("log categories", check_log_categories),
