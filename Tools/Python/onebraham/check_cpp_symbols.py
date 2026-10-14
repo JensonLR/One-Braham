@@ -59,6 +59,14 @@ WHY THIS EXISTS
          parameter to itself and the member never changed, and the HUD's
          `OwningController` local hid the member it was named after.
 
+      7. Audio played from inside a walk over the player controllers. Six
+         actors played their sounds by iterating every controller and playing
+         through each one's audio manager. On a listen host that is the sound
+         once per connected player, on the host's own speakers; on a client,
+         when the code was server-only, it was nothing. A sound plays through
+         UOneBrahamAudioManagerComponent::GetLocal(), from code that runs on
+         every machine (a multicast, an OnRep, a local tick).
+
 HOW IT PARSES
     Not with a regex over the whole file, which is what the first version of this
     tool did and why it reported 177 "missing" functions of which 170 were macro
@@ -694,6 +702,25 @@ def run_hygiene():
                     u"under UE5's shadow-variable level, and the member is not the one "
                     u"being written".format(class_name, match.group(2), kind, name)))
 
+    # --- audio played once per player controller --------------------------
+    for rel, path in files:
+        if not rel.endswith(".cpp"):
+            continue
+
+        text = strip_comments_and_strings(io.open(path, encoding="utf-8", errors="ignore").read())
+
+        for match in re.finditer(r'\bfor\s*\([^;{]*GetPlayerControllerIterator\s*\(\s*\)[^{]*\{', text):
+            checks += 1
+            body = _braced_body(text, match.end() - 1)
+
+            if re.search(r'GetAudioManager\s*\(|GetAudioFor\s*\(|PlaySound(?:AtLocation|2D|Attached)\s*\(', body):
+                problems.append((
+                    rel, text[:match.start()].count("\n") + 1,
+                    u"plays audio inside a loop over the player controllers: once per player "
+                    u"on a listen host, and never on a client if this runs on the server - "
+                    u"play through UOneBrahamAudioManagerComponent::GetLocal() from code that "
+                    u"runs on every machine"))
+
     # --- the same function defined twice ---------------------------------
     seen = {}
 
@@ -774,7 +801,8 @@ def build_all():
     else:
         C.log(u"  no scoped enum is compared with an operator it does not have, no "
               u"member shadows an engine property, no engine-private member is read, no "
-              u"parameter or local hides a member, no function is defined twice. OK")
+              u"parameter or local hides a member, no sound is played once per player, "
+              u"no function is defined twice. OK")
 
     return _SymbolReport(checked, missing, hygiene, hygiene_checks)
 
@@ -796,7 +824,7 @@ def main():
 
     if not hygiene and not missing:
         C.log(u"  hygiene: scoped enums, shadowed engine properties, engine-private "
-              u"members, shadowed members, duplicate definitions. OK")
+              u"members, shadowed members, per-controller audio, duplicate definitions. OK")
         return 0
 
     for rel, line, message in hygiene:

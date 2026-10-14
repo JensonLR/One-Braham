@@ -219,6 +219,17 @@ architecture between them. Firing a rifle into a stairwell should sound like
 firing a rifle into a stairwell; the two-sample approach is what does that
 without fifty wave assets.
 
+**Whose mix plays a sound - every sound.** One rule for the whole game: a sound
+plays through `UOneBrahamAudioManagerComponent::GetLocal()`, the listener's own
+manager, from code that runs on every machine - a multicast, an OnRep, or a local
+tick. A server-side event that makes a noise (a terminal accepting a card, a door
+refusing one, a shutter's warning) reaches the clients through one unreliable
+multicast on its actor (`MulticastPlayTerminalEffects`, `MulticastPlayZoneSound`,
+`MulticastPlayWarning`). Six actors used to walk the player controllers and play
+through each one's manager, which is the sound once per player on a listen host
+and silence on every client; `check_cpp_symbols.py` now fails the build on that
+shape.
+
 **Whose mix plays a weapon.** Every weapon cue is played by the *listener's*
 audio manager (`UOneBrahamAudioManagerComponent::GetLocal`), never the shooter's:
 the cues arrive by multicast on every machine, and on every machine but the

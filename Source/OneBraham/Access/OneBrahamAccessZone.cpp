@@ -329,23 +329,12 @@ void AOneBrahamAccessZone::PlayDoorEffects(EOneBrahamUnlockMethod Method, bool b
 		ReaderLight->SetLightColor(bUnlocked ? OBReaderOpen : OBReaderLocked);
 	}
 
-	UWorld* World = GetWorld();
-	if (World == nullptr)
-	{
-		return;
-	}
-
 	const FVector Location = GetBarrierCentre();
 
-	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	// This runs on every machine, so the listener's manager is the only one to
+	// play through: walking the controllers played it once per player on a host.
+	if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this))
 	{
-		AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(It->Get());
-		UOneBrahamAudioManagerComponent* Audio = GetAudioFor(PC);
-		if (Audio == nullptr)
-		{
-			continue;
-		}
-
 		if (bUnlocked)
 		{
 			switch (Method)
@@ -379,9 +368,12 @@ void AOneBrahamAccessZone::PlayDoorEffects(EOneBrahamUnlockMethod Method, bool b
 		FRotator::ZeroRotator, FVector(0.8f));
 }
 
-UOneBrahamAudioManagerComponent* AOneBrahamAccessZone::GetAudioFor(const AOneBrahamPlayerController* PC)
+void AOneBrahamAccessZone::MulticastPlayZoneSound_Implementation(FName SoundId, float Volume)
 {
-	return PC != nullptr ? PC->GetAudioManager() : nullptr;
+	if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this))
+	{
+		Audio->PlaySoundAtLocation(SoundId, GetBarrierCentre(), Volume, 1.f, this);
+	}
 }
 
 FVector AOneBrahamAccessZone::GetBarrierCentre() const
@@ -605,11 +597,8 @@ bool AOneBrahamAccessZone::OnInteractionStart_Implementation(AOneBrahamPlayerCon
 			*UEnum::GetValueAsString(Zone->RequiredTier),
 			*Zone->GetRefusalText(Interactor).ToString());
 
-		if (UOneBrahamAudioManagerComponent* Audio = GetAudioFor(Interactor))
-		{
-			Audio->PlaySoundAtLocation(FName(TEXT("SFX_Door_Locked")), GetBarrierCentre(), 0.8f, 1.f, this);
-			Audio->PlaySoundAtLocation(FName(TEXT("SFX_Terminal_Deny")), GetBarrierCentre(), 0.7f, 1.f, this);
-		}
+		MulticastPlayZoneSound(FName(TEXT("SFX_Door_Locked")), 0.8f);
+		MulticastPlayZoneSound(FName(TEXT("SFX_Terminal_Deny")), 0.7f);
 
 		return false;
 	}
@@ -620,11 +609,7 @@ bool AOneBrahamAccessZone::OnInteractionStart_Implementation(AOneBrahamPlayerCon
 	HoldInteractor = Interactor;
 	HoldLastSeconds = 0.f;
 
-	UOneBrahamAudioManagerComponent* Audio = GetAudioFor(Interactor);
-	if (Audio != nullptr)
-	{
-		Audio->PlaySoundAtLocation(FName(TEXT("SFX_Terminal_Hum")), GetBarrierCentre(), 0.7f, 1.f, this);
-	}
+	MulticastPlayZoneSound(FName(TEXT("SFX_Terminal_Hum")), 0.7f);
 
 	return true;
 }

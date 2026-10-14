@@ -346,21 +346,12 @@ void AOneBrahamBreachableWall::MulticastPlayBreachEffects_Implementation(const F
 		return;
 	}
 
-	// Audio through the local player's manager so the mix, the duck and the
-	// occlusion all apply exactly as they do for a door being breached.
-	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	// Audio through the listener's manager so the mix, the duck and the
+	// occlusion all apply exactly as they do for a door being breached. The
+	// charge that did this played its own blast; the wall adds its fall.
+	if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(World))
 	{
-		AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(It->Get());
-		if (PC == nullptr || !PC->IsLocalController())
-		{
-			continue;
-		}
-
-		// The charge that did this played its own blast; the wall adds its fall.
-		if (UOneBrahamAudioManagerComponent* Audio = PC->GetAudioManager())
-		{
-			Audio->PlaySoundAtLocation(FName(TEXT("SFX_Wall_Collapse")), Origin, 1.1f, 0.96f, this);
-		}
+		Audio->PlaySoundAtLocation(FName(TEXT("SFX_Wall_Collapse")), Origin, 1.1f, 0.96f, this);
 	}
 }
 

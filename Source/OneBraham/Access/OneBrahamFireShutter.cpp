@@ -313,7 +313,7 @@ void AOneBrahamFireShutter::ServerSetClosed(bool bNewClosed, float DurationSecon
 
 		if (bWarnBeforeClosing)
 		{
-			PlayWarning();
+			MulticastPlayWarning();
 		}
 	}
 
@@ -468,42 +468,28 @@ void AOneBrahamFireShutter::PlayWarning()
 		WarningLight->SetIntensity(2600.f);
 	}
 
-	UWorld* World = GetWorld();
-	if (World == nullptr)
+	// The chime is a building system, not a prop: every machine plays it through
+	// its own listener's mix, like a building announcement.
+	if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this))
 	{
-		return;
+		Audio->PlaySoundAtLocation(FName(TEXT("UI_Countdown")), GetMidOpeningLocation(), 0.85f, 1.0f, this);
 	}
+}
 
-	// The chime is a building system, not a prop: it is played on every machine
-	// through each player's own audio director, so it is mixed like a building
-	// announcement rather than like a prop three floors away.
-	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-	{
-		if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(It->Get()))
-		{
-			if (UOneBrahamAudioManagerComponent* Audio = PC->GetAudioManager())
-			{
-				Audio->PlaySoundAtLocation(FName(TEXT("UI_Countdown")), GetMidOpeningLocation(), 0.85f, 1.0f, this);
-			}
-		}
-	}
+void AOneBrahamFireShutter::MulticastPlayWarning_Implementation()
+{
+	PlayWarning();
 }
 
 void AOneBrahamFireShutter::PlayMovementEffects(bool bNowClosed)
 {
 	const FVector Location = GetMidOpeningLocation();
 
-	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this))
 	{
-		if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(It->Get()))
-		{
-			if (UOneBrahamAudioManagerComponent* Audio = PC->GetAudioManager())
-			{
-				Audio->PlaySoundAtLocation(
-					bNowClosed ? FName(TEXT("SFX_Shutter_Drop")) : FName(TEXT("SFX_Lift_Doors")),
-					Location, bNowClosed ? 1.15f : 0.7f, 1.f, this);
-			}
-		}
+		Audio->PlaySoundAtLocation(
+			bNowClosed ? FName(TEXT("SFX_Shutter_Drop")) : FName(TEXT("SFX_Lift_Doors")),
+			Location, bNowClosed ? 1.15f : 0.7f, 1.f, this);
 	}
 
 	if (bNowClosed)

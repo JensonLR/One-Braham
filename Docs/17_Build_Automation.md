@@ -28,7 +28,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `build_ui.py` | 11 widget blueprints, the HUD string table, the font slot, the palette check | yes | yes |
 | `build_vfx.py` | 17 Niagara systems, 3 camera shakes, 6 decal materials, the authoring sheet | yes | yes |
 | `import_font.py` | font faces from `Content/UI/Fonts` | yes | yes |
-| `check_cpp_symbols.py` | reads `Source/OneBraham` and reports every member function declared with no definition; also a scoped enum compared with `>=`/`<`/`|`, a member whose name is also an engine property of an ancestor class, a read of an engine member UE5 made private (`APlayerState::PlayerId`, `AActor::bReplicates`...), a parameter or local named like a member of its own class, and the same function defined twice | **no** | yes |
+| `check_cpp_symbols.py` | reads `Source/OneBraham` and reports every member function declared with no definition; also a scoped enum compared with `>=`/`<`/`|`, a member whose name is also an engine property of an ancestor class, a read of an engine member UE5 made private (`APlayerState::PlayerId`, `AActor::bReplicates`...), a parameter or local named like a member of its own class, audio played inside a loop over the player controllers, and the same function defined twice | **no** | yes |
 | `check_uht_contracts.py` | UE reflection contracts: RPC bodies, RepNotify callbacks and their previous-value parameter type, replicated properties named in a `DOREPLIFETIME`, widgets that animate in a `NativeTick` the engine never calls, duplicate type names, `TSoftObjectPtr`s that name a type existing nowhere in the module, and settings fields that no code reads | **no** | yes |
 | `check_soft_paths.py` | every `/Game/` path the C++ loads by name, against the directories and name prefixes the pipeline writes | **no** | yes |
 | `check_calls.py` | call sites whose argument count cannot match the project's own declaration (defaults honoured, qualified calls skipped) | **no** | yes |
@@ -87,10 +87,10 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
 | input_ini | OK | 0.0 | wrote 42 actions (41 with a default key) |
-| cpp_symbols | OK | 0.7 | 603 declarations, all defined; compile hygiene clean |
-| uht_contracts | OK | 1.5 | 822 UE reflection contracts, all satisfied |
+| cpp_symbols | OK | 0.7 | 599 declarations, all defined; compile hygiene clean |
+| uht_contracts | OK | 1.5 | 826 UE reflection contracts, all satisfied |
 | soft_paths | OK | 0.0 | 38 soft paths, all conventional |
-| calls | OK | 0.3 | 922 call sites, all arities plausible |
+| calls | OK | 0.3 | 927 call sites, all arities plausible |
 | tags | OK | 0.4 | 6 resolvable tag requests and 147 documented tags, all declared |
 | layout | OK | 0.0 | 16 floors, map and layout agree |
 | voice_lines | OK | 0.0 | 42 line references, all declared and documented |
