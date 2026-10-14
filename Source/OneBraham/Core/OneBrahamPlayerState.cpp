@@ -56,7 +56,7 @@ void AOneBrahamPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	DOREPLIFETIME(AOneBrahamPlayerState, bSelfMuted);
 	DOREPLIFETIME(AOneBrahamPlayerState, bIsTransmitting);
 	DOREPLIFETIME_CONDITION(AOneBrahamPlayerState, MutedPlayerIds, COND_OwnerOnly);
-	DOREPLIFETIME(AOneBrahamPlayerState, EquippedCosmetics);
+	DOREPLIFETIME(AOneBrahamPlayerState, ReplicatedCosmetics);
 }
 
 void AOneBrahamPlayerState::CopyProperties(APlayerState* PlayerState)
@@ -88,7 +88,7 @@ void AOneBrahamPlayerState::CopyProperties(APlayerState* PlayerState)
 		OneBrahamState->VoiceChannel = VoiceChannel;
 		OneBrahamState->bSelfMuted = bSelfMuted;
 		OneBrahamState->MutedPlayerIds = MutedPlayerIds;
-		OneBrahamState->EquippedCosmetics = EquippedCosmetics;
+		OneBrahamState->SetEquippedCosmetics(EquippedCosmetics);
 	}
 }
 
@@ -391,8 +391,19 @@ void AOneBrahamPlayerState::ApplyAppearanceLocally()
 	OnRep_Cosmetics();
 }
 
+void AOneBrahamPlayerState::SetEquippedCosmetics(const TMap<FName, FName>& InCosmetics)
+{
+	EquippedCosmetics = InCosmetics;
+	ReplicatedCosmetics = OneBrahamReplication::CosmeticsToArray(InCosmetics);
+	ForceNetUpdate();
+}
+
 void AOneBrahamPlayerState::OnRep_Cosmetics()
 {
+	// Clients rebuild the lookup from the wire; on the server this is a no-op
+	// rebuild of the same values (ApplyAppearanceLocally calls it there).
+	EquippedCosmetics = OneBrahamReplication::CosmeticsToMap(ReplicatedCosmetics);
+
 	if (AOneBrahamCharacter* Character = GetOneBrahamCharacter())
 	{
 		Character->ApplyCosmetics(EquippedCosmetics);

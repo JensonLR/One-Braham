@@ -170,8 +170,15 @@ public:
 	// ======================================================================
 	/** Slot name -> cosmetic id. Sent by the player's own machine and validated in
 	 *  AOneBrahamPlayerController::ServerSetAppearance (Docs/13 section 3). */
-	UPROPERTY(ReplicatedUsing = OnRep_Cosmetics, BlueprintReadOnly, Category = "One Braham|Cosmetics")
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Cosmetics")
 	TMap<FName, FName> EquippedCosmetics;
+
+	/** The outfit on the wire; OnRep_Cosmetics rebuilds EquippedCosmetics from it. */
+	UPROPERTY(ReplicatedUsing = OnRep_Cosmetics)
+	TArray<FOneBrahamCosmeticEntry> ReplicatedCosmetics;
+
+	/** Server: the one way to change the outfit, so the map and the wire agree. */
+	void SetEquippedCosmetics(const TMap<FName, FName>& InCosmetics);
 
 	// ======================================================================
 	//  API

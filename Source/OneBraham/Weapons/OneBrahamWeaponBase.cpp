@@ -93,7 +93,8 @@ void AOneBrahamWeaponBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 
 	DOREPLIFETIME(AOneBrahamWeaponBase, WeaponState);
 	DOREPLIFETIME(AOneBrahamWeaponBase, AmmoInMagazine);
-	DOREPLIFETIME(AOneBrahamWeaponBase, Attachments);
+	DOREPLIFETIME(AOneBrahamWeaponBase, ReplicatedAttachments);
+	DOREPLIFETIME(AOneBrahamWeaponBase, Definition);
 	DOREPLIFETIME(AOneBrahamWeaponBase, SkinId);
 	DOREPLIFETIME(AOneBrahamWeaponBase, bFlashlightEnabled);
 	DOREPLIFETIME(AOneBrahamWeaponBase, bLaserEnabled);
@@ -149,6 +150,25 @@ void AOneBrahamWeaponBase::InitialiseFromDefinition(UOneBrahamWeaponDefinition* 
 	AmmoInMagazine = InDefinition->MagazineSize;
 	WeaponState = bIsGroundPickup ? EOneBrahamWeaponState::Idle : EOneBrahamWeaponState::Ready;
 
+	ApplyDefinitionPresentation();
+
+	OB_WEAPON_LOG("Weapon '%s' initialised (%d rounds, %s).",
+		*InDefinition->WeaponId.ToString(), AmmoInMagazine, bIsGroundPickup ? TEXT("ground") : TEXT("held"));
+}
+
+void AOneBrahamWeaponBase::OnRep_Definition()
+{
+	ApplyDefinitionPresentation();
+}
+
+void AOneBrahamWeaponBase::ApplyDefinitionPresentation()
+{
+	const UOneBrahamWeaponDefinition* InDefinition = Definition;
+	if (InDefinition == nullptr)
+	{
+		return;
+	}
+
 	SpreadStream.Initialize(GetUniqueID());
 
 	// Meshes: the 3P mesh is on the actor root, the 1P mesh is swapped in by the
@@ -186,9 +206,6 @@ void AOneBrahamWeaponBase::InitialiseFromDefinition(UOneBrahamWeaponDefinition* 
 	ResolveFxFallbacks();
 
 	RefreshMaterialParameters();
-
-	OB_WEAPON_LOG("Weapon '%s' initialised (%d rounds, %s).",
-		*InDefinition->WeaponId.ToString(), AmmoInMagazine, bIsGroundPickup ? TEXT("ground") : TEXT("held"));
 }
 
 void AOneBrahamWeaponBase::Tick(float DeltaSeconds)
@@ -712,7 +729,7 @@ int32 AOneBrahamWeaponBase::GetMagazineSize() const
 	{
 		// The delta comes from the attachment table, looked up by the component's
 		// registry, and is cached into the attachment map at attach time.
-		UE_UNUSED(ExtendedMag);
+		(void)ExtendedMag;
 	}
 	return Size;
 }
@@ -907,6 +924,7 @@ bool AOneBrahamWeaponBase::AttachAttachment(FName AttachmentId)
 	{
 		const EOneBrahamAttachmentSlot Slot = Component->GetSlotForAttachment(AttachmentId);
 		Attachments.Add(Slot, AttachmentId);
+		SyncReplicatedAttachments();
 
 		if (Slot == EOneBrahamAttachmentSlot::Muzzle && Component->IsSuppressorAttachment(AttachmentId))
 		{
@@ -935,6 +953,7 @@ bool AOneBrahamWeaponBase::DetachAttachment(EOneBrahamAttachmentSlot Slot)
 	}
 
 	Attachments.Remove(Slot);
+	SyncReplicatedAttachments();
 	RebuildAttachmentMeshes();
 	ForceNetUpdate();
 	return true;
@@ -1479,8 +1498,25 @@ void AOneBrahamWeaponBase::OnRep_Ammo()
 	}
 }
 
+void AOneBrahamWeaponBase::SyncReplicatedAttachments()
+{
+	ReplicatedAttachments.Reset();
+	for (const TPair<EOneBrahamAttachmentSlot, FName>& Pair : Attachments)
+	{
+		FOneBrahamAttachmentEntry& Entry = ReplicatedAttachments.AddDefaulted_GetRef();
+		Entry.Slot = Pair.Key;
+		Entry.AttachmentId = Pair.Value;
+	}
+}
+
 void AOneBrahamWeaponBase::OnRep_Attachments()
 {
+	Attachments.Reset();
+	for (const FOneBrahamAttachmentEntry& Entry : ReplicatedAttachments)
+	{
+		Attachments.Add(Entry.Slot, Entry.AttachmentId);
+	}
+
 	RebuildAttachmentMeshes();
 
 	if (WeaponLight != nullptr)

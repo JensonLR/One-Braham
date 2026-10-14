@@ -64,7 +64,13 @@ public:
 	// ======================================================================
 	//  Setup
 	// ======================================================================
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "One Braham|Weapon")
+	/**
+	 * What this weapon is. Replicated: it was not, so on every remote machine a
+	 * weapon had no definition - no mesh, no muzzle flash, no shell, no tracer,
+	 * no ADS field of view, no magazine size. OnRep_Definition applies the
+	 * presentation half of InitialiseFromDefinition; the server owns the rest.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_Definition, Category = "One Braham|Weapon")
 	TObjectPtr<UOneBrahamWeaponDefinition> Definition;
 
 	/** Initialises this weapon actor from a definition. Safe to call twice. */
@@ -241,8 +247,18 @@ protected:
 	int32 AmmoInMagazine = 0;
 
 	/** Attachment ids by slot, replicated so other clients see the right model. */
-	UPROPERTY(ReplicatedUsing = OnRep_Attachments, BlueprintReadOnly, Category = "One Braham|Weapon")
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Weapon")
 	TMap<EOneBrahamAttachmentSlot, FName> Attachments;
+
+	/** Attachments on the wire; OnRep_Attachments rebuilds the map from it. */
+	UPROPERTY(ReplicatedUsing = OnRep_Attachments)
+	TArray<FOneBrahamAttachmentEntry> ReplicatedAttachments;
+
+	/** Server: copies Attachments to the wire after a change. */
+	void SyncReplicatedAttachments();
+
+	/** Every machine: the meshes, FX and materials a definition implies. */
+	void ApplyDefinitionPresentation();
 
 	/** The cosmetic skin. Replicated with a rep notify so every machine paints
 	 *  the weapon it can see: a material instance is local to the machine that
@@ -308,6 +324,7 @@ protected:
 	UFUNCTION() void OnRep_SkinId();
 	UFUNCTION() void OnRep_Ammo();
 	UFUNCTION() void OnRep_Attachments();
+	UFUNCTION() void OnRep_Definition();
 
 	/** Places attachment meshes on their sockets. */
 	void RebuildAttachmentMeshes();

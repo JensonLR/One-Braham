@@ -13,6 +13,8 @@
 #include "GameplayTagContainer.h"
 #include "OneBrahamTypes.generated.h"
 
+class AOneBrahamWeaponBase;
+
 // ==========================================================================
 //  Trace channels. MUST stay in sync with Config/DefaultEngine.ini
 //  [/Script/Engine.CollisionProfile] DefaultChannelResponses ordering.
@@ -396,6 +398,96 @@ enum class EOneBrahamAttachmentSlot : uint8
 	Magazine = 5,
 	Stock = 6
 };
+
+// ==========================================================================
+//  Replicated map entries
+//
+//  Unreal does not replicate TMap: UnrealHeaderTool rejects a Replicated TMap
+//  property outright, and a TMap inside a replicated struct never reaches a
+//  client. Four maps in this project were declared Replicated, so the module
+//  could not build and, had it built, no client would have had its weapons,
+//  its ammo, its attachments or anyone's outfit. Each owner now keeps its TMap
+//  as a local lookup and replicates one of these arrays; the RepNotify
+//  rebuilds the map on every client.
+// ==========================================================================
+
+/** Cosmetic slot -> option, for the wire. */
+USTRUCT(BlueprintType)
+struct FOneBrahamCosmeticEntry
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Cosmetics")
+	FName Slot = NAME_None;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Cosmetics")
+	FName Option = NAME_None;
+};
+
+/** Attachment slot -> attachment id, for the wire. */
+USTRUCT(BlueprintType)
+struct FOneBrahamAttachmentEntry
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon")
+	EOneBrahamAttachmentSlot Slot = EOneBrahamAttachmentSlot::Optic;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon")
+	FName AttachmentId = NAME_None;
+};
+
+/** Weapon id -> reserve rounds, for the wire. */
+USTRUCT(BlueprintType)
+struct FOneBrahamReserveAmmoEntry
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon")
+	FName WeaponId = NAME_None;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon")
+	int32 Rounds = 0;
+};
+
+/** Inventory slot -> weapon actor, for the wire. */
+USTRUCT(BlueprintType)
+struct FOneBrahamOwnedWeaponEntry
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon")
+	EOneBrahamWeaponSlot Slot = EOneBrahamWeaponSlot::Primary;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Weapon")
+	TObjectPtr<AOneBrahamWeaponBase> Weapon = nullptr;
+};
+
+namespace OneBrahamReplication
+{
+	inline TArray<FOneBrahamCosmeticEntry> CosmeticsToArray(const TMap<FName, FName>& Map)
+	{
+		TArray<FOneBrahamCosmeticEntry> Out;
+		for (const TPair<FName, FName>& Pair : Map)
+		{
+			// Field by field: a USTRUCT with GENERATED_BODY is not an aggregate.
+			FOneBrahamCosmeticEntry& Entry = Out.AddDefaulted_GetRef();
+			Entry.Slot = Pair.Key;
+			Entry.Option = Pair.Value;
+		}
+		return Out;
+	}
+
+	inline TMap<FName, FName> CosmeticsToMap(const TArray<FOneBrahamCosmeticEntry>& Entries)
+	{
+		TMap<FName, FName> Out;
+		for (const FOneBrahamCosmeticEntry& Entry : Entries)
+		{
+			Out.Add(Entry.Slot, Entry.Option);
+		}
+		return Out;
+	}
+}
 
 /** Serialisable runtime state of one weapon instance. Replicated as a struct to keep net cost low. */
 USTRUCT(BlueprintType)

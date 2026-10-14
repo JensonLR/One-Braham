@@ -199,7 +199,7 @@ AOneBrahamProjectileBase* UOneBrahamInventoryComponent::ServerConsumeAndSpawnUti
 			{
 				Voice->SpeakContextualLine(GetOwner(), TEXT("V_GRENADE_OUT"));
 			}
-			UE_UNUSED(PC);
+			(void)PC;
 		}
 	}
 

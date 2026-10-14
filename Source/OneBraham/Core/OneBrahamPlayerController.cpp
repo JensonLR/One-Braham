@@ -286,7 +286,7 @@ void AOneBrahamPlayerController::ServerSetAppearance_Implementation(FName Archet
 			}
 		}
 
-		State->EquippedCosmetics = MoveTemp(Outfit);
+		State->SetEquippedCosmetics(Outfit);
 	}
 
 	State->ForceNetUpdate();

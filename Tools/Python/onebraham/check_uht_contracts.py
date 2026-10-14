@@ -30,6 +30,15 @@ WHY THIS EXISTS
          parameter of any type but the property's own (the previous value),
          which UHT rejects. `TObjectPtr<T>` is passed as `T*`.
 
+      8. **A replicated TMap or TSet**, or a replicated property whose struct
+         (or array of structs) has a TMap or TSet member. UHT rejects the
+         first outright; the second compiles and the map never reaches a
+         client. Four maps - a weapon's attachments, a player's reserve ammo
+         and owned weapons, and everyone's outfit - were declared Replicated,
+         so the module could not build, and the character's appearance struct
+         carried a fifth inside it. Replicate an array of entries and rebuild
+         the map in the RepNotify (FOneBrahamCosmeticEntry and friends).
+
       6. **A Replicated specifier on a struct member.** A struct is not a
          replication unit; it travels as one property on the object that
          contains it. The specifier is not an error to UHT and not an error to
@@ -176,6 +185,14 @@ def _normalised_type(text):
     return re.sub(r'\s+', "", text)
 
 
+def _declared_type(statement, name):
+    """The type in front of a member's name: `FOneBrahamCharacterAppearance` for
+    `Appearance`, found as a whole word and the last one, since the name can
+    also be the tail of the type's name."""
+    matches = list(re.finditer(r'\b' + re.escape(name) + r'\b', statement))
+    return statement[:matches[-1].start()].strip() if matches else ""
+
+
 def _parameter_list(declaration):
     """The text between a declaration's outermost parentheses."""
     start = declaration.find("(")
@@ -244,6 +261,24 @@ def run(source_root=None):
                     ufunction_names.add(name)
                     ufunction_params.setdefault(name, []).append(
                         _parameter_list(" ".join(statement.split())))
+
+    # USTRUCTs that carry a map or set, which never replicates.
+    structs_with_maps = set()
+    for match in re.finditer(r'USTRUCT\s*\([^)]*\)\s*struct\s+(?:[A-Z_]+_API\s+)?(F[A-Za-z0-9_]+)[^{;]*\{', header_text):
+        start = match.end() - 1
+        depth = 0
+        end = start
+        for index in range(start, len(header_text)):
+            if header_text[index] == "{":
+                depth += 1
+            elif header_text[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    end = index
+                    break
+        body = header_text[start:end]
+        if re.search(r'UPROPERTY\s*\((?![^)]*NotReplicated)[^)]*\)\s*T(?:Map|Set)\s*<', body):
+            structs_with_maps.add(match.group(1))
 
     # --- two names, one type ------------------------------------------------
     # UHT rejects a second UCLASS/USTRUCT/UENUM with a name that is already
@@ -409,6 +444,20 @@ def run(source_root=None):
                     if "Replicated" in specs or any(s.startswith("Replicated") for s in specs):
                         checked += 1
 
+                        declared_type = _declared_type(text, property_name)
+                        if re.search(r'\bT(?:Map|Set)\s*<', declared_type):
+                            problems.append((rel, class_name,
+                                             u"'{0}' is a replicated TMap/TSet - UHT rejects it. Replicate "
+                                             u"an array of entries and rebuild the map in the RepNotify".format(
+                                                 property_name)))
+                        else:
+                            for struct_name in structs_with_maps:
+                                if re.search(r'\b' + re.escape(struct_name) + r'\b', declared_type):
+                                    problems.append((rel, class_name,
+                                                     u"'{0}' replicates {1}, which has a TMap/TSet member: "
+                                                     u"the map never reaches a client".format(
+                                                         property_name, struct_name)))
+
                         if is_struct:
                             problems.append((rel, class_name,
                                              u"'{0}' is marked Replicated inside a struct: a struct "
@@ -444,8 +493,7 @@ def run(source_root=None):
 
                         # A RepNotify may take the previous value, and only as
                         # the property's own type.
-                        prop_type = _normalised_type(text[:text.find(property_name)].strip()
-                                                     if property_name in text else "")
+                        prop_type = _normalised_type(_declared_type(text, property_name))
 
                         def _accepts(params):
                             if not params or params == "void":

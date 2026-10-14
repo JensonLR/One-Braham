@@ -49,9 +49,10 @@ struct FOneBrahamCharacterAppearance
 	UPROPERTY(BlueprintReadOnly, Category = "Appearance")
 	FGameplayTag ArchetypeTag;
 
-	/** Slot -> cosmetic asset id. */
+	/** Slot -> cosmetic asset id, as an array: a TMap in a replicated struct
+	 *  never reaches a client. */
 	UPROPERTY(BlueprintReadOnly, Category = "Appearance")
-	TMap<FName, FName> EquippedCosmetics;
+	TArray<FOneBrahamCosmeticEntry> EquippedCosmetics;
 
 	/** Which MetaHuman/body mesh variant (0-3) this archetype uses. */
 	UPROPERTY(BlueprintReadOnly, Category = "Appearance")

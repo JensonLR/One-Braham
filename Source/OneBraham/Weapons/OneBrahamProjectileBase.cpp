@@ -273,7 +273,7 @@ void AOneBrahamProjectileBase::OnProjectileBounce(const FHitResult& ImpactResult
 		{
 			// Grenades do not damage on impact - the design forbids "cooking" and
 			// ricochet kills because they are unreadable in a tactical shooter.
-			UE_UNUSED(Character);
+			(void)Character;
 		}
 	}
 }

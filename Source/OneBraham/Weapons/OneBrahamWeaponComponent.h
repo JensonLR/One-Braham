@@ -388,13 +388,28 @@ public:
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Weapons")
 	bool bMeleeOnCooldown = false;
 
-	/** Reserve ammo per weapon id (the pool the reload pulls from). */
-	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Weapons")
+	/** Reserve ammo per weapon id (the pool the reload pulls from). Local
+	 *  lookup: the wire is ReplicatedReserveAmmo. */
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Weapons")
 	TMap<FName, int32> ReserveAmmoByWeapon;
 
-	/** All weapons this player owns, by slot. */
-	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Weapons")
+	/** All weapons this player owns, by slot. Local lookup: the wire is
+	 *  ReplicatedOwnedWeapons. */
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Weapons")
 	TMap<EOneBrahamWeaponSlot, TObjectPtr<AOneBrahamWeaponBase>> OwnedWeapons;
+
+	/** The two maps above on the wire: a Replicated TMap does not build. */
+	UPROPERTY(ReplicatedUsing = OnRep_ReserveAmmo)
+	TArray<FOneBrahamReserveAmmoEntry> ReplicatedReserveAmmo;
+
+	UPROPERTY(ReplicatedUsing = OnRep_OwnedWeapons)
+	TArray<FOneBrahamOwnedWeaponEntry> ReplicatedOwnedWeapons;
+
+	/** Server: copies both maps to the wire. Called after every change to them. */
+	void SyncReplicatedInventory();
+
+	UFUNCTION() void OnRep_ReserveAmmo();
+	UFUNCTION() void OnRep_OwnedWeapons();
 
 protected:
 	/**

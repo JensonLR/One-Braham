@@ -710,7 +710,7 @@ void AOneBrahamCharacter::ApplyArchetype(FGameplayTag ArchetypeTag)
 
 void AOneBrahamCharacter::ApplyCosmetics(const TMap<FName, FName>& InCosmetics)
 {
-	Appearance.EquippedCosmetics = InCosmetics;
+	Appearance.EquippedCosmetics = OneBrahamReplication::CosmeticsToArray(InCosmetics);
 
 	// Cosmetic meshes are modular skeletal/static meshes parented to the body
 	// (jacket, fleece, hi-vis, lanyard, badge, backpack). They are looked up from
@@ -984,7 +984,7 @@ void AOneBrahamCharacter::ApplyLifeStateVisuals(EOneBrahamLifeState NewState)
 void AOneBrahamCharacter::OnRep_Appearance()
 {
 	ApplyArchetype(Appearance.ArchetypeTag);
-	ApplyCosmetics(Appearance.EquippedCosmetics);
+	ApplyCosmetics(OneBrahamReplication::CosmeticsToMap(Appearance.EquippedCosmetics));
 }
 
 void AOneBrahamCharacter::ApplyMatchSettings(UOneBrahamMatchSettingsAsset* Settings)

@@ -55,8 +55,8 @@ void UOneBrahamWeaponComponent::GetLifetimeReplicatedProps(TArray<FLifetimePrope
 	DOREPLIFETIME(UOneBrahamWeaponComponent, CurrentFireMode);
 	DOREPLIFETIME(UOneBrahamWeaponComponent, SelectedUtilityIndex);
 	DOREPLIFETIME(UOneBrahamWeaponComponent, bMeleeOnCooldown);
-	DOREPLIFETIME(UOneBrahamWeaponComponent, ReserveAmmoByWeapon);
-	DOREPLIFETIME(UOneBrahamWeaponComponent, OwnedWeapons);
+	DOREPLIFETIME(UOneBrahamWeaponComponent, ReplicatedReserveAmmo);
+	DOREPLIFETIME(UOneBrahamWeaponComponent, ReplicatedOwnedWeapons);
 }
 
 void UOneBrahamWeaponComponent::BeginPlay()
@@ -274,10 +274,12 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerGiveWeapon(FName WeaponId
 	if (ReserveAmmo >= 0)
 	{
 		ReserveAmmoByWeapon.Add(WeaponId, FMath::Clamp(ReserveAmmo, 0, Definition->MaxReserve));
+		SyncReplicatedInventory();
 	}
 	else if (!ReserveAmmoByWeapon.Contains(WeaponId))
 	{
 		ReserveAmmoByWeapon.Add(WeaponId, Definition->StartingReserve);
+		SyncReplicatedInventory();
 	}
 
 	// Slot management: the new weapon replaces whatever was in its slot.
@@ -302,6 +304,7 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerGiveWeapon(FName WeaponId
 	}
 
 	OwnedWeapons.Add(Slot, NewWeapon);
+	SyncReplicatedInventory();
 
 	if (bEquip)
 	{
@@ -324,6 +327,7 @@ void UOneBrahamWeaponComponent::ServerRemoveCurrentWeapon()
 	}
 
 	OwnedWeapons.Remove(CurrentSlot);
+	SyncReplicatedInventory();
 	CurrentWeapon->SetOwningWeaponComponent(nullptr);
 	CurrentWeapon->Destroy();
 	CurrentWeapon = nullptr;
@@ -353,6 +357,7 @@ void UOneBrahamWeaponComponent::ResetOnRespawn()
 
 	OwnedWeapons.Reset();
 	ReserveAmmoByWeapon.Reset();
+	SyncReplicatedInventory();
 	CurrentWeapon = nullptr;
 	CurrentSlot = EOneBrahamWeaponSlot::Melee;
 
@@ -449,6 +454,7 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::DropCurrentWeapon()
 
 	AOneBrahamWeaponBase* Dropped = CurrentWeapon;
 	OwnedWeapons.Remove(CurrentSlot);
+	SyncReplicatedInventory();
 	Dropped->SetOwningWeaponComponent(nullptr);
 	Dropped->OnUnequipped();
 
@@ -537,10 +543,12 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerPickupFromWorld(AOneBraha
 	{
 		const int32 Carried = FMath::Clamp(Pickup->GetGroundReserveAmmo(), 0, WorldWeapon->Definition->MaxReserve);
 		ReserveAmmoByWeapon.Add(WorldWeapon->Definition->WeaponId, Carried);
+		SyncReplicatedInventory();
 	}
 	else if (!ReserveAmmoByWeapon.Contains(WorldWeapon->Definition->WeaponId))
 	{
 		ReserveAmmoByWeapon.Add(WorldWeapon->Definition->WeaponId, WorldWeapon->Definition->StartingReserve);
+		SyncReplicatedInventory();
 	}
 
 	WorldWeapon->SetOwningWeaponComponent(this);
@@ -554,6 +562,7 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerPickupFromWorld(AOneBraha
 	}
 
 	OwnedWeapons.Add(Slot, WorldWeapon);
+	SyncReplicatedInventory();
 
 	// Equip it immediately: a player who pressed the pickup key wants the weapon
 	// in their hands, not in a bag they then have to open.
@@ -601,6 +610,7 @@ void UOneBrahamWeaponComponent::DropAllOnDeath()
 	}
 
 	OwnedWeapons.Reset();
+	SyncReplicatedInventory();
 	CurrentWeapon = nullptr;
 	CurrentSlot = EOneBrahamWeaponSlot::Melee;
 	ForceNetUpdate();
@@ -890,8 +900,8 @@ void UOneBrahamWeaponComponent::ServerRequestFire_Implementation(FVector_NetQuan
 
 	RestorePlayersAfterLagCompensation();
 
-	UE_UNUSED(RewindTime);
-	UE_UNUSED(bFired);
+	(void)RewindTime;
+	(void)bFired;
 }
 
 void UOneBrahamWeaponComponent::SendFireRequest()
@@ -976,7 +986,7 @@ bool UOneBrahamWeaponComponent::FireOnce(const FVector& AimOrigin, const FVector
 	AActor* FirstHitActor = nullptr;
 
 	const float Damage = CurrentWeapon->ServerFireShot(AimOrigin, AimDirection, Impacts, FirstHitActor);
-	UE_UNUSED(Damage);
+	(void)Damage;
 
 	// Auto-reload when the magazine runs dry (player preference, default on).
 	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
@@ -1250,6 +1260,7 @@ void UOneBrahamWeaponComponent::ServerCompleteReload()
 	const int32 Transferred = FMath::Min(Needed, Reserve);
 
 	Reserve -= Transferred;
+	SyncReplicatedInventory();
 	CurrentWeapon->SetAmmoInMagazine(CurrentWeapon->GetAmmoInMagazine() + Transferred);
 
 	bIsReloading = false;
@@ -1313,7 +1324,7 @@ void UOneBrahamWeaponComponent::ClientHitConfirmed_Implementation(bool bHeadshot
 		}
 	}
 
-	UE_UNUSED(DistanceCm);
+	(void)DistanceCm;
 }
 
 void UOneBrahamWeaponComponent::OnServerShotFired(int32 ShotIndex)
@@ -1326,7 +1337,7 @@ void UOneBrahamWeaponComponent::OnServerShotFired(int32 ShotIndex)
 			CurrentWeapon->Definition->Spread.MaxBloom);
 	}
 
-	UE_UNUSED(ShotIndex);
+	(void)ShotIndex;
 }
 
 // ==========================================================================
@@ -1404,7 +1415,7 @@ void UOneBrahamWeaponComponent::MeleeAttack()
 	bMeleeOnCooldown = true;
 
 	const float Damage = CurrentWeapon->ServerMelee();
-	UE_UNUSED(Damage);
+	(void)Damage;
 
 	if (CurrentWeapon->Definition != nullptr && CurrentWeapon->Definition->MeleeMontage.IsValid())
 	{
@@ -1536,7 +1547,7 @@ void UOneBrahamWeaponComponent::ThrowUtility()
 	}
 
 	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
-	UE_UNUSED(Settings);
+	(void)Settings;
 
 	// Rate limit: a player cannot throw four frags in one second.
 	const float Now = GetWorld()->GetTimeSeconds();
@@ -1883,6 +1894,51 @@ void UOneBrahamWeaponComponent::OnRep_CurrentWeapon(AOneBrahamWeaponBase* Previo
 	}
 
 	OnWeaponChanged.Broadcast(CurrentWeapon, PreviousWeapon);
+}
+
+void UOneBrahamWeaponComponent::SyncReplicatedInventory()
+{
+	ReplicatedOwnedWeapons.Reset();
+	for (const TPair<EOneBrahamWeaponSlot, TObjectPtr<AOneBrahamWeaponBase>>& Pair : OwnedWeapons)
+	{
+		FOneBrahamOwnedWeaponEntry& Entry = ReplicatedOwnedWeapons.AddDefaulted_GetRef();
+		Entry.Slot = Pair.Key;
+		Entry.Weapon = Pair.Value;
+	}
+
+	ReplicatedReserveAmmo.Reset();
+	for (const TPair<FName, int32>& Pair : ReserveAmmoByWeapon)
+	{
+		FOneBrahamReserveAmmoEntry& Entry = ReplicatedReserveAmmo.AddDefaulted_GetRef();
+		Entry.WeaponId = Pair.Key;
+		Entry.Rounds = Pair.Value;
+	}
+}
+
+void UOneBrahamWeaponComponent::OnRep_OwnedWeapons()
+{
+	OwnedWeapons.Reset();
+	for (const FOneBrahamOwnedWeaponEntry& Entry : ReplicatedOwnedWeapons)
+	{
+		// A weapon actor can arrive after the array that names it: the entry is
+		// kept as a null and filled by the next update, not dropped.
+		OwnedWeapons.Add(Entry.Slot, Entry.Weapon);
+	}
+}
+
+void UOneBrahamWeaponComponent::OnRep_ReserveAmmo()
+{
+	ReserveAmmoByWeapon.Reset();
+	for (const FOneBrahamReserveAmmoEntry& Entry : ReplicatedReserveAmmo)
+	{
+		ReserveAmmoByWeapon.Add(Entry.WeaponId, Entry.Rounds);
+	}
+
+	if (CurrentWeapon != nullptr && CurrentWeapon->Definition != nullptr)
+	{
+		const int32* Reserve = ReserveAmmoByWeapon.Find(CurrentWeapon->Definition->WeaponId);
+		OnAmmoChanged.Broadcast(CurrentWeapon->GetAmmoInMagazine(), Reserve != nullptr ? *Reserve : 0);
+	}
 }
 
 void UOneBrahamWeaponComponent::OnRep_Reloading()
