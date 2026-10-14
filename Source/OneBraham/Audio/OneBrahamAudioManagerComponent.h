@@ -179,6 +179,9 @@ public:
 	/** Fire alarm / klaxon bed, faded in over the building announcement. */
 	void SetLockdownAudio(bool bActive, float FadeSeconds = 1.5f);
 
+	/** The rain bed, laid over the zone's own while the listener is outdoors in the rain. */
+	void SetWeatherAudio(bool bRainAudible, float FadeSeconds = 2.5f);
+
 	/** Helicopter rotor bed, positioned on the pad. `Approach01` speeds it up. */
 	void SetExtractionAudio(bool bActive, const FVector& PadLocation, float Approach01);
 

@@ -146,6 +146,18 @@ without. A recorded wave at
 `/Game/OneBraham/Audio/Ambience/<Id>` replaces the synthesis the moment it
 exists.
 
+**Rain** is a second bed over the zone's own, not a zone. A match is wet or
+dry (`AOneBrahamGameState::bRaining`), and while the listener is outdoors in a
+wet match (the plaza or the Skydeck) `UOneBrahamWorldEffectsComponent` holds
+`AMB_Plaza_Rain` on the weather bed, so the street keeps its traffic and the
+deck keeps its wind with the rain over both.
+
+**The Tube.** The Circle line runs under Aldgate. Every 70 to 150 seconds a
+train passes under the building (`SFX_Tube_Rumble`, seven seconds of sub-bass
+with the wheels fluttering on top). It plays at full level on the plaza and in
+the lobby, at half on the mezzanine, and not at all higher up. Nobody needs it;
+it is the sort of thing that makes a building a place.
+
 The fire alarm is not a bed of its own. It is `SFX_FireAlarm`, held on the
 lockdown bed by the manager for as long as the stage lasts, at a level that makes
 speech uncomfortable — which is the point of an alarm.
@@ -294,15 +306,25 @@ they come out of the table rather than out of a designer's memory.
 
 ## 9. Cue ids and the recording brief
 
-`DA_AudioBank` names every cue the code plays. Three categories exist in the
-build today:
+`DA_AudioBank` names every cue the code plays, and every one of them is audible
+on a clean clone:
 
-1. **Present as assets** — recorded or licensed, referenced from the bank.
-2. **Synthesised fallback** — the audio manager generates the wave at runtime
-   (per-calibre gunshot bodies, impacts, UI blips). A build with zero audio
-   content still plays a match that sounds like a match.
-3. **Recording briefs** — cues that are neither recorded nor synthesised and are
-   listed in the build report with exactly what to record.
+1. **Present as assets** — recorded or licensed, referenced from the bank. An
+   asset always wins.
+2. **Synthesised fallback** — `OneBrahamProceduralAudio.cpp` makes the wave at
+   runtime when no asset exists. There are three kinds: hand-written recipes
+   (the gunshots per calibre, the fuse beep, the alarm, the rotor), the eleven
+   ambience beds, and the **layered cues**. A layered cue is a table row of a
+   shaped noise burst, a tone that may sweep or carry a chord, a later second
+   note and an amplitude pulse. That covers movement, bullet impacts per
+   surface, doors, the lifts (chime, doors, motor), the winch, the UI set and
+   the eight music beds, each a chord on a pulse at its state's tempo.
+   `HasSynthesisedSound` answers from the same table the dispatch uses, and
+   `check_audio_ids.py` fails the build if any bank row has neither.
+
+The fallbacks are placeholders that carry the information, not the shipping
+sound: a door that thuds, a lift that chimes two floors away. The briefs below
+say what the recording must do instead.
 
 The briefs are the shopping list. Each one specifies duration, character,
 frequency target, and what it must *communicate* — because "record a shutter
@@ -311,11 +333,12 @@ sound" produces a shutter sound nobody can locate in a building.
 
 ### The rest of the shipping list
 
-Every other cue in `DA_AudioBank` that has neither a wave nor a synthesis. These
+Every other cue in `DA_AudioBank` that has no recorded wave yet (each plays
+its layered fallback until it has one). These
 are one line each because the first twenty above are the ones worth a
 conversation; the point of listing them is that no cue in the bank is
-undocumented. `check_audio_ids.py` enforces exactly that: every row is either
-synthesised or named in this document.
+undocumented. `check_audio_ids.py` enforces that every row is synthesised or
+named in this document; today every row is synthesised.
 
 | Cue | Brief |
 | --- | --- |

@@ -25,7 +25,7 @@ validator fails the build if the two disagree.
 | 08 | [Interface](08_UI.md) | the HUD, the menus, the settings, the palette |
 | 09 | [Map implementation](09_Map_Implementation.md) | fifteen floors, eight areas, the routes up |
 | 10 | [Environment art](10_Environment_Art.md) | master material graphs, lighting per area, dressing |
-| 11 | [Niagara VFX](11_Niagara_VFX.md) | 17 systems, their parameters and their budgets |
+| 11 | [Niagara VFX](11_Niagara_VFX.md) | 18 systems, their parameters and their budgets |
 | 12 | [Audio](12_Audio.md) | classes, mixes, attenuation, ambience, the recording brief |
 | 13 | [Characters and clothing](13_Characters_Clothing.md) | six archetypes, cosmetics, competitive integrity |
 | 14 | [Voice script](14_Voice_Script.md) | 161 lines, six actors, per-line direction |

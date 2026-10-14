@@ -76,6 +76,7 @@ namespace
 		case EOneBrahamVFXEffect::DustPuff:			return TEXT("NS_OB_Dust");
 		case EOneBrahamVFXEffect::BreachDebris:		return TEXT("NS_OB_BreachDebris");
 		case EOneBrahamVFXEffect::CorpseImpact:		return TEXT("NS_OB_CorpseImpact");
+		case EOneBrahamVFXEffect::Rain:				return TEXT("NS_OB_Rain");
 		default:									return TEXT("NS_OB_Impact_Concrete");
 		}
 	}
@@ -121,7 +122,20 @@ UNiagaraSystem* UOneBrahamVFXStatics::LoadEffectSystem(EOneBrahamVFXEffect Effec
 	}
 
 	const FString Path = GetEffectAssetPath(Effect);
-	UNiagaraSystem* System = LoadObject<UNiagaraSystem>(nullptr, *Path);
+	UNiagaraSystem* System = LoadObject<UNiagaraSystem>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
+
+	// build_vfx.py creates every system so the paths resolve; a system nobody
+	// has authored yet has no emitters and draws nothing. Treated as missing,
+	// so the C++ fallback keeps drawing the effect until an artist fills it in.
+	// Without this, running the content build made every impact invisible.
+	if (System != nullptr && System->GetEmitterHandles().Num() == 0)
+	{
+		UE_LOG(LogOneBraham, Log,
+			TEXT("[OB.VFX] '%s' exists but has no emitters yet - using the runtime fallback effect."), *Path);
+		System = nullptr;
+		GMissingEffects.Add(Effect);
+		return nullptr;
+	}
 
 	if (System == nullptr)
 	{

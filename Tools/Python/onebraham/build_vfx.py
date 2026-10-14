@@ -21,7 +21,7 @@ WHY THE SYSTEMS ARE CREATED EMPTY
     playable and readable with no Niagara content at all.
 
 WHAT IT CREATES
-    /Game/OneBraham/VFX/NS_OB_*                     17 systems (see NAGARA_SYSTEMS)
+    /Game/OneBraham/VFX/NS_OB_*                     18 systems (see NIAGARA_SYSTEMS)
     /Game/OneBraham/VFX/CameraShakes/BP_OBCameraShake_{Explosion,Landing,Extraction}
     /Game/OneBraham/VFX/Decals/M_OB_Decal_*         decal material instances
     /Game/OneBraham/VFX/T_OB_VFX_*                  texture slot stubs (reported)
@@ -107,6 +107,11 @@ NIAGARA_SYSTEMS = [
     ("NS_OB_BreachDebris", "SpawnBreachDebris", "Explosion", 9000, 12,
      "A short burst of wall chunks along the breach normal, 1.2 s, 20 meshes. "
      "Spawned on the first charge impact and again, larger, when the wall opens."),
+    ("NS_OB_Rain", "WorldEffects", "Environment", 3000, 1,
+     "Rain in a 24 m box around the camera, outdoors only (the plaza and the "
+     "Skydeck), 2,000 GPU sprites stretched along velocity, falling at 9 m/s with "
+     "a slight westerly drift, plus splash sprites on the depth buffer. Until it "
+     "has emitters the C++ streak field draws the rain."),
     ("NS_OB_CorpseImpact", "PlayNearMiss", "Character", 5000, 8,
      "A ground impact puff sized from the ragdoll's velocity at first contact, "
      "plus a 0.15 s cloth ripple. Bodies are the most-read thing on a floor: this "
@@ -174,7 +179,12 @@ def _ensure_dirs():
 
 
 def build_systems(report):
-    """Creates the 17 Niagara systems with their user parameters declared."""
+    """Creates the 18 Niagara systems with their user parameters declared.
+
+    A new system has no emitters until an artist builds its stack; the runtime
+    treats an emitter-less system as missing and keeps drawing the C++ fallback,
+    so creating the paths early never makes an effect disappear.
+    """
     factory_class = getattr(unreal, "NiagaraSystemFactoryNew", None)
     system_class = getattr(unreal, "NiagaraSystem", None)
 

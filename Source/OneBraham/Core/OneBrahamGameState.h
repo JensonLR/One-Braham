@@ -59,6 +59,10 @@ public:
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Match")
 	bool bIsDedicatedServerMatch = false;
 
+	/** This match's weather, rolled by the game mode at the start. Outdoors only. */
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Match")
+	bool bRaining = false;
+
 	/** Seconds since the active phase began, replicated at 1 Hz to save bandwidth. */
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Match")
 	float PhaseElapsedSeconds = 0.f;

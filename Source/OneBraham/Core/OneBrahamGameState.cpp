@@ -33,6 +33,7 @@ void AOneBrahamGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 	DOREPLIFETIME(AOneBrahamGameState, MatchMode);
 	DOREPLIFETIME(AOneBrahamGameState, MatchPhase);
 	DOREPLIFETIME(AOneBrahamGameState, ServerName);
+	DOREPLIFETIME(AOneBrahamGameState, bRaining);
 	DOREPLIFETIME(AOneBrahamGameState, bIsDedicatedServerMatch);
 	DOREPLIFETIME(AOneBrahamGameState, PhaseElapsedSeconds);
 	DOREPLIFETIME(AOneBrahamGameState, MatchTimeLimitSeconds);

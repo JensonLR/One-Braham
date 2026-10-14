@@ -151,6 +151,7 @@ void UOneBrahamAudioBankAsset::EnsureCoreEntries()
 		Row(TEXT("SFX_Override_Hum"),			EOneBrahamAudioBus::Gameplay, EOneBrahamAudioCategory::Loop, 0.50f, 2600.f, 0.00f, 2, true),
 		Row(TEXT("SFX_Lift_Arrive"),			EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Mechanical, 0.85f, 6000.f, 0.00f, 3),
 		Row(TEXT("SFX_Lift_Doors"),				EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Mechanical, 0.70f, 4500.f, 0.00f, 3),
+		Row(TEXT("SFX_Tube_Rumble"),			EOneBrahamAudioBus::Ambience, EOneBrahamAudioCategory::Mechanical, 0.80f, 0.f, 0.00f, 1),
 		Row(TEXT("SFX_Lift_Motor"),				EOneBrahamAudioBus::Ambience, EOneBrahamAudioCategory::Loop, 0.55f, 3000.f, 0.00f, 2, true),
 		Row(TEXT("SFX_Shutter_Drop"),			EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Mechanical, 1.0f, 9000.f, 0.00f, 4),
 		Row(TEXT("SFX_Lockdown_Siren"),			EOneBrahamAudioBus::Ambience, EOneBrahamAudioCategory::Loop, 0.75f, 0.f, 0.00f, 1, true),

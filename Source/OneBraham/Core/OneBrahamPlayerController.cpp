@@ -11,6 +11,7 @@
 #include "Core/OneBrahamGameUserSettings.h"
 #include "Core/OneBrahamInputBindings.h"
 #include "UI/OneBrahamSettingsWidget.h"
+#include "VFX/OneBrahamWorldEffectsComponent.h"
 #include "UI/OneBrahamResultsWidget.h"
 #include "Online/OneBrahamSteamSubsystem.h"
 #include "Core/OneBrahamPlayerState.h"
@@ -70,6 +71,7 @@ AOneBrahamPlayerController::AOneBrahamPlayerController()
 	bAttachToPawn = false;
 
 	HUDComponent = CreateDefaultSubobject<UOneBrahamHUDComponent>(TEXT("HUDComponent"));
+	WorldEffects = CreateDefaultSubobject<UOneBrahamWorldEffectsComponent>(TEXT("WorldEffects"));
 	AudioManager = CreateDefaultSubobject<UOneBrahamAudioManagerComponent>(TEXT("AudioManager"));
 
 	// A 90 degree default FOV matches the weapon art and the HUD safe area.

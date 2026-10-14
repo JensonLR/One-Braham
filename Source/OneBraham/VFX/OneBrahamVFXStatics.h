@@ -50,7 +50,9 @@ enum class EOneBrahamVFXEffect : uint8
 	SparkShower,
 	DustPuff,
 	BreachDebris,
-	CorpseImpact
+	CorpseImpact,
+	/** Outdoor rain around the local camera (UOneBrahamWorldEffectsComponent). */
+	Rain
 };
 
 UCLASS()

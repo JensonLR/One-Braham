@@ -38,6 +38,7 @@ namespace
 	const FName BedRotor(TEXT("Rotor"));
 	const FName BedTinnitus(TEXT("Tinnitus"));
 	const FName BedDowned(TEXT("Downed"));
+	const FName BedWeather(TEXT("Weather"));
 
 	/** Low-pass values, Hz. The whole "world goes muffled" language of the game. */
 	constexpr float OBLowPassOpen = 20000.f;
@@ -185,6 +186,10 @@ void UOneBrahamAudioManagerComponent::TickComponent(float DeltaTime, ELevelTick 
 	if (UAudioComponent* Ambience = Beds.FindRef(BedAmbience))
 	{
 		Ambience->SetVolumeMultiplier(GetBusVolume(EOneBrahamAudioBus::Ambience) * VoiceDuckCurrent);
+	}
+	if (UAudioComponent* Weather = Beds.FindRef(BedWeather))
+	{
+		Weather->SetVolumeMultiplier(GetBusVolume(EOneBrahamAudioBus::Ambience) * VoiceDuckCurrent);
 	}
 
 	// QA readout.
@@ -1302,6 +1307,21 @@ void UOneBrahamAudioManagerComponent::SetMusicState(EOneBrahamMusicState NewStat
 		GetBusVolume(EOneBrahamAudioBus::Music), 2.5f);
 
 	UE_LOG(LogOneBrahamAudio, Verbose, TEXT("[OB.AUDIO] Music state -> %s"), *SoundId.ToString());
+}
+
+void UOneBrahamAudioManagerComponent::SetWeatherAudio(bool bRainAudible, float FadeSeconds)
+{
+	// Rain is a second bed over the zone's own: the street and the Skydeck keep
+	// their traffic and their wind, and the weather lies on top.
+	if (bRainAudible)
+	{
+		AcquireBed(BedWeather, FName(TEXT("AMB_Plaza_Rain")), false, FVector::ZeroVector,
+			GetBusVolume(EOneBrahamAudioBus::Ambience), FadeSeconds);
+	}
+	else
+	{
+		StopBed(BedWeather, FadeSeconds);
+	}
 }
 
 void UOneBrahamAudioManagerComponent::SetLockdownAudio(bool bActive, float FadeSeconds)

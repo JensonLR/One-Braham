@@ -219,7 +219,7 @@ should be at 4 Hz.
 2. **Nanite for architecture, LODs for props.** Every wall, floor and ceiling is a
    Nanite candidate; every loose prop has LODs and is `Movable` only if Chaos
    needs it.
-3. **No dynamic bounds on Niagara.** Fixed bounds on all 17 systems.
+3. **No dynamic bounds on Niagara.** Fixed bounds on all 18 systems.
 4. **No VFX or audio work on a dedicated server.**
    `ShouldSpawnForLocalViewer` returns false with no local viewer.
 5. **Occlusion traces at 15 Hz per listener**, not per frame.

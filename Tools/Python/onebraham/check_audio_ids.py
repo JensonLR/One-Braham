@@ -77,7 +77,10 @@ BRANCH = re.compile(r'Id == TEXT\("([A-Za-z0-9_]+)"\)')
 #: An ambience bed recipe: { TEXT("AMB_Foo"), { ... } }
 BED = re.compile(r'\{\s*TEXT\("(AMB_[A-Za-z0-9_]+)"\)\s*,')
 
-#: A literal whitelist entry inside the Known set.
+#: A layered cue recipe: Cue(TEXT("SFX_Foo"), FCueRecipe()...)
+LAYERED = re.compile(r'Cue\(TEXT\("([A-Za-z0-9_]+)"\)')
+
+#: A literal inside the HandWrittenIds set.
 KNOWN_ENTRY = re.compile(r'TEXT\("([A-Za-z0-9_]+)"\)')
 
 #: Any audio-family id literal, used to read the source.
@@ -125,17 +128,22 @@ def synthesised_ids():
     """Ids the procedural module can produce."""
     text = read(PROCEDURAL)
 
-    known = set()
-
-    if "static const TSet<FName> Known" in text:
-        block = text[text.index("static const TSet<FName> Known"):]
-        block = block[:block.index("};")]
-        known = set(KNOWN_ENTRY.findall(block))
-
     branches = set(BRANCH.findall(text))
     beds = set(BED.findall(text))
+    layered = set(LAYERED.findall(text))
 
-    return known | branches | beds
+    return branches | beds | layered
+
+
+def hand_written_ids():
+    """The ids HasSynthesisedSound's HandWrittenIds set lists, or None."""
+    text = read(PROCEDURAL)
+    marker = "const TSet<FName>& HandWrittenIds()"
+    if marker not in text:
+        return None
+    block = text[text.index(marker):]
+    block = block[:block.index("};")]
+    return set(KNOWN_ENTRY.findall(block))
 
 
 def is_synthesised(sound_id, known):
@@ -230,6 +238,25 @@ def run(source_root=None):
                 u"the bank has '{0}' and it is neither synthesised nor named in "
                 u"Docs/12 - a cue that ships silent and unexplained".format(sound_id),
                 u"silent cue"))
+
+    # 1b. HasSynthesisedSound answers from HandWrittenIds, which must list
+    #     exactly the hand-written branches; a separate whitelist once drifted
+    #     until five gunshots that played were reported silent.
+    checks += 1
+    listed = hand_written_ids()
+    branches = set(BRANCH.findall(read(PROCEDURAL)))
+    if listed is None:
+        problems.append((u"HandWrittenIds() was not found in OneBrahamProceduralAudio.cpp",
+                         u"synthesis list"))
+    elif listed != branches:
+        missing = sorted(branches - listed)
+        extra = sorted(listed - branches)
+        problems.append((
+            u"HandWrittenIds() and GetSynthesisedSound's branches differ"
+            u"{0}{1}".format(
+                u"; not listed: " + u", ".join(missing) if missing else u"",
+                u"; listed with no branch: " + u", ".join(extra) if extra else u""),
+            u"synthesis list"))
 
     # 7. duplicates (before the set-based rules, so a duplicate is reported once)
     seen = set()

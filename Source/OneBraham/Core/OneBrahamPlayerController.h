@@ -513,6 +513,10 @@ protected:
 	UPROPERTY()
 	TObjectPtr<UOneBrahamHUDComponent> HUDComponent = nullptr;
 
+	/** Rain outdoors and the Tube underneath, for the local player only. */
+	UPROPERTY()
+	TObjectPtr<class UOneBrahamWorldEffectsComponent> WorldEffects = nullptr;
+
 	UPROPERTY()
 	TObjectPtr<UOneBrahamAudioManagerComponent> AudioManager = nullptr;
 

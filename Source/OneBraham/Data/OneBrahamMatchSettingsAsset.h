@@ -152,6 +152,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Roster")
 	int32 PostMatchSeconds = 45;
 
+	/** Chance a match starts in the rain: the plaza and the Skydeck get it, nowhere else. London. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weather", meta = (ClampMin = "0", ClampMax = "1"))
+	float RainChance = 0.6f;
+
 	// --- Damage model -----------------------------------------------------
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat")
 	bool bFriendlyFire = false;

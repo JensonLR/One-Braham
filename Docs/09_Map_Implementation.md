@@ -375,7 +375,7 @@ validator fails if an authored surface is used by nothing.
 
 The building is what makes the effects happen: a partition gives dust, a rack
 gives sparks, a fall gives a body landing. `Docs/11` carries the full
-seventeen-effect table with its call sites; the map's half of it is:
+eighteen-effect table with its call sites; the map's half of it is:
 
 | The map provides | The effect that follows |
 | --- | --- |

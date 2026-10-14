@@ -159,6 +159,12 @@ void AOneBrahamGameMode::InitGameState()
 		}
 		GS->bIsDedicatedServerMatch = IsRunningDedicatedServer();
 		GS->SurvivorsRemaining = 0;
+
+		// The weather is the server's call, once, so every machine agrees on it.
+		// FIRE DRILL's arena is indoors and never gets it.
+		GS->bRaining = MatchSettings != nullptr
+			&& MatchSettings->Mode != EOneBrahamMatchMode::FireDrill
+			&& FMath::FRand() < MatchSettings->RainChance;
 	}
 }
 

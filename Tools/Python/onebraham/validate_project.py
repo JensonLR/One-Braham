@@ -155,7 +155,7 @@ EXPECTED_NIAGARA = [
     "NS_OB_Impact_Flesh", "NS_OB_MuzzleFlash", "NS_OB_Tracer", "NS_OB_ShellEject",
     "NS_OB_Explosion_Frag", "NS_OB_Explosion_Breach", "NS_OB_Flashbang",
     "NS_OB_Smoke", "NS_OB_BloodMist", "NS_OB_SprinklerSpray", "NS_OB_SparkShower",
-    "NS_OB_Dust", "NS_OB_BreachDebris", "NS_OB_CorpseImpact",
+    "NS_OB_Dust", "NS_OB_BreachDebris", "NS_OB_CorpseImpact", "NS_OB_Rain",
 ]
 
 # Performance caps from Docs/18_Performance.md. A dedicated 12-player server is
@@ -1172,7 +1172,11 @@ def check_vfx_reachability(v, _config_only):
         v.fail("vfx reachability", u"EOneBrahamVFXEffect not found in VFXStatics.h")
         return
 
-    effects = [name.strip() for name in re.split(r'[,\n]', enum_body.group(1)) if name.strip()]
+    # Comments out first: a documented enumerator ("/** ... */ Rain") is still
+    # one name, not a sentence and a name.
+    body = re.sub(r'/\*.*?\*/', u"", enum_body.group(1), flags=re.DOTALL)
+    body = re.sub(r'//[^\n]*', u"", body)
+    effects = [name.strip() for name in re.split(r'[,\n]', body) if name.strip()]
 
     if not effects:
         v.fail("vfx reachability", u"EOneBrahamVFXEffect is empty")
