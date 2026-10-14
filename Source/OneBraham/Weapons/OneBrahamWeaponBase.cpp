@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Weapons/OneBrahamWeaponBase.h"
+#include "Weapons/OneBrahamLagCompensationSubsystem.h"
 
 #include "OneBraham.h"
 #include "Core/OneBrahamGameSettings.h"
@@ -500,6 +501,14 @@ float AOneBrahamWeaponBase::TraceBullet(const FVector& Start, const FVector& Dir
 		Params.AddIgnoredActor(Owner);
 	}
 
+	// While the hitboxes are rewound, their present-day capsules would stop the
+	// round where the target is now rather than where the shooter saw it.
+	const UOneBrahamLagCompensationSubsystem* LagComp = World->GetSubsystem<UOneBrahamLagCompensationSubsystem>();
+	if (LagComp != nullptr && LagComp->IsRewound())
+	{
+		LagComp->AddIgnoredComponents(Params);
+	}
+
 	FHitResult Hit;
 	// The Weapon channel hits world geometry, characters (via their capsule/body)
 	// and the Penetrable channel's shoot-through surfaces.
@@ -600,6 +609,10 @@ float AOneBrahamWeaponBase::TraceBullet(const FVector& Start, const FVector& Dir
 			if (OwningCharacter.IsValid())
 			{
 				SecondParams.AddIgnoredActor(OwningCharacter.Get());
+			}
+			if (LagComp != nullptr && LagComp->IsRewound())
+			{
+				LagComp->AddIgnoredComponents(SecondParams);
 			}
 
 			FHitResult SecondHit;

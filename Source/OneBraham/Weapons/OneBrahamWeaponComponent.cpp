@@ -10,6 +10,7 @@
 #include "Core/OneBrahamPlayerState.h"
 #include "Characters/OneBrahamCharacter.h"
 #include "Characters/OneBrahamHealthComponent.h"
+#include "Weapons/OneBrahamLagCompensationSubsystem.h"
 #include "Weapons/OneBrahamInventoryComponent.h"
 #include "Weapons/OneBrahamPickupBase.h"
 #include "Weapons/OneBrahamProjectileBase.h"
@@ -85,8 +86,6 @@ void UOneBrahamWeaponComponent::BeginPlay()
 		OB_ERROR("No weapon registry on '%s'. Weapons will not function. "
 			"Run Tools/Python/create_data_assets.py and assign DA_WeaponRegistry.", *GetOwner()->GetName());
 	}
-
-	HitboxHistory.Reserve(64);
 }
 
 AOneBrahamCharacter* UOneBrahamWeaponComponent::GetCharacter() const
@@ -114,7 +113,6 @@ void UOneBrahamWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	}
 
 	const bool bLocallyControlled = Character->IsLocallyControlled();
-	const bool bAuthority = GetOwner()->HasAuthority();
 
 	// --- ADS blend --------------------------------------------------------
 	const float TargetADS = bAimingDownSights ? 1.f : 0.f;
@@ -207,17 +205,6 @@ void UOneBrahamWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 
 	// --- Weapon visual kick decay ----------------------------------------
 	WeaponKickOffset = FMath::Vector2DInterpTo(WeaponKickOffset, FVector2D::ZeroVector, DeltaTime, 9.f);
-
-	// --- Lag compensation snapshots (server only) -------------------------
-	if (bAuthority)
-	{
-		const float Now = GetWorld()->GetTimeSeconds();
-		if (Now - LastSnapshotTime >= (1.f / 30.f))
-		{
-			LastSnapshotTime = Now;
-			CaptureHitboxSnapshot();
-		}
-	}
 }
 
 // ==========================================================================
@@ -904,20 +891,19 @@ void UOneBrahamWeaponComponent::ServerRequestFire_Implementation(FVector_NetQuan
 		return;
 	}
 
-	// --- Rewind for lag compensation --------------------------------------
-	const float ShooterPingMs = PC->PlayerState != nullptr ? static_cast<float>(PC->PlayerState->GetPingInMilliseconds()) : 0.f;
-	const float RewindTime = RewindPlayersForLagCompensation(ShooterPingMs);
-
-	// --- Fire -------------------------------------------------------------
+	// --- Fire, against the world the shooter was looking at -----------------
+	// Every other character's hitboxes are put back where they were one round
+	// trip ago for the length of FireOnce, and restored when the scope closes
+	// (UOneBrahamLagCompensationSubsystem has the reasoning).
 	LastServerFireTime = Now;
 	++ServerShotIndex;
 
-	bool bFired = FireOnce(ClientEye, ClientDir);
+	const float ShooterPingMs = PC->PlayerState != nullptr ? PC->PlayerState->GetPingInMilliseconds() : 0.f;
 
-	RestorePlayersAfterLagCompensation();
-
-	(void)RewindTime;
-	(void)bFired;
+	{
+		const FOneBrahamScopedRewind Rewind(GetWorld(), Character, Character->IsLocallyControlled() ? 0.f : ShooterPingMs);
+		FireOnce(ClientEye, ClientDir);
+	}
 }
 
 void UOneBrahamWeaponComponent::SendFireRequest()
@@ -1762,108 +1748,6 @@ void UOneBrahamWeaponComponent::HandleDamageDuringMedkit(float Damage, AActor* D
 			Inventory->ServerConsumeMedkit();
 		}
 	}
-}
-
-// ==========================================================================
-//  Lag compensation
-// ==========================================================================
-void UOneBrahamWeaponComponent::CaptureHitboxSnapshot()
-{
-	UWorld* World = GetWorld();
-	if (World == nullptr || !GetOwner()->HasAuthority())
-	{
-		return;
-	}
-
-	FOneBrahamHitboxSnapshot Snapshot;
-	Snapshot.ServerTime = World->GetTimeSeconds();
-
-	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-	{
-		const AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(It->Get());
-		if (PC == nullptr)
-		{
-			continue;
-		}
-
-		const AOneBrahamCharacter* Character = Cast<AOneBrahamCharacter>(PC->GetPawn());
-		const AOneBrahamPlayerState* State = PC->GetPlayerState<AOneBrahamPlayerState>();
-		if (Character == nullptr || State == nullptr)
-		{
-			continue;
-		}
-
-		const int32 PlayerId = State->GetPlayerId();
-		const USkeletalMeshComponent* Body = Character->GetMesh();
-
-		if (Body != nullptr)
-		{
-			// Three anchors are enough for capsule-level compensation; per-bone
-			// transforms are stored too but only used for limb-accurate rewinds.
-			Snapshot.HeadTransforms.Add(PlayerId, Body->GetSocketTransform(TEXT("head"), RTS_World));
-			Snapshot.ChestTransforms.Add(PlayerId, Body->GetSocketTransform(TEXT("spine_03"), RTS_World));
-			Snapshot.PelvisTransforms.Add(PlayerId, Body->GetSocketTransform(TEXT("pelvis"), RTS_World));
-
-			TMap<FName, FTransform>& Bones = Snapshot.BoneTransforms.Add(PlayerId);
-			Bones.Add(TEXT("head"), Snapshot.HeadTransforms[PlayerId]);
-			Bones.Add(TEXT("spine_03"), Snapshot.ChestTransforms[PlayerId]);
-			Bones.Add(TEXT("pelvis"), Snapshot.PelvisTransforms[PlayerId]);
-		}
-	}
-
-	HitboxHistory.Add(MoveTemp(Snapshot));
-
-	// Trim to the sliding window.
-	const float Oldest = World->GetTimeSeconds() - LagCompensationHistorySeconds;
-	while (HitboxHistory.Num() > 0 && HitboxHistory[0].ServerTime < Oldest)
-	{
-		HitboxHistory.RemoveAt(0, 1, EAllowShrinking::No);
-	}
-}
-
-float UOneBrahamWeaponComponent::RewindPlayersForLagCompensation(float ShooterPingMs)
-{
-	// The rewind target: half the shooter's round trip, capped.
-	const float ClampedPingMs = FMath::Min(ShooterPingMs, MaxLagCompensationMs);
-	const float RewindSeconds = (ClampedPingMs * 0.5f) / 1000.f;
-
-	if (HitboxHistory.Num() == 0 || RewindSeconds <= 0.f)
-	{
-		return 0.f;
-	}
-
-	const float TargetTime = GetWorld()->GetTimeSeconds() - RewindSeconds;
-
-	// Find the closest snapshot at or before the target time.
-	const FOneBrahamHitboxSnapshot* Best = &HitboxHistory[0];
-	for (const FOneBrahamHitboxSnapshot& Snapshot : HitboxHistory)
-	{
-		if (Snapshot.ServerTime <= TargetTime)
-		{
-			Best = &Snapshot;
-		}
-		else
-		{
-			break;
-		}
-	}
-
-	// The rewind itself is applied by moving the *hit-testing* bodies: rather than
-	// teleporting the real (visible) characters - which would look catastrophic -
-	// we move the per-bone hitbox volumes used by the Weapon channel and restore
-	// them after the trace. The visible mesh is never touched.
-	//
-	// (See Docs/07_Networking.md, "Hitbox rewind": the hitboxes are separate
-	// USkeletalMeshComponents on the OneBrahamHitbox collision profile, so this
-	// swap is invisible to players and costs one component transform per bone.)
-	ActiveRewindSnapshot = Best != nullptr ? *Best : FOneBrahamHitboxSnapshot();
-
-	return Best != nullptr ? Best->ServerTime : 0.f;
-}
-
-void UOneBrahamWeaponComponent::RestorePlayersAfterLagCompensation()
-{
-	ActiveRewindSnapshot = FOneBrahamHitboxSnapshot();
 }
 
 // ==========================================================================

@@ -52,6 +52,30 @@ Anti-cheat basics (thresholds in `Config/DefaultGame.ini` `[OneBrahamAntiCheat]`
 * Reported and kicked, not silently tolerated. The reason is written to the
   player's session so a support ticket can be answered.
 
+### Hit rewind
+
+A shot is scored against the world the shooter was looking at.
+`UOneBrahamLagCompensationSubsystem` samples every character's body mesh 30
+times a second on the server. When a shot arrives it moves every other
+character's mesh (the per-bone `OneBrahamHitbox` bodies) to where it was one
+round trip plus `ob.LagComp.ExtraMs` (50 ms, the proxy smoothing) ago,
+interpolated between samples. Then it runs the trace, ignoring the
+present-day capsules, and puts the meshes back. All of that happens in one
+frame, so nothing is replicated in between.
+
+* **The cap.** The rewind is capped at `ob.LagComp.MaxMs` (250 ms). Beyond
+  that, a shooter has to lead their targets.
+* **The round trip.** It is the full round trip, not half. A client sees
+  state that is half a round trip old, and its shot takes the other half to
+  arrive.
+* **The pose.** It is the current pose at the old position. Rewinding every
+  bone is possible from the same history but has not been needed at these
+  ranges.
+* **Hosts and bots.** A listen host's own shots and bots are not rewound;
+  they already see the present.
+* **Switching it off.** `ob.LagComp 0` turns rewind off, so the
+  difference can be felt on a high-ping test client.
+
 ## 3. The player path
 
 ```

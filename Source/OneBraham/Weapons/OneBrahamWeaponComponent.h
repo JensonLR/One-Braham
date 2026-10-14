@@ -43,22 +43,6 @@ class UOneBrahamInventoryComponent;
 class USkeletalMeshComponent;
 class UAnimMontage;
 
-/** One entry in the lag-compensation history: where everyone's hitboxes were. */
-USTRUCT()
-struct FOneBrahamHitboxSnapshot
-{
-	GENERATED_BODY()
-
-	UPROPERTY() float ServerTime = 0.f;
-
-	/** Player id -> world-space head/chest/pelvis positions + capsule of each. */
-	UPROPERTY() TMap<int32, FTransform> HeadTransforms;
-	UPROPERTY() TMap<int32, FTransform> ChestTransforms;
-	UPROPERTY() TMap<int32, FTransform> PelvisTransforms;
-	/** Per-player full body pose: bone name -> world transform (used for limb hits). */
-	UPROPERTY() TMap<int32, TMap<FName, FTransform>> BoneTransforms;
-};
-
 /** Fired on the shooter's machine when the server confirms one of their hits. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOneBrahamHitConfirmed, bool, bHeadshot, bool, bKill, float, DistanceCm);
 
@@ -99,13 +83,6 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Weapons")
 	TObjectPtr<UOneBrahamWeaponDataAsset> WeaponRegistry;
 
-	/** How long the server remembers hitbox positions, seconds. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Weapons")
-	float LagCompensationHistorySeconds = 1.f;
-
-	/** Hard cap; players above this are not compensated further. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Weapons")
-	float MaxLagCompensationMs = 250.f;
 
 	/** How far the client's claimed eye position may differ from the server's. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Weapons")
@@ -449,18 +426,6 @@ protected:
 	/** Applies a view kick from the recoil pattern + random yaw jitter. */
 	void ApplyRecoilKick(int32 ShotIndex);
 
-	/** Server: records this frame's hitbox snapshot for lag compensation. */
-	void CaptureHitboxSnapshot();
-
-	/**
-	 * Server: rewinds every other player's body to the pose they had at
-	 * ServerTime - (shooter ping / 2), for one trace. Returns the rewind time used.
-	 */
-	float RewindPlayersForLagCompensation(float ShooterPingMs);
-
-	/** Server: restores the rewound bodies. */
-	void RestorePlayersAfterLagCompensation();
-
 	/** Server: ensures the current fire mode is legal for the weapon. */
 	void SanitiseFireMode();
 
@@ -489,10 +454,6 @@ protected:
 	/** --- ADS --- */
 	float ADSAlpha = 0.f;
 
-	/** --- Lag compensation --- */
-	TArray<FOneBrahamHitboxSnapshot> HitboxHistory;
-	float LastSnapshotTime = 0.f;
-
 	/** --- Utility --- */
 	/** Time of the last throw, for the anti-cheat rate limit. */
 	float LastUtilityTime = -1000.f;
@@ -512,9 +473,6 @@ protected:
 
 	/** Timer handle for the melee cooldown. */
 	FTimerHandle SourceMeleeCooldownHandle;
-
-	/** The lag-compensation snapshot currently applied for a trace. */
-	struct FOneBrahamHitboxSnapshot ActiveRewindSnapshot;
 
 	/** Screen-shake-less "kick" applied to the first person weapon mesh. */
 	FVector2D WeaponKickOffset = FVector2D::ZeroVector;

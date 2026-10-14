@@ -220,6 +220,10 @@ DEFINITION = re.compile(r'^[A-Za-z_][A-Za-z0-9_:<>,\s\*&]*?\b([A-Za-z_][A-Za-z0-
 #: before the first top-level parenthesis.
 DECL_LINE = re.compile(
     r'^(?P<return>(?:[\w:<>,*&\[\]\s]|::)+?)\s*'      # return type
+    r'(?<![A-Za-z0-9_])'                              # a whole identifier: a
+                                                      # constructor has no return
+                                                      # type, and without this the
+                                                      # F of FFoo(...) became one
     r'(?P<name>~?[A-Za-z_][A-Za-z0-9_]*)\s*'          # method name
     r'\((?P<params>.*)\)\s*'                          # parameters
     r'(?P<tail>(?:const\b|override\b|final\b|noexcept\b|virtual\b|\s)*)$',
