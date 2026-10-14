@@ -619,8 +619,9 @@ void UOneBrahamGameUserSettings::SetColourBlindMode(EOneBrahamColourBlindMode Ne
 {
 	ColourBlindMode = NewMode;
 
-	// CVD is implemented as a post-process material parameter so it works for
-	// all three deficiency types without shipping three LUTs.
+	// The interface swaps its own signal colours (UOneBrahamUIStyle reads this
+	// setting). The collection carries the mode to world materials too, so a
+	// beacon or a marker in the level can follow the same rule.
 	UMaterialParameterCollection* Collection = LoadObject<UMaterialParameterCollection>(
 		nullptr, TEXT("/Game/OneBraham/Materials/MPC_OneBraham_Global.MPC_OneBraham_Global"));
 

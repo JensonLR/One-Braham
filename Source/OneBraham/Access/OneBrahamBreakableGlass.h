@@ -143,8 +143,26 @@ protected:
 	UPROPERTY(ReplicatedUsing = OnRep_Broken, VisibleAnywhere, BlueprintReadOnly, Category = "One Braham|Glass")
 	bool bBroken = false;
 
-	/** Server-side accumulator. Not replicated: nobody needs a crack meter. */
+	/** Server-side accumulator. */
 	float AccumulatedDamage = 0.f;
+
+	/**
+	 * How cracked the pane looks, 0..255: the damage it has taken as a share of
+	 * what breaks it. Replicated as a byte so every machine draws the same cracks
+	 * (M_OB_Glass CrackAmount) and a shot window reads as shot.
+	 */
+	UPROPERTY(ReplicatedUsing = OnRep_Crack)
+	uint8 CrackLevel = 0;
+
+	UFUNCTION()
+	void OnRep_Crack();
+
+	/** Writes CrackLevel into the pane's material. */
+	void ApplyCrack();
+
+	/** The pane's own material instance, made on first crack. */
+	UPROPERTY(Transient)
+	TObjectPtr<class UMaterialInstanceDynamic> PaneMaterial = nullptr;
 
 	/** Applies `PaneSizeCm` and `ThicknessCm` to the mesh. Never scale the actor. */
 	void ApplyDimensions();

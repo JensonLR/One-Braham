@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Access/OneBrahamBreakableGlass.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Voice/OneBrahamVoiceDirector.h"
 
 #include "VFX/OneBrahamVFXStatics.h"
@@ -69,6 +70,31 @@ void AOneBrahamBreakableGlass::BeginPlay()
 		// A late joiner, or a PIE session restarted on top of a broken pane.
 		ApplyBrokenState();
 	}
+	else if (CrackLevel > 0)
+	{
+		ApplyCrack();
+	}
+}
+
+void AOneBrahamBreakableGlass::OnRep_Crack()
+{
+	ApplyCrack();
+}
+
+void AOneBrahamBreakableGlass::ApplyCrack()
+{
+	if (PaneMesh == nullptr || IsRunningDedicatedServer())
+	{
+		return;
+	}
+	if (PaneMaterial == nullptr)
+	{
+		PaneMaterial = PaneMesh->CreateAndSetMaterialInstanceDynamic(0);
+	}
+	if (PaneMaterial != nullptr)
+	{
+		PaneMaterial->SetScalarParameterValue(TEXT("CrackAmount"), static_cast<float>(CrackLevel) / 255.f);
+	}
 }
 
 void AOneBrahamBreakableGlass::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -76,6 +102,7 @@ void AOneBrahamBreakableGlass::GetLifetimeReplicatedProps(TArray<FLifetimeProper
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AOneBrahamBreakableGlass, bBroken);
+	DOREPLIFETIME(AOneBrahamBreakableGlass, CrackLevel);
 }
 
 void AOneBrahamBreakableGlass::ApplyDimensions()
@@ -140,14 +167,23 @@ float AOneBrahamBreakableGlass::TakeDamage(float DamageAmount, FDamageEvent cons
 		ImpactNormal = (GetActorLocation() - ImpactPoint).GetSafeNormal();
 	}
 
-	if (DamageAmount < OBGlassMinimumDamage)
+	AccumulatedDamage += DamageAmount;
+
+	// The cracks every machine sees, a quarter-crack minimum so the first hit
+	// is visible. OnRep does not run where the value was set.
+	const uint8 NewCrack = static_cast<uint8>(FMath::Clamp(
+		FMath::Max(0.25f, AccumulatedDamage / FMath::Max(PaneHealth, 1.f)) * 255.f, 0.f, 255.f));
+	if (NewCrack > CrackLevel)
 	{
-		// A graze. It still marks the glass, but nothing breaks.
-		AccumulatedDamage += DamageAmount;
-		return 0.f;
+		CrackLevel = NewCrack;
+		ApplyCrack();
 	}
 
-	AccumulatedDamage += DamageAmount;
+	if (DamageAmount < OBGlassMinimumDamage)
+	{
+		// A graze. It marks the glass, but nothing breaks.
+		return 0.f;
+	}
 
 	if (AccumulatedDamage >= PaneHealth)
 	{

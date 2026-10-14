@@ -82,6 +82,10 @@ protected:
 	TArray<FVector> StreakOffsets;
 
 	bool bRainActive = false;
+
+	/** The global collection the surface master reads RainWetness from. */
+	TWeakObjectPtr<class UMaterialParameterCollection> WetnessCollection;
+	float AppliedWetness = -1.f;
 	float EvaluateAccumulator = 0.f;
 	float TubeCountdown = 0.f;
 };

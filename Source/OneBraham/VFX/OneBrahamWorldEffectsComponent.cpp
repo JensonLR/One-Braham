@@ -15,6 +15,8 @@
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "VFX/OneBrahamVFXStatics.h"
+#include "Kismet/KismetMaterialLibrary.h"
+#include "Materials/MaterialParameterCollection.h"
 
 UOneBrahamWorldEffectsComponent::UOneBrahamWorldEffectsComponent()
 {
@@ -104,6 +106,23 @@ void UOneBrahamWorldEffectsComponent::Evaluate()
 	const UWorld* World = GetWorld();
 	const AOneBrahamGameState* GS = World ? World->GetGameState<AOneBrahamGameState>() : nullptr;
 	const int32 Floor = GetViewedFloor();
+
+	// Wet surfaces follow the match's weather everywhere at once: the surface
+	// master multiplies this by each surface's own WetnessResponse.
+	const float Wetness = GS != nullptr && GS->bRaining ? 1.f : 0.f;
+	if (Wetness != AppliedWetness)
+	{
+		if (!WetnessCollection.IsValid())
+		{
+			WetnessCollection = LoadObject<UMaterialParameterCollection>(nullptr,
+				TEXT("/Game/OneBraham/Materials/MPC_OneBraham_Global.MPC_OneBraham_Global"), nullptr, LOAD_NoWarn | LOAD_Quiet);
+		}
+		if (WetnessCollection.IsValid())
+		{
+			UKismetMaterialLibrary::SetScalarParameterValue(this, WetnessCollection.Get(), TEXT("RainWetness"), Wetness);
+			AppliedWetness = Wetness;
+		}
+	}
 
 	// Rain: outdoors, in a wet match.
 	const bool bOutdoors = Floor == OneBrahamConstants::FloorPlaza || Floor == OneBrahamConstants::FloorSkydeck;

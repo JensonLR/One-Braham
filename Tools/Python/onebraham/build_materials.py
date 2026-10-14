@@ -14,8 +14,9 @@ as wiring diagrams for anyone who would rather see them than run them.
 
 WHAT IT CREATES
     /Game/OneBraham/Materials/PM_OB_<Surface>      one physical material per surface (15)
-    /Game/OneBraham/Materials/M_OB_Surface         master, lit opaque
-    /Game/OneBraham/Materials/M_OB_Glass           master, translucent
+    /Game/OneBraham/Materials/MPC_OneBraham_Global flash, colour-blind mode, rain wetness
+    /Game/OneBraham/Materials/M_OB_Surface         master, lit opaque, dirt and wetness
+    /Game/OneBraham/Materials/M_OB_Glass           master, translucent, cracks
     /Game/OneBraham/Materials/M_OB_Emissive        master, unlit signage
     /Game/OneBraham/Materials/M_OB_Screen          master, unlit with a screen texture
     /Game/OneBraham/Materials/M_OB_Decal           master, deferred decal
@@ -56,6 +57,23 @@ PHYSICAL_SURFACE_NAMES = [
 # Surface name -> the master that draws it. Glass-ish things get the translucent
 # master; everything else is the lit opaque one.
 GLASS_SURFACES = ("Glass", "BallisticGlass", "Puddle")
+
+#: How much grime each surface shows (M_OB_Surface DirtAmount). Floors people
+#: walk on show the most; a server rack is cleaned more often than anything else
+#: in the building.
+DIRT = {
+    "Concrete": 0.35, "Carpet": 0.20, "Lino": 0.25, "Decking": 0.30, "Grating": 0.30,
+    "Metal": 0.15, "ServerRack": 0.10, "Marble": 0.08, "Wood": 0.15,
+    "Plasterboard": 0.12, "Fabric": 0.15,
+}
+
+#: How much a surface answers the rain (WetnessResponse). Only what is out in
+#: the weather: the Skydeck's decking. Indoor concrete stays dry in a wet match.
+WET_RESPONSE = {"Decking": 1.0}
+
+#: The global parameter collection C++ writes to: the flashbang white-out, the
+#: colour-blind mode, and the rain wetness the surface master reads.
+COLLECTION_SCALARS = (("FlashAlpha", 0.0), ("ColourBlindMode", 0.0), ("RainWetness", 0.0))
 
 # Which surfaces are metal enough to matter for reflections and impact sparks.
 METAL_SURFACES = ("Metal", "Grating", "Decking", "ServerRack")
@@ -102,6 +120,13 @@ def _create_asset(name, folder, asset_class, factory):
     path = u"{0}/{1}".format(folder, name)
     existing = unreal.EditorAssetLibrary.load_asset(path)
     if existing is not None:
+        # A master is authored from scratch every run. Without this, each run
+        # added a second copy of every node to the existing graph.
+        if asset_class is unreal.Material and _mel() is not None:
+            try:
+                _mel().delete_all_material_expressions(existing)
+            except Exception as exc:  # noqa: BLE001
+                C.warn(u"  {0}: old graph not cleared ({1})".format(name, exc))
         return existing, False
     asset = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
         name, folder, asset_class, factory)
@@ -228,6 +253,45 @@ def build_physical_materials(report):
 #  Master materials
 # ---------------------------------------------------------------------------
 
+def build_parameter_collection(report):
+    """MPC_OneBraham_Global: the values C++ sets for every material at once.
+
+    FlashAlpha (the flashbang white-out), ColourBlindMode (world markers follow
+    the interface's palette) and RainWetness (the surface master's rain). The
+    code has always written to this collection; until this function, nothing
+    made it, so every one of those writes went nowhere.
+    """
+    path = u"{0}/MPC_OneBraham_Global".format(C.MATERIALS)
+    collection, created = _create_asset("MPC_OneBraham_Global", C.MATERIALS,
+                                        unreal.MaterialParameterCollection,
+                                        unreal.MaterialParameterCollectionFactoryNew())
+    if collection is None:
+        report.failed("MPC_OneBraham_Global", "could not create the collection")
+        return None
+
+    existing = {}
+    try:
+        for parameter in collection.get_editor_property("scalar_parameters"):
+            existing[str(parameter.get_editor_property("parameter_name"))] = parameter
+    except Exception:  # noqa: BLE001
+        existing = {}
+
+    scalars = []
+    for name, default in COLLECTION_SCALARS:
+        # An existing parameter keeps its id, so materials already compiled
+        # against it keep resolving.
+        parameter = existing.get(name) or unreal.CollectionScalarParameter()
+        parameter.set_editor_property("parameter_name", name)
+        parameter.set_editor_property("default_value", float(default))
+        scalars.append(parameter)
+    collection.set_editor_property("scalar_parameters", scalars)
+
+    unreal.EditorAssetLibrary.save_asset(path)
+    report.created_asset(path) if created else report.updated_asset(path)
+    C.log(u"  MPC_OneBraham_Global: {0}".format(", ".join(n for n, _ in COLLECTION_SCALARS)))
+    return collection
+
+
 def build_master_surface(report):
     """M_OB_Surface: the lit opaque master every solid surface instance is made from.
 
@@ -255,11 +319,75 @@ def build_master_surface(report):
     _set_shading(material, "MSM_DEFAULT_LIT")
     _set_blend(material, "BLEND_OPAQUE")
 
-    base = _vector_param(material, "BaseColour", (0.5, 0.5, 0.5, 1.0), -700, -420)
-    _connect_property(material, base, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    base = _vector_param(material, "BaseColour", (0.5, 0.5, 0.5, 1.0), -1500, -420)
+    rough = _scalar_param(material, "Roughness", 0.5, -1500, -280)
 
-    rough = _scalar_param(material, "Roughness", 0.5, -700, -280)
-    _connect_property(material, rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
+    # Dirt: world-aligned noise, so grime is continuous across a wall made of
+    # many boxes and never repeats with the UVs. DirtAmount scales it.
+    world = _expr(material, unreal.MaterialExpressionWorldPosition, -2100, -900)
+    dirt_scale = _scalar_param(material, "DirtScale", 0.004, -2100, -760, 0.0005, 0.05)
+    world_mul = _expr(material, unreal.MaterialExpressionMultiply, -1850, -860)
+    _connect(material, world, "", world_mul, "A")
+    _connect(material, dirt_scale, "", world_mul, "B")
+    noise = _expr(material, unreal.MaterialExpressionNoise, -1600, -860)
+    for prop, value in (("output_min", 0.0), ("output_max", 1.0), ("levels", 4), ("turbulence", True)):
+        try:
+            noise.set_editor_property(prop, value)
+        except Exception as exc:  # noqa: BLE001
+            C.warn(u"  M_OB_Surface noise {0}: {1}".format(prop, exc))
+    _connect(material, world_mul, "", noise, "Position")
+    dirt_amount = _scalar_param(material, "DirtAmount", 0.0, -1600, -700)
+    dirt_mask = _expr(material, unreal.MaterialExpressionMultiply, -1350, -800)
+    _connect(material, noise, "", dirt_mask, "A")
+    _connect(material, dirt_amount, "", dirt_mask, "B")
+    dirt_colour = _vector_param(material, "DirtColour", (0.16, 0.14, 0.11, 1.0), -1350, -640)
+
+    dirty_base = _expr(material, unreal.MaterialExpressionLinearInterpolate, -1100, -480)
+    _connect(material, base, "", dirty_base, "A")
+    _connect(material, dirt_colour, "", dirty_base, "B")
+    _connect(material, dirt_mask, "", dirty_base, "Alpha")
+    dirty_rough = _expr(material, unreal.MaterialExpressionLinearInterpolate, -1100, -300)
+    _connect(material, rough, "", dirty_rough, "A")
+    _connect(material, _scalar_constant(material, 0.92, -1350, -360), "", dirty_rough, "B")
+    _connect(material, dirt_mask, "", dirty_rough, "Alpha")
+
+    # Wetness: the rain (MPC_OneBraham_Global.RainWetness, set by the world
+    # effects component in a wet match) times how much this surface is out in
+    # it. Wet darkens the colour and takes the roughness down to a sheen.
+    wet = None
+    collection = unreal.EditorAssetLibrary.load_asset(C.MATERIALS + "/MPC_OneBraham_Global")
+    if collection is not None:
+        rain = _expr(material, unreal.MaterialExpressionCollectionParameter, -1350, -180)
+        try:
+            rain.set_editor_property("collection", collection)
+            rain.set_editor_property("parameter_name", "RainWetness")
+            response = _scalar_param(material, "WetnessResponse", 0.0, -1350, -60)
+            wet = _expr(material, unreal.MaterialExpressionMultiply, -1100, -120)
+            _connect(material, rain, "", wet, "A")
+            _connect(material, response, "", wet, "B")
+        except Exception as exc:  # noqa: BLE001
+            C.warn(u"  M_OB_Surface: no wetness ({0})".format(exc))
+            wet = None
+    else:
+        C.warn(u"  M_OB_Surface: MPC_OneBraham_Global missing - built without wetness")
+
+    if wet is not None:
+        darken = _expr(material, unreal.MaterialExpressionLinearInterpolate, -850, -420)
+        _connect(material, _scalar_constant(material, 1.0, -1100, -560), "", darken, "A")
+        _connect(material, _scalar_constant(material, 0.55, -1100, -620), "", darken, "B")
+        _connect(material, wet, "", darken, "Alpha")
+        wet_base = _expr(material, unreal.MaterialExpressionMultiply, -600, -440)
+        _connect(material, dirty_base, "", wet_base, "A")
+        _connect(material, darken, "", wet_base, "B")
+        wet_rough = _expr(material, unreal.MaterialExpressionLinearInterpolate, -600, -280)
+        _connect(material, dirty_rough, "", wet_rough, "A")
+        _connect(material, _scalar_constant(material, 0.08, -850, -240), "", wet_rough, "B")
+        _connect(material, wet, "", wet_rough, "Alpha")
+        _connect_property(material, wet_base, "", unreal.MaterialProperty.MP_BASE_COLOR)
+        _connect_property(material, wet_rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
+    else:
+        _connect_property(material, dirty_base, "", unreal.MaterialProperty.MP_BASE_COLOR)
+        _connect_property(material, dirty_rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
 
     metal = _scalar_param(material, "Metallic", 0.0, -700, -160)
     _connect_property(material, metal, "", unreal.MaterialProperty.MP_METALLIC)
@@ -319,14 +447,58 @@ def build_master_glass(report):
     _set_shading(material, "MSM_DEFAULT_LIT")
     _set_blend(material, "BLEND_TRANSLUCENT")
 
-    base = _vector_param(material, "BaseColour", (0.75, 0.80, 0.85, 1.0), -700, -420)
-    _connect_property(material, base, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    glass_base = _vector_param(material, "BaseColour", (0.75, 0.80, 0.85, 1.0), -1300, -420)
 
-    opacity = _scalar_param(material, "Opacity", 0.15, -700, -280)
-    _connect_property(material, opacity, "", unreal.MaterialProperty.MP_OPACITY)
+    opacity = _scalar_param(material, "Opacity", 0.15, -1300, -280)
+    rough = _scalar_param(material, "Roughness", 0.04, -1300, -160)
 
-    rough = _scalar_param(material, "Roughness", 0.04, -700, -160)
-    _connect_property(material, rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
+    # Cracks: lines where world-aligned noise crosses zero, faded in by
+    # CrackAmount, which AOneBrahamBreakableGlass raises as the pane takes
+    # damage. A cracked pane is whiter, rougher and harder to see through, so
+    # a window that has been shot is a window a player can read.
+    world = _expr(material, unreal.MaterialExpressionWorldPosition, -1900, 300)
+    crack_scale = _scalar_param(material, "CrackScale", 0.03, -1900, 440, 0.005, 0.2)
+    world_mul = _expr(material, unreal.MaterialExpressionMultiply, -1650, 360)
+    _connect(material, world, "", world_mul, "A")
+    _connect(material, crack_scale, "", world_mul, "B")
+    noise = _expr(material, unreal.MaterialExpressionNoise, -1400, 360)
+    for prop, value in (("output_min", -1.0), ("output_max", 1.0), ("levels", 3), ("turbulence", False)):
+        try:
+            noise.set_editor_property(prop, value)
+        except Exception as exc:  # noqa: BLE001
+            C.warn(u"  M_OB_Glass noise {0}: {1}".format(prop, exc))
+    _connect(material, world_mul, "", noise, "Position")
+    line_abs = _expr(material, unreal.MaterialExpressionAbs, -1150, 360)
+    _connect(material, noise, "", line_abs, "")
+    line_mul = _expr(material, unreal.MaterialExpressionMultiply, -950, 360)
+    _connect(material, line_abs, "", line_mul, "A")
+    _connect(material, _scalar_constant(material, 14.0, -1150, 460), "", line_mul, "B")
+    line_sat = _expr(material, unreal.MaterialExpressionSaturate, -780, 360)
+    _connect(material, line_mul, "", line_sat, "")
+    lines = _expr(material, unreal.MaterialExpressionOneMinus, -620, 360)
+    _connect(material, line_sat, "", lines, "")
+    crack_amount = _scalar_param(material, "CrackAmount", 0.0, -780, 480)
+    crack = _expr(material, unreal.MaterialExpressionMultiply, -460, 400)
+    _connect(material, lines, "", crack, "A")
+    _connect(material, crack_amount, "", crack, "B")
+
+    cracked_opacity = _expr(material, unreal.MaterialExpressionLinearInterpolate, -250, -280)
+    _connect(material, opacity, "", cracked_opacity, "A")
+    _connect(material, _scalar_constant(material, 0.85, -460, -240), "", cracked_opacity, "B")
+    _connect(material, crack, "", cracked_opacity, "Alpha")
+    _connect_property(material, cracked_opacity, "", unreal.MaterialProperty.MP_OPACITY)
+
+    cracked_rough = _expr(material, unreal.MaterialExpressionLinearInterpolate, -250, -160)
+    _connect(material, rough, "", cracked_rough, "A")
+    _connect(material, _scalar_constant(material, 0.6, -460, -120), "", cracked_rough, "B")
+    _connect(material, crack, "", cracked_rough, "Alpha")
+    _connect_property(material, cracked_rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
+
+    cracked_base = _expr(material, unreal.MaterialExpressionLinearInterpolate, -250, -420)
+    _connect(material, glass_base, "", cracked_base, "A")
+    _connect(material, _constant3(material, (0.92, 0.94, 0.95), -460, -460), "", cracked_base, "B")
+    _connect(material, crack, "", cracked_base, "Alpha")
+    _connect_property(material, cracked_base, "", unreal.MaterialProperty.MP_BASE_COLOR)
 
     metal = _scalar_param(material, "Metallic", 0.0, -700, -40)
     _connect_property(material, metal, "", unreal.MaterialProperty.MP_METALLIC)
@@ -515,11 +687,15 @@ def build_surface_instances(report, masters, physicals):
             report.failed("MI_" + name, "could not create material instance")
             continue
 
+        extras = {}
+        if name not in GLASS_SURFACES:
+            extras["DirtAmount"] = DIRT.get(name, 0.15)
+            extras["WetnessResponse"] = WET_RESPONSE.get(name, 0.0)
         _apply_instance(
             asset, master, colour_key, roughness,
             0.85 if name in METAL_SURFACES else 0.0,
             SURFACE_ORDER.index(name) if name in SURFACE_ORDER else 2,
-            physical=physicals.get(name))
+            extras=extras, physical=physicals.get(name))
 
         path = u"{0}/MI_{1}".format(C.MATERIALS_INSTANCES, name)
         unreal.EditorAssetLibrary.save_asset(path)
@@ -583,6 +759,7 @@ def build_all():
                 masters[key] = asset
         return masters
 
+    C.guard(report, "parameter collection", build_parameter_collection, report)
     C.guard(report, "master materials", _masters, report)
 
     C.guard(report, "surface instances", build_surface_instances, report, masters, physicals)

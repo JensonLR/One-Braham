@@ -129,6 +129,7 @@ completes with a `MatchResult` on both the winning and losing paths.
       placeholders (480 / 480001 / 480002) with the real values.
 - [ ] Steam Dev AppID replaced in `Config/DefaultEngine.ini`.
 - [ ] Achievements and stats upload cleanly.
+- [ ] Colour-blind modes reach the purge lighting and the alarm beacons (lights in the level, not materials, so they need their own alternative colours).
 - [ ] Steam Input action manifest matches the four mapping contexts.
 - [ ] Cloud saves: settings and keybinds survive a second machine.
 - [ ] Purchasable cosmetics are Steam Inventory items, and `ServerSetAppearance`
