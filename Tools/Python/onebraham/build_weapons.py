@@ -493,6 +493,7 @@ def _apply_definition(report, asset, weapon, blueprints):
     audible, interior, suppressed = weapon["audio"]
     _set(asset, "audible_radius", audible, report, context)
     _set(asset, "interior_audible_radius", interior, report, context)
+    _set(asset, "b_integral_suppressor", suppressed, report, context)
 
     sound_prefix = {
         "W_Pistol": "SFX_Gunshot_Pistol",

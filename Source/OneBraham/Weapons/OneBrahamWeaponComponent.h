@@ -333,6 +333,10 @@ public:
 	UFUNCTION(Server, Reliable, Category = "One Braham|Weapons")
 	void ServerRequestReload();
 
+	/** Stops a shell-by-shell reload so the loaded shells can be fired. */
+	UFUNCTION(Server, Reliable, Category = "One Braham|Weapons")
+	void ServerInterruptReload();
+
 	UFUNCTION(Server, Reliable, Category = "One Braham|Weapons")
 	void ServerRequestEquipSlot(EOneBrahamWeaponSlot Slot);
 
@@ -495,6 +499,13 @@ protected:
 	float LastMedkitTime = -1000.f;
 	bool bMedkitInProgress = false;
 	FTimerHandle MedkitTimerHandle;
+
+	/** Server: a hit during the medkit animation ends it and spends the kit. */
+	UFUNCTION()
+	void HandleDamageDuringMedkit(float Damage, AActor* DamageInstigator, FVector InstigatorLocation);
+
+	/** Server: unbinds the damage listener and clears the timer. */
+	void EndMedkit();
 
 	/** Random stream for spread, seeded per component. */
 	FRandomStream SpreadStream;

@@ -406,6 +406,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio")
 	TSoftObjectPtr<USoundBase> ShellDropSound;
 
+	/** Built quiet (the P99-S): fires as if a suppressor were fitted, with no
+	 *  attachment in the muzzle slot. Suppressed audio, no flash, no light. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio")
+	bool bIntegralSuppressor = false;
+
 	/** Metres at which this weapon's report is still clearly audible. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Audio")
 	float AudibleRadius = 9000.f;

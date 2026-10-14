@@ -45,6 +45,8 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
+#include "GameFramework/GameModeBase.h"
+#include "GameFramework/GameSession.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformFileManager.h"
@@ -882,22 +884,33 @@ void AOneBrahamPlayerController::Input_JumpCompleted(const FInputActionValue& Va
 
 void AOneBrahamPlayerController::Input_SprintStarted(const FInputActionValue& Value)
 {
+	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
+	const bool bHoldToSprint = Settings != nullptr && Settings->bHoldToSprint;
+
 	if (AOneBrahamCharacter* Character = GetOneBrahamCharacter())
 	{
-		Character->SetSprintRequested(true);
+		// Hold: the press starts it. Toggle: each press flips it, so a second
+		// tap is how a latched sprint is dropped without stopping.
+		Character->SetSprintRequested(bHoldToSprint ? true : !Character->IsSprintRequested());
 	}
 }
 
 void AOneBrahamPlayerController::Input_SprintCompleted(const FInputActionValue& Value)
 {
 	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
-	const bool bIsHold = Settings == nullptr || !Settings->bHoldToSprint;
+	const bool bHoldToSprint = Settings != nullptr && Settings->bHoldToSprint;
+
+	// Hold: releasing ends the sprint. Toggle: the release means nothing; the
+	// latch ends on the next press, on stopping, or on firing. This was the
+	// other way round, so "hold to sprint" latched and "toggle" needed holding.
+	if (!bHoldToSprint)
+	{
+		return;
+	}
 
 	if (AOneBrahamCharacter* Character = GetOneBrahamCharacter())
 	{
-		// With "hold to sprint" off, tapping the key latches sprint until the
-		// player stops or shoots; with it on, releasing ends the sprint.
-		Character->SetSprintRequested(!bIsHold ? Character->IsSprintRequested() : false);
+		Character->SetSprintRequested(false);
 	}
 }
 
@@ -2296,6 +2309,20 @@ void AOneBrahamPlayerController::ReportViolation(const FString& Reason, float Se
 	if (GameSettings.bKickOnRepeatedViolations && ViolationScore >= GameSettings.ViolationsBeforeKick)
 	{
 		OB_AUDIT_LOG("SECURITY: kicking '%s' after violation score reached %d.", *GetName(), ViolationScore);
-		ClientReturnToMainMenuWithTextReason(NSLOCTEXT("OneBraham", "Kicked", "Disconnected by the server."));
+		const FText Reason = NSLOCTEXT("OneBraham", "Kicked", "Disconnected by the server.");
+
+		// KickPlayer tells the client why and then closes the connection from
+		// this end. ClientReturnToMainMenuWithTextReason alone only asked the
+		// client to leave, and the clients worth kicking are the ones that
+		// do not do as they are asked.
+		AGameModeBase* GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode() : nullptr;
+		if (GameMode != nullptr && GameMode->GameSession != nullptr && !IsLocalController())
+		{
+			GameMode->GameSession->KickPlayer(this, Reason);
+		}
+		else if (!IsLocalController())
+		{
+			ClientReturnToMainMenuWithTextReason(Reason);
+		}
 	}
 }

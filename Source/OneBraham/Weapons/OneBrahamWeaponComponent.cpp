@@ -759,6 +759,22 @@ void UOneBrahamWeaponComponent::SetTriggerHeld(bool bHeld)
 		return;
 	}
 
+	// A press during a shell-by-shell reload with shells already in stops the
+	// loading; the next press fires. Every other reload has to finish.
+	if (bHeld && bIsReloading && CurrentWeapon->Definition != nullptr &&
+		CurrentWeapon->Definition->bPerShellReload && CurrentWeapon->GetAmmoInMagazine() > 0)
+	{
+		if (GetOwner()->HasAuthority())
+		{
+			ServerInterruptReload_Implementation();
+		}
+		else
+		{
+			ServerInterruptReload();
+		}
+		return;
+	}
+
 	// Cannot fire while sprinting, mantling or downed: this is a tactical shooter,
 	// not a run-and-gun. Reloading also blocks firing.
 	if (bHeld && (Character->IsSprintRequested() ||
@@ -1236,6 +1252,26 @@ void UOneBrahamWeaponComponent::RequestReload()
 	ForceNetUpdate();
 }
 
+void UOneBrahamWeaponComponent::ServerInterruptReload_Implementation()
+{
+	if (!bIsReloading || CurrentWeapon == nullptr || CurrentWeapon->Definition == nullptr)
+	{
+		return;
+	}
+
+	// Only a shell-by-shell reload can be stopped part way: a magazine that is
+	// half seated is not a state the weapon has. And only with something loaded.
+	if (!CurrentWeapon->Definition->bPerShellReload || CurrentWeapon->GetAmmoInMagazine() <= 0)
+	{
+		return;
+	}
+
+	CurrentWeapon->ServerCancelReload();
+	bIsReloading = false;
+	OnRep_Reloading();
+	ForceNetUpdate();
+}
+
 void UOneBrahamWeaponComponent::ServerCompleteReload()
 {
 	if (!GetOwner()->HasAuthority() || CurrentWeapon == nullptr || CurrentWeapon->Definition == nullptr)
@@ -1257,11 +1293,28 @@ void UOneBrahamWeaponComponent::ServerCompleteReload()
 		Needed = MagazineSize - CurrentWeapon->GetAmmoInMagazine();
 	}
 
-	const int32 Transferred = FMath::Min(Needed, Reserve);
+	// A pump shotgun loads one shell per cycle. This used to move a whole tube
+	// at the end of the first 0.55 s cycle: eight shells in about half a second.
+	const bool bPerShell = CurrentWeapon->Definition->bPerShellReload;
+	const int32 Transferred = FMath::Min(bPerShell ? FMath::Min(1, Needed) : Needed, Reserve);
 
 	Reserve -= Transferred;
 	SyncReplicatedInventory();
 	CurrentWeapon->SetAmmoInMagazine(CurrentWeapon->GetAmmoInMagazine() + Transferred);
+
+	if (bPerShell && Transferred > 0 && Reserve > 0 && CurrentWeapon->GetAmmoInMagazine() < MagazineSize)
+	{
+		OnAmmoChanged.Broadcast(CurrentWeapon->GetAmmoInMagazine(), Reserve);
+		CurrentWeapon->ServerContinueShellReload();
+		ForceNetUpdate();
+		return;
+	}
+
+	if (bPerShell)
+	{
+		// The tube is full or the pouch is empty: the closing pump.
+		CurrentWeapon->MulticastPlayReloadFX(FName(TEXT("Complete")));
+	}
 
 	bIsReloading = false;
 	OnRep_Reloading();
@@ -1632,8 +1685,10 @@ void UOneBrahamWeaponComponent::UseMedkit()
 	}
 
 	// Health is restored at the END of the animation: being shot mid-medkit
-	// cancels it and costs the kit. This is the "no free healing" rule.
+	// cancels it and costs the kit. This is the "no free healing" rule, which
+	// until HandleDamageDuringMedkit was only this comment.
 	bMedkitInProgress = true;
+	Health->OnDamageTaken.AddUniqueDynamic(this, &UOneBrahamWeaponComponent::HandleDamageDuringMedkit);
 
 	const UOneBrahamMatchSettingsAsset* Settings = nullptr;
 	if (const AOneBrahamGameState* GameState = GetWorld()->GetGameState<AOneBrahamGameState>())
@@ -1646,7 +1701,7 @@ void UOneBrahamWeaponComponent::UseMedkit()
 
 	GetWorld()->GetTimerManager().SetTimer(MedkitTimerHandle, FTimerDelegate::CreateWeakLambda(this, [this, HealAmount, Inventory]()
 	{
-		bMedkitInProgress = false;
+		EndMedkit();
 
 		AOneBrahamCharacter* MedCharacter = GetCharacter();
 		if (MedCharacter == nullptr || Inventory == nullptr)
@@ -1670,6 +1725,43 @@ void UOneBrahamWeaponComponent::UseMedkit()
 			}
 		}
 	}), UseSeconds, false);
+}
+
+void UOneBrahamWeaponComponent::EndMedkit()
+{
+	bMedkitInProgress = false;
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(MedkitTimerHandle);
+	}
+
+	if (AOneBrahamCharacter* Character = GetCharacter())
+	{
+		if (UOneBrahamHealthComponent* Health = Character->GetHealthComponent())
+		{
+			Health->OnDamageTaken.RemoveDynamic(this, &UOneBrahamWeaponComponent::HandleDamageDuringMedkit);
+		}
+	}
+}
+
+void UOneBrahamWeaponComponent::HandleDamageDuringMedkit(float Damage, AActor* DamageInstigator, FVector InstigatorLocation)
+{
+	if (!bMedkitInProgress || Damage <= 0.f || !GetOwner() || !GetOwner()->HasAuthority())
+	{
+		return;
+	}
+
+	EndMedkit();
+
+	// The kit was open: it is spent, and nothing is healed.
+	if (AOneBrahamCharacter* Character = GetCharacter())
+	{
+		if (UOneBrahamInventoryComponent* Inventory = Character->GetInventoryComponent())
+		{
+			Inventory->ServerConsumeMedkit();
+		}
+	}
 }
 
 // ==========================================================================

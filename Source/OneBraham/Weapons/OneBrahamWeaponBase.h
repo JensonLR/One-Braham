@@ -130,6 +130,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Weapon")
 	void ServerFinishReload();
 
+	/** Per-shell weapons: one more shell's worth of time, after the component
+	 *  has loaded the last one and found room for another. */
+	void ServerContinueShellReload();
+
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Weapon")
 	void ServerCancelReload();
 
@@ -195,7 +199,10 @@ public:
 	float GetEffectiveADSTime() const;
 
 	UFUNCTION(BlueprintPure, Category = "One Braham|Weapon")
-	bool HasSuppressor() const { return bSuppressorFitted; }
+	bool HasSuppressor() const { return IsSuppressed(); }
+
+	/** A suppressor in the muzzle slot, or a weapon built suppressed. */
+	bool IsSuppressed() const;
 
 	// ======================================================================
 	//  FX (client-side, called on every machine that can see the shot)
@@ -206,7 +213,7 @@ public:
 	UFUNCTION(NetMulticast, Unreliable, Category = "One Braham|Weapon")
 	void MulticastPlayImpactFX(const TArray<FOneBrahamImpactInfo>& Impacts);
 
-	/** Stage: "Start", "Complete" or "Abort". Montage and reload foley on every machine. */
+	/** Stage: "Start", "Shell" (one shell in, per-shell weapons), "Complete" or "Abort". Montage and reload foley on every machine. */
 	UFUNCTION(NetMulticast, Reliable, Category = "One Braham|Weapon")
 	void MulticastPlayReloadFX(FName Stage);
 

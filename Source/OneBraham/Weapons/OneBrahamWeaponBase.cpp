@@ -453,7 +453,7 @@ float AOneBrahamWeaponBase::ServerFireShot(const FVector& StartLocation, const F
 		SetWeaponState(EOneBrahamWeaponState::Empty);
 	}
 
-	OnWeaponFired.Broadcast(this, bSuppressorFitted);
+	OnWeaponFired.Broadcast(this, IsSuppressed());
 
 	if (OwningWeaponComponent.IsValid())
 	{
@@ -462,7 +462,7 @@ float AOneBrahamWeaponBase::ServerFireShot(const FVector& StartLocation, const F
 
 	// FX go to every machine including the shooter (the shooter's own tracer is
 	// predicted locally too, but the multicast keeps them in step).
-	MulticastPlayFireFX(GetMuzzleLocation(), AimDirection, bSuppressorFitted);
+	MulticastPlayFireFX(GetMuzzleLocation(), AimDirection, IsSuppressed());
 	MulticastPlayImpactFX(OutImpacts);
 
 	return TotalDamage;
@@ -812,13 +812,30 @@ void AOneBrahamWeaponBase::ServerFinishReload()
 	SetWeaponState(EOneBrahamWeaponState::Ready);
 	ResetShotTracking();
 
-	MulticastPlayReloadFX(FName(TEXT("Complete")));
+	// A shell-by-shell weapon plays a shell going in each cycle; the component
+	// calls ServerContinueShellReload while there is room, and the closing
+	// animation plays only when it stops.
+	MulticastPlayReloadFX(Definition->bPerShellReload ? FName(TEXT("Shell")) : FName(TEXT("Complete")));
 
 	// The component owns the reserve pool, so it does the actual ammo transfer.
 	if (OwningWeaponComponent.IsValid())
 	{
 		OwningWeaponComponent->ServerCompleteReload();
 	}
+}
+
+void AOneBrahamWeaponBase::ServerContinueShellReload()
+{
+	if (Definition == nullptr || !HasAuthority() || !Definition->bPerShellReload)
+	{
+		return;
+	}
+
+	SetWeaponState(EOneBrahamWeaponState::Reloading);
+
+	GetWorldTimerManager().ClearTimer(ReloadTimerHandle);
+	GetWorldTimerManager().SetTimer(ReloadTimerHandle, this, &AOneBrahamWeaponBase::ServerFinishReload,
+		FMath::Max(0.1f, Definition->PerShellReloadTime), false);
 }
 
 void AOneBrahamWeaponBase::ServerCancelReload()
@@ -1195,6 +1212,13 @@ float AOneBrahamWeaponBase::GetEffectiveADSTime() const
 // ==========================================================================
 //  FX
 // ==========================================================================
+bool AOneBrahamWeaponBase::IsSuppressed() const
+{
+	// The P99-S has no muzzle attachment and was firing with a full flash, the
+	// muzzle light and the unsuppressed report: only a fitted suppressor counted.
+	return bSuppressorFitted || (Definition != nullptr && Definition->bIntegralSuppressor);
+}
+
 void AOneBrahamWeaponBase::MulticastPlayFireFX_Implementation(const FVector_NetQuantize& MuzzleLocation, const FVector_NetQuantizeNormal& Direction, bool bSuppressed)
 {
 	// --- Muzzle flash -----------------------------------------------------
@@ -1276,6 +1300,17 @@ void AOneBrahamWeaponBase::MulticastPlayReloadFX_Implementation(FName Stage)
 	}
 
 	const bool bStarted = Stage == FName(TEXT("Start"));
+
+	// One shell into the tube: the insert sound, and nothing else changes. The
+	// montage keeps looping and the cue timers below are not touched.
+	if (Stage == FName(TEXT("Shell")))
+	{
+		if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this))
+		{
+			Audio->PlayReloadCue(EOneBrahamReloadCue::MagIn, OwningCharacter.Get());
+		}
+		return;
+	}
 
 	if (USkeletalMeshComponent* Mesh = WeaponMesh)
 	{
