@@ -28,7 +28,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `build_ui.py` | 11 widget blueprints, the HUD string table, the font slot, the palette check | yes | yes |
 | `build_vfx.py` | 17 Niagara systems, 3 camera shakes, 6 decal materials, the authoring sheet | yes | yes |
 | `import_font.py` | font faces from `Content/UI/Fonts` | yes | yes |
-| `check_cpp_symbols.py` | reads `Source/OneBraham` and reports every member function declared with no definition | **no** | yes |
+| `check_cpp_symbols.py` | reads `Source/OneBraham` and reports every member function declared with no definition; also a scoped enum compared with `>=`/`<`/`|`, a member whose name is also an engine property of an ancestor class, and the same function defined twice | **no** | yes |
 | `check_uht_contracts.py` | UE reflection contracts: RPC bodies, RepNotify callbacks, replicated properties named in a `DOREPLIFETIME`, widgets that animate in a `NativeTick` the engine never calls, duplicate type names, `TSoftObjectPtr`s that name a type existing nowhere in the module, and settings fields that no code reads | **no** | yes |
 | `check_soft_paths.py` | every `/Game/` path the C++ loads by name, against the directories and name prefixes the pipeline writes | **no** | yes |
 | `check_calls.py` | call sites whose argument count cannot match the project's own declaration (defaults honoured, qualified calls skipped) | **no** | yes |
@@ -86,7 +86,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
 | input_ini | OK | 0.0 | wrote 41 actions (40 with a default key) |
-| cpp_symbols | OK | 0.1 | 558 declarations, all defined |
+| cpp_symbols | OK | 0.6 | 558 declarations, all defined; compile hygiene clean |
 | uht_contracts | OK | 0.5 | 791 UE reflection contracts, all satisfied |
 | soft_paths | OK | 0.0 | 37 soft paths, all conventional |
 | calls | OK | 0.2 | 877 call sites, all arities plausible |
@@ -124,7 +124,8 @@ installed is "29 steps succeeded, 0 failed".
 
 ```
 generate_input_ini        text only; can fail before the editor opens
-cpp_symbols               text only; a link error found in 0.1 s, not 4 minutes
+cpp_symbols               text only; a link error found in 0.6 s, not 4 minutes, and the two faults that are not errors at all: a scoped enum compared with an operator it does
+                          not have (refuses to compile), and a member that shadows an engine property (compiles, and the value you set is not the one the engine uses)
 uht_contracts             text only; a property that silently never replicates, a tick a widget never has
 soft_paths                text only; an asset path that silently loads nothing
 calls                     text only; a call that cannot compile: wrong argument count

@@ -22,6 +22,27 @@ WHY THIS EXISTS
     Both are found by comparing declarations against definitions textually, and
     neither is found by a code review of 107 headers.
 
+    Two more rules were added the day two of each were found by hand in code that
+    had been reviewed three times:
+
+      3. A relational or bitwise operator applied to a scoped enum. `enum class`
+         has no `operator>`, and both instances of this in the project were inside
+         a conditional that read as ordinary code: `AccessTier >=
+         EOneBrahamAccessTier::Executive` (the keycard's glow, in
+         `OneBrahamKeycard.cpp`) and `Size >= EOneBrahamTextSize::Header` (the
+         letter-spacing, in `OneBrahamUIStyle.cpp`). Neither would have compiled.
+      4. A project member whose name is also an engine property of one of its
+         ancestors. This one *does* compile, and that is the problem:
+         `UOneBrahamCharacterMovementComponent::AirControl` shadowed
+         `UCharacterMovementComponent::AirControl`, so the constructor's
+         `AirControl = 0.14f;` wrote to the project's member, the engine property
+         stayed at its default 0.05, and nothing read the member. Air control was
+         a fifth of what the code, the tuning comments and Docs/04 all said it
+         was, in a file where every number is written twice and only one of them
+         is the one the engine uses. The list of engine names below is curated,
+         not complete: it is a net for the properties a project like this one is
+         likely to reach for, and it says so rather than implying it is a proof.
+
 HOW IT PARSES
     Not with a regex over the whole file, which is what the first version of this
     tool did and why it reported 177 "missing" functions of which 170 were macro
@@ -91,6 +112,78 @@ KNOWN_EXTERNAL = {
 }
 
 MACRO_LINE = re.compile(r'^[A-Z][A-Z0-9_]*\s*[\(;]')
+
+#: Engine properties, by the engine class that declares them. Curated: the names
+#: a project writing its own movement, camera, HUD or character code is most
+#: likely to reach for. A name missing from this table costs a missed report; a
+#: name that is wrong costs a false one, which is why every entry here is a
+#: property of the class it is filed under and not a guess.
+ENGINE_PROPERTIES = {
+    "UCharacterMovementComponent": (
+        "MaxWalkSpeed", "MaxWalkSpeedCrouched", "MaxAcceleration", "MaxFlySpeed",
+        "MaxSwimSpeed", "MaxCustomMovementSpeed", "BrakingDecelerationWalking",
+        "BrakingDecelerationFalling", "BrakingDecelerationSwimming",
+        "BrakingDecelerationFlying", "GroundFriction", "AirControl",
+        "AirControlBoostMultiplier", "AirControlBoostVelocityThreshold",
+        "FallingLateralFriction", "JumpZVelocity", "GravityScale", "MaxStepHeight",
+        "CrouchedHalfHeight", "PerchRadiusThreshold", "PerchAdditionalHeight",
+        "bCanWalkOffLedges", "bCanWalkOffLedgesWhenCrouching",
+        "bOrientRotationToMovement", "bUseControllerDesiredRotation",
+        "bIsCrouched", "MaxSimulationTimeStep", "MaxSimulationIterations",
+    ),
+    "ACharacter": (
+        "JumpMaxCount", "JumpMaxHoldTime", "CrouchedEyeHeight", "BaseEyeHeight",
+        "bUseControllerRotationPitch", "bUseControllerRotationYaw",
+        "bUseControllerRotationRoll", "Mesh", "CharacterMovement", "CapsuleComponent",
+    ),
+    "APawn": ("AutoPossessPlayer", "AutoPossessAI", "AIControllerClass",
+              "PlayerState", "Controller", "InputComponent"),
+    "AActor": ("Tags", "PrimaryActorTick", "RootComponent", "bReplicates",
+               "bAlwaysRelevant", "bNetLoadOnClient", "NetCullDistanceSquared",
+               "NetUpdateFrequency", "MinNetUpdateFrequency", "CustomTimeDilation",
+               "bCanBeDamaged", "bHidden", "bBlockInput", "Owner", "Instigator",
+               "InputComponent"),
+    "UActorComponent": ("PrimaryComponentTick", "bAutoActivate", "bIsActive",
+                        "ComponentTags", "bReplicates"),
+    "APlayerController": ("Player", "PlayerCameraManager", "MyHUD",
+                          "bShowMouseCursor", "bEnableClickEvents",
+                          "DefaultMouseCursor", "bAutoManageActiveCameraTarget",
+                          "ClickEventKeys", "bEnableTouchEvents"),
+    "APlayerState": ("PlayerName", "Score", "Ping", "bIsSpectator",
+                     "bOnlySpectator", "bIsABot", "CompressedPing"),
+    "AGameStateBase": ("PlayerArray", "ElapsedTime", "ServerWorldTimeSeconds"),
+    "UUserWidget": ("ColorAndOpacity", "Visibility", "bIsFocusable",
+                    "ForegroundColor", "RootWidget", "WidgetTree"),
+}
+
+#: The engine's own inheritance, for the project classes that sit on top of it:
+#: a member that shadows `bAutoActivate` shadows it through the whole chain.
+ENGINE_PARENT = {
+    "UCharacterMovementComponent": "UActorComponent",
+    "USkeletalMeshComponent": "USkinnedMeshComponent",
+    "UStaticMeshComponent": "UMeshComponent",
+    "ACharacter": "APawn",
+    "APawn": "AActor",
+    "AController": "AActor",
+    "APlayerController": "AController",
+    "APlayerState": "AInfo",
+    "AGameStateBase": "AInfo",
+    "AInfo": "AActor",
+    "UUserWidget": "UWidget",
+}
+
+#: An operator scoped enums do not have. `==` and `!=` are fine and are what the
+#: fixes use.
+SCOPED_ENUM_OPERATOR = re.compile(r'(?:>=|<=|<<|>>|>|<|\||&|\^)\s*(%s)::')
+
+#: A data member with an initialiser or a bare declaration in a class body.
+MEMBER_DECLARATION = re.compile(
+    r'\b(?:float|double|int32|uint8|int64|bool|FName|FText|FString|FVector|FRotator|'
+    r'FLinearColor|FGameplayTag|TSubclassOf\s*<[^>]*>)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;)')
+
+#: A definition in a .cpp: `ReturnType AClass::Function(` at the start of a line.
+DEFINITION = re.compile(r'^[A-Za-z_][A-Za-z0-9_:<>,\s\*&]*?\b([A-Za-z_][A-Za-z0-9_]*)::'
+                        r'([A-Za-z_][A-Za-z0-9_]*)\s*\(', re.MULTILINE)
 
 #: A declaration: `Type Name(args) tail;` where Name is the identifier directly
 #: before the first top-level parenthesis.
@@ -291,30 +384,232 @@ def run(report=None):
     return checked, missing
 
 
+def source_files():
+    """Every .h and .cpp under Source/OneBraham, as (rel, path)."""
+    out = []
+
+    for dirpath, _dirs, files in os.walk(SOURCE_ROOT):
+        for name in sorted(files):
+            if name.endswith(".h") or name.endswith(".cpp"):
+                path = os.path.join(dirpath, name)
+                out.append((os.path.relpath(path, SOURCE_ROOT), path))
+
+    return out
+
+
+def scoped_enums(files):
+    """The project's `enum class` names, and the file each is declared in."""
+    out = {}
+
+    for rel, path in files:
+        if not rel.endswith(".h"):
+            continue
+
+        for match in re.finditer(r'enum\s+class\s+([A-Za-z_][A-Za-z0-9_]*)',
+                                 strip_comments_and_strings(io.open(path, encoding="utf-8",
+                                                                    errors="ignore").read())):
+            out.setdefault(match.group(1), rel)
+
+    return out
+
+
+def class_bases(files):
+    """class name -> (base names, body, rel path), for every class with a body."""
+    out = {}
+
+    for rel, path in files:
+        if not rel.endswith(".h"):
+            continue
+
+        text = strip_comments_and_strings(io.open(path, encoding="utf-8", errors="ignore").read())
+
+        for match in re.finditer(
+                r'\bclass\s+(?:[A-Za-z0-9_]+_API\s+)?([A-Za-z0-9_]+)\s*'
+                r'(?::\s*public\s+([^{;]+?))?\s*\{', text):
+            name, bases = match.group(1), match.group(2) or ""
+            body = _braced_body(text, match.end() - 1)
+            out.setdefault(name, (bases, body, rel))
+
+    return out
+
+
+def _braced_body(text, start):
+    depth = 0
+
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start + 1:i]
+
+    return text[start + 1:]
+
+
+def engine_ancestors(class_name, classes, seen=None):
+    """The engine classes this project class sits on, transitively."""
+    seen = seen or set()
+
+    if class_name in seen:
+        return set()
+
+    seen.add(class_name)
+
+    if class_name in ENGINE_PROPERTIES:
+        # A class in both tables is an engine class whose own ancestors also carry
+        # properties: UCharacterMovementComponent is a UActorComponent, so a member
+        # that shadows `bAutoActivate` shadows it through the movement component.
+        out = {class_name}
+
+        if class_name in ENGINE_PARENT:
+            out |= engine_ancestors(ENGINE_PARENT[class_name], classes, seen)
+
+        return out
+
+    if class_name in ENGINE_PARENT:
+        return engine_ancestors(ENGINE_PARENT[class_name], classes, seen)
+
+    if class_name not in classes:
+        return set()
+
+    bases, _body, _rel = classes[class_name]
+    out = set()
+
+    for base in re.findall(r'[AUIF][A-Za-z0-9_]+', bases):
+        out |= engine_ancestors(base, classes, seen)
+
+    return out
+
+
+def run_hygiene():
+    """(checks, problems) for the rules that are not about linking.
+
+    problems are (rel, line_number, message).
+    """
+    files = source_files()
+    classes = class_bases(files)
+    enums = scoped_enums(files)
+    checks = 0
+    problems = []
+
+    if not classes:
+        problems.append((u"Source/OneBraham", 0, u"no class bodies parsed"))
+        return checks, problems
+
+    # --- a scoped enum compared with an operator it does not have ---------
+    pattern = re.compile(SCOPED_ENUM_OPERATOR.pattern % u"|".join(
+        re.escape(name) for name in sorted(enums))) if enums else None
+
+    for rel, path in files:
+        text = strip_comments_and_strings(io.open(path, encoding="utf-8", errors="ignore").read())
+        checks += 1
+
+        if pattern is not None:
+            for match in pattern.finditer(text):
+                line = text[:match.start()].count("\n") + 1
+                problems.append((
+                    rel, line,
+                    u"{0} is a scoped enum and has no relational or bitwise operator: "
+                    u"'{1} {2}::' cannot compile - compare against the values it can be"
+                    .format(match.group(1), match.group(0)[:2].strip(), match.group(1))))
+
+    # --- a member that shadows an engine property -------------------------
+    for class_name in sorted(classes):
+        ancestors = engine_ancestors(class_name, classes)
+        if not ancestors:
+            continue
+
+        engine_names = set()
+        for ancestor in ancestors:
+            engine_names |= set(ENGINE_PROPERTIES[ancestor])
+
+        if not engine_names:
+            continue
+
+        _bases, body, rel = classes[class_name]
+
+        # Only data members: a function of the same name is an override, which is
+        # how the engine is meant to be extended.
+        body_no_calls = re.sub(r'[A-Za-z_][A-Za-z0-9_:<>,\*&\s]*\([^)]*\)[^;{]*[;{]',
+                               u"", body)
+
+        for match in MEMBER_DECLARATION.finditer(body_no_calls):
+            checks += 1
+            member = match.group(1)
+
+            if member in engine_names:
+                problems.append((
+                    rel, 0,
+                    u"{0}::{1} shadows the engine property {1} on {2}: the constructor "
+                    u"and the tuning UI write the project's member and the engine never "
+                    u"sees the value".format(class_name, member,
+                                             u"/".join(sorted(ancestors)))))
+
+    # --- the same function defined twice ---------------------------------
+    seen = {}
+
+    for rel, path in files:
+        if not rel.endswith(".cpp"):
+            continue
+
+        text = io.open(path, encoding="utf-8", errors="ignore").read()
+
+        for match in DEFINITION.finditer(text):
+            key = (match.group(1), match.group(2))
+            line = text[:match.start()].count("\n") + 1
+            seen.setdefault(key, []).append((rel, line))
+
+    for (class_name, function), places in sorted(seen.items()):
+        if len(places) > 1:
+            where = u", ".join(u"{0}:{1}".format(rel, line) for rel, line in places)
+            problems.append((
+                places[0][0], places[0][1],
+                u"{0}::{1} is defined {2} times ({3}): a redefinition, or a second "
+                u"copy of the file's logic in another file".format(
+                    class_name, function, len(places), where)))
+
+    return checks, problems
+
+
 class _SymbolReport(object):
     """Report object with the shape run_all expects (summary + ok())."""
 
-    def __init__(self, checked, missing, limit_note=None):
+    def __init__(self, checked, missing, hygiene=None, hygiene_checks=0):
         self.checked = checked
         self.missing = list(missing)
+        self.hygiene = list(hygiene or [])
+        self.hygiene_checks = hygiene_checks
 
     def ok(self):
-        return not self.missing
+        return not self.missing and not self.hygiene
 
     def summary(self):
         if self.missing:
             first = ", ".join(sorted(set("{0}::{1}".format(c, n) for _f, c, n in self.missing))[:3])
             return u"{0} declared, {1} undefined ({2})".format(
                 self.checked, len(self.missing), first)
-        return u"{0} declarations, all defined".format(self.checked)
+
+        if self.hygiene:
+            return u"{0} declarations defined, {1} hygiene problems".format(
+                self.checked, len(self.hygiene))
+
+        # The hygiene check count is deliberately absent: it is the number of
+        # statements looked at, it moves whenever anybody adds a member, and a
+        # number in a document that changes on every edit is a number that will
+        # be wrong. The count is logged by build_all() for the record; the
+        # summary says only what a reader needs, which is that it passed.
+        return u"{0} declarations, all defined; compile hygiene clean".format(self.checked)
 
 
 def build_all():
     """Entry point used by run_all.py. Prints the detail, returns a report."""
     checked, missing = run()
+    hygiene_checks, hygiene = run_hygiene()
 
     C.log(u"")
     C.log(u"  declarations checked: {0}".format(checked))
+    C.log(u"  compile-hygiene checks: {0}".format(hygiene_checks))
 
     if missing:
         C.log(u"  MISSING: {0} - each one is a link error".format(len(missing)))
@@ -323,20 +618,43 @@ def build_all():
     else:
         C.log(u"  every declared member function has a definition. OK")
 
-    return _SymbolReport(checked, missing)
+    if hygiene:
+        C.log(u"  HYGIENE: {0} - each one is a compile error or a silent no-op".format(
+            len(hygiene)))
+        for rel, line, message in hygiene:
+            C.log(u"      {0}:{1} {2}".format(rel, line, message))
+    else:
+        C.log(u"  no scoped enum is compared with an operator it does not have, no "
+              u"member shadows an engine property, no function is defined twice. OK")
+
+    return _SymbolReport(checked, missing, hygiene, hygiene_checks)
 
 
 def main():
     checked, missing = run()
+    hygiene_checks, hygiene = run_hygiene()
 
     C.log(u"=" * 70)
-    C.log(u"ONE BRAHAM - declared-but-undefined member functions")
+    C.log(u"ONE BRAHAM - declared-but-undefined member functions, and hygiene")
     C.log(u"=" * 70)
     C.log(u"  declarations checked: {0}".format(checked))
+    C.log(u"  compile-hygiene checks: {0}".format(hygiene_checks))
+
+    if missing:
+        C.log(u"  MISSING: {0} - each one is a link error".format(len(missing)))
+    else:
+        C.log(u"  every declared member function has a definition. OK")
+
+    if not hygiene and not missing:
+        C.log(u"  hygiene: scoped enums, shadowed engine properties, duplicate "
+              u"definitions. OK")
+        return 0
+
+    for rel, line, message in hygiene:
+        C.log(u"  {0}:{1} {2}".format(rel, line, message))
 
     if not missing:
-        C.log(u"  every declared member function has a definition. OK")
-        return 0
+        return 0 if not hygiene else 1
 
     C.log(u"  MISSING: {0} - each one is a link error".format(len(missing)))
     C.log(u"")

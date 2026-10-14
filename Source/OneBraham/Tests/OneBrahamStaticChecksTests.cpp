@@ -40,7 +40,7 @@ namespace
 
 	const FOneBrahamStaticCheck EngineFreeChecks[] =
 	{
-		{ TEXT("check_cpp_symbols"),   TEXT("every declared member function has a definition") },
+		{ TEXT("check_cpp_symbols"),   TEXT("every declared member function has a definition, and no scoped enum compared with an operator it does not have") },
 		{ TEXT("check_uht_contracts"), TEXT("UE reflection contracts: replicated properties, RPC flags, RepNotify, soft paths") },
 		{ TEXT("check_soft_paths"),    TEXT("every soft object path names a conventional, cookable asset") },
 		{ TEXT("check_calls"),         TEXT("every call site matches a declaration's arity and parameter types") },

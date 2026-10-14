@@ -918,6 +918,12 @@ def check_cpp_symbols(v, _config_only):
     The compiler finds this and the linker finds this, but both find it minutes
     into a build that a machine has to be able to run. This finds it in 0.3 s on
     any machine, which means it is the check that actually gets run.
+
+    The same checker carries the two faults that are not link errors and that no
+    compiler on the project's own machines has ever been asked about: a scoped
+    enum compared with an operator it does not have, and a member whose name is
+    also an engine property of an ancestor class - which compiles, and then the
+    value the code sets is not the value the engine uses.
     """
     try:
         from onebraham import check_cpp_symbols
@@ -926,13 +932,22 @@ def check_cpp_symbols(v, _config_only):
         return
 
     checked, missing = check_cpp_symbols.run()
+    hygiene_checks, hygiene = check_cpp_symbols.run_hygiene()
 
     if checked == 0:
         v.warn("cpp symbols", u"no source parsed - is Source/OneBraham missing?")
         return
 
-    if not missing:
-        v.pass_("cpp symbols", u"all {0} declared member functions have definitions".format(checked))
+    # A scoped enum compared with an operator it does not have is a compile
+    # error, and a member that shadows an engine property is a value the engine
+    # never sees: both are failures rather than warnings, because neither can be
+    # argued with at runtime.
+    for rel, line, message in hygiene:
+        v.fail("cpp symbols", u"{0}:{1} {2}".format(rel, line, message))
+
+    if not missing and not hygiene:
+        v.pass_("cpp symbols", u"all {0} declared member functions have definitions; "
+                               u"{1} compile-hygiene checks clean".format(checked, hygiene_checks))
         return
 
     # A missing definition is a certain link error, so this is a failure, not a

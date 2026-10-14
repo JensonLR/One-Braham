@@ -64,7 +64,8 @@ STEPS = [
     ("input_ini", "onebraham.generate_input_ini", False,
      "write the default key bindings into Config/DefaultInput.ini"),
     ("cpp_symbols", "onebraham.check_cpp_symbols", False,
-     "declared-but-undefined member functions (the link errors grep misses)"),
+     "declared-but-undefined member functions, scoped enums compared with operators "
+     "they do not have, members that shadow an engine property, duplicate definitions"),
     ("uht_contracts", "onebraham.check_uht_contracts", False,
      "RPCs, native events, RepNotify callbacks and replicated properties"),
     ("soft_paths", "onebraham.check_soft_paths", False,
