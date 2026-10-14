@@ -447,6 +447,10 @@ protected:
 
 	/** Character/controller shortcuts. */
 	AOneBrahamCharacter* GetCharacter() const;
+
+	/** Server: attacking ends spawn protection, so it can shield a player who
+	 *  has just arrived but never one who is fighting. */
+	void EndSpawnProtection();
 	AOneBrahamPlayerController* GetOneBrahamPlayerController() const;
 
 	TWeakObjectPtr<AOneBrahamCharacter> CachedCharacter;

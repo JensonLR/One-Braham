@@ -250,3 +250,56 @@ of the systems (see `Docs/11_Niagara_VFX.md`), never scripted.
   the roof reads as a different place without a loading screen.
 * Every floor's level contains its own lighting, fog and audio volumes, so a
   streamed floor arriving is complete rather than half-lit for a frame.
+
+## 7. Reference: the real building's interiors
+
+Notes from public photographs of the real One Braham, Aldgate (October 2026),
+for look and layout only. The game's building is fictional: no real company's
+logo, signage or brand colour goes into it.
+
+| Where | What the real building does | What it gives the game |
+| --- | --- | --- |
+| Office floors (1–14) | Exposed services ceiling painted dark, large ring pendant lights and linear LED strips, pale concrete-grey floors, column-free plate around the core, full-height curtain wall onto the City towers | `M_OB_Surface` ceiling in charcoal with visible ducts; ring-light props in open plan; the window line is the brightest thing on every floor, which is what silhouettes a player against it |
+| Furniture | Light-oak islands and long benching, grey soft-seating clusters, meeting booths, planters everywhere | Island desks and booths are waist-high cover; planters are soft cover that a round passes through |
+| Feature stairs | Open-tread steel stairs with glass balustrades, near the glass | A stair you can be seen on from the floor below: a fast route that is also exposed |
+| Reception (ground) | Double-height, dark feature wall, pale stone floor, turnstiles, glazed front | The ground floor reads as stone and glass, not carpet; the turnstiles are the first choke |
+| Breakout kitchens | Long timber servery counters under pendant lights | The canteen servery on 15: hard cover for its whole length |
+| Roof terrace | Large dark steel planters with grasses, pale paving, glass balustrade, skyline | The Skydeck balcony: planters are the only cover on the open deck, the balustrade is glass so nothing hides at the edge |
+
+### What the published case studies add
+
+Facts from fit-out and supplier case studies (paraphrased; sources below). Where
+sources disagree it is said so.
+
+* **Reception.** Two storeys, entered from the north and the east through
+  all-glass revolving doors, with a structural-glass balustrade gallery above
+  and a large media wall. A line of black glass speed gates crosses the floor,
+  with more gate banks in front of the lifts. The game's turnstile banks are the
+  same choke, and the gallery is an overlook onto it.
+* **Office floors.** Large column-free spans (steel frame, up to about 13.7 m),
+  no suspended ceilings - services, beams and the underside of the deck left
+  exposed - raised floors, carpet tiles, and furniture in "neighbourhoods":
+  timber benching, booths, sofas and glass meeting rooms. Full-height glass
+  behind vertical fins throws banded light and shadow across the floor.
+* **The feature stair.** A staircase runs up through the heart of the building
+  behind see-through balustrades, and is visible from outside through the
+  facade. A fast vertical route that is also the most exposed one.
+* **Canteen and community floors.** Some floors carry a café, a restaurant and
+  social space; the servery is a set of separate food islands rather than one
+  counter. Counters and dense tables are the cover.
+* **Upper floors.** Sources put an atrium over parts of the top floors (they
+  disagree which) and open terraces on two upper levels, one overlooking the
+  other.
+* **Below ground.** A basement of cycle stands, lockers and showers.
+* **Height.** Sources say 18 or 19 storeys; the game's tower is fifteen floors
+  over a ground floor by design.
+
+Sources: [Severfield](https://www.severfield.com/projects/one-braham),
+[Barbour product search](https://www.barbourproductsearch.info/one-braham-london-news120205.html),
+[HDR](https://www.hdrinc.com/node/9564),
+[RLB](https://www.rlb.com/africa/projects/bt-london-one-braham),
+[McLaughlin & Harvey](https://mclh.co.uk/?p=1118),
+[Focchi](https://www.focchi.it/us/projects/one-braham),
+[AGC](https://www.agc-yourglass.com/en/project-case-studies/one-braham),
+[NLA](https://nla.london/projects/one-braham),
+[Buildington](https://www.buildington.co.uk/buildings/4813/england/london-e1/1-braham-street/one-braham).

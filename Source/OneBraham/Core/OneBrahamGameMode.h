@@ -245,6 +245,18 @@ protected:
 	UPROPERTY()
 	TMap<TObjectPtr<AController>, float> PendingRespawns;
 
+	/** Where players died recently: a spawn next to a fresh death is next to
+	 *  whoever caused it. Pruned to OneBrahamSpawnRules::RecentDeathSeconds. */
+	struct FRecentDeath
+	{
+		FVector Location = FVector::ZeroVector;
+		float Time = 0.f;
+	};
+	TArray<FRecentDeath> RecentDeaths;
+
+	/** Each player's last killer, so a respawn is never handed back to them. */
+	TMap<TWeakObjectPtr<AController>, TWeakObjectPtr<AController>> LastKillerOf;
+
 	FTimerHandle MatchPhaseTimerHandle;
 	FTimerHandle RespawnTimerHandle;
 

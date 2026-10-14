@@ -873,6 +873,8 @@ void UOneBrahamWeaponComponent::ServerRequestFire_Implementation(FVector_NetQuan
 		return;
 	}
 
+	EndSpawnProtection();
+
 	AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(Character->GetController());
 	if (PC == nullptr)
 	{
@@ -1894,19 +1896,32 @@ void UOneBrahamWeaponComponent::ServerRequestFireMode_Implementation()
 	CycleFireMode();
 }
 
+void UOneBrahamWeaponComponent::EndSpawnProtection()
+{
+	const AOneBrahamCharacter* Character = GetCharacter();
+	UOneBrahamHealthComponent* Health = Character ? Character->GetHealthComponent() : nullptr;
+	if (Health != nullptr && Health->IsInvulnerable())
+	{
+		Health->ClearInvulnerability();
+	}
+}
+
 void UOneBrahamWeaponComponent::ServerRequestMelee_Implementation()
 {
+	EndSpawnProtection();
 	MeleeAttack();
 }
 
 void UOneBrahamWeaponComponent::ServerRequestThrowUtility_Implementation(int32 UtilityIndex, FVector_NetQuantize AimOrigin, FVector_NetQuantizeNormal AimDirection)
 {
+	EndSpawnProtection();
 	SelectUtilityIndex(UtilityIndex);
 	ThrowUtility();
 }
 
 void UOneBrahamWeaponComponent::ServerRequestUseUtility_Implementation(int32 UtilityIndex, FVector_NetQuantize TargetLocation)
 {
+	EndSpawnProtection();
 	SelectUtilityIndex(UtilityIndex);
 	UseUtilityItem();
 }

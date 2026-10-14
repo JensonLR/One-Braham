@@ -80,11 +80,11 @@ bool FOneBrahamAscentRulesTest::RunTest(const FString& Parameters)
 		Settings->ExtractionBroadcastSeconds > 0.f);
 
 	// The building closes behind the players, the Skydeck is never purged, and the
-	// purge stops at floor 13, below the executive suites and the canteen.
+	// purge climbs to floor 14, leaving only the canteen and the Skydeck on 15.
 	TestTrue(TEXT("ASCENT has lockdown"), Settings->bLockdownEnabled);
 	TestNearlyEqual(TEXT("lockdown stage, seconds"), Settings->LockdownStageSeconds, 90.f, 0.5f);
 	TestNearlyEqual(TEXT("lockdown warning, seconds"), Settings->LockdownWarningSeconds, 15.f, 0.5f);
-	TestEqual(TEXT("the purge ceiling is floor 13"),
+	TestEqual(TEXT("the purge ceiling is floor 14"),
 		Settings->PurgeFloorCeiling, OneBrahamConstants::FloorPurgeCeiling);
 	TestTrue(TEXT("the purge never reaches the Skydeck"),
 		Settings->PurgeFloorCeiling < OneBrahamConstants::FloorSkydeck);

@@ -20,7 +20,7 @@ namespace OneBrahamHUDStrings
 		{ TEXT("HUD_Objective_Winch"), NSLOCTEXT("OneBraham", "HUD_Objective_Winch", "Winch zone is open - take the Skydeck") },
 		{ TEXT("HUD_Objective_Hold"), NSLOCTEXT("OneBraham", "HUD_Objective_Hold", "Winch is holding - get to the pad") },
 		{ TEXT("HUD_Objective_Lockdown"), NSLOCTEXT("OneBraham", "HUD_Objective_Lockdown", "Shutters down - the Skydeck is still open") },
-		{ TEXT("HUD_Objective_Purge"), NSLOCTEXT("OneBraham", "HUD_Objective_Purge", "Security purge on lower floors - get above 13") },
+		{ TEXT("HUD_Objective_Purge"), NSLOCTEXT("OneBraham", "HUD_Objective_Purge", "Security purge on lower floors - get to floor 15") },
 		{ TEXT("HUD_Prompt_Override"), NSLOCTEXT("OneBraham", "HUD_Prompt_Override", "Hold E - override") },
 		{ TEXT("HUD_Prompt_Card"), NSLOCTEXT("OneBraham", "HUD_Prompt_Card", "Use badge") },
 		{ TEXT("HUD_Prompt_Revive"), NSLOCTEXT("OneBraham", "HUD_Prompt_Revive", "Hold E - revive") },

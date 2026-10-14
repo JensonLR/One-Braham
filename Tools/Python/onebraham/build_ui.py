@@ -84,7 +84,7 @@ HUD_STRINGS = [
     ("HUD_Objective_Winch",  "Winch zone is open - take the Skydeck"),
     ("HUD_Objective_Hold",   "Winch is holding - get to the pad"),
     ("HUD_Objective_Lockdown", "Shutters down - the Skydeck is still open"),
-    ("HUD_Objective_Purge",  "Security purge on lower floors - get above 13"),
+    ("HUD_Objective_Purge",  "Security purge on lower floors - get to floor 15"),
     ("HUD_Prompt_Override",  "Hold E - override"),
     ("HUD_Prompt_Card",      "Use badge"),
     ("HUD_Prompt_Revive",    "Hold E - revive"),

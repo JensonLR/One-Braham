@@ -96,8 +96,9 @@ namespace OneBrahamConstants
 	/** The canteen and the Skydeck balcony share the top floor. */
 	static constexpr int32 FloorCanteen = 15;
 	static constexpr int32 FloorSkydeck = 15;
-	/** The purge never climbs above this: Executive 14 and floor 15 stay clear of gas. */
-	static constexpr int32 FloorPurgeCeiling = 13;
+	/** The purge climbs to the top Executive floor; only floor 15 - the canteen
+	 *  and the Skydeck balcony - is ever clear of gas. */
+	static constexpr int32 FloorPurgeCeiling = 14;
 
 	/** Extraction hold time, seconds (ASCENT). */
 	static constexpr float ExtractionHoldSeconds = 30.f;

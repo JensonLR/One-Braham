@@ -65,7 +65,9 @@ public:
 
 	/** Disables the point after use for N seconds; 0 = reusable immediately. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spawn")
-	float CooldownSeconds = 0.f;
+	/** A used spawn rests this long, so a killer cannot watch one point and
+	 *  catch the next respawn on it. */
+	float CooldownSeconds = 8.f;
 
 	/** A point that is not enabled cannot be chosen (locked floors, pre-breach areas). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn")

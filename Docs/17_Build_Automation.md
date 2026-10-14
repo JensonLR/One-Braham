@@ -18,7 +18,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | --- | --- | --- | --- |
 | `generate_input_ini.py` | `Config/DefaultInput.ini` `[OneBraham.Input]`, 41 actions, 72 bindings | no | yes |
 | `build_materials.py` | 15 physical materials, 6 masters (node graphs, one of them the post-process interaction outline), 28 instances | yes | yes |
-| `build_environment.py` | the map: 7 areas, 16 levels, 38 rooms, 10 access zones, 5 terminals, 4 breach walls, 28 shutters | yes | yes |
+| `build_environment.py` | the map: 7 areas, 16 levels, 40 rooms, 10 access zones, 5 terminals, 4 breach walls, 28 shutters | yes | yes |
 | `build_props.py` | 12 gameplay blueprints, 4 loot cards, the prop manifest, the dressing pass | yes | yes |
 | `build_weapons.py` | 10 weapon definitions, 10 blueprints, `DA_WeaponRegistry` | yes | yes |
 | `build_characters.py` | the cast payload + `ABP_OneBrahamCharacter` when the skeleton exists | yes | yes |
@@ -87,10 +87,10 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
 | input_ini | OK | 0.0 | wrote 41 actions (40 with a default key) |
-| cpp_symbols | OK | 0.7 | 608 declarations, all defined; compile hygiene clean |
-| uht_contracts | OK | 1.5 | 818 UE reflection contracts, all satisfied |
+| cpp_symbols | OK | 0.7 | 609 declarations, all defined; compile hygiene clean |
+| uht_contracts | OK | 1.5 | 820 UE reflection contracts, all satisfied |
 | soft_paths | OK | 0.0 | 37 soft paths, all conventional |
-| calls | OK | 0.3 | 914 call sites, all arities plausible |
+| calls | OK | 0.3 | 919 call sites, all arities plausible |
 | tags | OK | 0.4 | 6 resolvable tag requests and 147 documented tags, all declared |
 | layout | OK | 0.0 | 16 floors, map and layout agree |
 | voice_lines | OK | 0.0 | 42 line references, all declared and documented |

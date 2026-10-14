@@ -154,9 +154,11 @@ ROOM_FLOOR_FINISH = {
 
     # The canteen shares floor 15 with the Skydeck balcony: lino throughout,
     # and a kitchen floor that is always wet.
-    ("Skydeck", "Canteen_Hall"): "Lino",
-    ("Skydeck", "Servery"):      "Lino",
-    ("Skydeck", "Kitchen"):      "Puddle",
+    ("Skydeck", "Canteen_Hall"):  "Lino",
+    ("Skydeck", "Servery"):       "Lino",
+    ("Skydeck", "Hot_Food_Line"): "Lino",
+    ("Skydeck", "Coffee_Bar"):    "Lino",
+    ("Skydeck", "Kitchen"):       "Puddle",
 
     # Skydeck: plant deck, the pad, the rails, and a lino control room.
     ("Skydeck", "Helipad"):         "Decking",
@@ -228,19 +230,37 @@ ROOM_PROGRAMMES = {
         ("Exec_PA_Desk", 900, 900, 500, 400),
         ("West_Lounge", 1200, -700, 700, 700),
     ],
-    # Floor 15: the canteen is the enclosed south half (a winter-garden
-    # restaurant), the Skydeck balcony the open north half. The helipad stays
+    # Floor 15: the canteen is the enclosed south half (a glazed
+    # canteen), the Skydeck balcony the open north half. The helipad stays
     # on the extraction pad at the centre.
     "Skydeck": [
-        ("Canteen_Hall", -600, -1250, 2600, 1100),
-        ("Servery", 1500, -1450, 1200, 500),
-        ("Kitchen", 1500, -900, 1200, 500),
+        # The canteen, west to east: the till and coffee bar against the back
+        # wall, the hot-food line in front of the kitchen to its right, the
+        # servery islands in front of those, then the dining hall widening out
+        # towards the Skydeck gate. Zones of one open floor, not walled rooms
+        # (see OPEN_ROOMS); the counters themselves are built by
+        # build_canteen_fixtures.
+        ("Coffee_Bar", -2150, -1200, 500, 1000),
+        ("Kitchen", -1150, -1750, 1500, 500),
+        ("Hot_Food_Line", -1150, -1300, 1500, 300),
+        ("Servery", -1150, -850, 1500, 500),
+        ("Canteen_Hall", 950, -1250, 2800, 1300),
         ("Helipad", 0, 250, 1800, 1500),
         ("Plant_Room", 1800, 600, 700, 900),
         ("Winch_Control", -1700, 400, 600, 500),
         ("Bar_Pavilion", 0, 1500, 1200, 400),
         ("Edge_Rail_North", 0, 1900, 4200, 120),
     ],
+}
+
+# Zones of an open floor: they get a floor finish but no partition walls. The
+# canteen is one room with a food court in it, not five rooms.
+OPEN_ROOMS = {
+    ("Skydeck", "Coffee_Bar"),
+    ("Skydeck", "Kitchen"),
+    ("Skydeck", "Hot_Food_Line"),
+    ("Skydeck", "Servery"),
+    ("Skydeck", "Canteen_Hall"),
 }
 
 # Floor 15's split: the canteen is roofed and glazed south of this line, the
@@ -537,6 +557,50 @@ AREA_GRADE = {
 }
 
 
+def build_canteen_fixtures(origin_x, origin_y, z, materials, prefix):
+    """The canteen's counters and tables on floor 15, as blockout cover.
+
+    Laid out from the real building's staff canteen: separate timber-clad
+    servery islands, a hot-food line with the kitchen behind it, a till and
+    coffee bar on the back wall, and the dining tables widening out beyond.
+    Every piece is waist-high hard cover except the kitchen wall.
+    """
+    wood = materials.get("Wood")
+    metal = materials.get("Metal")
+    plaster = materials.get("Plasterboard")
+    counter_h = 95.0
+
+    def at(x, y, height):
+        return (origin_x + x, origin_y + y, z + height / 2.0)
+
+    # Till and coffee bar against the west wall, with its back wall behind it.
+    _box(at(-2330.0, -1200.0, C.CEILING_HEIGHT_CM), (20.0, 1000.0, C.CEILING_HEIGHT_CM),
+         metal, prefix + "_Coffee_Backwall")
+    _box(at(-1950.0, -1200.0, 105.0), (90.0, 700.0, 105.0), wood, prefix + "_Till_Counter")
+
+    # The kitchen: full-height wall in front of it with a staff door at the
+    # east end, and the hot-food counter a staff aisle in front of that.
+    door = C.DOOR_WIDTH_CM
+    _box(at(-1150.0 - door / 2.0, -1500.0, C.CEILING_HEIGHT_CM), (1500.0 - door, 15.0, C.CEILING_HEIGHT_CM),
+         plaster, prefix + "_Kitchen_Wall")
+    _box(at(-1150.0, -1300.0, counter_h), (1400.0, 90.0, counter_h), wood, prefix + "_Hot_Food_Counter")
+
+    # Three servery islands in a row.
+    for index, x in enumerate((-1650.0, -1150.0, -650.0)):
+        _box(at(x, -850.0, counter_h), (380.0, 140.0, counter_h), wood,
+             "{0}_Servery_Island_{1}".format(prefix, index + 1))
+
+    # Eighteen six-seat tables in three rows, widening east across the hall.
+    for row, y in enumerate((-1650.0, -1250.0, -850.0)):
+        for col in range(6):
+            x = -200.0 + col * 450.0
+            _box(at(x, y, 74.0), (180.0, 75.0, 74.0), wood,
+                 "{0}_Canteen_Table_{1}_{2}".format(prefix, row + 1, col + 1))
+
+    _note_surface("Wood", prefix + "_Canteen_Counters")
+    _note_surface("Metal", prefix + "_Coffee_Backwall")
+
+
 def build_floor_shell(report, floor_index, materials):
     """Builds one floor: slab, ceiling, perimeter glazing, core, rooms, circulation.
 
@@ -606,7 +670,7 @@ def build_floor_shell(report, floor_index, materials):
         _note_surface("BallisticGlass" if materials.get("BallisticGlass") is not None else "Glass",
                       prefix + "_Glazing")
 
-    # --- The winter-garden screen (floor 15) ------------------------------
+    # --- The canteen screen (floor 15) ------------------------------
     # Ordinary glass between the canteen and the balcony, in two panels either
     # side of the Skydeck gate. Plain rather than ballistic: it is an interior
     # screen, and it is the one place a fight on 15 can see straight through.
@@ -617,8 +681,8 @@ def build_floor_shell(report, floor_index, materials):
         door_hi = SKYDECK_GATE_X + SKYDECK_GATE_WIDTH / 2.0
         for label, lo, hi in (("West", -half_x + 100.0, door_lo), ("East", door_hi, half_x - 100.0)):
             _box((origin_x + (lo + hi) / 2.0, origin_y + SKYDECK_SCREEN_Y, z + screen_h / 2.0),
-                 (hi - lo, 12.0, screen_h), screen, prefix + "_WinterGarden_Screen_" + label)
-        _note_surface("Glass", prefix + "_WinterGarden_Screen")
+                 (hi - lo, 12.0, screen_h), screen, prefix + "_Canteen_Screen_" + label)
+        _note_surface("Glass", prefix + "_Canteen_Screen")
 
     # --- Core walls (the lift core is a hole in the middle of every floor) ---
     core = C.LIFT_CORE_SIZE_CM
@@ -634,6 +698,9 @@ def build_floor_shell(report, floor_index, materials):
     # --- Room partitions --------------------------------------------------
     rooms = ROOM_PROGRAMMES.get(area_name, [])
     for room_name, rx, ry, rsx, rsy in rooms:
+        if (area_name, room_name) in OPEN_ROOMS:
+            continue
+
         cx = origin_x + rx
         cy = origin_y + ry
 
@@ -657,6 +724,9 @@ def build_floor_shell(report, floor_index, materials):
         # Door head over the gap, so the opening reads as a doorway from a
         # distance and, more importantly, blocks line of sight over it.
         _box((cx, cy - rsy / 2.0, z + wall_h - 25.0), (door_gap, wall_t, 50.0), plaster, prefix + "_" + room_name + "_Head")
+
+    if area_name == "Skydeck":
+        build_canteen_fixtures(origin_x, origin_y, z, materials, prefix)
 
     # --- Room floor finishes ---------------------------------------------
     # The slab is one material for a whole area. The finish is the layer a room
@@ -805,7 +875,7 @@ def build_spawn_points(report):
                 # together. The game mode round-robins players onto clusters 0-2.
                 actor.set_editor_property("SquadClusterId", spawn_index % 3)
                 actor.set_editor_property("Weight", 1.0)
-                actor.set_editor_property("CooldownSeconds", 0.0)
+                actor.set_editor_property("CooldownSeconds", 8.0)
                 actor.set_editor_property("bEnabled", True)
 
                 # Best-effort tag: if the tag list in DefaultGame.ini has not been
@@ -1230,6 +1300,11 @@ def build_lighting(report, floor_index):
         for iy in range(grid_y):
             lx = origin_x - size_x / 2.0 + (ix + 0.5) * (size_x / grid_x)
             ly = origin_y - size_y / 2.0 + (iy + 0.5) * (size_y / grid_y)
+
+            # Floor 15 has a ceiling only over the canteen; the balcony is lit
+            # by its floodlight masts, not by panels hanging in the open air.
+            if area_name == "Skydeck" and ly > origin_y + SKYDECK_SCREEN_Y:
+                continue
 
             light = _spawn(unreal.RectLight, unreal.Vector(lx, ly, ceiling_z),
                            unreal.Rotator(0.0, 0.0, -90.0))

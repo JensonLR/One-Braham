@@ -1,6 +1,6 @@
 # ONE BRAHAM — map implementation
 
-The building: 15 floors, 7 areas, 38 rooms, one vertical line from the ground
+The building: 15 floors, 7 areas, 40 rooms, one vertical line from the ground
 plaza to the Skydeck. This document is how it is built, why each area is shaped
 the way it is, and what every space is *for* as a fight.
 
@@ -192,14 +192,17 @@ lounge programme. Breach walls on 12 and 14.
 
 ### 2.8 Canteen and Skydeck — floor 15
 
-**Layout.** 4800 × 4000 cm, split by a glass winter-garden screen. South of it,
-under a roof, the canteen: eighteen six-seat tables, a long servery counter, hot
-holding units and a kitchen with a wet floor. North of it, open to the sky, the
-Skydeck balcony.
+**Layout.** 4800 × 4000 cm, split by a glass screen. South of it, under a
+roof, the canteen, laid out from the real building's staff canteen: the till
+and coffee bar on the back (west) wall; to its right the hot-food line, with the
+kitchen behind it (wet floor, one staff door); in front of those, three
+timber-clad servery islands; then the dining hall, eighteen six-seat tables
+widening out east towards the Skydeck gate. North of the screen, open to the
+sky, the Skydeck balcony.
 
 **Fights here.** The canteen is the densest cover in the game: eighteen tables
-means eighteen fire positions, and a servery counter that is hard cover for its
-entire length. The screen is ordinary glass, so the canteen and the balcony can
+mean eighteen fire positions, the servery islands and the hot-food counter are
+waist-high hard cover, and the kitchen is the one place to break line of sight. The screen is ordinary glass, so the canteen and the balcony can
 see each other, and the one door in it - the Skydeck gate - is where the last
 push happens. Squads arrive with one down, no utility and less than a magazine
 each, and the design intent is that it *feels* like that.
@@ -241,7 +244,7 @@ with any other material the four states are told through the screen light alone.
 
 ## 3. The rooms, as data
 
-Thirty-eight rooms across the seven areas, each `(name, x, y, size_x, size_y)` in the
+Forty rooms across the seven areas, each `(name, x, y, size_x, size_y)` in the
 area's local frame, in `ROOM_PROGRAMMES` in `build_environment.py`:
 
 | Area | Rooms |
@@ -252,7 +255,7 @@ area's local frame, in `ROOM_PROGRAMMES` in `build_environment.py`:
 | Open Plan | Desk_Farm_A, Desk_Farm_B, Meeting_Pod_1, Meeting_Pod_2, Break_Out_Kitchen, Print_Alcove, Power_Room, Plant_Room, Under_Stair_Store |
 | Server & Comms | Server_Row_1, Server_Row_2, Cold_Aisle, NOC, Comms_Cupboard, Power_Room, Vending_Alcove |
 | Executive | Boardroom, Corner_Office, Exec_PA_Desk, West_Lounge |
-| Skydeck | Canteen_Hall, Servery, Kitchen, Helipad, Winch_Control, Plant_Room, Bar_Pavilion, Edge_Rail_North |
+| Skydeck | Coffee_Bar, Kitchen, Hot_Food_Line, Servery, Canteen_Hall, Helipad, Winch_Control, Plant_Room, Bar_Pavilion, Edge_Rail_North |
 
 ---
 

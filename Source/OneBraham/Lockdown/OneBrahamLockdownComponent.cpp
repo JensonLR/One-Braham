@@ -24,7 +24,7 @@ namespace
 	constexpr float OBFallbackStageSeconds = OneBrahamConstants::LockdownStageSeconds;
 	constexpr float OBFallbackWarningSeconds = 15.f;
 	constexpr float OBFallbackPurgeDps = 18.f;
-	constexpr int32 OBFallbackPurgeCeiling = 13;
+	constexpr int32 OBFallbackPurgeCeiling = OneBrahamConstants::FloorPurgeCeiling;
 
 	/** Height of one floor in cm. The map is 15 x 400 cm with the lobby at Z=0. */
 	/** One number, defined once: see OneBrahamConstants in OneBraham.h. */
@@ -380,8 +380,7 @@ void UOneBrahamLockdownComponent::RegisterShutter(AActor* ShutterActor)
 	if (GetOwnerRole() == ROLE_Authority && ShutterActor->GetClass()->ImplementsInterface(UOneBrahamShutterInterface::StaticClass()))
 	{
 		const int32 Floor = IOneBrahamShutterInterface::Execute_GetShutterFloor(ShutterActor);
-		if (SealedFloors.Contains(Floor) ||
-			(Stage == EOneBrahamLockdownStage::Purge && Floor <= OBFallbackPurgeCeiling))
+		if (SealedFloors.Contains(Floor) || IsFloorBeingPurged(Floor))
 		{
 			IOneBrahamShutterInterface::Execute_SetShutterClosed(ShutterActor, true, 0.35f);
 		}

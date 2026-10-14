@@ -103,6 +103,9 @@ void UOneBrahamMatchSettingsAsset::EnsureDefaults()
 		}
 		bRespawnEnabled = true;
 		bExtractionEnabled = false;
+		// A respawn into a live fight: long enough to look around, short
+		// enough that it is not a shield to push with.
+		SpawnGraceInvulnerabilitySeconds = 3.f;
 	}
 
 	if (ControlPoints.Num() == 0 && Mode == EOneBrahamMatchMode::FireDrill)

@@ -218,7 +218,9 @@ public:
 	int32 SpawnSelectionMode = 1;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Respawn")
-	float SpawnGraceInvulnerabilitySeconds = 0.f;
+	/** Invulnerability after spawning, ended early by any attack. ASCENT's is
+	 *  the whole-lobby start (DefaultGame.ini AscentSpawnGraceSeconds). */
+	float SpawnGraceInvulnerabilitySeconds = 8.f;
 
 	// --- Access / lockdown (ASCENT) ---------------------------------------
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ascent")
@@ -250,7 +252,7 @@ public:
 
 	/** Never purge above this floor: the Skydeck fight must always be possible. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ascent")
-	int32 PurgeFloorCeiling = 13;
+	int32 PurgeFloorCeiling = 14;
 
 	// --- Extraction -------------------------------------------------------
 	/** Seconds a squad has to reach the Skydeck after calling the winch. */

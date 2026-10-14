@@ -32,6 +32,7 @@
 #include "Misc/Parse.h"
 #include "TimerManager.h"
 #include "Engine/Engine.h"
+#include "Core/OneBrahamSpawnRules.h"
 
 AOneBrahamGameMode::AOneBrahamGameMode()
 {
@@ -436,7 +437,7 @@ void AOneBrahamGameMode::UpdateObjectiveState()
 		{
 			if (Lockdown->GetStage() == EOneBrahamLockdownStage::Purge)
 			{
-				ObjectiveText = TEXT("Security purge on lower floors - get above floor 13");
+				ObjectiveText = TEXT("Security purge on lower floors - get to floor 15");
 			}
 			else if (Lockdown->GetStage() == EOneBrahamLockdownStage::Lockdown)
 			{
@@ -619,6 +620,22 @@ FOneBrahamKillFeedEntry AOneBrahamGameMode::RegisterKill(AActor* Victim, AContro
 	AOneBrahamPlayerState* VictimState = VictimPawn != nullptr
 		? VictimPawn->GetPlayerState<AOneBrahamPlayerState>()
 		: nullptr;
+
+	// Remembered for spawn selection: where the death was, and who did it.
+	if (Victim != nullptr && GetWorld() != nullptr)
+	{
+		const float Now = GetWorld()->GetTimeSeconds();
+		RecentDeaths.RemoveAll([Now](const FRecentDeath& Death)
+		{
+			return Now - Death.Time > OneBrahamSpawnRules::RecentDeathSeconds;
+		});
+		RecentDeaths.Add({ Victim->GetActorLocation(), Now });
+	}
+	if (VictimPawn != nullptr && VictimPawn->GetController() != nullptr && KillerController != nullptr
+		&& KillerController != VictimPawn->GetController())
+	{
+		LastKillerOf.Add(VictimPawn->GetController(), KillerController);
+	}
 	AOneBrahamPlayerState* KillerState = KillerController != nullptr
 		? Cast<AOneBrahamPlayerState>(KillerController->PlayerState)
 		: nullptr;
@@ -1056,6 +1073,8 @@ AOneBrahamSpawnPoint* AOneBrahamGameMode::SelectSpawnPointFor(AController* Contr
 
 	// --- Gather candidates ------------------------------------------------
 	TArray<AOneBrahamSpawnPoint*> Candidates;
+	AOneBrahamSpawnPoint* BestFallback = nullptr;
+	float BestFallbackSafety = -1.f;
 	TArray<float> Weights;
 	float TotalWeight = 0.f;
 
@@ -1081,10 +1100,19 @@ AOneBrahamSpawnPoint* AOneBrahamGameMode::SelectSpawnPointFor(AController* Contr
 
 		float Weight = FMath::Max(0.f, Spawn->Weight);
 
-		// --- Enemy proximity penalty -------------------------------------
-		// A spawn within 12 m of a live enemy is a free kill; within 30 m is
-		// still unfair. This is the single most important spawn rule in the game.
-		float NearestEnemySq = TNumericLimits<float>::Max();
+		// --- Threat ------------------------------------------------------
+		// See OneBrahamSpawnRules.h. Only enemies within a floor of the spawn
+		// count (a slab stops rounds); any of them that can see the spawn makes
+		// it a free kill; a fresh death next to it means someone is camping it;
+		// and a respawn never goes where the player's own killer can reach them.
+		OneBrahamSpawnRules::FThreat Threat;
+		const FVector SpawnHead = Spawn->GetActorLocation() + FVector(0.f, 0.f, 90.f);
+		const AController* LastKiller = nullptr;
+		if (const TWeakObjectPtr<AController>* Found = LastKillerOf.Find(const_cast<AController*>(Controller)))
+		{
+			LastKiller = Found->Get();
+		}
+
 		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 		{
 			const AOneBrahamPlayerController* OtherPC = Cast<AOneBrahamPlayerController>(It->Get());
@@ -1107,31 +1135,69 @@ AOneBrahamSpawnPoint* AOneBrahamGameMode::SelectSpawnPointFor(AController* Contr
 
 			const bool bEnemy = !OneBrahamTags::AreTeamsFriendly(RequestingTeam, OtherState->Team,
 				MatchSettings ? MatchSettings->Mode : EOneBrahamMatchMode::Ascent);
+			const float DistCm = FVector::Dist(Spawn->GetActorLocation(), OtherCharacter->GetActorLocation());
 
-			if (bEnemy)
-			{
-				NearestEnemySq = FMath::Min(NearestEnemySq, FVector::DistSquared2D(Spawn->GetActorLocation(), OtherCharacter->GetActorLocation()));
-			}
-			else
+			if (!bEnemy)
 			{
 				// Teammates nearby are a *bonus*: spawning next to your squad is
 				// exactly what ASCENT wants.
-				const float SquadmateDistSq = FVector::DistSquared2D(Spawn->GetActorLocation(), OtherCharacter->GetActorLocation());
-				if (SquadmateDistSq < FMath::Square(1500.f))
+				if (DistCm < 1500.f)
 				{
 					Weight *= (OtherState->SquadId == RequestingSquad) ? 2.2f : 1.4f;
 				}
+				continue;
+			}
+
+			if (!OneBrahamSpawnRules::IsInFloorBand(Spawn->FloorIndex, OtherCharacter->GetCurrentFloorIndex()))
+			{
+				continue;
+			}
+
+			Threat.NearestEnemyCm = FMath::Min(Threat.NearestEnemyCm, DistCm);
+
+			bool bHasSight = false;
+			if (DistCm < OneBrahamSpawnRules::SightCheckCm)
+			{
+				FCollisionQueryParams Params(SCENE_QUERY_STAT(OneBrahamSpawnSight), false, OtherCharacter);
+				Params.AddIgnoredActor(Spawn);
+				bHasSight = !World->LineTraceTestByChannel(OtherCharacter->GetEyeLocation(), SpawnHead,
+					ECC_Visibility, Params);
+				if (bHasSight)
+				{
+					Threat.NearestSightingEnemyCm = FMath::Min(Threat.NearestSightingEnemyCm, DistCm);
+				}
+			}
+
+			if (LastKiller != nullptr && OtherPC == LastKiller)
+			{
+				Threat.KillerCm = DistCm;
+				Threat.bKillerHasSight = bHasSight;
 			}
 		}
 
-		if (NearestEnemySq < FMath::Square(1200.f))
+		for (const FRecentDeath& Death : RecentDeaths)
 		{
-			continue; // hard veto
+			if (Now - Death.Time <= OneBrahamSpawnRules::RecentDeathSeconds)
+			{
+				Threat.NearestRecentDeathCm = FMath::Min(Threat.NearestRecentDeathCm,
+					static_cast<float>(FVector::Dist(Spawn->GetActorLocation(), Death.Location)));
+			}
 		}
-		if (NearestEnemySq < FMath::Square(3000.f))
+
+		const float ThreatMultiplier = OneBrahamSpawnRules::ThreatMultiplier(Threat);
+		if (ThreatMultiplier <= 0.f)
 		{
-			Weight *= 0.15f;
+			// Vetoed, but remembered: if every spawn is vetoed, the safest of
+			// them is still better than none.
+			const float Safety = OneBrahamSpawnRules::FallbackSafety(Threat);
+			if (Safety > BestFallbackSafety)
+			{
+				BestFallbackSafety = Safety;
+				BestFallback = Spawn;
+			}
+			continue;
 		}
+		Weight *= ThreatMultiplier;
 
 		// --- Same-cluster preference -------------------------------------
 		if (RequestingSquad != INDEX_NONE && Spawn->SquadClusterId == RequestingSquad)
@@ -1151,21 +1217,22 @@ AOneBrahamSpawnPoint* AOneBrahamGameMode::SelectSpawnPointFor(AController* Contr
 
 	if (Candidates.Num() == 0)
 	{
-		// Relax the enemy-proximity rules rather than fail to spawn. Better a
-		// slightly unfair spawn than a player stuck in the void.
+		// Every spawn is threatened. Take the safest of the vetoed ones rather
+		// than a random one - a random pick is how a camped spawn gets chosen.
+		if (BestFallback != nullptr)
+		{
+			return BestFallback;
+		}
+
+		// Nothing was even considered (every spawn on cooldown or filtered):
+		// ignore the cooldowns rather than leave a player unable to spawn.
 		for (AOneBrahamSpawnPoint* Spawn : SpawnPoints)
 		{
-			if (Spawn != nullptr && Spawn->IsAvailable(Now))
+			if (Spawn != nullptr && Spawn->bEnabled)
 			{
-				Candidates.Add(Spawn);
-				Weights.Add(1.f);
-				TotalWeight += 1.f;
+				return Spawn;
 			}
 		}
-	}
-
-	if (Candidates.Num() == 0)
-	{
 		return nullptr;
 	}
 

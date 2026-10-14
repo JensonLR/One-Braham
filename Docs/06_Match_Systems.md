@@ -34,7 +34,7 @@ it into two sides pushing a line.
 | Players | 12 (6v6) or 16 (8v8) |
 | Teams | Internal Staff vs External Contractors |
 | Objective | TDM/control over three points: Lobby, Server Floor, Canteen–Skydeck |
-| Respawn | wave respawn every 12 s, spawn protection 2 s, no downed state |
+| Respawn | wave respawn every 12 s, spawn protection 3 s (ended by any attack), no downed state |
 | Match length | 10 minutes, or first to 200 points |
 | Why it exists | it is how a player learns the map, the weapons and the callouts without losing a 25-minute run to it |
 
@@ -48,6 +48,26 @@ mistaken for an unfinished feature.
 
 ---
 
+## Spawn safety — no spawn kills, no spawn camping
+
+Every spawn is chosen by `AOneBrahamGameMode::SelectSpawnPointFor` against the
+rules in `Core/OneBrahamSpawnRules.h` (tested by `OneBraham.Core.SpawnSafety`).
+Only enemies within one floor of a spawn count: a slab stops rounds, and a stair
+is the only way through it.
+
+| Rule | Effect |
+| --- | --- |
+| Enemy within 12 m | veto |
+| Enemy with line of sight within 25 m | veto |
+| Enemy with line of sight within 50 m | weight × 0.05 — a last resort |
+| Unseen enemy within 30 m | weight × 0.15 |
+| A death within 20 m in the last 15 s | weight × 0.1 — that is where the camper is |
+| Your own killer within 40 m, or with sight at any range | veto |
+| Squadmate within 15 m | weight × 2.2 (another squad's player × 1.4) |
+| Every spawn vetoed | the safest of them: furthest from a threat, being seen counting double |
+| A spawn point just used | rests 8 s, so one point cannot be watched for the next respawn |
+| After spawning | invulnerable for 8 s in ASCENT (the lobby start) and 3 s per FIRE DRILL respawn; firing, melee, throwing or using utility ends it at once |
+
 ## 2. Access — the spine of ASCENT
 
 Ten gated zones, five tiers, three ways through each:
@@ -57,7 +77,7 @@ Ten gated zones, five tiers, three ways through each:
 | Public | `OB.Access.Tier.Public` | none needed | ground, lobby, mezzanine |
 | Staff | `OB.Access.Tier.Staff` | 14 spawns | office floors 3–8 |
 | Secure | `OB.Access.Tier.Secure` | 6 spawns | server and comms 9–11 |
-| Executive | `OB.Access.Tier.Executive` | 3 spawns | floor 12 |
+| Executive | `OB.Access.Tier.Executive` | 3 spawns | floors 12–14 |
 | Skydeck | `OB.Access.Tier.Skydeck` | 2 spawns | canteen and Skydeck balcony, both on 15 |
 
 ### The three routes
@@ -99,7 +119,7 @@ start time:
 | `Normal` | until stage 2 | nothing |
 | `PreLockdown` | 15 s warning | announcement, klaxon, exit signs flash, every screen shows the notice |
 | `Lockdown` | 90 s | floors below `HighestOccupiedFloor - 1` seal. Fire shutters close, one at a time, 2.75 s each |
-| `Purge` | until the match ends | every floor ≤ 13 takes escalating damage on a 2 Hz pulse. Floors 14 and 15 are safe |
+| `Purge` | until the match ends | every floor ≤ 14 takes escalating damage on a 2 Hz pulse. Only floor 15 (canteen and Skydeck) is safe |
 
 Rules, all implemented:
 
