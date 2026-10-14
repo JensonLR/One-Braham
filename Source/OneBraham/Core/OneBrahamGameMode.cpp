@@ -646,7 +646,56 @@ FOneBrahamKillFeedEntry AOneBrahamGameMode::RegisterKill(AActor* Victim, AContro
 	Entry.Verb = ChooseKillVerb(bKilledByBuilding, bSelfKill, Entry.bWasDowned, Report.HitZone);
 
 	Entry.WeaponId = GetKillWeaponId(KillerController);
-	Entry.bAssisted = false;   // the report carries one instigator; assists are future work
+
+	// Assists. The health component has been watching who took what off this
+	// player since it was written - everyone who has accounted for at least 20%
+	// of their maximum health, inside a window that closes five seconds after the
+	// last hit they took - and this is the half that pays them. Without it a
+	// squad's kill is one player's kill and two players' empty magazines, which
+	// is how a squad stops shooting together.
+	TArray<AActor*> Attackers;
+	if (const UOneBrahamHealthComponent* VictimHealth = VictimCharacter != nullptr
+		? VictimCharacter->GetHealthComponent()
+		: nullptr)
+	{
+		VictimHealth->GetRecentAttackers(Attackers);
+	}
+
+	int32 AssistCount = 0;
+	for (AActor* Attacker : Attackers)
+	{
+		// The tracker holds whoever the damage was attributed to. That is the
+		// character in every normal case; a projectile whose thrower has since
+		// died arrives here as the projectile, which is why the instigator is the
+		// fallback rather than the only path.
+		APawn* AttackerPawn = Cast<APawn>(Attacker);
+		if (AttackerPawn == nullptr && Attacker != nullptr)
+		{
+			AttackerPawn = Attacker->GetInstigator();
+		}
+
+		AController* AttackerController = AttackerPawn != nullptr ? AttackerPawn->GetController() : nullptr;
+		if (AttackerController == nullptr || AttackerController == KillerController)
+		{
+			// The killer is not their own assist, and the building has no
+			// player state to credit.
+			continue;
+		}
+
+		AOneBrahamPlayerState* AttackerState = AttackerController->GetPlayerState<AOneBrahamPlayerState>();
+		if (AttackerState == nullptr || AttackerState == VictimState)
+		{
+			continue;
+		}
+
+		AttackerState->ServerRegisterAssist();
+		++AssistCount;
+	}
+
+	// The feed says so when it was a squad's kill: the HUD draws "assisted"
+	// against the killer's name, and in FIRE DRILL it is why two players who both
+	// emptied a magazine get something for it.
+	Entry.bAssisted = AssistCount > 0;
 	Entry.Timestamp = GS->GetServerWorldTimeSeconds();
 
 	GS->AddKillFeedEntry(Entry);

@@ -259,6 +259,19 @@ bool FOneBrahamKillWiringTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("RegisterKill scores the team in the points mode"),
 		GameMode.Contains(TEXT("AddTeamScoreByIndex(")));
 
+	// The assist half. The health component has tracked recent attackers since
+	// it was written and nothing ever read them, so a squad's kill was one
+	// player's kill and the other two got nothing for the damage that made it.
+	TestTrue(TEXT("RegisterKill reads the victim's recent attackers"),
+		GameMode.Contains(TEXT("VictimHealth->GetRecentAttackers(Attackers)")));
+
+	TestTrue(TEXT("RegisterKill credits every attacker who is not the killer"),
+		GameMode.Contains(TEXT("AttackerController == KillerController")) &&
+		GameMode.Contains(TEXT("AttackerState->ServerRegisterAssist()")));
+
+	TestTrue(TEXT("and the feed entry says the kill was assisted"),
+		GameMode.Contains(TEXT("Entry.bAssisted = AssistCount > 0")));
+
 	TestTrue(TEXT("and decides the verb through the one function the suite pins"),
 		GameMode.Contains(TEXT("ChooseKillVerb(bKilledByBuilding, bSelfKill, Entry.bWasDowned, Report.HitZone)")));
 

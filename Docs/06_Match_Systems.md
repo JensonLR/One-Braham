@@ -222,3 +222,23 @@ Four endings, all designed, none of them a null:
 The last two are the reason the game has a tone. A match that goes wrong in this
 building should end with nobody walking out of it, and the results screen should
 say so plainly rather than pretending a losing squad "placed second".
+
+### What a kill is worth
+
+`AOneBrahamGameMode::RegisterKill` is the single place a kill is recorded, and it
+does three things: it writes the feed entry, it credits the killer, and it credits
+the assists.
+
+- **The killer** gets `ServerRegisterKill(ScorePerKill)`, and in FIRE DRILL the
+  same amount goes to their team (`AddTeamScoreByIndex`). In ASCENT there is no
+  team score at all, because the win condition is the winch and a kill count is
+  not a score.
+- **The assists** are everyone who took **20% or more of the victim's maximum
+  health**, inside the window the health component keeps and closes five seconds
+  after the victim's last hit (`UOneBrahamHealthComponent::GetRecentAttackers`),
+  and who is not the killer. `ServerRegisterAssist` gives each of them the count
+  and a third of a kill's score. The killer is never their own assist, a
+  self-kill has no assists, and the building has no player state to credit.
+- **The feed entry** carries `bAssisted`, because "Okonkwo, assisted" and
+  "Okonkwo" are different facts about the last ten seconds, and a squad that
+  shoots together should be able to see that it did.

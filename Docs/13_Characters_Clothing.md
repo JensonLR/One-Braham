@@ -173,7 +173,7 @@ first-person arms mesh so the hands visibly reach for the button.
 | Asset | Used for | Length | Notes |
 | --- | --- | --- | --- |
 | `AM_OB_Interact_Door` | every `OB.Interaction.Door.*` tag: opening, closing, breaching | 1.1 s | starts at the handle, ends with the arm back at the weapon. The most-played montage in the game; it is worth the extra polish. |
-| `AM_OB_Interact_Terminal` | override terminals, the extraction console, keycard readers with a screen | 12 s | loops while the hold runs, so it must loop cleanly. The 12 s figure is the solo override time; the paired 3 s override plays the first second and blends out. |
+| `AM_OB_Interact_Terminal` | override terminals and keycard readers with a screen | 12 s | loops while the hold runs, so it must loop cleanly. The 12 s figure is the solo override time; the paired 3 s override plays the first second and blends out. |
 | `AM_OB_Interact_LiftPanel` | lift call panels only | 0.9 s | the only montage with a real button press: a deliberate, single, index-finger stab, because calling a lift is the one interaction nobody rushes. |
 | `AM_OB_Interact_Revive` | reviving a downed squadmate | 4.5 s | loops for the revive duration (see `OneBrahamConstants::ReviveSeconds`). Needs a clear "pulling them up" read from first person, because the player is blind to their own surroundings while it plays. |
 | `AM_OB_Interact_Execute` | finishing a downed enemy | 2 s | the smallest montage in the game and the coldest: a single step in, the weapon already level, and no flourish at all. It is held for `UOneBrahamDownedComponent::ExecuteSeconds`, and the victim is watching it, so the read has to be legible from the floor. |
