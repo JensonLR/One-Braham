@@ -25,6 +25,29 @@ device, no voice capture. Every system in this project checks
 `UOneBrahamVoiceSubsystem` refuses to initialise capture on a dedicated process
 rather than failing at capture time.
 
+### Finding a match
+
+A dedicated server advertises itself. `AGameModeBase::InitGame` calls
+`RegisterServer` on any networked server without a session, and
+`AOneBrahamGameSession` turns that into `RegisterDedicatedSession` on the
+game instance: an advertised, presence-free session (`bIsDedicated`, no lobby,
+no invites) carrying the mode, the name from `-ServerName=`, the region and
+the network protocol. A listen host made its session from the menu, so the
+same call does nothing there.
+
+The server browser and matchmaking search twice: player lobbies, then
+dedicated servers (`SEARCH_DEDICATED_ONLY`). Both passes filter on
+`OB_PROTOCOL`, so an out-of-date client never sees a server it cannot join.
+The results of both go into one list, ping first; a row's index stays
+joinable whichever pass found it. A LAN browse has no lobbies and runs one pass.
+
+Every session call binds its completion delegate by handle and unbinds it in
+the handler, so a second host, search or join never fires the first one's
+callback. Cancelling matchmaking cancels the search in flight
+(`CancelFindSessions`), and so does the timeout before it hosts. A re-host waits
+for the old session's destroy to complete before it creates the new one.
+`Shutdown` stops the search, unbinds everything and leaves the session.
+
 ## 2. Authority model
 
 | Thing | Authority |

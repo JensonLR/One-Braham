@@ -16,6 +16,7 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
 #include "Interfaces/OnlineSessionInterface.h"
+#include "OnlineSessionSettings.h"
 #include "Core/OneBrahamTypes.h"
 #include "OneBrahamGameInstance.generated.h"
 
@@ -54,6 +55,10 @@ struct FOneBrahamServerInfo
 
 	UPROPERTY(BlueprintReadOnly, Category = "Server")
 	int32 SearchResultIndex = INDEX_NONE;
+
+	/** A dedicated server rather than a player's listen lobby. */
+	UPROPERTY(BlueprintReadOnly, Category = "Server")
+	bool bDedicated = false;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOneBrahamSessionCreated, bool, bWasSuccessful);
@@ -142,6 +147,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Session")
 	void DestroyCurrentSession();
 
+	/**
+	 * Dedicated server: advertises this server on the online service so the
+	 * browser and matchmaking can find it. Called by AOneBrahamGameSession.
+	 */
+	void RegisterDedicatedSession(EOneBrahamMatchMode Mode, int32 MaxPlayers, const FString& ServerName);
+
 	/** Direct connect used by automation tests and the QA scripts. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Session")
 	void TravelToAddress(const FString& Address, int32 Port, const FString& Options);
@@ -218,8 +229,44 @@ protected:
 	/** UGameInstance has no timer manager of its own; this resolves the world's. */
 	FTimerManager* GetOBTimerManager() const;
 
+	/** The session interface, or null when there are no online services. */
+	static IOnlineSessionPtr GetSessionInterface();
+
+	/** Creates the listen-server session from the Pending* values. */
+	void CreateHostedSession();
+
+	/**
+	 * Starts one search pass. The first pass finds player lobbies; when
+	 * bThenDedicated is set a second pass finds dedicated servers, and the
+	 * results of both land in BrowserResults.
+	 */
+	bool StartSessionSearch(bool bLobbies, bool bLANOnly, int32 MaxResults, bool bThenDedicated);
+
+	/** Stops an in-flight search and forgets its results. */
+	void CancelSessionSearch();
+
+	/** Unbinds every session completion delegate this instance added. */
+	void ClearSessionDelegates();
+
 	/** Live search handle kept alive while the async search runs. */
 	TSharedPtr<FOnlineSessionSearch> ActiveSearch;
+
+	/** Every result of the current browse, lobbies then dedicated servers. Indexed by FOneBrahamServerInfo::SearchResultIndex. */
+	TArray<FOnlineSessionSearchResult> BrowserResults;
+
+	/** The second (dedicated-server) pass is still to run. */
+	bool bSearchDedicatedNext = false;
+
+	/** The current browse is a LAN query. */
+	bool bBrowseLAN = false;
+
+	/** A re-host is waiting for the old session to finish being destroyed. */
+	bool bHostAfterDestroy = false;
+
+	FDelegateHandle CreateSessionDelegateHandle;
+	FDelegateHandle FindSessionsDelegateHandle;
+	FDelegateHandle JoinSessionDelegateHandle;
+	FDelegateHandle DestroySessionDelegateHandle;
 
 	bool bMatchmakingActive = false;
 	bool bLoadingScreenActive = false;

@@ -29,6 +29,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/GameSession.h"
+#include "Core/OneBrahamGameSession.h"
 #include "GameFramework/PlayerStart.h"
 #include "Kismet/GameplayStatics.h"
 #include "Misc/CommandLine.h"
@@ -44,6 +45,7 @@ AOneBrahamGameMode::AOneBrahamGameMode()
 	PlayerControllerClass = AOneBrahamPlayerController::StaticClass();
 	PlayerStateClass = AOneBrahamPlayerState::StaticClass();
 	GameStateClass = AOneBrahamGameState::StaticClass();
+	GameSessionClass = AOneBrahamGameSession::StaticClass();
 
 	bUseSeamlessTravel = true;
 	bPauseable = false;
