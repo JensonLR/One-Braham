@@ -1000,13 +1000,6 @@ void UOneBrahamHUDComponent::NotifyDownedStateChanged(bool bDowned, float BleedO
 	}
 }
 
-void UOneBrahamHUDComponent::NotifyInteractionProgress(const FText& Prompt, float Progress01)
-{
-	Data.bHasInteractionTarget = !Prompt.IsEmpty();
-	Data.InteractionPrompt = Prompt;
-	Data.InteractionHoldProgress01 = FMath::Clamp(Progress01, 0.f, 1.f);
-}
-
 // ==========================================================================
 //  Delegate handlers
 // ==========================================================================

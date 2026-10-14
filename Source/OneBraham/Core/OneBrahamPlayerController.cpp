@@ -1236,11 +1236,25 @@ void AOneBrahamPlayerController::ClientShowBanner_Implementation(const FText& Te
 	}
 }
 
-void AOneBrahamPlayerController::ClientPlayUISound_Implementation(USoundBase* Sound, float Volume)
+void AOneBrahamPlayerController::ClientDamageTaken_Implementation(float Damage, FVector_NetQuantize InstigatorLocation)
 {
-	if (Sound != nullptr)
+	// The screen-edge arc. The HUD converts the world position into a bearing
+	// against the character's own facing, so a player who has already turned
+	// towards the shooter sees it straight ahead - which is what makes it read as
+	// an answer rather than a decoration.
+	if (HUDComponent != nullptr)
 	{
-		UGameplayStatics::PlaySound2D(this, Sound, Volume);
+		HUDComponent->NotifyDamageTaken(Damage, InstigatorLocation);
+	}
+
+	// The impact, not the report: this is what tells a player they were hit
+	// rather than shot past. Id-based through the audio director, so it obeys the
+	// player's mix, their hearing-damage setting and the impact category's limits
+	// - and it is the flesh-impact cue, played flat, because it happened to the
+	// person listening.
+	if (UOneBrahamAudioManagerComponent* Audio = GetAudioManager())
+	{
+		Audio->PlayLocalUISound(TEXT("SFX_Bullet_Impact_Flesh"));
 	}
 }
 

@@ -140,17 +140,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|HUD")
 	void NotifyHitConfirmed(bool bHeadshot, bool bKill);
 
-	/** From the health component when damage lands: direction + intensity. */
+	/**
+	 * From `AOneBrahamPlayerController::ClientDamageTaken`, on the machine that
+	 * was hit: direction + intensity for the screen-edge arc.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|HUD")
 	void NotifyDamageTaken(float Damage, const FVector& InstigatorLocation);
 
 	/** From the downed component: the bleed-out bar and the revive prompt. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|HUD")
 	void NotifyDownedStateChanged(bool bDowned, float BleedOutRemaining);
-
-	/** From the interaction component: the hold-to-interact progress. */
-	UFUNCTION(BlueprintCallable, Category = "One Braham|HUD")
-	void NotifyInteractionProgress(const FText& Prompt, float Progress01);
 
 	/** Last hit-marker state, exposed for tests. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|HUD")

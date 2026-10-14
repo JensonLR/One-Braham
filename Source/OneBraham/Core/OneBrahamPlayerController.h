@@ -175,9 +175,20 @@ public:
 	UFUNCTION(BlueprintCallable, Client, Reliable, Category = "One Braham|UI")
 	void ClientShowBanner(const FText& Text, float DurationSeconds, FLinearColor Colour);
 
-	/** Plays a one-shot 2D UI sound on this client. */
-	UFUNCTION(BlueprintCallable, Client, Reliable, Category = "One Braham|UI")
-	void ClientPlayUISound(USoundBase* Sound, float Volume = 1.f);
+	/**
+	 * This client just took damage, and from where. A Client RPC for the same
+	 * reason the death screen is one: `UOneBrahamHealthComponent::ApplyDamage`
+	 * returns early on every machine except the authority, so the directional
+	 * damage indicator - the arc on the screen edge, the only way a player learns
+	 * they are being shot from behind - was broadcast into a delegate that exists
+	 * on the server's copy of a remote player's pawn and nowhere else. The row in
+	 * Docs/08 says the indicator is always on. This is what makes that true.
+	 *
+	 * Unreliable on purpose: a dropped arc on one bullet is invisible next to the
+	 * bullet that follows it, and this fires on every hit that lands.
+	 */
+	UFUNCTION(BlueprintCallable, Client, Unreliable, Category = "One Braham|UI")
+	void ClientDamageTaken(float Damage, FVector_NetQuantize InstigatorLocation);
 
 	/** Blinds this client with a flashbang: white-out, tinnitus, temporary deafness. */
 	UFUNCTION(BlueprintCallable, Client, Reliable, Category = "One Braham|Effects")

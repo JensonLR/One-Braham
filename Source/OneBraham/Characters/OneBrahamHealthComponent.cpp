@@ -252,8 +252,12 @@ float UOneBrahamHealthComponent::ApplyDamage(float RawDamage, AActor* DamageInst
 	LastDamageReport = Report;
 
 	// --- Damage feedback ---------------------------------------------------
-	// Broadcast on every machine that owns this component: the HUD uses it for the
-	// directional damage indicator and the audio manager for the impact grunt.
+	// The delegate is for the systems that live on the authority: score, assists,
+	// Blueprint hooks, the question of whether this should have been a head shot.
+	// It is *not* how the local player finds out. This function returns early on
+	// every client, so a broadcast from here reaches a remote player's HUD never,
+	// and the indicator drew on the host's screen and nowhere else. The client
+	// RPC below is what reaches the machine with someone sitting at it.
 	if (ActualDamage > 0.f)
 	{
 		FVector InstigatorLocation = FVector::ZeroVector;
@@ -268,6 +272,12 @@ float UOneBrahamHealthComponent::ApplyDamage(float RawDamage, AActor* DamageInst
 		}
 
 		OnDamageTaken.Broadcast(ActualDamage, DamageInstigator, InstigatorLocation);
+
+		if (AOneBrahamPlayerController* OwnerPC = OwnerCharacter != nullptr
+			? Cast<AOneBrahamPlayerController>(OwnerCharacter->GetController()) : nullptr)
+		{
+			OwnerPC->ClientDamageTaken(ActualDamage, InstigatorLocation);
+		}
 	}
 
 	// --- Attacker tracking (for assists) ---------------------------------
