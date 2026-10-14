@@ -234,10 +234,11 @@ def build_font(report):
 def build_style_guide(report):
     """Writes the UI style guide's machine-readable half.
 
-    The palette, spacing scale and type scale live in C++
-    (UI/OneBrahamUIStyle.cpp) and in Config/DefaultGame.ini's
-    [OneBrahamGameSettings] section. This function exists so the two are checked
-    against each other rather than assumed to agree.
+    The palette lives in Config/DefaultEngine.ini's
+    [/Script/OneBraham.OneBrahamGameSettings] section, read at runtime through
+    UOneBrahamGameSettings by UI/OneBrahamUIStyle.cpp. The content pipeline keeps
+    its own copy in common.py; this checks that copy against the style guide
+    rather than assuming the two agree.
     """
     expected = {
         "Primary": (0.000, 0.439, 0.753),

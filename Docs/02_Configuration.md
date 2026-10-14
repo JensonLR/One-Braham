@@ -134,8 +134,8 @@ The FIRE DRILL arena is a single plain level.
 ## 1b. Project Settings -> One Braham
 
 `UOneBrahamGameSettings` is a `UDeveloperSettings` class, so everything in it is
-editable in Project Settings and stored in `DefaultGame.ini` under
-`[/Script/OneBraham.OneBrahamGameSettings]`. It carries the brand colours, the
+editable in Project Settings and stored in `DefaultEngine.ini` (the class is
+`config = Engine`) under `[/Script/OneBraham.OneBrahamGameSettings]`. It carries the brand colours, the
 match and security tuning, and the content registries.
 
 **The content registries resolve in three steps.** Every one of them, in this
@@ -168,10 +168,20 @@ setting that does nothing looks exactly like a setting that works.
 | `[/Script/EngineSettings.GeneralProjectSettings]` | project name, `CompanyName`, `ProjectDisplayedTitle` = `ONE BRAHAM`, copyright line, project version 1.0.0 |
 | `[/Script/UnrealEd.ProjectPackagingSettings]` | shipping, IoStore on, compression, cook lists (5 maps), no editor content, `bSkipEditorContent=True` |
 | `[/Script/Engine.GameSession]` | `MaxPlayers=16`, `MaxSplitscreensPerConnection=1` |
-| `[OneBraham.Modes]` | ASCENT / FIRE DRILL / NIGHT SHIFT defaults |
-| `[OneBrahamAntiCheat]` | speed 1.15× / 0.4 s, fire-rate 1.20×, tolerance 12 cm, report-and-kick |
 | `[/Script/GameplayTags.GameplayTagsSettings]` | ~105 `+GameplayTagList=(Tag="OB...` entries |
-| `[/Script/OneBraham.OneBrahamGameSettings]` | the seven UI colours, interaction distance, default mode |
+
+There is no project section in this file, deliberately. Match rules are per-mode
+`UOneBrahamMatchSettingsAsset`s that fall back to their C++ defaults. The project
+settings (colours, anti-cheat thresholds, registries) are `config = Engine`, so they
+live in `DefaultEngine.ini`. An earlier version of this file carried a 31-line
+`[/Script/OneBraham.OneBrahamMatchSettings]` section for a class that does not
+exist, and the anti-cheat thresholds in a file their class never reads. The engine
+ignored both without a warning. `validate_project.py` now fails the build if any
+key under `[/Script/OneBraham.*]`:
+
+- names no config property of that class;
+- sits in a file the class does not read; or
+- gives an enum a value that is not one of its names.
 
 The gameplay tags in this file are **declarative and required**: a tag used in
 C++ that is not declared here fails at cook time on a shipping build and works

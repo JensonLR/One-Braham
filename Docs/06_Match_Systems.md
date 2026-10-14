@@ -229,8 +229,12 @@ state, so a bot never walks into a door a player sealed five seconds ago.
 | `BotsEnabled` | false | true (filled to minimum) |
 | `MinPlayersToStart` | 6 | 4 |
 
-The values live in `Config/DefaultGame.ini` under `[OneBraham.Modes]` as well, so
-a server operator can retune a mode without an editor.
+The values live in each mode's `UOneBrahamMatchSettingsAsset`
+(`/Game/OneBraham/Data/DA_MatchSettings_<Mode>`). When that asset does not exist,
+they come from the C++ defaults (`EnsureDefaults`). There is no ini route: an
+earlier `[OneBraham.Modes]` section was read by nothing. To retune a cooked
+server, change the asset and re-cook, or point Project Settings → One Braham →
+`DefaultMatchSettings` at another asset.
 
 ---
 

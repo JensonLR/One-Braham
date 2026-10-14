@@ -13,8 +13,8 @@ One-Braham/
 ├── README.md                     build-from-clone instructions
 ├── .gitignore                    UE conventions: no Binaries/, no Intermediate/, no DerivedDataCache/
 ├── Config/                       every ini, all hand-authored, all commented
-│   ├── DefaultEngine.ini         renderer, collision, net, streaming, Steam
-│   ├── DefaultGame.ini           modes, branding, tags, anti-cheat, cook list
+│   ├── DefaultEngine.ini         renderer, collision, net, streaming, Steam, project settings (colours, anti-cheat)
+│   ├── DefaultGame.ini           project name, packaging and cook list, session size, tags
 │   ├── DefaultInput.ini          engine input + the generated [OneBraham.Input] block
 │   ├── DefaultEditor.ini         PIE defaults, Python import paths
 │   ├── DefaultGameUserSettings.ini

@@ -872,13 +872,112 @@ def check_performance(v, config_only):
 #  12. Config drift
 # ---------------------------------------------------------------------------
 
+#: Where a UCLASS(config=X) reads its section from.
+CONFIG_FILE_FOR = {"Engine": "DefaultEngine.ini", "Game": "DefaultGame.ini",
+                   "GameUserSettings": "DefaultGameUserSettings.ini", "Input": "DefaultInput.ini",
+                   "Editor": "DefaultEditor.ini"}
+
+
+def project_config_classes():
+    """{ClassNameWithoutPrefix: (config file, parent, {property: type})} for the module's classes."""
+    source = os.path.join(REPO_ROOT, "Source", "OneBraham")
+    classes = {}
+    for root, _dirs, files in os.walk(source):
+        for name in files:
+            if not name.endswith(".h"):
+                continue
+            text = read_text(os.path.join(root, name))
+            # Comments out first: a doc comment between UPROPERTY() and the
+            # declaration is normal, and commented-out code is not a property.
+            text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+            text = re.sub(r"//[^\n]*", "", text)
+            heads = list(re.finditer(r"UCLASS\(((?:[^()]|\([^()]*\))*)\)\s*class\s+ONEBRAHAM_API\s+[AU](\w+)\s*:\s*public\s+[AU](\w+)", text))
+            for index, head in enumerate(heads):
+                body = text[head.end():heads[index + 1].start() if index + 1 < len(heads) else len(text)]
+                spec = re.search(r"\bconfig\s*=\s*(\w+)", head.group(1), re.I)
+                props = dict((prop, kind.strip()) for kind, prop in re.findall(
+                    r"UPROPERTY\((?:[^()]|\([^()]*\))*\b(?:config|GlobalConfig)\b(?:[^()]|\([^()]*\))*\)\s*"
+                    r"([\w:<>,\s\*]+?)\s+(\w+)\s*(?:=|;|\[|\{)", body, re.I))
+                classes[head.group(2)] = (CONFIG_FILE_FOR.get(spec.group(1)) if spec else None,
+                                          head.group(3), props)
+    return classes
+
+
+def project_enum_values():
+    """{EnumName: set of value names} for the module's UENUMs."""
+    source = os.path.join(REPO_ROOT, "Source", "OneBraham")
+    enums = {}
+    for root, _dirs, files in os.walk(source):
+        for name in files:
+            if name.endswith(".h"):
+                text = re.sub(r"//[^\n]*", "", read_text(os.path.join(root, name)))
+                for enum_name, body in re.findall(r"enum\s+class\s+(\w+)\s*:\s*\w+\s*\{(.*?)\}", text, re.S):
+                    enums[enum_name] = set(re.findall(r"^\s*(\w+)\s*(?:=|,|UMETA|$)", body, re.M))
+    return enums
+
+
+def check_project_config_keys(v):
+    """Every key under [/Script/OneBraham.X] is a config property of X, in the file X reads.
+
+    The engine ignores an ini key that names no property, and a whole section
+    for a class that reads another file, without a word. This project shipped
+    a 31-line section for a class that does not exist, its anti-cheat
+    thresholds in a file their class never opens, and ColorBlindMode for a
+    property spelled ColourBlindMode.
+    """
+    classes = project_config_classes()
+    enums = project_enum_values()
+    unknown, misplaced, bad_enums = [], [], []
+    for root, _dirs, files in os.walk(CONFIG_DIR):
+        for name in sorted(files):
+            if not name.endswith(".ini"):
+                continue
+            path = os.path.join(root, name)
+            section = None
+            for number, raw in enumerate(read_text(path).splitlines(), 1):
+                line = raw.strip()
+                if line.startswith("[") and line.endswith("]"):
+                    section = line[1:-1]
+                    continue
+                if not section or not section.startswith("/Script/OneBraham.") or not line or line.startswith(";"):
+                    continue
+                where = u"{0}:{1}".format(os.path.relpath(path, REPO_ROOT), number)
+                cls = section[len("/Script/OneBraham."):]
+                if cls not in classes:
+                    unknown.append(u"{0} [{1}]: no such class".format(where, section))
+                    continue
+                if root == CONFIG_DIR and classes[cls][0] and name != classes[cls][0]:
+                    misplaced.append(u"{0}: {1} reads {2}, not {3}".format(where, cls, classes[cls][0], name))
+                key = line.lstrip("+-!.").split("=")[0].split("[")[0].split("(")[0].strip()
+                value = line.split("=", 1)[1].strip() if "=" in line else u""
+                kind, current = None, cls
+                while current in classes and kind is None:
+                    kind = classes[current][2].get(key)
+                    current = classes[current][1]
+                if kind is None:
+                    unknown.append(u"{0}: {1} has no config property '{2}'".format(where, cls, key))
+                elif kind in enums and value not in enums[kind]:
+                    bad_enums.append(u"{0}: {1}={2} is not a {3} value name".format(where, key, value, kind))
+
+    for label, problems, fix in (
+            ("config keys", unknown, "the engine ignores these lines; fix the name or delete the line"),
+            ("config files", misplaced, "move the section to the file the class reads"),
+            ("config enums", bad_enums, "write the enum value's name, as the engine reads it")):
+        if problems:
+            v.fail("config", u"{0}: {1}".format(label, u"; ".join(problems)), fix)
+        else:
+            v.pass_("config", u"{0}: every project setting is read".format(label))
+
+
+
 def check_config(v, _config_only):
     game_ini = read_text(os.path.join(CONFIG_DIR, "DefaultGame.ini"))
     engine_ini = read_text(os.path.join(CONFIG_DIR, "DefaultEngine.ini"))
 
     required_sections = [
-        ("[/Script/OneBraham.OneBrahamMatchSettings]", game_ini, "match tuning"),
-        ("[/Script/OneBraham.OneBrahamGameSettings]", game_ini, "palette and gameplay"),
+        ("[/Script/OneBraham.OneBrahamGameSettings]", engine_ini, "palette, security and registries"),
+        ("[/Script/OneBraham.OneBrahamGameUserSettings]",
+         read_text(os.path.join(CONFIG_DIR, "DefaultGameUserSettings.ini")), "player settings defaults"),
         ("[/Script/Engine.Engine]", engine_ini, "engine classes"),
     ]
 
@@ -890,14 +989,7 @@ def check_config(v, _config_only):
         v.pass_("config", u"all {0} required config sections present".format(
             len(required_sections)))
 
-    # The three modes must each have a settings block: a mode with no block
-    # loads with the C++ defaults, which is how one mode quietly plays like
-    # another.
-    for mode in ("Ascent", "FireDrill", "NightShift"):
-        if mode not in game_ini:
-            v.fail("config", u"no [OneBrahamMatchSettings] entry for {0}".format(mode))
-        else:
-            v.pass_("config", u"{0} settings present".format(mode))
+    check_project_config_keys(v)
 
     # The content pipeline is Python run inside the editor: -run=pythonscript
     # needs the Python plugin enabled in this project (Epic: per project), and

@@ -62,18 +62,29 @@ for the old session's destroy to complete before it creates the new one.
 | Movement | server-authoritative with client prediction and a 15% speed tolerance |
 | Cosmetics | server: a client cannot grant itself an appearance |
 
-Anti-cheat basics (thresholds in `Config/DefaultGame.ini` `[OneBrahamAntiCheat]`):
+Anti-cheat basics. The thresholds are `UOneBrahamGameSettings` properties in
+`Config/DefaultEngine.ini` under `[/Script/OneBraham.OneBrahamGameSettings]`:
 
-* Impossible speed: flagged above 1.15× the movement component's maximum for
-  more than 0.4 s; corrected on the spot, logged to the server's audit line.
-* Impossible fire rate: over-rate shots are dropped; a sustained 20% over-rate
-  flags.
+* Impossible speed: the server checks its own simulated speed every 0.25 s, and
+  four checks in a row above 1.35× the movement cap (`MaxMovementSpeedTolerance`)
+  are a violation. The pawn is clamped back to the cap on the spot. A client whose
+  speed reports stop arriving is flagged too.
+* Impossible fire rate: a shot that arrives more than 0.08 s
+  (`MaxFireRateTolerance`) earlier than the weapon's interval allows is dropped
+  and reported. The weapon and the weapon component both check.
 * Damage originating from a client value: ignored entirely; the server recomputes.
-* Hit registration through geometry: rejected — the server line-traces the same
-  shot from the same origin with a 12 cm tolerance.
-* Shot from outside the map volume: rejected.
-* Reported and kicked, not silently tolerated. The reason is written to the
-  player's session so a support ticket can be answered.
+* Shot origin: rejected when the client's eye is more than 270 cm (3× the
+  component's 90 cm drift allowance) from where the server has it.
+* Aim direction: rejected when it is more than the weapon's current spread plus
+  12°, plus 6° of slack, off the server's view.
+* Shooting from inside geometry: rejected.
+* Every violation adds to the player's score and writes a `SECURITY:` line to the
+  server's audit log (`bLogSuspiciousActions`). Kicking at 25 points
+  (`ViolationsBeforeKick`) is a server switch, `bKickOnRepeatedViolations`, and
+  it is **off** by default. These checks have not yet met real players' latency,
+  and a false kick costs more than a logged cheater. Turn it on once the audit log
+  from a playtest shows the thresholds are not catching honest players. A kick
+  tells the player why.
 
 ### Movement prediction
 
