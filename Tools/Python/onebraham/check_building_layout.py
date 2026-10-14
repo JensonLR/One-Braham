@@ -208,6 +208,13 @@ def frame_problems():
 
     found.extend(core_problems(E, areas))
 
+    # The spawn rules (20 m between squads, 6 m between squadmates on one
+    # storey), run on the builder's own plan with no engine. They used to run
+    # only inside the editor, where two opposing Skydeck spawns 17.5 m apart
+    # would have been the first thing the map build said.
+    for problem in E.spawn_safety_problems(E.spawn_plan()):
+        found.append((u"spawn safety: " + problem, None))
+
     pad_x, pad_y, pad_z = C.EXTRACTION_PAD_LOCATION
     skydeck_z = E._floor_z(C.FLOOR_COUNT)
     if abs(pad_z - skydeck_z) > 1.0:

@@ -123,6 +123,10 @@ STEPS = [
      "names, every gameplay tag either claimed by an emitter or written down as "
      "waiting, every verb against the montage it plays, and every class's own "
      "overrides against the interface's signatures"),
+    ("builders_dry_run", "onebraham.check_builders_dry_run", False,
+     "every content builder run end to end against a stand-in for the editor's "
+     "unreal module: the builders' own Python (names, arguments, report calls) "
+     "and their pure rules, such as spawn safety, with no engine"),
     ("materials", "onebraham.build_materials", True,
      "master materials, physical materials, surface and brand instances"),
     ("environment", "onebraham.build_environment", True,

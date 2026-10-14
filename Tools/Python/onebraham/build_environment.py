@@ -295,11 +295,16 @@ ANCHORS = {
         ("Canteen_Spawn_B", 1600, -1200),
         ("Canteen_Spawn_C", 0, 1450),
     ],
+    # The deck's four corners: clear of the service core, the helipad (the
+    # extraction pad), the plant room, the winch control room and the bar, and
+    # 3-4 m in from the edges. Any two corners are at least 32 m apart, so every
+    # squad pairing clears the 20 m enemy rule. (The first layout put two
+    # opposing squads 17.5 m apart on the same open deck.)
     "Skydeck": [
-        ("Deck_Spawn_West", -2000, 0),
-        ("Deck_Spawn_East", 2000, 0),
-        ("Deck_Spawn_North", -1300, -1600),
-        ("Deck_Spawn_South", 1300, 1600),
+        ("Deck_Spawn_NorthWest", -2100, 1600),
+        ("Deck_Spawn_SouthEast", 2100, -1600),
+        ("Deck_Spawn_NorthEast", 2100, 1600),
+        ("Deck_Spawn_SouthWest", -2100, -1600),
     ],
 }
 
@@ -1132,23 +1137,11 @@ def build_destructible_props(report, floor_index):
     return placed
 
 
-def build_spawn_points(report):
-    """Places and configures every spawn anchor.
-
-    Spawn safety is a hard requirement of the map spec: no spawn may be within
-    SPAWN_MIN_ENEMY_DISTANCE_CM of an enemy's spawn, and no two same-team spawns
-    may be closer than SPAWN_MIN_SAME_TEAM_DISTANCE_CM. This functions places
-    them, configures them, and hands the list to the manifest where
-    validate_project.py checks it - a map where the first thing that happens is
-    being shot in the back is a map that does not ship.
-    """
-    spawn_class = getattr(unreal, "OneBrahamSpawnPoint", None)
-    if spawn_class is None:
-        report.failed("OneBrahamSpawnPoint", "the C++ class is not available; "
-                      "compile the project before running the environment build.")
-        return []
-
-    placed = []
+def spawn_plan():
+    """Every spawn anchor as the map will place it: name, floor, area, zone tag,
+    world location and squad cluster. Pure data, so check_building_layout can
+    run the spawn-safety rules with no engine."""
+    plan = []
     spawn_index = 0
 
     for area_name, anchors in ANCHORS.items():
@@ -1169,78 +1162,109 @@ def build_spawn_points(report):
             # them all on the middle one: two anchors on the same floor 3000 cm
             # apart are one spawn, not two.
             floor_index = floors[0] + (index % floor_span)
-            z = _floor_z(floor_index) + 90.0
-
-            actor = _spawn(spawn_class, unreal.Vector(ax, ay, z))
-            if actor is None:
-                continue
-
-            _label(actor, anchor_name)
-
-            try:
-                actor.set_editor_property("FloorIndex", floor_index)
-
-                # ASCENT is three squads of four in a free-for-all: no anchor is
-                # tied to a team, and the cluster id is what keeps a squad
-                # together. The game mode round-robins players onto clusters 0-2.
-                actor.set_editor_property("SquadClusterId", spawn_index % 3)
-                actor.set_editor_property("Weight", 1.0)
-                actor.set_editor_property("CooldownSeconds", 0.0)
-                actor.set_editor_property("bEnabled", True)
-
-                # Best-effort tag: if the tag list in DefaultGame.ini has not been
-                # compiled into this editor session, leave it unset rather than
-                # failing the build. An untagged spawn point is a spawn point the
-                # game mode weights less; it is not a broken map.
-                tag = C.make_gameplay_tag(zone_tag_name)
-                if tag is not None:
-                    actor.set_editor_property("ZoneTag", tag)
-                else:
-                    report.skipped_asset(anchor_name, u"zone tag {0} is not registered in this "
-                                         u"editor session".format(zone_tag_name))
-
-            except Exception as exc:  # noqa: BLE001
-                report.failed("spawn point " + anchor_name, str(exc))
-
-            placed.append({
+            plan.append({
                 "name": anchor_name,
                 "floor": floor_index,
                 "area": area_name,
                 "zone_tag": zone_tag_name,
-                "location": [ax, ay, z],
+                "location": [ax, ay, _floor_z(floor_index) + 90.0],
                 "squad_cluster": spawn_index % 3,
             })
             spawn_index += 1
+    return plan
 
-    # The two rules, checked here as well as in the validator: a failure at build
-    # time names the anchor, which a validation report cannot.
-    #
-    # MEASURED ON THE SAME STOREY. The enemy rule exists to stop an opening rush
-    # reaching an opposing squad before it has moved, and a squad two floors away
-    # cannot do that: the slab between them is a real barrier, and the stairwells
-    # are the only route. Measuring straight-line distance through a floor would
-    # force spawn anchors into the corners of a floor plan and make the tower
-    # worse to play in order to satisfy a number. Same storey, then, and the
-    # vertical case is covered by the deploy timer and the spawn-heat scan in
-    # AOneBrahamGameMode.
+
+def spawn_safety_problems(plan):
+    """The two spawn rules over a plan; one line per offending pair.
+
+    MEASURED ON THE SAME STOREY. The enemy rule exists to stop an opening rush
+    reaching an opposing squad before it has moved, and a squad two floors away
+    cannot do that: the slab between them is a real barrier, and the stairwells
+    are the only route. Measuring straight-line distance through a floor would
+    force spawn anchors into the corners of a floor plan and make the tower
+    worse to play in order to satisfy a number. Same storey, then, and the
+    vertical case is covered by the deploy timer and the spawn-heat scan in
+    AOneBrahamGameMode.
+    """
     import math
     problems = []
-
-    for i, a in enumerate(placed):
-        for b in placed[i + 1:]:
+    for i, a in enumerate(plan):
+        for b in plan[i + 1:]:
             if abs(a["location"][2] - b["location"][2]) >= C.FLOOR_HEIGHT_CM:
                 continue
-
             distance = math.hypot(a["location"][0] - b["location"][0],
                                   a["location"][1] - b["location"][1])
-
             if a["squad_cluster"] != b["squad_cluster"] and distance < C.SPAWN_MIN_ENEMY_DISTANCE_CM:
                 problems.append(u"{0} (F{1:02d}) is {2:.0f} cm from {3} (F{4:02d}), enemy rule is {5:.0f} cm".format(
-                    a["name"], a["floor"], distance, b["name"], b["floor"],
-                    C.SPAWN_MIN_ENEMY_DISTANCE_CM))
+                    a["name"], a["floor"], distance, b["name"], b["floor"], C.SPAWN_MIN_ENEMY_DISTANCE_CM))
             elif a["squad_cluster"] == b["squad_cluster"] and distance < C.SPAWN_MIN_SAME_TEAM_DISTANCE_CM:
                 problems.append(u"{0} (F{1:02d}) is {2:.0f} cm from squadmate {3} (F{4:02d})".format(
                     a["name"], a["floor"], distance, b["name"], b["floor"]))
+    return problems
+
+
+def build_spawn_points(report):
+    """Places and configures every spawn anchor.
+
+    Spawn safety is a hard requirement of the map spec: no spawn may be within
+    SPAWN_MIN_ENEMY_DISTANCE_CM of an enemy's spawn, and no two same-team spawns
+    may be closer than SPAWN_MIN_SAME_TEAM_DISTANCE_CM. This functions places
+    them, configures them, and hands the list to the manifest where
+    validate_project.py checks it - a map where the first thing that happens is
+    being shot in the back is a map that does not ship.
+    """
+    spawn_class = getattr(unreal, "OneBrahamSpawnPoint", None)
+    if spawn_class is None:
+        report.failed("OneBrahamSpawnPoint", "the C++ class is not available; "
+                      "compile the project before running the environment build.")
+        return []
+
+    placed = []
+
+    for spawn in spawn_plan():
+        anchor_name = spawn["name"]
+        floor_index = spawn["floor"]
+        zone_tag_name = spawn["zone_tag"]
+        ax, ay, z = spawn["location"]
+
+        actor = _spawn(spawn_class, unreal.Vector(ax, ay, z))
+        if actor is None:
+            report.failed("spawn point " + anchor_name, "could not be spawned")
+            continue
+
+        _label(actor, anchor_name)
+
+        try:
+            actor.set_editor_property("FloorIndex", floor_index)
+
+            # ASCENT is three squads of four in a free-for-all: no anchor is
+            # tied to a team, and the cluster id is what keeps a squad
+            # together. The game mode round-robins players onto clusters 0-2.
+            actor.set_editor_property("SquadClusterId", spawn["squad_cluster"])
+            actor.set_editor_property("Weight", 1.0)
+            actor.set_editor_property("CooldownSeconds", 0.0)
+            actor.set_editor_property("bEnabled", True)
+
+            # Best-effort tag: if the tag list in DefaultGame.ini has not been
+            # compiled into this editor session, leave it unset rather than
+            # failing the build. An untagged spawn point is a spawn point the
+            # game mode weights less; it is not a broken map.
+            tag = C.make_gameplay_tag(zone_tag_name)
+            if tag is not None:
+                actor.set_editor_property("ZoneTag", tag)
+            else:
+                report.skipped_asset(anchor_name, u"zone tag {0} is not registered in this "
+                                     u"editor session".format(zone_tag_name))
+
+        except Exception as exc:  # noqa: BLE001
+            report.failed("spawn point " + anchor_name, str(exc))
+
+        placed.append(spawn)
+
+    # The two rules, checked here as well as by check_building_layout (which
+    # runs the same function with no engine): a failure at build time names the
+    # anchor, which a validation report cannot.
+    problems = spawn_safety_problems(placed)
 
     if problems:
         # A spawn-safety failure is a design failure, not a script failure, so it

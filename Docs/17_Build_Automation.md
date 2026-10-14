@@ -45,6 +45,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `check_hud_strings.py` | the HUD's copy: the `HUD_STRINGS` list `build_ui.py` generates `DT_HUDStrings` from, the rows compiled into `OneBrahamHUDStrings`, the keys the code asks the table for, and the ownership table in `Docs/08` that says which layer shows each one | **no** | yes |
 | `check_cosmetic_ids.py` | the wardrobe: `COSMETIC_SLOTS` / `COSMETIC_OPTIONS` in `build_characters.py`, the compiled-in `CosmeticSlots` default (names, parent bones, offsets), the starter outfit in `UOneBrahamGameInstance`, and the slot table in `Docs/13` - names and option counts ; the earned-cosmetic catalogue: every locked id is a wardrobe option that no starter outfit or archetype default issues, every tag is registered, and every tag an achievement grants has a row | **no** | yes |
 | `check_interaction.py` | the interaction surface: every class that implements `IOneBrahamInteractionInterface` against the table in `Docs/13` section 9, every number in that table against the constant or property default it names, every `OB.Interaction.*` tag either claimed by an emitter or written down as declared-and-waiting, and every verb against the montage `PlayInteractionMontage` would load for it | **no** | yes |
+| `check_builders_dry_run.py` | every content builder run end to end against a stand-in for the editor's `unreal` module, in a scratch copy of the tree: the builders' own Python (an undefined name, a wrong argument, a report method that does not exist) and their pure rules (spawn safety) fail here instead of on the first content build | **no** | yes |
 | `report_uncalled.py` | **a report, not a gate**: every member function declared, defined and never called anywhere in the module, tagged `[BP]` when it exists for a Blueprint to call and `[net]` when it is an RPC. Run by hand before and after a wiring batch; `HANDOVER.md` section 4.2 is the triage of the current list. It exits 0 whatever it finds, because "this has no caller" is a question rather than a failure | **no** | by hand |
 | `validate_project.py` | the health check and a markdown report | either | yes |
 | `run_all.py` | all of the above, in dependency order, with a report | either | yes |
@@ -82,7 +83,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 
 ```
 # ONE BRAHAM - content build report
-**29 steps succeeded, 0 failed.**
+**30 steps succeeded, 0 failed.**
 
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
@@ -104,6 +105,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | hud_strings | OK | 0.1 | 98 HUD-string checks, 31 rows and 7 widgets, every one shown |
 | audio_ids | OK | 0.2 | 308 audio-id checks, every cue audible or documented |
 | interaction_ids | OK | 0.3 | 281 interaction checks, 10 interactables, every verb, tag, tuning number and override accounted for |
+| builders_dry_run | OK | 1.6 | 10 builders ran end to end with no Python error |
 | materials | OK | 3.1 | 6 masters, 15 physicals, 28 instances |
 ...
 ```
@@ -116,8 +118,8 @@ builders raise `"... must run inside the Unreal Editor."`, which is a fact about
 the machine rather than about the project, and a CI box with no engine install
 should not report a broken build - it should report that it did not run the
 content steps, with their names. On a fresh clone the full run is therefore
-"19 steps succeeded, 0 failed, 10 skipped" and the same run with an editor
-installed is "29 steps succeeded, 0 failed".
+"20 steps succeeded, 0 failed, 10 skipped" and the same run with an editor
+installed is "30 steps succeeded, 0 failed".
 
 ---
 
