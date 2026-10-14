@@ -118,6 +118,19 @@ void UOneBrahamExtractionComponent::TickComponent(float DeltaTime, ELevelTick Ti
 	const float HoldSeconds = Settings ? FMath::Max(1.f, Settings->ExtractionHoldSeconds) : OBFallbackHoldSeconds;
 	const float LoiterSeconds = Settings ? FMath::Max(1.f, Settings->HelicopterLoiterSeconds) : OBFallbackLoiterSeconds;
 
+	// The claiming squad is on the floor. Nobody is left to walk onto the wire, and
+	// the pad has to re-arm for whoever is still standing. Checked for every live
+	// phase, not only the hold: a squad wiped while the helicopter is still inbound
+	// would otherwise keep its claim and lock every other squad out of the win.
+	if ((ExtractionState == EOneBrahamExtractionState::Broadcast
+			|| ExtractionState == EOneBrahamExtractionState::Arriving
+			|| ExtractionState == EOneBrahamExtractionState::Holding)
+		&& !IsClaimingSquadAlive())
+	{
+		ServerAbortExtraction(EOneBrahamExtractionFailReason::CallersEliminated);
+		return;
+	}
+
 	switch (ExtractionState)
 	{
 	case EOneBrahamExtractionState::Inactive:
@@ -166,13 +179,6 @@ void UOneBrahamExtractionComponent::TickComponent(float DeltaTime, ELevelTick Ti
 		if (TimeInState >= LoiterSeconds)
 		{
 			ServerAbortExtraction(EOneBrahamExtractionFailReason::LoiterExpired);
-			return;
-		}
-
-		// The claiming squad is on the floor. Nobody is left to walk onto the wire.
-		if (GS->IsSquadEliminated(ClaimingSquadId))
-		{
-			ServerAbortExtraction(EOneBrahamExtractionFailReason::CallersEliminated);
 			return;
 		}
 

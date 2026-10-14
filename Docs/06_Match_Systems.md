@@ -142,6 +142,7 @@ Inactive ──call──► Broadcast (10 s) ──► Arriving (45 s) ──�
 | Hold time | 30 s |
 | Contested | a member of another squad inside the radius **freezes** the timer; it does not reset it |
 | Prerequisites | mode is ASCENT · ≥ 1 squadmate alive · the claiming pawn's Z ≥ 5600 |
+| Callers wiped | checked every server tick in Broadcast, Arriving **and** Holding: a claiming squad wiped before the helicopter lands loses the call there and then, and the pad re-arms for whoever is still standing (`IsClaimingSquadAlive`) |
 | Loiter | 75 s from the call; a squad that calls and does not come fails and the extraction is locked out for 60 s |
 | Fast mode | CVar `ob.Extraction.Fast 1` halves the durations for testing |
 
