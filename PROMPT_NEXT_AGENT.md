@@ -115,6 +115,7 @@ require".
 ```
 cd One-Braham
 export PYTHONPATH=Tools/Python
+export PYTHONUTF8=1                 # if the shell's locale is ASCII, as this sandbox's is
 
 python3 Tools/Python/run_all.py --text-only            # expect: BUILD OK: 18 step(s) succeeded
 python3 Tools/Python/onebraham/validate_project.py     # expect: 31 pass, 2 warn, 0 fail
