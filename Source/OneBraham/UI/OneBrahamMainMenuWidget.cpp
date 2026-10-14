@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "UI/OneBrahamMainMenuWidget.h"
+#include "Online/OneBrahamPlatformSubsystem.h"
 
 #include "OneBraham.h"
 #include "Blueprint/WidgetTree.h"
@@ -68,6 +69,17 @@ void UOneBrahamMainMenuWidget::NativeConstruct()
 		GameInstance->OnMatchmakingStatus.AddUniqueDynamic(this, &UOneBrahamMainMenuWidget::HandleMatchmakingStatus);
 		GameInstance->OnSessionJoined.AddUniqueDynamic(this, &UOneBrahamMainMenuWidget::HandleSessionJoined);
 		GameInstance->HideLoadingScreen();
+	}
+
+	// Why the last match ended, when it ended badly: the engine brings a
+	// disconnected client back here and the platform subsystem kept the reason.
+	if (UOneBrahamPlatformSubsystem* Platform = UOneBrahamPlatformSubsystem::Get(this))
+	{
+		const FText Notice = Platform->ConsumeNotice();
+		if (!Notice.IsEmpty())
+		{
+			StatusText = Notice;
+		}
 	}
 	Super::NativeConstruct();
 }

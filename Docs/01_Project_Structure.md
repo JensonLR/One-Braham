@@ -48,7 +48,7 @@ all. Each one is a system with a single owner:
 
 | Folder | Contents | Belongs to |
 | --- | --- | --- |
-| `Core/` | Types, tags, settings, game instance, game state, player state, controller, game mode, spawn points, save/settings, the console and its QA commands, the `ob.NetDebug` overlay and the `ob.Bench.Skydeck` flythrough, the server's game session, `UOneBrahamGameplayStatics` | PART 3 |
+| `Core/` | Types, tags, settings, game instance, game state, player state, controller, game mode, spawn points, save/settings, the console and its QA commands, the `ob.NetDebug` overlay and the `ob.Bench.Skydeck` flythrough, the server's game session, `UOneBrahamGameplayStatics`, stick aim assist | PART 3 |
 | `Characters/` | Character, movement, health, downed, ragdoll | PART 4 |
 | `Weapons/` | Weapon base, weapon component, inventory, projectile | PART 5 |
 | `Access/` | Access zone (the door), keycard, override terminal, fire shutter, breach interface | PART 6 |
@@ -62,7 +62,7 @@ all. Each one is a system with a single owner:
 | `VFX/` | VFX statics, camera shake | PART 11 |
 | `Data/` | weapon definition/registry, match settings, character data asset, the cosmetic catalogue (earned items) | PART 3 |
 | `Match/` | FIRE DRILL control points | PART 6 |
-| `Online/` | the Steam subsystem: career record, achievements, stats, rich presence, overlay | PART 19 |
+| `Online/` | the Steam subsystem: career record, achievements, stats, rich presence, overlay; the platform subsystem: privileges, crossplay, block list, controller disconnect, suspend, disconnect reasons (`Docs/21`) | PART 19 |
 | `Tests/` | the automation suite, one file per system it covers | PART 18 |
 
 Conventions that hold across all of it:

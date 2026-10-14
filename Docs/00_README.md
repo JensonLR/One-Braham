@@ -35,6 +35,7 @@ validator fails the build if the two disagree.
 | 18 | [Testing and performance](18_Testing_Performance.md) | the test plan, the budgets, the manual QA pass |
 | 19 | [Steam, marketing, trailer](19_Steam_Marketing_Trailer.md) | the store page, the capsule art, the 96-second trailer |
 | 20 | [Release checklists](20_Release_Checklists.md) | everything that must pass before a build goes out |
+| 21 | [Xbox](21_Xbox.md) | ID@Xbox, what the code already does for consoles, and what needs the GDK |
 | — | [Licences](LICENCES.md) | every third-party asset and its licence |
 
 ---

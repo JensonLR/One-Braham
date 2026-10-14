@@ -66,8 +66,8 @@ does.
 | `python3 Tools/Python/onebraham/validate_project.py` | `31 pass, 2 warn, 0 fail` | the two warnings are the fresh-clone manifest and surface coverage; anything else is a regression |
 | `python3 Tools/Python/onebraham/check_doc_numbers.py` | `89 numbers checked. agree. OK` | every count quoted in `Docs/17` and the README against the count the tooling produces |
 | `python3 Tools/Python/onebraham/check_interaction.py` | `checks: 281` | the interaction surface: classes, tables, tags, montage chain, interface conformance |
-| `python3 Tools/Python/onebraham/check_cpp_symbols.py` | `835 declarations`, `2096 hygiene checks`, `OK` | declared-but-undefined members, scoped enums, shadowed engine properties, duplicate definitions, float literals, unbudgeted Server RPCs |
-| `python3 Tools/Python/onebraham/report_uncalled.py` | `49 member(s) with no call site` | the triage list in §4.2. **This is a report, not a gate** |
+| `python3 Tools/Python/onebraham/check_cpp_symbols.py` | `855 declarations`, `2096 hygiene checks`, `OK` | declared-but-undefined members, scoped enums, shadowed engine properties, duplicate definitions, float literals, unbudgeted Server RPCs |
+| `python3 Tools/Python/onebraham/report_uncalled.py` | `48 member(s) with no call site` | the triage list in §4.2. **This is a report, not a gate** |
 
 Each checker also runs standalone with the import root, which is the only thing
 that ever trips anyone up:
@@ -114,11 +114,11 @@ Every fix is a commit, and `check_cpp_symbols.py` plus `check_uht_contracts.py`
 run after each one. Expect the first pass to be large; expect the second to be
 small; expect the first *run* (not compile) to be a different list again.
 
-### 4.2 The uncalled-API triage — 49 members
+### 4.2 The uncalled-API triage — 48 members
 
 `Tools/Python/onebraham/report_uncalled.py` lists every member function that is
 declared, defined and never called anywhere in the module. It was 83 at the
-first handover; it is 49 now, and the group still matters more than the count.
+first handover; it is 48 now, and the group still matters more than the count.
 
 **Not Blueprint: none that are real.** The audio cue wrappers, the gamepad look,
 the extraction abort and the rest of the old Group A have been wired or deleted.
@@ -129,8 +129,7 @@ through `SNew` (a false positive of a text search).
 which is correct only if a Blueprint does. The front end no longer depends on
 any of them: the main menu, settings, rebinding, results and loading screens are
 C++ (`Docs/08` §4). What remains is mostly read-only queries a designer's
-Blueprint will want (`IsOnPad`, `GetPaneHealth01`, `IsCosmeticUnlocked`,
-`AreFriendly`) plus a few deliberate designer hooks (`ServerLock`,
+Blueprint will want (`IsOnPad`, `GetPaneHealth01`, `IsCosmeticUnlocked`) plus a few deliberate designer hooks (`ServerLock`,
 `ServerSlamClosed`, `AddArmour`, `SetPendingMatchSettingsOverride`). Treat the
 list as a contract. Delete a member a release proves nobody needed, rather than
 leaving a third state.

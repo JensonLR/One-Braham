@@ -5,6 +5,7 @@
 #include "OneBraham.h"
 #include "Core/OneBrahamGameSettings.h"
 #include "Core/OneBrahamSaveSettings.h"
+#include "Online/OneBrahamPlatformSubsystem.h"
 #include "Data/OneBrahamMatchSettingsAsset.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
@@ -346,6 +347,15 @@ TSharedPtr<FOnlineSessionSettings> UOneBrahamGameInstance::BuildSessionSettings(
 	Settings->Set(FName(TEXT("OB_MAP")), MapName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 	Settings->Set(FName(TEXT("OB_REGION")), Profile ? Profile->PreferredRegion : FString(TEXT("EU-West")), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 
+	// Crossplay: a player's lobby carries their platform and whether they
+	// allow crossplay. A dedicated server has no platform of its own (it is a
+	// Linux box serving everyone), so it advertises none and suits every client.
+	const UOneBrahamPlatformSubsystem* Platform = GetSubsystem<UOneBrahamPlatformSubsystem>();
+	Settings->Set(FName(TEXT("OB_PLATFORM")), Platform != nullptr ? UOneBrahamPlatformSubsystem::GetPlatformKey() : FString(),
+		EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+	Settings->Set(FName(TEXT("OB_CROSSPLAY")), Platform == nullptr || Platform->IsCrossplayAllowed(),
+		EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+
 	return Settings;
 }
 
@@ -360,6 +370,11 @@ void UOneBrahamGameInstance::HostListenServer(EOneBrahamMatchMode Mode, int32 Ma
 	{
 		// Already a server: just travel into the map.
 		TravelToMatchMap(BuildTravelOptions());
+		return;
+	}
+
+	if (!bLAN && !CheckOnlinePrivilege())
+	{
 		return;
 	}
 
@@ -477,6 +492,10 @@ void UOneBrahamGameInstance::RegisterDedicatedSession(EOneBrahamMatchMode Mode, 
 
 void UOneBrahamGameInstance::StartMatchmaking(EOneBrahamMatchMode Mode)
 {
+	if (!CheckOnlinePrivilege())
+	{
+		return;
+	}
 	SetPendingMatchMode(Mode);
 	bMatchmakingActive = true;
 
@@ -522,6 +541,18 @@ void UOneBrahamGameInstance::StartMatchmaking(EOneBrahamMatchMode Mode)
 	}
 }
 
+bool UOneBrahamGameInstance::CheckOnlinePrivilege()
+{
+	const UOneBrahamPlatformSubsystem* Platform = GetSubsystem<UOneBrahamPlatformSubsystem>();
+	if (Platform == nullptr || Platform->CanPlayOnline())
+	{
+		return true;
+	}
+	OnMatchmakingStatus.Broadcast(NSLOCTEXT("OneBraham", "NoOnlinePrivilege",
+		"Your account's settings do not allow online play. Practice and LAN games are still available."), 0.f);
+	return false;
+}
+
 void UOneBrahamGameInstance::CancelMatchmaking()
 {
 	if (!bMatchmakingActive && ActiveSearch == nullptr)
@@ -554,6 +585,12 @@ void UOneBrahamGameInstance::StartPracticeMatch(EOneBrahamMatchMode Mode, int32 
 
 void UOneBrahamGameInstance::RefreshServerBrowser(bool bLANOnly)
 {
+	if (!bLANOnly && !CheckOnlinePrivilege())
+	{
+		OnServerListUpdated.Broadcast(TArray<FOneBrahamServerInfo>());
+		return;
+	}
+
 	IOnlineSubsystem* OnlineSubsystem = IOnlineSubsystem::Get();
 	const IOnlineSessionPtr Sessions = OnlineSubsystem ? OnlineSubsystem->GetSessionInterface() : nullptr;
 	if (!Sessions.IsValid())
@@ -817,10 +854,22 @@ void UOneBrahamGameInstance::HandleFindSessionsComplete(bool bWasSuccessful)
 
 	if (BrowserResults.Num() > 0)
 	{
+		const UOneBrahamPlatformSubsystem* Platform = GetSubsystem<UOneBrahamPlatformSubsystem>();
+		const bool bLocalCrossplay = Platform == nullptr || Platform->IsCrossplayAllowed();
 		for (int32 Index = 0; Index < BrowserResults.Num(); ++Index)
 		{
 			const FOnlineSessionSearchResult& Result = BrowserResults[Index];
 			if (!Result.IsValid())
+			{
+				continue;
+			}
+
+			// Crossplay: another platform's lobby shows only when both sides allow it.
+			FString HostPlatform;
+			bool bHostCrossplay = true;
+			Result.Session.SessionSettings.Get(FName(TEXT("OB_PLATFORM")), HostPlatform);
+			Result.Session.SessionSettings.Get(FName(TEXT("OB_CROSSPLAY")), bHostCrossplay);
+			if (!UOneBrahamPlatformSubsystem::IsCrossplayCompatible(UOneBrahamPlatformSubsystem::GetPlatformKey(), bLocalCrossplay, HostPlatform, bHostCrossplay))
 			{
 				continue;
 			}

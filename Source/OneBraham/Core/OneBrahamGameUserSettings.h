@@ -295,6 +295,13 @@ public:
 	UPROPERTY(config) bool bShareAnonymousStats = true;
 	UPROPERTY(config) bool bAllowRichPresence = true;
 	UPROPERTY(config) bool bAllowSteamOverlay = true;
+
+	/**
+	 * Matchmaking and the browser show sessions from other platforms. The
+	 * platform's own crossplay privilege can force it off whatever this says
+	 * (UOneBrahamPlatformSubsystem::IsCrossplayAllowed).
+	 */
+	UPROPERTY(config) bool bAllowCrossplay = true;
 	UPROPERTY(config) FString PreferredRegion = TEXT("EU-West");
 	UPROPERTY(config) FString LastUsedServerAddress;
 	UPROPERTY(config) int32 LastUsedServerPort = 7777;

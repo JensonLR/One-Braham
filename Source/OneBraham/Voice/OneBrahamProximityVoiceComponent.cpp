@@ -9,6 +9,8 @@
 #include "Core/OneBrahamPlayerController.h"
 #include "Core/OneBrahamPlayerState.h"
 #include "Voice/OneBrahamVoiceSubsystem.h"
+#include "Online/OneBrahamPlatformSubsystem.h"
+#include "GameFramework/GameStateBase.h"
 #include "Voice/OneBrahamVoiceTypes.h"
 #include "Components/AudioComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -565,6 +567,30 @@ void UOneBrahamProximityVoiceComponent::ClientReceiveVoiceFrame_Implementation(i
 	if (World == nullptr || Frame.Num() == 0 || Frame.Num() > MAX_VOICE_FRAME_BYTES)
 	{
 		return;
+	}
+
+	// The platform's rules for this listener: no voice at all when the account
+	// may not communicate online, and none from a player it has blocked.
+	if (const UOneBrahamPlatformSubsystem* Platform = UOneBrahamPlatformSubsystem::Get(this))
+	{
+		if (!Platform->CanCommunicate())
+		{
+			return;
+		}
+		if (const AGameStateBase* GameState = World->GetGameState())
+		{
+			for (const APlayerState* Speaker : GameState->PlayerArray)
+			{
+				if (Speaker != nullptr && Speaker->GetPlayerId() == SpeakerPlayerId)
+				{
+					if (Platform->IsBlocked(Speaker))
+					{
+						return;
+					}
+					break;
+				}
+			}
+		}
 	}
 
 	const EOneBrahamVoiceChannel Channel = static_cast<EOneBrahamVoiceChannel>(ChannelByte);

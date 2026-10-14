@@ -5,6 +5,7 @@
 #include "Components/HorizontalBox.h"
 #include "Core/OneBrahamGameUserSettings.h"
 #include "Core/OneBrahamInputBindings.h"
+#include "Online/OneBrahamPlatformSubsystem.h"
 #include "InputCoreTypes.h"
 #include "Kismet/KismetSystemLibrary.h"
 
@@ -284,6 +285,8 @@ void UOneBrahamSettingsWidget::BuildControls()
 	AddToggle(NSLOCTEXT("OneBraham", "Settings_InvertMouse", "Invert mouse Y"), S->bInvertMouseY, [S](bool bOn) { S->bInvertMouseY = bOn; Commit(S); });
 	AddToggle(NSLOCTEXT("OneBraham", "Settings_InvertPad", "Invert stick Y"), S->bInvertGamepadY, [S](bool bOn) { S->bInvertGamepadY = bOn; Commit(S); });
 	AddToggle(NSLOCTEXT("OneBraham", "Settings_AimAssist", "Aim assist (pad)"), S->bAimAssistEnabled, [S](bool bOn) { S->bAimAssistEnabled = bOn; Commit(S); });
+	AddSlider(NSLOCTEXT("OneBraham", "Settings_AimAssistStrength", "Aim assist strength"), 0.f, 1.f, 0.05f, S->AimAssistStrength,
+		[S](float Value) { S->AimAssistStrength = Value; Commit(S); }, Percent);
 
 	AddHeading(NSLOCTEXT("OneBraham", "Settings_HoldToggle", "Hold or toggle"));
 	AddToggle(NSLOCTEXT("OneBraham", "Settings_HoldSprint", "Hold to sprint"), S->bHoldToSprint, [S](bool bOn) { S->bHoldToSprint = bOn; Commit(S); });
@@ -456,6 +459,16 @@ void UOneBrahamSettingsWidget::BuildGameplay()
 	AddHeading(NSLOCTEXT("OneBraham", "Settings_Weapons", "Weapons"));
 	AddToggle(NSLOCTEXT("OneBraham", "Settings_AutoReload", "Reload automatically when empty"), S->bAutoReloadOnEmpty,
 		[S](bool bOn) { S->bAutoReloadOnEmpty = bOn; Commit(S); });
+
+	AddHeading(NSLOCTEXT("OneBraham", "Settings_Online", "Online"));
+	AddToggle(NSLOCTEXT("OneBraham", "Settings_Crossplay", "Play with other platforms"), S->bAllowCrossplay,
+		[S](bool bOn) { S->bAllowCrossplay = bOn; Commit(S); });
+	const UOneBrahamPlatformSubsystem* Platform = UOneBrahamPlatformSubsystem::Get(this);
+	if (Platform != nullptr && S->bAllowCrossplay && !Platform->IsCrossplayAllowed())
+	{
+		AddText(NSLOCTEXT("OneBraham", "Settings_CrossplayBlocked", "Your platform's privacy settings have crossplay switched off."),
+			EOneBrahamTextSize::Small, UOneBrahamUIStyle::SafetyYellow());
+	}
 }
 
 void UOneBrahamSettingsWidget::BuildAccessibility()

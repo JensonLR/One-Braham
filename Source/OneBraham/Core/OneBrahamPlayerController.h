@@ -108,9 +108,17 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Input")
 	TObjectPtr<UInputMappingContext> CommonMappingContext;
 
-	/** Runtime sensitivity multiplier, refreshed from settings each tick. */
+	/** Runtime mouse sensitivity (horizontal), refreshed from settings each tick; includes the ADS multiplier. */
 	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Input")
 	float EffectiveSensitivity = 0.07f;
+
+	/** The vertical counterpart: Settings -> Controls has separate X and Y sliders. */
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Input")
+	float EffectiveSensitivityY = 0.07f;
+
+	/** The right-stick multiplier aim assist set this frame (1 = none). */
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Input")
+	float AimAssistLookScale = 1.f;
 
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Input")
 	void PushMappingContext(UInputMappingContext* Context, int32 Priority = 0);
@@ -178,6 +186,13 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|UI")
 	void TogglePauseMenu();
+
+	UFUNCTION(BlueprintPure, Category = "One Braham|UI")
+	bool IsPauseMenuOpen() const { return bPauseMenuOpen; }
+
+	/** True when the player last looked with a stick: prompts show pad glyphs, aim assist may act. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Input")
+	bool IsUsingGamepad() const { return bPromptsShowGamepad; }
 
 	/** WBP_Settings over the pause menu; closed with it. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|UI")
@@ -563,6 +578,23 @@ protected:
 
 	/** Which device's key the prompts name: whichever the player last looked with. */
 	bool bPromptsShowGamepad = false;
+
+	/**
+	 * Local: works out this frame's aim assist (FOneBrahamAimAssist) from the
+	 * enemies in view, sets AimAssistLookScale, and applies the follow when the
+	 * player is moving or turning on the pad.
+	 */
+	void TickAimAssist(float DeltaTime);
+
+	/** World seconds of the last non-zero stick input; follow only acts just after one. */
+	double LastPadLookTime = -1.0;
+	double LastMoveInputTime = -1.0;
+
+	/** Follow acts for this long after the last stick input. */
+	static constexpr double AimAssistInputWindowSeconds = 0.15;
+
+	/** Where on an enemy aim assist aims: upper chest, above the capsule centre. */
+	static constexpr float ChestHeightAboveCentreCm = 35.f;
 	static constexpr float InteractionTraceInterval = 0.1f;
 
 	/** Whether the pause menu is currently up (blocks gameplay input). */

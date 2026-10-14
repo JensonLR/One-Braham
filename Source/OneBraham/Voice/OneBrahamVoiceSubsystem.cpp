@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Voice/OneBrahamVoiceSubsystem.h"
+#include "Online/OneBrahamPlatformSubsystem.h"
 #include "Voice/OneBrahamVoiceDirector.h"
 #include "UI/OneBrahamHUDStringTable.h"
 
@@ -384,7 +385,17 @@ void UOneBrahamVoiceSubsystem::SetTransmitting(const AActor* Context, bool bTran
 
 	// Self-muted or the channel is Off: push-to-talk does nothing, and the HUD
 	// shows the mic-muted icon rather than the transmitting one.
+	// The platform's say comes first for the local player: a user whose account
+	// may not talk online does not transmit, whatever the game settings say.
+	// Checked only for a local player; a listen host's own privilege says
+	// nothing about its clients.
+	const APlayerController* OwnerController = Cast<APlayerController>(State->GetOwner());
+	const UOneBrahamPlatformSubsystem* Platform = OwnerController != nullptr && OwnerController->IsLocalController()
+		? UOneBrahamPlatformSubsystem::Get(OwnerController) : nullptr;
+	const bool bPlatformAllows = Platform == nullptr || Platform->CanCommunicate();
+
 	const bool bAllowed = bTransmitting
+		&& bPlatformAllows
 		&& !State->bSelfMuted
 		&& State->VoiceChannel != EOneBrahamVoiceChannel::None;
 

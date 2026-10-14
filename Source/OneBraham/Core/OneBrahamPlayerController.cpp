@@ -10,6 +10,9 @@
 #include "Core/OneBrahamGameplayTags.h"
 #include "Core/OneBrahamGameUserSettings.h"
 #include "Core/OneBrahamInputBindings.h"
+#include "Core/OneBrahamAimAssist.h"
+#include "Core/OneBrahamGameplayStatics.h"
+#include "Match/OneBrahamSmokeSubsystem.h"
 #include "UI/OneBrahamSettingsWidget.h"
 #include "VFX/OneBrahamWorldEffectsComponent.h"
 #include "UI/OneBrahamResultsWidget.h"
@@ -107,6 +110,7 @@ void AOneBrahamPlayerController::BeginPlay()
 	if (Settings != nullptr)
 	{
 		EffectiveSensitivity = Settings->MouseSensitivityX;
+		EffectiveSensitivityY = Settings->MouseSensitivityY;
 		if (PlayerCameraManager != nullptr)
 		{
 			PlayerCameraManager->SetFOV(Settings->FOV);
@@ -748,7 +752,14 @@ void AOneBrahamPlayerController::PlayerTick(float DeltaTime)
 	{
 		const AOneBrahamCharacter* Character = GetOneBrahamCharacter();
 		const bool bAiming = Character != nullptr && Character->GetWeaponComponent() != nullptr && Character->GetWeaponComponent()->IsAimingDownSights();
-		EffectiveSensitivity = Settings->MouseSensitivityX * (bAiming ? Settings->MouseSensitivityADSMultiplier : 1.f);
+		const float ADSScale = bAiming ? Settings->MouseSensitivityADSMultiplier : 1.f;
+		EffectiveSensitivity = Settings->MouseSensitivityX * ADSScale;
+		EffectiveSensitivityY = Settings->MouseSensitivityY * ADSScale;
+	}
+
+	if (IsLocalController())
+	{
+		TickAimAssist(DeltaTime);
 	}
 
 	if (bIsSpectating)
@@ -771,6 +782,10 @@ void AOneBrahamPlayerController::Input_Move(const FInputActionValue& Value)
 	}
 
 	const FVector2D Axis = Value.Get<FVector2D>();
+	if (!Axis.IsNearlyZero() && GetWorld() != nullptr)
+	{
+		LastMoveInputTime = GetWorld()->GetTimeSeconds();
+	}
 	Character->HandleMoveInput(Axis);
 }
 
@@ -784,13 +799,15 @@ void AOneBrahamPlayerController::Input_Look(const FInputActionValue& Value)
 
 	const FVector2D Axis = Value.Get<FVector2D>();
 	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
-	const float Scale = Settings != nullptr ? EffectiveSensitivity : 0.07f;
+	const float ScaleX = Settings != nullptr ? EffectiveSensitivity : 0.07f;
+	const float ScaleY = Settings != nullptr ? EffectiveSensitivityY : 0.07f;
 
 	bPromptsShowGamepad = false;
 
 	// Mouse: direct 1:1 rotation, no acceleration (bViewAccelerationEnabled=False).
-	AddYawInput(Axis.X * Scale * 20.f);
-	AddPitchInput((Settings != nullptr && Settings->bInvertMouseY ? Axis.Y : -Axis.Y) * Scale * 20.f);
+	// No aim assist on a mouse, ever.
+	AddYawInput(Axis.X * ScaleX * 20.f);
+	AddPitchInput((Settings != nullptr && Settings->bInvertMouseY ? Axis.Y : -Axis.Y) * ScaleY * 20.f);
 }
 
 void AOneBrahamPlayerController::Input_LookGamepad(const FInputActionValue& Value)
@@ -813,8 +830,127 @@ void AOneBrahamPlayerController::Input_LookGamepad(const FInputActionValue& Valu
 	// which gives the "smooth in the middle, fast at the edges" feel players
 	// expect from a pad without any extra code here.
 	const float DeltaTime = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.016f;
-	AddYawInput(Axis.X * SensX * 300.f * DeltaTime);
-	AddPitchInput((bInvertY ? Axis.Y : -Axis.Y) * SensY * 220.f * DeltaTime);
+	if (!Axis.IsNearlyZero() && GetWorld() != nullptr)
+	{
+		LastPadLookTime = GetWorld()->GetTimeSeconds();
+	}
+
+	// Slowdown: AimAssistLookScale is 1 unless the crosshair is over an enemy.
+	const float Assist = AimAssistLookScale;
+	AddYawInput(Axis.X * SensX * 300.f * DeltaTime * Assist);
+	AddPitchInput((bInvertY ? Axis.Y : -Axis.Y) * SensY * 220.f * DeltaTime * Assist);
+}
+
+void AOneBrahamPlayerController::TickAimAssist(float DeltaTime)
+{
+	AimAssistLookScale = 1.f;
+
+	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
+	AOneBrahamCharacter* Character = GetOneBrahamCharacter();
+	UWorld* World = GetWorld();
+	if (Settings == nullptr || !Settings->bAimAssistEnabled || Settings->AimAssistStrength <= 0.f
+		|| !bPromptsShowGamepad || bPauseMenuOpen || bIsSpectating || Character == nullptr || World == nullptr)
+	{
+		return;
+	}
+
+	const UOneBrahamHealthComponent* Health = Character->GetHealthComponent();
+	const UOneBrahamDownedComponent* Downed = Character->GetDownedComponent();
+	if ((Health != nullptr && !Health->IsAlive()) || (Downed != nullptr && Downed->IsDowned()))
+	{
+		return;
+	}
+
+	const AGameStateBase* GameState = World->GetGameState();
+	if (GameState == nullptr)
+	{
+		return;
+	}
+
+	// Enemies standing up: a downed player is not a target worth helping onto,
+	// and a teammate never is.
+	TArray<FOneBrahamAimAssistTarget> Targets;
+	TArray<const AOneBrahamCharacter*> TargetActors;
+	for (const APlayerState* Other : GameState->PlayerArray)
+	{
+		const AOneBrahamCharacter* Enemy = Other != nullptr ? Cast<AOneBrahamCharacter>(Other->GetPawn()) : nullptr;
+		if (Enemy == nullptr || Enemy == Character || UOneBrahamGameplayStatics::AreFriendly(Character, Enemy))
+		{
+			continue;
+		}
+		const UOneBrahamHealthComponent* EnemyHealth = Enemy->GetHealthComponent();
+		const UOneBrahamDownedComponent* EnemyDowned = Enemy->GetDownedComponent();
+		if ((EnemyHealth != nullptr && !EnemyHealth->IsAlive()) || (EnemyDowned != nullptr && EnemyDowned->IsDowned()))
+		{
+			continue;
+		}
+
+		FOneBrahamAimAssistTarget& Target = Targets.AddDefaulted_GetRef();
+		Target.Location = Enemy->GetActorLocation() + FVector(0.f, 0.f, ChestHeightAboveCentreCm);
+		Target.Velocity = Enemy->GetVelocity();
+		TargetActors.Add(Enemy);
+	}
+	if (Targets.Num() == 0)
+	{
+		return;
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	const UOneBrahamWeaponComponent* Weapons = Character->GetWeaponComponent();
+	const bool bAiming = Weapons != nullptr && Weapons->IsAimingDownSights();
+	const UOneBrahamSmokeSubsystem* Smoke = World->GetSubsystem<UOneBrahamSmokeSubsystem>();
+
+	// The math picks a candidate; the world gets the last word. A target behind
+	// a wall or inside smoke is dropped and the next best is tried. Three tries
+	// bounds the traces at three a frame, local player only.
+	TArray<int32, TInlineAllocator<4>> Excluded;
+	FOneBrahamAimAssistResult Result;
+	for (int32 Attempt = 0; Attempt < 3; ++Attempt)
+	{
+		Result = FOneBrahamAimAssist::Evaluate(ViewLocation, ViewRotation, Character->GetVelocity(), Targets,
+			Settings->AimAssistStrength, bAiming, DeltaTime, Excluded);
+		if (Result.TargetIndex == INDEX_NONE)
+		{
+			return;
+		}
+
+		const FVector TargetPoint = Targets[Result.TargetIndex].Location;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(OneBrahamAimAssist), false, Character);
+		Params.AddIgnoredActor(TargetActors[Result.TargetIndex]);
+		const bool bWallBlocks = World->LineTraceTestByChannel(ViewLocation, TargetPoint, ECC_Visibility, Params);
+		const bool bSmokeBlocks = Smoke != nullptr && Smoke->IsSightBlocked(ViewLocation, TargetPoint);
+		if (!bWallBlocks && !bSmokeBlocks)
+		{
+			break;
+		}
+
+		Excluded.Add(Result.TargetIndex);
+		Result = FOneBrahamAimAssistResult();
+	}
+	if (Result.TargetIndex == INDEX_NONE)
+	{
+		return;
+	}
+
+	AimAssistLookScale = Result.LookScale;
+
+	// Follow only while the player is driving: a pad left on the desk is never
+	// steered, and neither is someone standing still waiting for a target to
+	// walk into the crosshair.
+	const double Now = World->GetTimeSeconds();
+	const bool bDriving = (Now - LastPadLookTime) <= AimAssistInputWindowSeconds || (Now - LastMoveInputTime) <= AimAssistInputWindowSeconds;
+	if (bDriving && !Result.Follow.IsNearlyZero())
+	{
+		FRotator Control = GetControlRotation();
+		Control.Yaw += Result.Follow.Yaw;
+		const float PitchMin = PlayerCameraManager != nullptr ? PlayerCameraManager->ViewPitchMin : -89.f;
+		const float PitchMax = PlayerCameraManager != nullptr ? PlayerCameraManager->ViewPitchMax : 89.f;
+		Control.Pitch = FMath::ClampAngle(FRotator::NormalizeAxis(Control.Pitch + Result.Follow.Pitch), PitchMin, PitchMax);
+		SetControlRotation(Control);
+	}
 }
 
 void AOneBrahamPlayerController::Input_JumpStarted(const FInputActionValue& Value)

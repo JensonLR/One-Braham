@@ -8,6 +8,7 @@
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
+#include "Online/OneBrahamPlatformSubsystem.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
@@ -177,6 +178,37 @@ bool FOneBrahamAchievementTableTest::RunTest(const FString& Parameters)
 			TestTrue(FString::Printf(TEXT("%s is defined"), Token), Vdf.Contains(FString::Printf(TEXT("\"%s\""), Token)));
 		}
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamPlatformRulesTest, "OneBraham.Online.PlatformRules",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamPlatformRulesTest::RunTest(const FString& Parameters)
+{
+	// Crossplay: same platform always; across platforms only when both allow.
+	TestTrue(TEXT("same platform, both off"), UOneBrahamPlatformSubsystem::IsCrossplayCompatible(TEXT("Windows"), false, TEXT("Windows"), false));
+	TestTrue(TEXT("different platforms, both on"), UOneBrahamPlatformSubsystem::IsCrossplayCompatible(TEXT("Windows"), true, TEXT("XSX"), true));
+	TestFalse(TEXT("different platforms, local off"), UOneBrahamPlatformSubsystem::IsCrossplayCompatible(TEXT("Windows"), false, TEXT("XSX"), true));
+	TestFalse(TEXT("different platforms, host off"), UOneBrahamPlatformSubsystem::IsCrossplayCompatible(TEXT("Windows"), true, TEXT("XSX"), false));
+	TestTrue(TEXT("dedicated server (no platform) suits everyone"), UOneBrahamPlatformSubsystem::IsCrossplayCompatible(TEXT("XSX"), false, FString(), true));
+	TestTrue(TEXT("platform names compare without case"), UOneBrahamPlatformSubsystem::IsCrossplayCompatible(TEXT("windows"), false, TEXT("Windows"), false));
+
+	// Every failure has words, and the ones a player can act on say different things.
+	TestFalse(TEXT("lost has text"), UOneBrahamPlatformSubsystem::DescribeNetworkFailure(ENetworkFailure::ConnectionLost).IsEmpty());
+	TestFalse(TEXT("outdated client differs from lost"), UOneBrahamPlatformSubsystem::DescribeNetworkFailure(ENetworkFailure::OutdatedClient)
+		.EqualTo(UOneBrahamPlatformSubsystem::DescribeNetworkFailure(ENetworkFailure::ConnectionLost)));
+	TestFalse(TEXT("travel failure has text"), UOneBrahamPlatformSubsystem::DescribeTravelFailure(ETravelFailure::LoadMapFailure).IsEmpty());
+
+	// A notice is read once; the block list answers by id.
+	UOneBrahamPlatformSubsystem* Platform = NewObject<UOneBrahamPlatformSubsystem>();
+	Platform->PostNotice(FText::FromString(TEXT("gone")));
+	TestEqual(TEXT("notice read"), Platform->ConsumeNotice().ToString(), FString(TEXT("gone")));
+	TestTrue(TEXT("notice cleared"), Platform->ConsumeNotice().IsEmpty());
+	Platform->SetBlockedIds(TArray<FString>{ FString(TEXT("player-a")) });
+	TestTrue(TEXT("blocked id"), Platform->IsBlockedId(TEXT("player-a")));
+	TestFalse(TEXT("other id"), Platform->IsBlockedId(TEXT("player-b")));
+	TestFalse(TEXT("null player state is never blocked"), Platform->IsBlocked(nullptr));
 	return true;
 }
 

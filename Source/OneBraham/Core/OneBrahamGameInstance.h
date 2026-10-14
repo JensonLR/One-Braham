@@ -225,6 +225,12 @@ protected:
 	/** Builds the option string the GameMode reads for mode/roster config. */
 	FString BuildTravelOptions() const;
 
+	/**
+	 * True when the platform lets this user play online. When it does not, says
+	 * so on the matchmaking status line (the menu shows it) and returns false.
+	 */
+	bool CheckOnlinePrivilege();
+
 	/** Shared session settings builder so host + matchmaking agree. */
 	TSharedPtr<class FOnlineSessionSettings> BuildSessionSettings(EOneBrahamMatchMode Mode, int32 MaxPlayers, bool bLAN, const FString& ServerName) const;
 

@@ -24,6 +24,7 @@
 
 #include "Core/OneBrahamGameSettings.h"
 #include "Core/OneBrahamInputBindings.h"
+#include "Core/OneBrahamAimAssist.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/ScopeExit.h"
 #include "InputAction.h"
@@ -310,6 +311,75 @@ bool FOneBrahamInputRebindTest::RunTest(const FString& Parameters)
 	// Reset gives the defaults back.
 	UOneBrahamInputBindings::ResetBindings(false);
 	TestTrue(TEXT("reset: Interact is F"), KeysOf(UOneBrahamInputBindings::GetBindings(false), TEXT("IA_Interact")) == TArray<FKey>{ EKeys::F });
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamAimAssistTest, "OneBraham.Input.AimAssist",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamAimAssistTest::RunTest(const FString& Parameters)
+{
+	const FVector Eye = FVector::ZeroVector;
+	const FRotator Ahead = FRotator::ZeroRotator; // looking down +X
+	const float Dt = 1.f / 60.f;
+
+	auto One = [](const FVector& Location, const FVector& Velocity = FVector::ZeroVector)
+	{
+		FOneBrahamAimAssistTarget Target;
+		Target.Location = Location;
+		Target.Velocity = Velocity;
+		return TArray<FOneBrahamAimAssistTarget>{ Target };
+	};
+
+	// Dead ahead, standing still: full slowdown for the strength, no follow.
+	FOneBrahamAimAssistResult R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector::ZeroVector, One(FVector(1000.f, 0.f, 0.f)), 0.6f, false, Dt);
+	TestEqual(TEXT("ahead: target chosen"), R.TargetIndex, 0);
+	TestEqual(TEXT("ahead: slowdown is strength x hip maximum"), R.LookScale, 1.f - FOneBrahamAimAssist::MaxSlowdownHip * 0.6f, 0.001f);
+	TestTrue(TEXT("ahead, still: no follow"), R.Follow.IsNearlyZero());
+
+	// Strength zero is off.
+	R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector::ZeroVector, One(FVector(1000.f, 0.f, 0.f)), 0.f, false, Dt);
+	TestEqual(TEXT("strength 0: nothing"), R.TargetIndex, static_cast<int32>(INDEX_NONE));
+	TestEqual(TEXT("strength 0: full speed"), R.LookScale, 1.f);
+
+	// Twenty degrees off is outside every cone.
+	const FVector Wide = FRotator(0.f, 20.f, 0.f).Vector() * 1000.f;
+	R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector::ZeroVector, One(Wide), 1.f, true, Dt);
+	TestEqual(TEXT("20 degrees off: nothing"), R.TargetIndex, static_cast<int32>(INDEX_NONE));
+
+	// Cone: shrinks with distance, inside its floor and ceiling.
+	TestEqual(TEXT("cone ceiling up close"), FOneBrahamAimAssist::ConeHalfAngleDegrees(100.f, false), FOneBrahamAimAssist::MaxConeDegrees);
+	TestEqual(TEXT("cone floor far away"), FOneBrahamAimAssist::ConeHalfAngleDegrees(100000.f, false), FOneBrahamAimAssist::MinConeDegrees);
+	TestTrue(TEXT("cone shrinks with distance"),
+		FOneBrahamAimAssist::ConeHalfAngleDegrees(1500.f, false) < FOneBrahamAimAssist::ConeHalfAngleDegrees(900.f, false));
+
+	// Range: 45 m is past hip range and inside ADS range.
+	R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector::ZeroVector, One(FVector(4500.f, 0.f, 0.f)), 1.f, false, Dt);
+	TestEqual(TEXT("45 m from the hip: nothing"), R.TargetIndex, static_cast<int32>(INDEX_NONE));
+	R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector::ZeroVector, One(FVector(4500.f, 0.f, 0.f)), 1.f, true, Dt);
+	TestEqual(TEXT("45 m down sights: assisted"), R.TargetIndex, 0);
+
+	// A target running to the player's right pulls the view right, and no
+	// faster than the cap however fast it runs.
+	R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector::ZeroVector, One(FVector(1000.f, 0.f, 0.f), FVector(0.f, 400.f, 0.f)), 1.f, false, Dt);
+	TestTrue(TEXT("strafing right: follow turns right"), R.Follow.Yaw > 0.f);
+	R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector::ZeroVector, One(FVector(300.f, 0.f, 0.f), FVector(0.f, 100000.f, 0.f)), 1.f, true, Dt);
+	TestTrue(TEXT("follow capped"), R.Follow.Yaw <= FOneBrahamAimAssist::MaxFollowDegreesPerSecond * Dt + KINDA_SMALL_NUMBER);
+
+	// The player strafing with the target cancels the follow: it is relative motion.
+	R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector(0.f, 400.f, 0.f), One(FVector(1000.f, 0.f, 0.f), FVector(0.f, 400.f, 0.f)), 1.f, false, Dt);
+	TestTrue(TEXT("moving together: no follow"), R.Follow.IsNearlyZero());
+
+	// Two targets: the one nearer the crosshair for its cone wins, and an
+	// excluded one (sight line blocked) hands over to the other.
+	TArray<FOneBrahamAimAssistTarget> Two;
+	Two.Add(One(FRotator(0.f, 3.f, 0.f).Vector() * 800.f)[0]);
+	Two.Add(One(FRotator(0.f, 0.5f, 0.f).Vector() * 2000.f)[0]);
+	R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector::ZeroVector, Two, 1.f, false, Dt);
+	TestEqual(TEXT("nearer the crosshair wins"), R.TargetIndex, 1);
+	const TArray<int32> Blocked = { 1 };
+	R = FOneBrahamAimAssist::Evaluate(Eye, Ahead, FVector::ZeroVector, Two, 1.f, false, Dt, Blocked);
+	TestEqual(TEXT("blocked target skipped"), R.TargetIndex, 0);
 	return true;
 }
 
