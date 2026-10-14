@@ -59,6 +59,13 @@ WHY THIS EXISTS
          parameter to itself and the member never changed, and the HUD's
          `OwningController` local hid the member it was named after.
 
+      8. `IsValid()` on a TSoftObjectPtr or TSoftClassPtr. On a soft pointer
+         IsValid() means "the asset is already in memory", not "a path is
+         set", so `if (Ptr.IsValid()) Ptr.LoadSynchronous()` never loads from
+         a cold start. The body and arms meshes, every weapon montage, the
+         weapon meshes, muzzle flash, shells, tracers and every authored weapon
+         sound were gated that way. IsNull() is the "is anything set" test.
+
       7. Audio played from inside a walk over the player controllers. Six
          actors played their sounds by iterating every controller and playing
          through each one's audio manager. On a listen host that is the sound
@@ -702,6 +709,30 @@ def run_hygiene():
                     u"under UE5's shadow-variable level, and the member is not the one "
                     u"being written".format(class_name, match.group(2), kind, name)))
 
+    # --- IsValid() on a soft pointer ----------------------------------------
+    soft_names = set()
+    for rel, path in files:
+        text = strip_comments_and_strings(io.open(path, encoding="utf-8", errors="ignore").read())
+        soft_names.update(re.findall(
+            r'TSoft(?:Object|Class)Ptr\s*<[^;()]*?>\s*&?\s*([A-Za-z_][A-Za-z0-9_]*)\s*[;=,)]', text))
+
+    if soft_names:
+        soft_pattern = re.compile(r'(?<![A-Za-z0-9_])(%s)\s*\.\s*IsValid\s*\(\s*\)' % u"|".join(
+            re.escape(name) for name in sorted(soft_names)))
+
+        for rel, path in files:
+            if not rel.endswith(".cpp"):
+                continue
+
+            text = strip_comments_and_strings(io.open(path, encoding="utf-8", errors="ignore").read())
+            checks += 1
+
+            for match in soft_pattern.finditer(text):
+                problems.append((
+                    rel, text[:match.start()].count("\n") + 1,
+                    u"{0}.IsValid() on a soft pointer is true only when the asset is already "
+                    u"loaded - use !{0}.IsNull() to ask whether one is set".format(match.group(1))))
+
     # --- audio played once per player controller --------------------------
     for rel, path in files:
         if not rel.endswith(".cpp"):
@@ -802,7 +833,7 @@ def build_all():
         C.log(u"  no scoped enum is compared with an operator it does not have, no "
               u"member shadows an engine property, no engine-private member is read, no "
               u"parameter or local hides a member, no sound is played once per player, "
-              u"no function is defined twice. OK")
+              u"no soft pointer is asked IsValid(), no function is defined twice. OK")
 
     return _SymbolReport(checked, missing, hygiene, hygiene_checks)
 
@@ -824,7 +855,8 @@ def main():
 
     if not hygiene and not missing:
         C.log(u"  hygiene: scoped enums, shadowed engine properties, engine-private "
-              u"members, shadowed members, per-controller audio, duplicate definitions. OK")
+              u"members, shadowed members, per-controller audio, soft-pointer IsValid, "
+              u"duplicate definitions. OK")
         return 0
 
     for rel, line, message in hygiene:

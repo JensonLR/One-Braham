@@ -246,7 +246,7 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerGiveWeapon(FName WeaponId
 	UWorld* World = GetWorld();
 	const FTransform SpawnTransform = Character->GetActorTransform();
 
-	TSubclassOf<AOneBrahamWeaponBase> SpawnClass = WeaponRegistry->WeaponActorClass.IsValid()
+	TSubclassOf<AOneBrahamWeaponBase> SpawnClass = !WeaponRegistry->WeaponActorClass.IsNull()
 		? WeaponRegistry->WeaponActorClass.LoadSynchronous()
 		: AOneBrahamWeaponBase::StaticClass();
 
@@ -1021,7 +1021,7 @@ void UOneBrahamWeaponComponent::PredictLocalShot()
 	// Muzzle flash + shell + tracer are all multicast by the server, so the local
 	// prediction only handles the *pose* change (kick) - which is what the player
 	// actually feels. Firing the FX twice would double the muzzle flash.
-	if (CurrentWeapon->Definition != nullptr && CurrentWeapon->Definition->FireMontage.IsValid())
+	if (CurrentWeapon->Definition != nullptr && !CurrentWeapon->Definition->FireMontage.IsNull())
 	{
 		if (USkeletalMeshComponent* Arms = GetCharacter() ? GetCharacter()->GetFirstPersonMesh() : nullptr)
 		{
@@ -1417,7 +1417,7 @@ void UOneBrahamWeaponComponent::MeleeAttack()
 	const float Damage = CurrentWeapon->ServerMelee();
 	(void)Damage;
 
-	if (CurrentWeapon->Definition != nullptr && CurrentWeapon->Definition->MeleeMontage.IsValid())
+	if (CurrentWeapon->Definition != nullptr && !CurrentWeapon->Definition->MeleeMontage.IsNull())
 	{
 		if (USkeletalMeshComponent* Arms = GetCharacter() ? GetCharacter()->GetFirstPersonMesh() : nullptr)
 		{
@@ -1447,7 +1447,7 @@ void UOneBrahamWeaponComponent::PlayInspect()
 		return;
 	}
 
-	if (!CurrentWeapon->Definition->InspectMontage.IsValid())
+	if (CurrentWeapon->Definition->InspectMontage.IsNull())
 	{
 		return;
 	}
