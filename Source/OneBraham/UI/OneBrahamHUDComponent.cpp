@@ -571,6 +571,15 @@ void UOneBrahamHUDComponent::GatherHUDData()
 {
 	AOneBrahamCharacter* Character = BoundCharacter.Get();
 	AOneBrahamPlayerController* PC = OwningController.Get();
+
+	// Spectating first: a spectator has no pawn of their own, and this is the
+	// one part of the HUD that matters to them.
+	Data.bSpectating = PC != nullptr && PC->bIsSpectating;
+	Data.bSpectatorFreeCamera = Data.bSpectating && PC->IsFreeCameraActive();
+	const AOneBrahamPlayerState* Watched = Data.bSpectating ? PC->GetSpectatedPlayerState() : nullptr;
+	Data.SpectatedPlayerName = Watched ? Watched->GetPlayerName() : FString();
+	Data.SpectatedFloor = Watched ? Watched->CurrentFloor : 0;
+
 	if (Character == nullptr || PC == nullptr)
 	{
 		return;

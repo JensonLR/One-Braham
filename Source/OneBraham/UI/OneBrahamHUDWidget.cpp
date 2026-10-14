@@ -276,6 +276,12 @@ void UOneBrahamHUDWidget::BuildDefaultLayout()
 		ETextJustify::Center);
 	AddToCanvas(Text_SubBanner, FVector2D(0.f, 138.f), FVector2D(900.f, 22.f), TopCentre, FVector2D(0.5f, 0.f));
 
+	// --- Spectating (bottom centre, above where the ammo row would be) ------
+	Text_Spectating = MakeText(TEXT("Text_Spectating"), EOneBrahamTextSize::Medium, UOneBrahamUIStyle::LightGrey(),
+		ETextJustify::Center, true);
+	AddToCanvas(Text_Spectating, FVector2D(0.f, -96.f), FVector2D(900.f, 56.f), FAnchors(0.5f, 1.f), FVector2D(0.5f, 1.f));
+	Text_Spectating->SetVisibility(ESlateVisibility::Collapsed);
+
 	// --- Objective state (top left) --------------------------------------
 	Text_Floor = MakeText(TEXT("Text_Floor"), EOneBrahamTextSize::Medium, UOneBrahamUIStyle::LightGrey(), ETextJustify::Left, true);
 	AddToCanvas(Text_Floor, FVector2D(PanelPadding, 18.f), FVector2D(320.f, 24.f), TopLeft, FVector2D(0.f, 0.f));
@@ -979,6 +985,19 @@ void UOneBrahamHUDWidget::UpdateOverlays(const FOneBrahamHUDData& InData)
 		{
 			Text_Banner->SetText(InData.BannerText);
 			Text_Banner->SetColorAndOpacity(FSlateColor(InData.BannerColour));
+		}
+	}
+
+	if (Text_Spectating != nullptr)
+	{
+		Text_Spectating->SetVisibility(InData.bSpectating ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		if (InData.bSpectating)
+		{
+			const FText Who = InData.bSpectatorFreeCamera || InData.SpectatedPlayerName.IsEmpty()
+				? NSLOCTEXT("OneBraham", "HUD_SpectatingFree", "SPECTATING - FREE CAMERA")
+				: FText::Format(NSLOCTEXT("OneBraham", "HUD_SpectatingWho", "SPECTATING {0} - FLOOR {1}"),
+					FText::FromString(InData.SpectatedPlayerName.ToUpper()), FText::AsNumber(InData.SpectatedFloor));
+			Text_Spectating->SetText(FText::Format(NSLOCTEXT("OneBraham", "HUD_SpectatingHelp", "{0}\nPrevious / next player  -  free camera"), Who));
 		}
 	}
 

@@ -53,10 +53,9 @@ WIDGETS = [
     ("WBP_Settings",        C.UI + "/Menus", "OneBrahamSettingsWidget",
      "Video, audio, controls, gameplay, accessibility. Subclasses the C++ "
      "screen, which builds every page and the rebinding list; empty by default."),
-    ("WBP_Results",         C.UI + "/Menus", None,
-     "End-of-match: survivors, damage, objectives, progression."),
-    ("WBP_LoadingScreen",   C.UI + "/Menus", None,
-     "Map name, mode, squad, and a flat map of floors climbed so far."),
+    ("WBP_Results",         C.UI + "/Menus", "OneBrahamResultsWidget",
+     "End of match: the ending, your line, every squad, what you earned. "
+     "Subclasses the C++ screen, which builds it; empty by default."),
     ("WBP_QuickLineWheel",  C.UI_HUD, "OneBrahamQuickLineWidget",
      "The comms wheel: eight segments, clockwise from the top. Subclasses the "
      "C++ widget, which already draws the ring, the labels and the cooldowns - "

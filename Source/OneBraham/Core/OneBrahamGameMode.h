@@ -214,6 +214,9 @@ protected:
 	void ParseTravelOptions(const FString& Options);
 
 	/** Builds the replicated match result payload for the end screen. */
+	/** After the post-match window: remote players to their menus, then the server's own next step. */
+	void ReturnPlayersToMenu();
+
 	FOneBrahamMatchResult BuildMatchResult(EOneBrahamTeam WinningTeam, const FString& WinningSquadName, bool bNoSurvivors, int32 ExtractedCount) const;
 
 	/** Broadcasts a Tannoy announcement to everyone (lobby speaker + HUD banner). */

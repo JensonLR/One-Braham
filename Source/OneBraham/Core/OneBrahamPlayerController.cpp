@@ -11,6 +11,8 @@
 #include "Core/OneBrahamGameUserSettings.h"
 #include "Core/OneBrahamInputBindings.h"
 #include "UI/OneBrahamSettingsWidget.h"
+#include "UI/OneBrahamResultsWidget.h"
+#include "Online/OneBrahamSteamSubsystem.h"
 #include "Core/OneBrahamPlayerState.h"
 #include "Core/OneBrahamSaveSettings.h"
 #include "Data/OneBrahamCosmeticDataAsset.h"
@@ -58,6 +60,7 @@ AOneBrahamPlayerController::AOneBrahamPlayerController()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	SettingsWidgetClass = TSoftClassPtr<UUserWidget>(FSoftObjectPath(TEXT("/Game/OneBraham/UI/Menus/WBP_Settings.WBP_Settings_C")));
+	ResultsWidgetClass = TSoftClassPtr<UUserWidget>(FSoftObjectPath(TEXT("/Game/OneBraham/UI/Menus/WBP_Results.WBP_Results_C")));
 	bShowMouseCursor = false;
 	bEnableClickEvents = false;
 	bEnableMouseOverEvents = false;
@@ -87,6 +90,16 @@ void AOneBrahamPlayerController::GetLifetimeReplicatedProps(TArray<FLifetimeProp
 void AOneBrahamPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// The results screen: bound here when the game state is already in, and
+	// from the game state's BeginPlay when it arrives after us.
+	if (IsLocalController())
+	{
+		if (AOneBrahamGameState* GS = GetWorld() ? GetWorld()->GetGameState<AOneBrahamGameState>() : nullptr)
+		{
+			GS->OnMatchResultReady.AddUniqueDynamic(this, &AOneBrahamPlayerController::HandleMatchResult);
+		}
+	}
 
 	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
 	if (Settings != nullptr)
@@ -1643,6 +1656,46 @@ void AOneBrahamPlayerController::OpenSettingsMenu()
 	}
 }
 
+void AOneBrahamPlayerController::HandleMatchResult(const FOneBrahamMatchResult& Result)
+{
+	if (!IsLocalController())
+	{
+		return;
+	}
+
+	// The career record and achievements first (once per match, whichever
+	// delegate ran first), so the screen can list what this match earned.
+	if (UOneBrahamSteamSubsystem* Steam = GetGameInstance() ? GetGameInstance()->GetSubsystem<UOneBrahamSteamSubsystem>() : nullptr)
+	{
+		Steam->HandleMatchResult(Result);
+	}
+
+	if (bPauseMenuOpen)
+	{
+		TogglePauseMenu();
+	}
+
+	if (ResultsWidget == nullptr)
+	{
+		UClass* WidgetClass = ResultsWidgetClass.IsNull() ? nullptr : ResultsWidgetClass.LoadSynchronous();
+		ResultsWidget = CreateWidget<UUserWidget>(this, WidgetClass != nullptr ? WidgetClass : UOneBrahamResultsWidget::StaticClass());
+	}
+	UOneBrahamResultsWidget* Results = Cast<UOneBrahamResultsWidget>(ResultsWidget);
+	if (Results == nullptr)
+	{
+		return;
+	}
+
+	if (!Results->IsInViewport())
+	{
+		Results->AddToViewport(50);
+	}
+	Results->SetResult(Result, PlayerState != nullptr ? PlayerState->GetPlayerId() : INDEX_NONE);
+
+	// The world keeps running behind it; the player needs the cursor.
+	SetMenuInput(true);
+}
+
 void AOneBrahamPlayerController::LeaveMatch()
 {
 	if (!IsLocalController())
@@ -1897,6 +1950,23 @@ void AOneBrahamPlayerController::OnRep_Spectating()
 	{
 		Audio->SetDeafened(bIsSpectating);
 	}
+}
+
+const AOneBrahamPlayerState* AOneBrahamPlayerController::GetSpectatedPlayerState() const
+{
+	const AOneBrahamGameState* GS = GetWorld() ? GetWorld()->GetGameState<AOneBrahamGameState>() : nullptr;
+	if (GS == nullptr || SpectatedPlayerId == INDEX_NONE || bFreeCamActive)
+	{
+		return nullptr;
+	}
+	for (const APlayerState* State : GS->PlayerArray)
+	{
+		if (State != nullptr && State->GetPlayerId() == SpectatedPlayerId)
+		{
+			return Cast<AOneBrahamPlayerState>(State);
+		}
+	}
+	return nullptr;
 }
 
 void AOneBrahamPlayerController::ApplySpectatorView()

@@ -152,6 +152,14 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|UI")
 	TSoftClassPtr<UUserWidget> SettingsWidgetClass;
 
+	/** WBP_Results, shown when the match result arrives. Defaults to the pipeline's path. */
+	UPROPERTY(EditDefaultsOnly, Category = "One Braham|UI")
+	TSoftClassPtr<UUserWidget> ResultsWidgetClass;
+
+	/** Shows the results screen. Bound to the game state's OnMatchResultReady on a local controller. */
+	UFUNCTION()
+	void HandleMatchResult(const FOneBrahamMatchResult& Result);
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|UI")
 	TSubclassOf<UUserWidget> DeathScreenWidgetClass;
 
@@ -271,6 +279,12 @@ protected:
 
 	UPROPERTY(BlueprintAssignable, Category = "One Braham|Spectator")
 	FOneBrahamSpectatorTargetChanged OnSpectatorTargetChanged;
+
+	/** The player state being watched, or null (free camera, or nobody left). */
+	const AOneBrahamPlayerState* GetSpectatedPlayerState() const;
+
+	UFUNCTION(BlueprintPure, Category = "One Braham|Spectator")
+	bool IsFreeCameraActive() const { return bFreeCamActive; }
 
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Spectator")
 	void SpectateNextPlayer();
@@ -524,6 +538,9 @@ protected:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UUserWidget> SettingsWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UUserWidget> ResultsWidget;
 
 	/**
 	 * GFrameCounter of the last interaction begin. Tap and hold share a key by

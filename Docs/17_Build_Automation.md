@@ -25,7 +25,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `apply_cast_payload.py` | writes the payload onto `DA_CharacterRegistry`, verifies 6 archetypes | yes | yes |
 | `build_audio.py` | 12 sound classes, 3 submixes, 4 mixes, 8 attenuations, 11 ambience, 8 music, `DA_AudioBank` | yes | yes |
 | `build_input.py` | 42 input actions, 4 mapping contexts, `DA_InputConfig` | yes | yes |
-| `build_ui.py` | 8 widget blueprints, the HUD string table, the font slot, the palette check | yes | yes |
+| `build_ui.py` | 7 widget blueprints, the HUD string table, the font slot, the palette check | yes | yes |
 | `build_vfx.py` | 17 Niagara systems, 3 camera shakes, 6 decal materials, the authoring sheet | yes | yes |
 | `import_font.py` | font faces from `Content/UI/Fonts` | yes | yes |
 | `check_cpp_symbols.py` | reads `Source/OneBraham` and reports every member function declared with no definition; also a scoped enum compared with `>=`/`<`/`|`, a member whose name is also an engine property of an ancestor class, a read of an engine member UE5 made private (`APlayerState::PlayerId`, `AActor::bReplicates`...), a parameter or local named like a member of its own class, audio played inside a loop over the player controllers, `IsValid()` asked of a `TSoftObjectPtr`/`TSoftClassPtr` (true only once the asset is in memory, so it never gates a `LoadSynchronous` from a cold start: `IsNull()` is the test), the same function defined twice, and an integer literal with a float suffix (`0f` is not C++; `0.f` is) | **no** | yes |
@@ -87,10 +87,10 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
 | input_ini | OK | 0.0 | wrote 42 actions (41 with a default key) |
-| cpp_symbols | OK | 0.7 | 801 declarations, all defined; compile hygiene clean |
-| uht_contracts | OK | 1.5 | 948 UE reflection contracts, all satisfied |
-| soft_paths | OK | 0.0 | 40 soft paths, all conventional |
-| calls | OK | 0.3 | 1313 call sites, all arities plausible |
+| cpp_symbols | OK | 0.7 | 808 declarations, all defined; compile hygiene clean |
+| uht_contracts | OK | 1.5 | 951 UE reflection contracts, all satisfied |
+| soft_paths | OK | 0.0 | 41 soft paths, all conventional |
+| calls | OK | 0.3 | 1330 call sites, all arities plausible |
 | tags | OK | 0.4 | 0 resolvable tag requests and 147 documented tags, all declared |
 | layout | OK | 0.0 | 16 floors, map and layout agree |
 | voice_lines | OK | 0.0 | 118 line references, all declared and documented |
@@ -101,7 +101,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | doc_types | OK | 0.1 | 61 documented type names, all declared |
 | weapon_ids | OK | 0.1 | 122 weapon-id checks, the armoury and the spawn table agree |
 | cosmetic_ids | OK | 0.1 | 149 cosmetic checks, one wardrobe |
-| hud_strings | OK | 0.1 | 98 HUD-string checks, 31 rows and 8 widgets, every one shown |
+| hud_strings | OK | 0.1 | 98 HUD-string checks, 31 rows and 7 widgets, every one shown |
 | audio_ids | OK | 0.2 | 305 audio-id checks, every cue audible or documented |
 | interaction_ids | OK | 0.3 | 281 interaction checks, 10 interactables, every verb, tag, tuning number and override accounted for |
 | materials | OK | 3.1 | 6 masters, 15 physicals, 28 instances |

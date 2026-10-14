@@ -169,6 +169,13 @@ struct ONEBRAHAM_API FOneBrahamHUDData
 	UPROPERTY(BlueprintReadOnly, Category = "HUD") int32 ScoreAway = 0;
 	UPROPERTY(BlueprintReadOnly, Category = "HUD") int32 LocalTeamScore = 0;
 
+	// --- spectating -----------------------------------------------------
+	/** Out of the match and watching: the HUD shows whom, and how to switch. */
+	UPROPERTY(BlueprintReadOnly, Category = "HUD") bool bSpectating = false;
+	UPROPERTY(BlueprintReadOnly, Category = "HUD") bool bSpectatorFreeCamera = false;
+	UPROPERTY(BlueprintReadOnly, Category = "HUD") FString SpectatedPlayerName;
+	UPROPERTY(BlueprintReadOnly, Category = "HUD") int32 SpectatedFloor = 0;
+
 	// --- voice ----------------------------------------------------------
 	UPROPERTY(BlueprintReadOnly, Category = "HUD") EOneBrahamVoiceChannel VoiceChannel = EOneBrahamVoiceChannel::Proximity;
 	UPROPERTY(BlueprintReadOnly, Category = "HUD") FText VoiceChannelName;

@@ -601,15 +601,48 @@ void AOneBrahamGameMode::FinishMatch(EOneBrahamMatchEnding Ending, EOneBrahamTea
 		GetWorld()->GetTimeSeconds() - MatchStartTime,
 		*UEnum::GetValueAsString(FailReason));
 
-	// Award cosmetics/achievements (client-side, cosmetic only) then travel back
-	// to the lobby after the post-match window.
+	// Each player's machine records the match and its achievements from the
+	// replicated result and shows the results screen. After the post-match
+	// window everyone goes back to the menu, and the server is ready again.
 	GetWorldTimerManager().SetTimer(MatchPhaseTimerHandle, FTimerDelegate::CreateWeakLambda(this, [this]()
 	{
-		if (UOneBrahamGameInstance* GameInstance = GetGameInstance<UOneBrahamGameInstance>())
-		{
-			GameInstance->TravelToMainMenu();
-		}
+		ReturnPlayersToMenu();
 	}), static_cast<float>(MatchSettings->PostMatchSeconds), false);
+}
+
+void AOneBrahamGameMode::ReturnPlayersToMenu()
+{
+	// Remote players first, while there is still a server to tell them: the
+	// engine's own return path takes each one to its main menu and tidies its
+	// session. A player who already left from the results screen is gone.
+	const FText Reason = NSLOCTEXT("OneBraham", "MatchOver", "The match is over.");
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* PC = It->Get();
+		if (PC != nullptr && !PC->IsLocalController())
+		{
+			PC->ClientReturnToMainMenuWithTextReason(Reason);
+		}
+	}
+
+	UOneBrahamGameInstance* GameInstance = GetGameInstance<UOneBrahamGameInstance>();
+	if (GameInstance == nullptr)
+	{
+		return;
+	}
+
+	if (IsRunningDedicatedServer())
+	{
+		// A dedicated server never opens the menu: it reloads the match map
+		// for the next lobby, in the same mode, and keeps its advert.
+		const FString ModeKey = StaticEnum<EOneBrahamMatchMode>()->GetNameStringByValue(
+			static_cast<int64>(MatchSettings ? MatchSettings->Mode : EOneBrahamMatchMode::Ascent));
+		GameInstance->TravelToMatchMap(FString::Printf(TEXT("Mode=%s"), *ModeKey));
+	}
+	else
+	{
+		GameInstance->TravelToMainMenu();
+	}
 }
 
 FOneBrahamMatchResult AOneBrahamGameMode::BuildMatchResult(EOneBrahamTeam WinningTeam, const FString& WinningSquadName, bool bNoSurvivors, int32 ExtractedCount) const

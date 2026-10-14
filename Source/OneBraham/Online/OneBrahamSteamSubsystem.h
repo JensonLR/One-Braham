@@ -112,6 +112,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "One Braham|Steam")
 	bool IsAchievementUnlocked(FName AchievementId) const;
 
+	/** Achievements the last recorded match earned; the results screen lists them. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Steam")
+	TArray<FName> GetLastMatchAchievements() const { return LastMatchAchievements; }
+
 	UFUNCTION(BlueprintPure, Category = "One Braham|Steam")
 	bool IsOverlayOpen() const { return bOverlayOpen; }
 
@@ -168,6 +172,8 @@ protected:
 
 	/** The game state whose result was last recorded: a result replicates more than once. */
 	TWeakObjectPtr<const UObject> LastRecordedGameState;
+
+	TArray<FName> LastMatchAchievements;
 
 	FString LastPresenceText;
 	FString LastSentPresence;

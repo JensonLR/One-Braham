@@ -250,6 +250,7 @@ void UOneBrahamSteamSubsystem::HandleMatchResult(const FOneBrahamMatchResult& Re
 	LastRecordedGameState = GameState;
 
 	const TArray<FName> Newly = EvaluateAchievements(*Record);
+	LastMatchAchievements = Newly;
 	GameInstance->SaveProfile();
 
 	for (const FName& AchievementId : Newly)

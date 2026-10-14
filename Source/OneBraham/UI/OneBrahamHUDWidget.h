@@ -217,6 +217,10 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "One Braham|HUD")
 	TObjectPtr<UTextBlock> Text_SubBanner = nullptr;
 
+	/** "SPECTATING ALEX - FLOOR 9" and the keys to switch; bottom centre. */
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "One Braham|HUD")
+	TObjectPtr<UTextBlock> Text_Spectating = nullptr;
+
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "One Braham|HUD")
 	TObjectPtr<UTextBlock> Text_Subtitle = nullptr;
 

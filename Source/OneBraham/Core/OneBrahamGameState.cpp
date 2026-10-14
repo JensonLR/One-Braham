@@ -12,6 +12,7 @@
 #include "Extraction/OneBrahamExtractionComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Online/OneBrahamSteamSubsystem.h"
+#include "Core/OneBrahamPlayerController.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerState.h"
@@ -138,6 +139,18 @@ void AOneBrahamGameState::BeginPlay()
 		if (UOneBrahamSteamSubsystem* Steam = GameInstance->GetSubsystem<UOneBrahamSteamSubsystem>())
 		{
 			OnMatchResultReady.AddUniqueDynamic(Steam, &UOneBrahamSteamSubsystem::HandleMatchResult);
+		}
+	}
+
+	// The local player's results screen, when the controller arrived first.
+	if (const UWorld* World = GetWorld())
+	{
+		if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(World->GetFirstPlayerController()))
+		{
+			if (PC->IsLocalController())
+			{
+				OnMatchResultReady.AddUniqueDynamic(PC, &AOneBrahamPlayerController::HandleMatchResult);
+			}
 		}
 	}
 }
