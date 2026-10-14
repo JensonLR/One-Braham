@@ -72,6 +72,9 @@ namespace OneBrahamTags
 	ONEBRAHAM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Revive);
 	ONEBRAHAM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Execute);
 	ONEBRAHAM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Body);
+	ONEBRAHAM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Extraction);
+	ONEBRAHAM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_HoldToUnlock);
+	ONEBRAHAM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_TapToUse);
 
 	// --- Weapons ----------------------------------------------------------
 	ONEBRAHAM_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Weapon_Category_Pistol);

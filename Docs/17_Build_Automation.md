@@ -102,7 +102,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | cosmetic_ids | OK | 0.1 | 135 cosmetic checks, one wardrobe |
 | hud_strings | OK | 0.1 | 99 HUD-string checks, 31 rows and 11 widgets, every one shown |
 | audio_ids | OK | 0.2 | 305 audio-id checks, every cue audible or documented |
-| interaction_ids | OK | 0.1 | 110 interaction checks, 6 interactables, every verb, tag and tuning number accounted for |
+| interaction_ids | OK | 0.2 | 112 interaction checks, 6 interactables, every verb, tag and tuning number accounted for |
 | materials | OK | 3.1 | 6 masters, 15 physicals, 28 instances |
 ...
 ```

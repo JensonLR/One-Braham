@@ -66,6 +66,16 @@ namespace OneBrahamTags
 	UE_DEFINE_GAMEPLAY_TAG(Interaction_Execute, "OB.Interaction.Execute");
 	UE_DEFINE_GAMEPLAY_TAG(Interaction_Body, "OB.Interaction.Body");
 
+	// The three below are the tags Table 6 of Docs/13 lists as declared and not
+	// yet emitted, and they were declared in Config/DefaultGame.ini only. An ini
+	// tag works - a designer can pick it, and RequestGameplayTag can name it - and
+	// nothing in C++ can hold it in a variable, which is the difference between a
+	// vocabulary and three strings. `OB.Interaction.Extraction` is the one the
+	// Skydeck terminal will emit.
+	UE_DEFINE_GAMEPLAY_TAG(Interaction_Extraction, "OB.Interaction.Extraction");
+	UE_DEFINE_GAMEPLAY_TAG(Interaction_HoldToUnlock, "OB.Interaction.HoldToUnlock");
+	UE_DEFINE_GAMEPLAY_TAG(Interaction_TapToUse, "OB.Interaction.TapToUse");
+
 	// --- Weapons ----------------------------------------------------------
 	UE_DEFINE_GAMEPLAY_TAG(Weapon_Category_Pistol, "OB.Weapon.Pistol");
 	UE_DEFINE_GAMEPLAY_TAG(Weapon_Category_CompactPistol, "OB.Weapon.Pistol.Compact");

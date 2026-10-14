@@ -42,7 +42,17 @@ WHY THIS EXISTS
        cannot quietly stop being emitted. `OB.Interaction.Revive` and
        `OB.Interaction.Execute` were declared in both the registry and the ini
        and emitted by nothing at all; that is exactly what rule 4 refuses.
-    5. Every duration, distance and speed in the three tuning tables in Docs/04
+    5. The two registers of interaction tags are the same list. A tag lives in
+       the native registry (`UE_DEFINE_GAMEPLAY_TAG`) and in
+       `Config/DefaultGame.ini`'s `+GameplayTagList`, and the two are allowed to
+       disagree - a native tag works whether or not the ini has heard of it. So
+       deleting the ini row for `OB.Interaction.Revive` was invisible: the tag
+       still worked, both tables in Docs/13 still agreed with it, and the checker
+       reported OK with 110 checks. The ini row is what puts the tag in the
+       editor's tag picker, and it is where a tag explains itself. Rule 5 makes
+       the two registers one list, in both directions, so a tag cannot arrive in
+       one of them and not the other.
+    6. Every duration, distance and speed in the three tuning tables in Docs/04
        (movement, physics, the downed state) carries the name of the property
        that defines it, and the two agree. Docs/04 section 4 said a revive was
        4.0 s and left the player on 30 HP for most of this project's life while
@@ -348,11 +358,21 @@ def class_files(class_name):
     return out
 
 
+def native_tags():
+    """The interaction tags the native registry declares."""
+    return set(NATIVE_TAG.findall(strip_comments(read(os.path.join(
+        SOURCE_ROOT, "Core", "OneBrahamGameplayTags.cpp")))))
+
+
+def ini_tags():
+    """The interaction tags Config/DefaultGame.ini lists."""
+    return set(INI_TAG.findall(read(GAME_INI)))
+
+
 def declared_tags():
     """Every OB.Interaction.* tag this project declares, native or ini."""
-    tags = set(INI_TAG.findall(read(GAME_INI)))
-    tags.update(NATIVE_TAG.findall(strip_comments(read(os.path.join(
-        SOURCE_ROOT, "Core", "OneBrahamGameplayTags.cpp")))))
+    tags = native_tags()
+    tags.update(ini_tags())
 
     return tags
 
@@ -525,6 +545,35 @@ def run():
                 u"Docs/13 names {0}, which Config/DefaultGame.ini and the native "
                 u"registry do not declare".format(tag),
                 u"undeclared tag"))
+
+    # --- 3b. The native registry and the ini are one list ----------------
+    native = native_tags()
+    ini = ini_tags()
+
+    if not native:
+        problems.append((u"no OB.Interaction.* tag is declared natively", u"parse failure"))
+
+    if not ini:
+        problems.append((u"Config/DefaultGame.ini lists no OB.Interaction.* tag",
+                         u"parse failure"))
+
+    checks += 1
+
+    for tag in sorted(native - ini):
+        problems.append((
+            u"{0} is declared natively and has no +GameplayTagList row in "
+            u"Config/DefaultGame.ini: the tag works, and no designer can find it or "
+            u"read what it is for in the editor's tag picker".format(tag),
+            u"native tag absent from the ini"))
+
+    checks += 1
+
+    for tag in sorted(ini - native):
+        problems.append((
+            u"Config/DefaultGame.ini lists {0} and the native registry does not "
+            u"declare it: the interaction vocabulary is declared once and mirrored, "
+            u"and an ini-only tag is one no C++ file can hold in a variable".format(tag),
+            u"ini tag absent from the registry"))
 
     checks += 1
 
