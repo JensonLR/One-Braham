@@ -236,7 +236,7 @@ void UOneBrahamProximityVoiceComponent::MulticastSpeakLine_Implementation(FName 
 	// which take was chosen, so it is derived from the line id: a stable hash
 	// seeded stream picks the same variant everywhere, every time.
 	FRandomStream VariantStream(static_cast<int32>(GetTypeHash(LineId)));
-	const FOneBrahamVoiceLine* Line = Lines->PickLine(LineId, Character->GetArchetypeTag(), VariantStream);
+	const FOneBrahamVoiceLine* Line = Lines->PickLine(LineId, Character->Appearance.ArchetypeTag, VariantStream);
 
 	if (Line == nullptr)
 	{
@@ -402,11 +402,11 @@ void UOneBrahamProximityVoiceComponent::TickLocalCapture(float DeltaTime)
 			continue;
 		}
 
-		if (Encoded.Num() > MAX_VOICE_FRAME_BYTES)
+		if (Encoded.Num() > ONE_BRAHAM_MAX_VOICE_FRAME_BYTES)
 		{
 			UE_LOG(LogOneBrahamVoice, Warning,
 				TEXT("[OB.VOICE] Dropping an oversized outgoing frame (%d bytes > %d)."),
-				Encoded.Num(), MAX_VOICE_FRAME_BYTES);
+				Encoded.Num(), ONE_BRAHAM_MAX_VOICE_FRAME_BYTES);
 			continue;
 		}
 
@@ -452,11 +452,11 @@ void UOneBrahamProximityVoiceComponent::ServerPushVoiceFrame_Implementation(cons
 	}
 
 	// 2. Size sanity, before anything touches the buffer.
-	if (Frame.Num() == 0 || Frame.Num() > MAX_VOICE_FRAME_BYTES)
+	if (Frame.Num() == 0 || Frame.Num() > ONE_BRAHAM_MAX_VOICE_FRAME_BYTES)
 	{
 		UE_LOG(LogOneBrahamVoice, Warning,
 			TEXT("[OB.VOICE] Voice frame from '%s' rejected: %d bytes (limit %d)."),
-			*SpeakerState->GetPlayerName(), Frame.Num(), MAX_VOICE_FRAME_BYTES);
+			*SpeakerState->GetPlayerName(), Frame.Num(), ONE_BRAHAM_MAX_VOICE_FRAME_BYTES);
 		return;
 	}
 
@@ -524,7 +524,7 @@ void UOneBrahamProximityVoiceComponent::RelayFrameToListeners(AOneBrahamPlayerSt
 			continue;
 		}
 
-		if (UOneBrahamProximityVoiceComponent* ListenerVoice = ListenerCharacter->GetVoiceComponent())
+		if (UOneBrahamProximityVoiceComponent* ListenerVoice = ListenerCharacter->FindComponentByClass<UOneBrahamProximityVoiceComponent>())
 		{
 			if (ListenerVoice->IsVoiceChatEnabled())
 			{
@@ -538,7 +538,7 @@ void UOneBrahamProximityVoiceComponent::ClientReceiveVoiceFrame_Implementation(i
 	uint8 ChannelByte, const TArray<uint8>& Frame)
 {
 	UWorld* World = GetWorld();
-	if (World == nullptr || Frame.Num() == 0 || Frame.Num() > MAX_VOICE_FRAME_BYTES)
+	if (World == nullptr || Frame.Num() == 0 || Frame.Num() > ONE_BRAHAM_MAX_VOICE_FRAME_BYTES)
 	{
 		return;
 	}

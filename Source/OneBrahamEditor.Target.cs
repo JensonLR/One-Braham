@@ -12,7 +12,9 @@ public class OneBrahamEditorTarget : TargetRules
 	public OneBrahamEditorTarget(TargetInfo Target) : base(Target)
 	{
 		Type = TargetType.Editor;
-		DefaultBuildSettings = BuildSettingsVersion.V5;
+		// Editor targets share UnrealEditor's build environment, so their settings
+		// must match the installed engine's; Latest tracks it (5.5 and 5.8 alike).
+		DefaultBuildSettings = BuildSettingsVersion.Latest;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Latest;
 		ExtraModuleNames.AddRange(new string[] { "OneBraham" });
 

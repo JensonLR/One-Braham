@@ -497,10 +497,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Weapons")
 	UOneBrahamWeaponDefinition* FindWeapon(FName WeaponId) const;
 
-	UFUNCTION(BlueprintPure, Category = "Attachments")
 	const FOneBrahamAttachmentDefinition* FindAttachment(FName AttachmentId) const;
 
-	UFUNCTION(BlueprintPure, Category = "Skins")
 	const FOneBrahamWeaponSkin* FindSkin(FName SkinId) const;
 
 	/**

@@ -567,7 +567,7 @@ void UOneBrahamHUDWidget::UpdateHealthPanel(const FOneBrahamHUDData& InData)
 
 	if (Text_Access != nullptr)
 	{
-		Text_Access->SetText(FText::FromString(BuildAccessRow(InData)));
+		Text_Access->SetText(BuildAccessRow(InData));
 		Text_Access->SetVisibility(InData.bShowFloorIndicator ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	}
 }

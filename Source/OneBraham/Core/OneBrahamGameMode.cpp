@@ -66,7 +66,7 @@ void AOneBrahamGameMode::InitGame(const FString& MapName, const FString& Options
 			? static_cast<EOneBrahamMatchMode>(StaticEnum<EOneBrahamMatchMode>()->GetValueByNameString(PendingModeString))
 			: UOneBrahamGameSettings::Get().DefaultMode;
 
-		if (const UOneBrahamGameInstance* GameInstance = GetGameInstance<UOneBrahamGameInstance>())
+		if (UOneBrahamGameInstance* GameInstance = GetGameInstance<UOneBrahamGameInstance>())
 		{
 			MatchSettings = GameInstance->GetMatchSettings(Mode);
 		}
@@ -932,7 +932,7 @@ void AOneBrahamGameMode::RebuildSquadInfo()
 		}
 
 		FOneBrahamSquadMemberInfo Member;
-		Member.PlayerId = State->PlayerId;
+		Member.PlayerId = State->GetPlayerId();
 		Member.PlayerName = State->GetPlayerName();
 		Member.ArchetypeTag = State->ArchetypeTag;
 		Member.LifeState = State->LifeState;
@@ -1193,7 +1193,7 @@ void AOneBrahamGameMode::QueueRespawn(AController* Controller, float DelaySecond
 	PendingRespawns.Add(Controller, FMath::Max(0.1f, DelaySeconds));
 }
 
-bool AOneBrahamGameMode::PlayerCanRestart_Implementation(AController* Player)
+bool AOneBrahamGameMode::PlayerCanRestart_Implementation(APlayerController* Player)
 {
 	if (Player == nullptr || bMatchFinished)
 	{
@@ -1335,7 +1335,7 @@ void AOneBrahamGameMode::PostLogin(APlayerController* NewPlayer)
 			TEXT("BusinessAnalyst"), TEXT("Graduate"), TEXT("FinanceBroker"),
 			TEXT("ITOperations"), TEXT("FacilitiesSecurity"), TEXT("Consultant")
 		};
-		const int32 Index = FMath::Abs(State->PlayerId) % UE_ARRAY_COUNT(DefaultArchetypes);
+		const int32 Index = FMath::Abs(State->GetPlayerId()) % UE_ARRAY_COUNT(DefaultArchetypes);
 		State->ArchetypeTag = FGameplayTag::RequestGameplayTag(
 			FName(*FString::Printf(TEXT("OB.Character.Archetype.%s"), DefaultArchetypes[Index])), false);
 	}
@@ -1355,7 +1355,7 @@ void AOneBrahamGameMode::PostLogin(APlayerController* NewPlayer)
 		FText::FromString(State->GetPlayerName())), false);
 
 	OB_MATCH_LOG("PostLogin: '%s' (id=%d, team=%s, squad=%d). Players=%d",
-		*State->GetPlayerName(), State->PlayerId, *UEnum::GetValueAsString(State->Team), State->SquadId,
+		*State->GetPlayerName(), State->GetPlayerId(), *UEnum::GetValueAsString(State->Team), State->SquadId,
 		GetNumPlayers());
 }
 

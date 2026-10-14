@@ -10,6 +10,8 @@
 #include "Core/OneBrahamPlayerState.h"
 #include "Characters/OneBrahamCharacter.h"
 #include "Characters/OneBrahamHealthComponent.h"
+#include "Characters/OneBrahamCharacterMovementComponent.h"
+#include "UI/OneBrahamHUDComponent.h"
 #include "Weapons/OneBrahamInventoryComponent.h"
 #include "Weapons/OneBrahamPickupBase.h"
 #include "Weapons/OneBrahamProjectileBase.h"
@@ -19,6 +21,7 @@
 #include "Voice/OneBrahamVoiceSubsystem.h"
 
 #include "Components/SkeletalMeshComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
@@ -55,8 +58,49 @@ void UOneBrahamWeaponComponent::GetLifetimeReplicatedProps(TArray<FLifetimePrope
 	DOREPLIFETIME(UOneBrahamWeaponComponent, CurrentFireMode);
 	DOREPLIFETIME(UOneBrahamWeaponComponent, SelectedUtilityIndex);
 	DOREPLIFETIME(UOneBrahamWeaponComponent, bMeleeOnCooldown);
-	DOREPLIFETIME(UOneBrahamWeaponComponent, ReserveAmmoByWeapon);
-	DOREPLIFETIME(UOneBrahamWeaponComponent, OwnedWeapons);
+	DOREPLIFETIME(UOneBrahamWeaponComponent, ReplicatedReserveAmmo);
+	DOREPLIFETIME(UOneBrahamWeaponComponent, ReplicatedOwnedWeapons);
+}
+
+void UOneBrahamWeaponComponent::PreReplication(IRepChangedPropertyTracker& ChangedPropertyTracker)
+{
+	Super::PreReplication(ChangedPropertyTracker);
+
+	ReplicatedReserveAmmo.Reset(ReserveAmmoByWeapon.Num());
+	for (const TPair<FName, int32>& Pair : ReserveAmmoByWeapon)
+	{
+		ReplicatedReserveAmmo.Add({ Pair.Key, Pair.Value });
+	}
+
+	ReplicatedOwnedWeapons.Reset(OwnedWeapons.Num());
+	for (const TPair<EOneBrahamWeaponSlot, TObjectPtr<AOneBrahamWeaponBase>>& Pair : OwnedWeapons)
+	{
+		ReplicatedOwnedWeapons.Add({ Pair.Key, Pair.Value });
+	}
+}
+
+void UOneBrahamWeaponComponent::OnRep_ReserveAmmo()
+{
+	ReserveAmmoByWeapon.Reset();
+	for (const FOneBrahamReserveAmmoEntry& Entry : ReplicatedReserveAmmo)
+	{
+		ReserveAmmoByWeapon.Add(Entry.WeaponId, Entry.Rounds);
+	}
+}
+
+void UOneBrahamWeaponComponent::OnRep_OwnedWeapons()
+{
+	// A weapon actor that has not reached this client yet arrives as null; the
+	// engine calls this again once it resolves, so null entries are skipped
+	// rather than stored.
+	OwnedWeapons.Reset();
+	for (const FOneBrahamOwnedWeaponEntry& Entry : ReplicatedOwnedWeapons)
+	{
+		if (Entry.Weapon != nullptr)
+		{
+			OwnedWeapons.Add(Entry.Slot, Entry.Weapon);
+		}
+	}
 }
 
 void UOneBrahamWeaponComponent::BeginPlay()
@@ -138,9 +182,10 @@ void UOneBrahamWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 					// Optics override the base ADS FOV, which is why a 3x sight
 					// genuinely changes how the executive floor plays.
 					float Magnification = 1.f;
-					if (const FName* OpticId = CurrentWeapon->Attachments.Find(EOneBrahamAttachmentSlot::Optic))
+					const FName OpticId = CurrentWeapon->GetAttachmentInSlot(EOneBrahamAttachmentSlot::Optic);
+					if (!OpticId.IsNone())
 					{
-						if (const FOneBrahamAttachmentDefinition* Optic = GetAttachmentDefinition(*OpticId))
+						if (const FOneBrahamAttachmentDefinition* Optic = GetAttachmentDefinition(OpticId))
 						{
 							Magnification = FMath::Max(1.f, Optic->Magnification);
 						}
@@ -163,7 +208,7 @@ void UOneBrahamWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	ConsumeRecoil(DeltaTime);
 
 	// --- Trigger handling -------------------------------------------------
-	if (bTriggerHeld && CurrentWeapon != nullptr && CurrentWeapon->WeaponState == EOneBrahamWeaponState::Ready)
+	if (bTriggerHeld && CurrentWeapon != nullptr && CurrentWeapon->GetWeaponState() == EOneBrahamWeaponState::Ready)
 	{
 		// Automatic fire is driven by the player's own machine; the server
 		// validates each shot against its own clock and shoots back any that
@@ -237,7 +282,7 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerGiveWeapon(FName WeaponId
 		return nullptr;
 	}
 
-	const AOneBrahamCharacter* Character = GetCharacter();
+	AOneBrahamCharacter* Character = GetCharacter();
 	if (Character == nullptr)
 	{
 		return nullptr;
@@ -312,7 +357,10 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerGiveWeapon(FName WeaponId
 		*Character->GetName(), *WeaponId.ToString(), NewWeapon->GetAmmoInMagazine(),
 		ReserveAmmoByWeapon.Contains(WeaponId) ? ReserveAmmoByWeapon[WeaponId] : 0);
 
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 	return NewWeapon;
 }
 
@@ -329,7 +377,10 @@ void UOneBrahamWeaponComponent::ServerRemoveCurrentWeapon()
 	CurrentWeapon = nullptr;
 	CurrentSlot = EOneBrahamWeaponSlot::Melee;
 
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 }
 
 void UOneBrahamWeaponComponent::ResetOnRespawn()
@@ -364,7 +415,10 @@ void UOneBrahamWeaponComponent::ResetOnRespawn()
 	ApplyLoadoutForCurrentLife();
 
 	OnWeaponChanged.Broadcast(CurrentWeapon, nullptr);
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 }
 
 void UOneBrahamWeaponComponent::ApplyLoadoutForCurrentLife()
@@ -437,7 +491,10 @@ void UOneBrahamWeaponComponent::ServerApplyLoadout(FName PrimaryWeaponId, FName 
 		}
 	}
 
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 }
 
 AOneBrahamWeaponBase* UOneBrahamWeaponComponent::DropCurrentWeapon()
@@ -470,7 +527,10 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::DropCurrentWeapon()
 	// Auto-equip the sidearm, which is what a player actually expects.
 	EquipSlot(EOneBrahamWeaponSlot::Sidearm);
 
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 	return Dropped;
 }
 
@@ -500,7 +560,7 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerPickupFromWorld(AOneBraha
 	}
 
 	// Already held by somebody: never steal a weapon out of another player's hands.
-	if (!WorldWeapon->bIsGroundPickup)
+	if (!WorldWeapon->IsGroundPickup())
 	{
 		return nullptr;
 	}
@@ -547,7 +607,7 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerPickupFromWorld(AOneBraha
 
 	// Take it off the floor before it is attached: the pickup actor owns the
 	// ground-state visuals (glow, world mesh, lifetime) and must stand down.
-	WorldWeapon->bIsGroundPickup = false;
+	WorldWeapon->SetIsGroundPickup(false);
 	if (AOneBrahamPickupBase* Pickup = Cast<AOneBrahamPickupBase>(WorldWeapon))
 	{
 		Pickup->ServerTakeOffGround();
@@ -559,7 +619,10 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerPickupFromWorld(AOneBraha
 	// in their hands, not in a bag they then have to open.
 	EquipSlot(Slot);
 
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 
 	UE_LOG(LogOneBrahamWeapons, Log, TEXT("[OB.WPN] %s picked up '%s' (%d + %d rounds)"),
 		*Character->GetName(),
@@ -603,7 +666,10 @@ void UOneBrahamWeaponComponent::DropAllOnDeath()
 	OwnedWeapons.Reset();
 	CurrentWeapon = nullptr;
 	CurrentSlot = EOneBrahamWeaponSlot::Melee;
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 }
 
 void UOneBrahamWeaponComponent::EquipSlot(EOneBrahamWeaponSlot Slot)
@@ -676,7 +742,10 @@ void UOneBrahamWeaponComponent::EquipSlot(EOneBrahamWeaponSlot Slot)
 	}
 
 	OnWeaponChanged.Broadcast(CurrentWeapon, Previous);
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 }
 
 void UOneBrahamWeaponComponent::CycleWeapon(int32 Direction)
@@ -776,7 +845,7 @@ void UOneBrahamWeaponComponent::SetTriggerHeld(bool bHeld)
 		return;
 	}
 
-	if (CurrentWeapon->WeaponState != EOneBrahamWeaponState::Ready)
+	if (CurrentWeapon->GetWeaponState() != EOneBrahamWeaponState::Ready)
 	{
 		return;
 	}
@@ -811,7 +880,7 @@ void UOneBrahamWeaponComponent::ServerRequestFire_Implementation(FVector_NetQuan
 	}
 
 	// --- Validation 1: weapon state ---------------------------------------
-	if (CurrentWeapon->WeaponState != EOneBrahamWeaponState::Ready)
+	if (CurrentWeapon->GetWeaponState() != EOneBrahamWeaponState::Ready)
 	{
 		++RejectedShotCount;
 		return;
@@ -889,8 +958,8 @@ void UOneBrahamWeaponComponent::ServerRequestFire_Implementation(FVector_NetQuan
 
 	RestorePlayersAfterLagCompensation();
 
-	UE_UNUSED(RewindTime);
-	UE_UNUSED(bFired);
+	(void)RewindTime;
+	(void)bFired;
 }
 
 void UOneBrahamWeaponComponent::GetLocalAim(FVector& OutOrigin, FVector& OutDirection) const
@@ -967,7 +1036,7 @@ bool UOneBrahamWeaponComponent::FireOnce(const FVector& AimOrigin, const FVector
 	AActor* FirstHitActor = nullptr;
 
 	const float Damage = CurrentWeapon->ServerFireShot(AimOrigin, AimDirection, Impacts, FirstHitActor);
-	UE_UNUSED(Damage);
+	(void)Damage;
 
 	// Auto-reload when the magazine runs dry (player preference, default on).
 	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
@@ -1082,7 +1151,7 @@ void UOneBrahamWeaponComponent::ConsumeRecoil(float DeltaTime)
 		}
 	}
 
-	AccumulatedRecoil -= FVector2D(FMath::Abs(RecoverStep.X), FMath::Abs(RecoverStep.Y)) * FMath::Sign(AccumulatedRecoil);
+	AccumulatedRecoil -= FVector2D(FMath::Abs(RecoverStep.X), FMath::Abs(RecoverStep.Y)) * FVector2D(FMath::Sign(AccumulatedRecoil.X), FMath::Sign(AccumulatedRecoil.Y));
 
 	if (AccumulatedRecoil.SizeSquared() < 0.0004f)
 	{
@@ -1214,7 +1283,10 @@ void UOneBrahamWeaponComponent::RequestReload()
 
 	// The weapon actor drives the timer; we only mirror the state for the HUD.
 	CurrentWeapon->ServerStartReload();
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 }
 
 void UOneBrahamWeaponComponent::ServerCompleteReload()
@@ -1257,7 +1329,10 @@ void UOneBrahamWeaponComponent::ServerCompleteReload()
 		}
 	}
 
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 }
 
 void UOneBrahamWeaponComponent::OnWeaponAmmoChanged(int32 AmmoInMagazine)
@@ -1304,7 +1379,7 @@ void UOneBrahamWeaponComponent::ClientHitConfirmed_Implementation(bool bHeadshot
 		}
 	}
 
-	UE_UNUSED(DistanceCm);
+	(void)DistanceCm;
 }
 
 void UOneBrahamWeaponComponent::OnServerShotFired(int32 ShotIndex)
@@ -1317,7 +1392,7 @@ void UOneBrahamWeaponComponent::OnServerShotFired(int32 ShotIndex)
 			CurrentWeapon->Definition->Spread.MaxBloom);
 	}
 
-	UE_UNUSED(ShotIndex);
+	(void)ShotIndex;
 }
 
 // ==========================================================================
@@ -1346,7 +1421,10 @@ void UOneBrahamWeaponComponent::CycleFireMode()
 	const int32 NextIndex = (CurrentIndex + 1) % Modes.Num();
 
 	CurrentFireMode = Modes[NextIndex];
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 
 	OB_WEAPON_LOG("Fire mode: %s", *UEnum::GetValueAsString(CurrentFireMode));
 }
@@ -1395,7 +1473,7 @@ void UOneBrahamWeaponComponent::MeleeAttack()
 	bMeleeOnCooldown = true;
 
 	const float Damage = CurrentWeapon->ServerMelee();
-	UE_UNUSED(Damage);
+	(void)Damage;
 
 	if (CurrentWeapon->Definition != nullptr && CurrentWeapon->Definition->MeleeMontage.IsValid())
 	{
@@ -1414,10 +1492,16 @@ void UOneBrahamWeaponComponent::MeleeAttack()
 	GetWorld()->GetTimerManager().SetTimer(SourceMeleeCooldownHandle, FTimerDelegate::CreateWeakLambda(this, [this]()
 	{
 		bMeleeOnCooldown = false;
-		ForceNetUpdate();
+		if (AActor* Owner = GetOwner())
+		{
+			Owner->ForceNetUpdate();
+		}
 	}), CurrentWeapon->Definition != nullptr ? CurrentWeapon->Definition->MeleeCooldown : 0.8f, false);
 
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 }
 
 void UOneBrahamWeaponComponent::PlayInspect()
@@ -1500,7 +1584,10 @@ bool UOneBrahamWeaponComponent::ServerAttachToCurrentWeapon(FName AttachmentId)
 void UOneBrahamWeaponComponent::SelectUtilityIndex(int32 Index)
 {
 	SelectedUtilityIndex = FMath::Clamp(Index, 0, 3);
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 }
 
 void UOneBrahamWeaponComponent::ThrowUtility()
@@ -1524,7 +1611,7 @@ void UOneBrahamWeaponComponent::ThrowUtility()
 	}
 
 	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
-	UE_UNUSED(Settings);
+	(void)Settings;
 
 	// Rate limit: a player cannot throw four frags in one second.
 	const float Now = GetWorld()->GetTimeSeconds();
@@ -1678,7 +1765,7 @@ void UOneBrahamWeaponComponent::CaptureHitboxSnapshot()
 			continue;
 		}
 
-		const int32 PlayerId = State->PlayerId;
+		const int32 PlayerId = State->GetPlayerId();
 		const USkeletalMeshComponent* Body = Character->GetMesh();
 
 		if (Body != nullptr)
@@ -1852,7 +1939,7 @@ void UOneBrahamWeaponComponent::ServerRequestToggleAttachment_Implementation(boo
 void UOneBrahamWeaponComponent::OnRep_CurrentWeapon()
 {
 	AOneBrahamWeaponBase* Previous = nullptr;
-	UE_UNUSED(Previous);
+	(void)Previous;
 
 	if (CurrentWeapon != nullptr)
 	{
@@ -1881,5 +1968,8 @@ void UOneBrahamWeaponComponent::SetAimingDownSights(bool bAiming)
 		GetCharacter()->SetSprintRequested(false);
 	}
 
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 }

@@ -49,9 +49,10 @@ struct FOneBrahamCharacterAppearance
 	UPROPERTY(BlueprintReadOnly, Category = "Appearance")
 	FGameplayTag ArchetypeTag;
 
-	/** Slot -> cosmetic asset id. */
+	/** Slot -> cosmetic asset id, as entries: this struct replicates, and TMap
+	 *  does not (see FOneBrahamNamePairEntry). */
 	UPROPERTY(BlueprintReadOnly, Category = "Appearance")
-	TMap<FName, FName> EquippedCosmetics;
+	TArray<FOneBrahamNamePairEntry> EquippedCosmetics;
 
 	/** Which MetaHuman/body mesh variant (0-3) this archetype uses. */
 	UPROPERTY(BlueprintReadOnly, Category = "Appearance")
@@ -318,8 +319,7 @@ public:
 	 * voice, the anti-cheat reporters, the scoreboard's "player" language - can
 	 * behave sensibly instead of logging nonsense about a person who is not there.
 	 */
-	UFUNCTION(BlueprintPure, Category = "One Braham|Character")
-	bool IsBotControlled() const { return bBotControlled; }
+	virtual bool IsBotControlled() const override { return bBotControlled; }
 
 	/** Server: set by AOneBrahamBotController when it possesses/unpossesses. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Character")

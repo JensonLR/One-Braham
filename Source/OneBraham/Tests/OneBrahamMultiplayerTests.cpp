@@ -20,6 +20,7 @@
 #include "Misc/Paths.h"
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/Package.h"
 
 #include "Core/OneBrahamGameMode.h"
 #include "Core/OneBrahamGameState.h"
@@ -72,7 +73,9 @@ namespace
 
 		bool bInSection = false;
 
-		for (const FString& Line : FString(Ini).ParseIntoArrayLines(true))
+		TArray<FString> Lines;
+		Ini.ParseIntoArrayLines(Lines, true);
+		for (const FString& Line : Lines)
 		{
 			const FString Trimmed = Line.TrimStartAndEnd();
 

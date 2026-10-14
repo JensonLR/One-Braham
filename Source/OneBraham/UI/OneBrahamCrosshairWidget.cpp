@@ -5,6 +5,7 @@
 #include "OneBraham.h"
 #include "UI/OneBrahamUIStyle.h"
 #include "Rendering/DrawElements.h"
+#include "Styling/CoreStyle.h"
 #include "Widgets/SWidget.h"
 
 UOneBrahamCrosshairWidget::UOneBrahamCrosshairWidget(const FObjectInitializer& ObjectInitializer)
@@ -25,13 +26,13 @@ float UOneBrahamCrosshairWidget::ComputeTickGapPixels(float WidgetScale) const
 	// The honest version of a "dynamic crosshair": the gap is the real cone,
 	// projected onto a reference plane. At 1.4 degrees and 12 m that is a small
 	// gap; at 6 degrees it is a warning.
-	const float ReferenceDistanceCm = FMath::Max(100.f, ReferenceDistanceCm);
-	const float HalfWidthCm = FMath::Tan(FMath::DegreesToRadians(SpreadDegrees * 0.5f)) * ReferenceDistanceCm;
+	const float ClampedDistanceCm = FMath::Max(100.f, ReferenceDistanceCm);
+	const float HalfWidthCm = FMath::Tan(FMath::DegreesToRadians(SpreadDegrees * 0.5f)) * ClampedDistanceCm;
 
 	// A first-person camera in this project has ~90 degrees horizontal FOV, so the
 	// screen-half-width maps to tan(45) * distance. Everything cancels except the
 	// ratio of the two tangents, which is why this is stable across FOV settings.
-	const float ScreenHalfWidthCm = ReferenceDistanceCm; // tan(45) = 1
+	const float ScreenHalfWidthCm = ClampedDistanceCm; // tan(45) = 1
 	const float HalfWidthFraction = HalfWidthCm / ScreenHalfWidthCm;
 
 	// Convert to pixels using the widget's own size (a square viewport is assumed

@@ -243,7 +243,7 @@ int32 UOneBrahamQuickLineWidget::NativePaint(const FPaintArgs& Args, const FGeom
 			AllottedGeometry.ToPaintGeometry(),
 			RingPoints,
 			ESlateDrawEffect::None,
-			UOneBrahamUIStyle::Muted(UOneBrahamUIStyle::LightGrey(), 0.5f).CopyWithAlpha(0.55f * Alpha),
+			UOneBrahamUIStyle::Muted(UOneBrahamUIStyle::LightGrey(), 0.5f).CopyWithNewOpacity(0.55f * Alpha),
 			true,
 			1.5f);
 	}
@@ -304,7 +304,7 @@ int32 UOneBrahamQuickLineWidget::NativePaint(const FPaintArgs& Args, const FGeom
 			AllottedGeometry.ToPaintGeometry(),
 			ArcPoints,
 			ESlateDrawEffect::None,
-			SegmentColour.CopyWithAlpha(Alpha * (bHovered ? 0.95f : 0.62f)),
+			SegmentColour.CopyWithNewOpacity(Alpha * (bHovered ? 0.95f : 0.62f)),
 			true,
 			BandThickness);
 
@@ -330,7 +330,7 @@ int32 UOneBrahamQuickLineWidget::NativePaint(const FPaintArgs& Args, const FGeom
 			LabelFont,
 			ESlateDrawEffect::None,
 			(bHovered ? UOneBrahamUIStyle::LightGrey() : UOneBrahamUIStyle::Muted(UOneBrahamUIStyle::LightGrey(), 0.35f))
-				.CopyWithAlpha(Alpha));
+				.CopyWithNewOpacity(Alpha));
 	}
 
 	// --- Centre ------------------------------------------------------------
@@ -350,7 +350,7 @@ int32 UOneBrahamQuickLineWidget::NativePaint(const FPaintArgs& Args, const FGeom
 			HubText,
 			UOneBrahamUIStyle::Font(EOneBrahamTextSize::Small, true),
 			ESlateDrawEffect::None,
-			UOneBrahamUIStyle::LightGrey().CopyWithAlpha(0.85f * Alpha));
+			UOneBrahamUIStyle::LightGrey().CopyWithNewOpacity(0.85f * Alpha));
 
 		// Push-to-talk state, at the bottom of the hub: holding the radio key
 		// and choosing a quick line are two different things, and a player who
@@ -365,7 +365,7 @@ int32 UOneBrahamQuickLineWidget::NativePaint(const FPaintArgs& Args, const FGeom
 				NSLOCTEXT("OneBraham", "CommsTransmitting", "LIVE"),
 				UOneBrahamUIStyle::Font(EOneBrahamTextSize::Micro, true),
 				ESlateDrawEffect::None,
-				UOneBrahamUIStyle::EmergencyRed().CopyWithAlpha(0.9f * Alpha));
+				UOneBrahamUIStyle::EmergencyRed().CopyWithNewOpacity(0.9f * Alpha));
 		}
 	}
 

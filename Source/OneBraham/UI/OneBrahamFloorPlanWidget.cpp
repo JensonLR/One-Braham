@@ -56,7 +56,7 @@ bool UOneBrahamFloorPlanWidget::HasDownedSquadmate() const
 }
 
 void UOneBrahamFloorPlanWidget::PaintFloorRow(FSlateWindowElementList& OutDrawElements, int32 LayerId,
-	const FGeometry& Geometry, const FOneBrahamFloorPlanFloor& Floor, float RowTop, float RowHeight) const
+	const FGeometry& Geometry, const FOneBrahamFloorPlanFloor& Floor, float RowTop, float InRowHeight) const
 {
 	const float RowLeft = PanelPadding;
 	const float RowWidth = LabelColumnWidth;
@@ -86,7 +86,7 @@ void UOneBrahamFloorPlanWidget::PaintFloorRow(FSlateWindowElementList& OutDrawEl
 		FSlateDrawElement::MakeBox(
 			OutDrawElements,
 			LayerId,
-			Geometry.ToPaintGeometry(FVector2D(RowWidth, RowHeight - 2.f),
+			Geometry.ToPaintGeometry(FVector2D(RowWidth, InRowHeight - 2.f),
 				FSlateLayoutTransform(FVector2D(RowLeft, RowTop))),
 			&RowBrush,
 			ESlateDrawEffect::None,
@@ -122,7 +122,7 @@ void UOneBrahamFloorPlanWidget::PaintFloorRow(FSlateWindowElementList& OutDrawEl
 		FSlateDrawElement::MakeBox(
 			OutDrawElements,
 			LayerId + 1,
-			Geometry.ToPaintGeometry(FVector2D(RuleWidth, RowHeight - 2.f),
+			Geometry.ToPaintGeometry(FVector2D(RuleWidth, InRowHeight - 2.f),
 				FSlateLayoutTransform(FVector2D(RowLeft, RowTop))),
 			&RuleBrush,
 			ESlateDrawEffect::None,
@@ -142,12 +142,12 @@ void UOneBrahamFloorPlanWidget::PaintFloorRow(FSlateWindowElementList& OutDrawEl
 		FSlateDrawElement::MakeText(
 			OutDrawElements,
 			LayerId + 2,
-			Geometry.ToPaintGeometry(FVector2D(34.f, RowHeight - 2.f),
+			Geometry.ToPaintGeometry(FVector2D(34.f, InRowHeight - 2.f),
 				FSlateLayoutTransform(FVector2D(RowLeft + 10.f, RowTop + 2.f))),
 			NumberText,
 			NumberFont,
 			ESlateDrawEffect::None,
-			(bLocal ? UOneBrahamUIStyle::LightGrey() : UOneBrahamUIStyle::Muted(UOneBrahamUIStyle::LightGrey(), 0.45f)).CopyWithAlpha(
+			(bLocal ? UOneBrahamUIStyle::LightGrey() : UOneBrahamUIStyle::Muted(UOneBrahamUIStyle::LightGrey(), 0.45f)).CopyWithNewOpacity(
 				(bLocal ? 1.f : 0.75f) * FadeAlpha));
 	}
 
@@ -167,12 +167,12 @@ void UOneBrahamFloorPlanWidget::PaintFloorRow(FSlateWindowElementList& OutDrawEl
 		FSlateDrawElement::MakeText(
 			OutDrawElements,
 			LayerId + 2,
-			Geometry.ToPaintGeometry(FVector2D(LabelColumnWidth - 56.f, RowHeight - 2.f),
+			Geometry.ToPaintGeometry(FVector2D(LabelColumnWidth - 56.f, InRowHeight - 2.f),
 				FSlateLayoutTransform(FVector2D(RowLeft + 46.f, RowTop + 2.f))),
 			NameText,
 			NameFont,
 			ESlateDrawEffect::None,
-			NameColour.CopyWithAlpha((bLocal ? 1.f : 0.8f) * FadeAlpha));
+			NameColour.CopyWithNewOpacity((bLocal ? 1.f : 0.8f) * FadeAlpha));
 	}
 
 	// --- Squad count and the downed marker ---------------------------------
@@ -191,12 +191,12 @@ void UOneBrahamFloorPlanWidget::PaintFloorRow(FSlateWindowElementList& OutDrawEl
 		FSlateDrawElement::MakeText(
 			OutDrawElements,
 			LayerId + 2,
-			Geometry.ToPaintGeometry(FVector2D(70.f, RowHeight - 2.f),
+			Geometry.ToPaintGeometry(FVector2D(70.f, InRowHeight - 2.f),
 				FSlateLayoutTransform(FVector2D(RowLeft + RowWidth - 74.f, RowTop + 2.f))),
 			CountText,
 			CountFont,
 			ESlateDrawEffect::None,
-			CountColour.CopyWithAlpha(FadeAlpha));
+			CountColour.CopyWithNewOpacity(FadeAlpha));
 	}
 }
 
@@ -215,7 +215,7 @@ void UOneBrahamFloorPlanWidget::PaintHeaderAndFooter(FSlateWindowElementList& Ou
 			PlanData.BuildingName,
 			TitleFont,
 			ESlateDrawEffect::None,
-			UOneBrahamUIStyle::LightGrey().CopyWithAlpha(FadeAlpha));
+			UOneBrahamUIStyle::LightGrey().CopyWithNewOpacity(FadeAlpha));
 
 		// Where the player is, in the lift's own words, under the building name:
 		// "FLOOR 9 - SERVER AND COMMS". The plan is for orientation, and
@@ -230,7 +230,7 @@ void UOneBrahamFloorPlanWidget::PaintHeaderAndFooter(FSlateWindowElementList& Ou
 			PlanData.LocalFloorLabel,
 			PlaceFont,
 			ESlateDrawEffect::None,
-			UOneBrahamUIStyle::SignalBlue().CopyWithAlpha(FadeAlpha));
+			UOneBrahamUIStyle::SignalBlue().CopyWithNewOpacity(FadeAlpha));
 	}
 
 	// --- Extraction banner -------------------------------------------------
@@ -241,23 +241,25 @@ void UOneBrahamFloorPlanWidget::PaintHeaderAndFooter(FSlateWindowElementList& Ou
 		const float BarLeft = PanelPadding;
 		const float BarTop = PanelPadding * 0.5f + 44.f;
 
+		const FSlateBrush TrackBrush = UOneBrahamUIStyle::PanelBrush(0.25f * FadeAlpha, 1.f);
 		FSlateDrawElement::MakeBox(
 			OutDrawElements,
 			LayerId,
 			Geometry.ToPaintGeometry(FVector2D(BarWidth, BarHeight),
 				FSlateLayoutTransform(FVector2D(BarLeft, BarTop))),
-			&UOneBrahamUIStyle::PanelBrush(0.25f * FadeAlpha, 1.f),
+			&TrackBrush,
 			ESlateDrawEffect::None,
 			FLinearColor::White);
 
 		const float Progress = FMath::Clamp(PlanData.ExtractionProgress01, 0.f, 1.f);
 
+		const FSlateBrush FillBrush = UOneBrahamUIStyle::PanelBrush(FadeAlpha, 1.f);
 		FSlateDrawElement::MakeBox(
 			OutDrawElements,
 			LayerId + 1,
 			Geometry.ToPaintGeometry(FVector2D(BarWidth * Progress, BarHeight),
 				FSlateLayoutTransform(FVector2D(BarLeft, BarTop))),
-			&UOneBrahamUIStyle::PanelBrush(FadeAlpha, 1.f),
+			&FillBrush,
 			ESlateDrawEffect::None,
 			UOneBrahamUIStyle::SafetyYellow());
 
@@ -274,7 +276,7 @@ void UOneBrahamFloorPlanWidget::PaintHeaderAndFooter(FSlateWindowElementList& Ou
 			ExtractionText,
 			UOneBrahamUIStyle::Font(EOneBrahamTextSize::Micro, true),
 			ESlateDrawEffect::None,
-			UOneBrahamUIStyle::SafetyYellow().CopyWithAlpha(FadeAlpha));
+			UOneBrahamUIStyle::SafetyYellow().CopyWithNewOpacity(FadeAlpha));
 	}
 
 	// --- Footer ------------------------------------------------------------
@@ -296,7 +298,7 @@ void UOneBrahamFloorPlanWidget::PaintHeaderAndFooter(FSlateWindowElementList& Ou
 			ClockText,
 			FooterFont,
 			ESlateDrawEffect::None,
-			UOneBrahamUIStyle::Muted(UOneBrahamUIStyle::LightGrey(), 0.4f).CopyWithAlpha(FadeAlpha));
+			UOneBrahamUIStyle::Muted(UOneBrahamUIStyle::LightGrey(), 0.4f).CopyWithNewOpacity(FadeAlpha));
 
 		FSlateDrawElement::MakeText(
 			OutDrawElements,
@@ -306,7 +308,7 @@ void UOneBrahamFloorPlanWidget::PaintHeaderAndFooter(FSlateWindowElementList& Ou
 			PlanData.LockdownStageLabel,
 			FooterFont,
 			ESlateDrawEffect::None,
-			UOneBrahamUIStyle::EmergencyRed().CopyWithAlpha(0.9f * FadeAlpha));
+			UOneBrahamUIStyle::EmergencyRed().CopyWithNewOpacity(0.9f * FadeAlpha));
 	}
 }
 

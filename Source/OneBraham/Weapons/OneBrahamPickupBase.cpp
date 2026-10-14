@@ -4,9 +4,11 @@
 
 #include "Characters/OneBrahamCharacter.h"
 #include "Components/PointLightComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Core/OneBrahamGameplayTags.h"
 #include "Core/OneBrahamPlayerController.h"
+#include "Data/OneBrahamWeaponDataAsset.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerState.h"
 #include "Net/UnrealNetwork.h"

@@ -152,7 +152,7 @@ void AOneBrahamAccessZone::BeginPlay()
 		*GetZoneId().ToString(),
 		Zone != nullptr ? Zone->FloorIndex : INDEX_NONE,
 		Zone != nullptr ? *UEnum::GetValueAsString(Zone->RequiredTier) : TEXT("?"),
-		bOpen ? "open" : "locked");
+		bOpen ? TEXT("open") : TEXT("locked"));
 }
 
 void AOneBrahamAccessZone::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -313,7 +313,7 @@ void AOneBrahamAccessZone::HandleZoneChanged(FName InZoneId, bool bUnlocked, EOn
 	}
 
 	OB_ACCESS_LOG("Door '%s' -> %s (%s)",
-		*InZoneId.ToString(), bUnlocked ? "open" : "shut", *UEnum::GetValueAsString(Method));
+		*InZoneId.ToString(), bUnlocked ? TEXT("open") : TEXT("shut"), *UEnum::GetValueAsString(Method));
 }
 
 void AOneBrahamAccessZone::OnRep_DoorState()

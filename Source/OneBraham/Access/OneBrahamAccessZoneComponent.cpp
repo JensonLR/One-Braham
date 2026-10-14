@@ -139,7 +139,10 @@ void UOneBrahamAccessZoneComponent::ApplyUnlockState(bool bNewUnlocked, EOneBrah
 	UnlockedByPlayerId = UnlockerPlayerId;
 
 	OnRep_Unlocked();
-	ForceNetUpdate();
+	if (AActor* OwnerActor = GetOwner())
+	{
+		OwnerActor->ForceNetUpdate();
+	}
 
 	OB_ACCESS_LOG("Zone '%s' (floor %d, tier %s) is now %s via %s (player %d)",
 		*ZoneId.ToString(), FloorIndex,

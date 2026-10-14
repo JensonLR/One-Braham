@@ -10,6 +10,7 @@
 #pragma once
 
 #include "NativeGameplayTags.h"
+#include "Core/OneBrahamTypes.h"
 
 namespace OneBrahamTags
 {

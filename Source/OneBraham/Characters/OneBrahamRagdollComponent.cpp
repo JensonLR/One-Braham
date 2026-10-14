@@ -13,6 +13,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "PhysicsEngine/PhysicsAsset.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
@@ -126,7 +127,7 @@ void UOneBrahamRagdollComponent::EnterRagdoll(FName HitBone, const FVector& Shot
 	OnCorpseReady.Broadcast(Character);
 
 	OB_LOG("Corpse: '%s' ragdolled on bone '%s' (impulse %.0f, pose %s).",
-		Character->GetName(), *HitBone.ToString(), ImpulseMagnitude, *UEnum::GetValueAsString(DeathPose));
+		*Character->GetName(), *HitBone.ToString(), ImpulseMagnitude, *UEnum::GetValueAsString(DeathPose));
 
 	// Cleanup timer: bodies must not accumulate. In a 12-player ASCENT every
 	// death produces a corpse and a bag, and corpses never despawn naturally.

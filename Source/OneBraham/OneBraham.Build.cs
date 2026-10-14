@@ -52,6 +52,7 @@ public class OneBraham : ModuleRules
 			"JsonUtilities",
 			"ApplicationCore",
 			"RenderCore",
+			"RHI",
 			"NetCore"
 		});
 
@@ -63,7 +64,7 @@ public class OneBraham : ModuleRules
 			"AudioMixer",
 			"PreLoadScreen",
 			"PakFile",
-			"RSAEncryption" // only touched by editor-only validation helpers, guarded by WITH_EDITOR
+			"EngineCameras" // UPerlinNoiseCameraShakePattern, used by the camera shakes
 		});
 
 		if (Target.bBuildEditor)

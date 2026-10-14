@@ -78,7 +78,7 @@ void AOneBrahamPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
 
-	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
+	UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
 	if (Settings != nullptr)
 	{
 		EffectiveSensitivity = Settings->MouseSensitivityX;
@@ -1476,7 +1476,7 @@ void AOneBrahamPlayerController::ApplySpectatorView()
 
 			if (AOneBrahamPlayerState* OtherState = OtherPC->GetPlayerState<AOneBrahamPlayerState>())
 			{
-				if (OtherState->PlayerId == SpectatedPlayerId && !OtherState->IsEliminated())
+				if (OtherState->GetPlayerId() == SpectatedPlayerId && !OtherState->IsEliminated())
 				{
 					Target = OtherPC->GetOneBrahamCharacter();
 					break;
@@ -1574,7 +1574,7 @@ void AOneBrahamPlayerController::ServerBeginSpectating_Implementation(int32 Pref
 		{
 			if (OtherState->LifeState == EOneBrahamLifeState::Alive || OtherState->LifeState == EOneBrahamLifeState::Downed)
 			{
-				Candidates.Add(OtherState->PlayerId);
+				Candidates.Add(OtherState->GetPlayerId());
 			}
 		}
 	}
@@ -1682,7 +1682,7 @@ void AOneBrahamPlayerController::MulticastPingLocation_Implementation(FVector_Ne
 
 	if (HUDComponent != nullptr)
 	{
-		HUDComponent->AddWorldPing(Location, PingingTeam == State->Team ? PingingName : FString(), PingingTeam);
+		HUDComponent->AddWorldPing(Location, PingingTeam == State->Team ? PingingName : FString(), static_cast<int32>(PingingTeam));
 	}
 }
 
@@ -1787,7 +1787,7 @@ void AOneBrahamPlayerController::ReportViolation(const FString& Reason, float Se
 		const AOneBrahamPlayerState* State = GetPlayerState<AOneBrahamPlayerState>();
 		OB_AUDIT_LOG("SECURITY: player='%s' id=%d reason='%s' severity=%.1f score=%d",
 			State ? *State->GetPlayerName() : *GetName(),
-			State ? State->PlayerId : -1,
+			State ? State->GetPlayerId() : -1,
 			*Reason,
 			Severity,
 			ViolationScore);

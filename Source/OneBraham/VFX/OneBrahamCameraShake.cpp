@@ -4,56 +4,50 @@
 
 #include "OneBraham.h"
 #include "Core/OneBrahamGameUserSettings.h"
+#include "Shakes/PerlinNoiseCameraShakePattern.h"
 
-UOneBrahamCameraShake::UOneBrahamCameraShake()
+UOneBrahamCameraShake::UOneBrahamCameraShake(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<UPerlinNoiseCameraShakePattern>(TEXT("RootShakePattern")))
 {
 	// A single-cycle shake with a short attack and a longer decay, driven through
-	// the engine's own CameraShakeBase pattern matrix. No binary curve asset, no
+	// the engine's Perlin-noise shake pattern. No binary curve asset, no
 	// editor-only dependency: this compiles and works from a code-only checkout.
 	bSingleInstance = true;
 
-	// The engine's default oscillation uses a Sine on all axes; we set the
-	// amplitudes below and let the base class blend them.
-	OscillationDuration = 0.45f;
-	OscillationBlendInTime = 0.02f;
-	OscillationBlendOutTime = 0.35f;
+	UPerlinNoiseCameraShakePattern* Pattern = Cast<UPerlinNoiseCameraShakePattern>(GetRootShakePattern());
+	if (Pattern == nullptr)
+	{
+		return;
+	}
 
-	RotOscillation.Pitch.Amplitude = 1.1f;
-	RotOscillation.Pitch.Frequency = 22.f;
-	RotOscillation.Pitch.InitialOffset = EInitialOscillatorOffset::EOO_OffsetRandom;
-	RotOscillation.Pitch.Waveform = EOscillatorWaveform::PerlinNoise;
+	// The Perlin pattern randomises its initial noise offset per axis on every
+	// start, so each shake instance reads differently.
+	Pattern->Duration = 0.45f;
+	Pattern->BlendInTime = 0.02f;
+	Pattern->BlendOutTime = 0.35f;
 
-	RotOscillation.Yaw.Amplitude = 0.9f;
-	RotOscillation.Yaw.Frequency = 19.f;
-	RotOscillation.Yaw.InitialOffset = EInitialOscillatorOffset::EOO_OffsetRandom;
-	RotOscillation.Yaw.Waveform = EOscillatorWaveform::PerlinNoise;
+	Pattern->Pitch.Amplitude = 1.1f;
+	Pattern->Pitch.Frequency = 22.f;
 
-	RotOscillation.Roll.Amplitude = 1.4f;
-	RotOscillation.Roll.Frequency = 26.f;
-	RotOscillation.Roll.InitialOffset = EInitialOscillatorOffset::EOO_OffsetRandom;
-	RotOscillation.Roll.Waveform = EOscillatorWaveform::PerlinNoise;
+	Pattern->Yaw.Amplitude = 0.9f;
+	Pattern->Yaw.Frequency = 19.f;
 
-	LocOscillation.Z.Amplitude = 2.2f;
-	LocOscillation.Z.Frequency = 28.f;
-	LocOscillation.Z.InitialOffset = EInitialOscillatorOffset::EOO_OffsetRandom;
-	LocOscillation.Z.Waveform = EOscillatorWaveform::PerlinNoise;
+	Pattern->Roll.Amplitude = 1.4f;
+	Pattern->Roll.Frequency = 26.f;
 
-	LocOscillation.X.Amplitude = 1.0f;
-	LocOscillation.X.Frequency = 24.f;
-	LocOscillation.X.InitialOffset = EInitialOscillatorOffset::EOO_OffsetRandom;
-	LocOscillation.X.Waveform = EOscillatorWaveform::PerlinNoise;
+	Pattern->Z.Amplitude = 2.2f;
+	Pattern->Z.Frequency = 28.f;
 
-	LocOscillation.Y.Amplitude = 1.0f;
-	LocOscillation.Y.Frequency = 24.f;
-	LocOscillation.Y.InitialOffset = EInitialOscillatorOffset::EOO_OffsetRandom;
-	LocOscillation.Y.Waveform = EOscillatorWaveform::PerlinNoise;
+	Pattern->X.Amplitude = 1.0f;
+	Pattern->X.Frequency = 24.f;
+
+	Pattern->Y.Amplitude = 1.0f;
+	Pattern->Y.Frequency = 24.f;
 
 	// FOV kick: a punch to the field of view reads as "concussion" more than
 	// camera translation ever does.
-	FOVOscillation.Amplitude = 1.6f;
-	FOVOscillation.Frequency = 30.f;
-	FOVOscillation.InitialOffset = EInitialOscillatorOffset::EOO_OffsetRandom;
-	FOVOscillation.Waveform = EOscillatorWaveform::PerlinNoise;
+	Pattern->FOV.Amplitude = 1.6f;
+	Pattern->FOV.Frequency = 30.f;
 }
 
 TSubclassOf<UCameraShakeBase> UOneBrahamCameraShake::GetExplosionShakeClass()

@@ -23,7 +23,9 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Framework/Text/TextLayout.h"
 #include "UI/OneBrahamHUDTypes.h"
+#include "UI/OneBrahamUIStyle.h"
 #include "OneBrahamHUDWidget.generated.h"
 
 class UOneBrahamCrosshairWidget;

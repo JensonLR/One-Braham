@@ -90,7 +90,7 @@ void UOneBrahamLockdownComponent::TickComponent(float DeltaTime, ELevelTick Tick
 		return;
 	}
 
-	if (!HasAuthority())
+	if (GetOwnerRole() != ROLE_Authority)
 	{
 		// Clients count the clock down between the 2 Hz replication beats.
 		if (bDirectorRunning && Stage != EOneBrahamLockdownStage::Purge)
@@ -161,7 +161,10 @@ void UOneBrahamLockdownComponent::TickComponent(float DeltaTime, ELevelTick Tick
 	{
 		ReplicationAccumulator = 0.f;
 		SecondsToNextStage = Remaining;
-		ForceNetUpdate();
+		if (AActor* OwnerActor = GetOwner())
+		{
+			OwnerActor->ForceNetUpdate();
+		}
 	}
 }
 
@@ -171,7 +174,7 @@ void UOneBrahamLockdownComponent::TickComponent(float DeltaTime, ELevelTick Tick
 
 void UOneBrahamLockdownComponent::StartDirector()
 {
-	if (!HasAuthority() || bDirectorRunning)
+	if (GetOwnerRole() != ROLE_Authority || bDirectorRunning)
 	{
 		return;
 	}
@@ -189,7 +192,7 @@ void UOneBrahamLockdownComponent::StartDirector()
 
 void UOneBrahamLockdownComponent::StopDirector()
 {
-	if (!HasAuthority())
+	if (GetOwnerRole() != ROLE_Authority)
 	{
 		return;
 	}
@@ -203,7 +206,7 @@ void UOneBrahamLockdownComponent::StopDirector()
 
 void UOneBrahamLockdownComponent::ServerForceStage(EOneBrahamLockdownStage NewStage)
 {
-	if (!HasAuthority())
+	if (GetOwnerRole() != ROLE_Authority)
 	{
 		return;
 	}
@@ -222,7 +225,10 @@ void UOneBrahamLockdownComponent::ServerForceStage(EOneBrahamLockdownStage NewSt
 		if (NewStage != EOneBrahamLockdownStage::Purge)
 		{
 			OnRep_Stage();
-			ForceNetUpdate();
+			if (AActor* OwnerActor = GetOwner())
+			{
+				OwnerActor->ForceNetUpdate();
+			}
 		}
 		return;
 	}
@@ -232,7 +238,7 @@ void UOneBrahamLockdownComponent::ServerForceStage(EOneBrahamLockdownStage NewSt
 
 void UOneBrahamLockdownComponent::ServerApplyStage(EOneBrahamLockdownStage NewStage, bool bAnnounce)
 {
-	if (!HasAuthority() || NewStage == Stage)
+	if (GetOwnerRole() != ROLE_Authority || NewStage == Stage)
 	{
 		return;
 	}
@@ -273,7 +279,10 @@ void UOneBrahamLockdownComponent::ServerApplyStage(EOneBrahamLockdownStage NewSt
 	}
 
 	OnRep_Stage();
-	ForceNetUpdate();
+	if (AActor* OwnerActor = GetOwner())
+	{
+		OwnerActor->ForceNetUpdate();
+	}
 
 	if (bAnnounce)
 	{
@@ -308,7 +317,7 @@ void UOneBrahamLockdownComponent::ServerSealFloorsBelow(int32 FloorIndex, bool b
 			}
 		}
 
-		if (HasAuthority() && bClose)
+		if (GetOwnerRole() == ROLE_Authority && bClose)
 		{
 			// Report the higher of the shutter's own floor and the group we are
 			// sealing: a single mesh can serve a whole stair core.
@@ -368,7 +377,7 @@ void UOneBrahamLockdownComponent::RegisterShutter(AActor* ShutterActor)
 
 	// A shutter registered after its floor has already been sealed must close now,
 	// otherwise a streamed-in sub-level would open a hole in the lockdown.
-	if (HasAuthority() && ShutterActor->GetClass()->ImplementsInterface(UOneBrahamShutterInterface::StaticClass()))
+	if (GetOwnerRole() == ROLE_Authority && ShutterActor->GetClass()->ImplementsInterface(UOneBrahamShutterInterface::StaticClass()))
 	{
 		const int32 Floor = IOneBrahamShutterInterface::Execute_GetShutterFloor(ShutterActor);
 		if (SealedFloors.Contains(Floor) ||

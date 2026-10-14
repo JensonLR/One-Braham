@@ -32,6 +32,7 @@
 #include "CoreMinimal.h"
 #include "Audio/OneBrahamAudioTypes.h"
 #include "Components/ActorComponent.h"
+#include "Engine/HitResult.h"
 #include "Core/OneBrahamTypes.h"
 #include "OneBrahamAudioManagerComponent.generated.h"
 
@@ -169,7 +170,7 @@ public:
 	void SetTinnitusState(bool bActive, float DurationSeconds);
 
 	/** Spectating after death: everything gets distant. */
-	void SetDeafened(bool bDeafened);
+	void SetDeafened(bool bInDeafened);
 
 	/** Ref-counted voice duck (0.45x on the beds while anyone is talking). */
 	void PushVoiceDuck();

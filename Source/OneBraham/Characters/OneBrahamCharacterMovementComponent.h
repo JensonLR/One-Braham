@@ -180,10 +180,10 @@ public:
 	//  API
 	// ======================================================================
 	UFUNCTION(BlueprintPure, Category = "One Braham|Movement")
-	EOneBrahamMovementMode GetOBMovementMode() const { return MovementState; }
+	EOneBrahamMovementMode GetOBMovementMode() const { return OBMovementState; }
 
 	UFUNCTION(BlueprintPure, Category = "One Braham|Movement")
-	EOneBrahamMovementMode GetCachedMovementMode() const { return MovementState; }
+	EOneBrahamMovementMode GetCachedMovementMode() const { return OBMovementState; }
 
 	/**
 	 * Sets the ONE BRAHAM movement state. Named differently from the engine's
@@ -238,7 +238,7 @@ public:
 	//  Delegates
 	// ======================================================================
 	UPROPERTY(BlueprintAssignable, Category = "One Braham|Movement")
-	FOneBrahamMovementModeChanged OnMovementModeChanged;
+	FOneBrahamMovementModeChanged OnOBMovementModeChanged;
 
 	UPROPERTY(BlueprintAssignable, Category = "One Braham|Movement")
 	FOneBrahamSurfaceChanged OnSurfaceChanged;
@@ -254,7 +254,7 @@ protected:
 	void TickSlide(float DeltaTime);
 
 	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Movement")
-	EOneBrahamMovementMode MovementState = EOneBrahamMovementMode::Normal;
+	EOneBrahamMovementMode OBMovementState = EOneBrahamMovementMode::Normal;
 
 	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Movement")
 	EOneBrahamFootstepSurface CurrentSurface = EOneBrahamFootstepSurface::Concrete;
@@ -285,6 +285,9 @@ public:
 
 	/** Called by the character when crouch state changes. */
 	void SetCrouchRequested(bool bCrouch);
+
+	/** True when the standing capsule fits at the current location (no ceiling or desk above). */
+	bool CanUnCrouch() const;
 
 	/** Replicated lean/state payload used by the anim BP on remote clients. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Movement")

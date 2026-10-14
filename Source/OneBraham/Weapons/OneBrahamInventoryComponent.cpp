@@ -8,6 +8,7 @@
 #include "Core/OneBrahamPlayerState.h"
 #include "Core/OneBrahamGameplayTags.h"
 #include "Core/OneBrahamPlayerController.h"
+#include "Voice/OneBrahamVoiceSubsystem.h"
 #include "Weapons/OneBrahamProjectileBase.h"
 #include "Weapons/OneBrahamPickupBase.h"
 #include "Data/OneBrahamWeaponDataAsset.h"
@@ -115,7 +116,10 @@ int32 UOneBrahamInventoryComponent::ServerAddUtility(FName UtilityId, int32 Amou
 	{
 		OnItemPickedUp.Broadcast(UtilityId, GetUtilityCount(UtilityId));
 		OnInventoryChanged.Broadcast();
-		ForceNetUpdate();
+		if (AActor* Owner = GetOwner())
+		{
+			Owner->ForceNetUpdate();
+		}
 	}
 
 	return Added;
@@ -180,7 +184,10 @@ AOneBrahamProjectileBase* UOneBrahamInventoryComponent::ServerConsumeAndSpawnUti
 	--(*Available);
 
 	OnInventoryChanged.Broadcast();
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 
 	// Delay the spawn by 0.25 s so the throw animation's release matches the
 	// grenade leaving the hand - a small detail that makes utility feel physical.
@@ -199,7 +206,7 @@ AOneBrahamProjectileBase* UOneBrahamInventoryComponent::ServerConsumeAndSpawnUti
 			{
 				Voice->SpeakContextualLine(GetOwner(), TEXT("V_GRENADE_OUT"));
 			}
-			UE_UNUSED(PC);
+			(void)PC;
 		}
 	}
 
@@ -247,7 +254,10 @@ bool UOneBrahamInventoryComponent::ServerPlaceUtility(UOneBrahamWeaponComponent*
 
 	--Utility.BreachChargeCount;
 	OnInventoryChanged.Broadcast();
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 
 	AOneBrahamProjectileBase* Charge = SpawnUtilityProjectile(UtilityId, Hit.ImpactPoint + Hit.ImpactNormal * 4.f, Hit.ImpactNormal);
 	if (Charge != nullptr)
@@ -272,7 +282,10 @@ bool UOneBrahamInventoryComponent::ServerConsumeMedkit()
 
 	--Utility.MedkitCount;
 	OnInventoryChanged.Broadcast();
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 	return true;
 }
 
@@ -290,14 +303,20 @@ void UOneBrahamInventoryComponent::ServerGrantKeycard(EOneBrahamAccessTier Tier)
 	if (Tier == EOneBrahamAccessTier::Override)
 	{
 		bHasOverrideTool = true;
-		ForceNetUpdate();
+		if (AActor* Owner = GetOwner())
+		{
+			Owner->ForceNetUpdate();
+		}
 		return;
 	}
 
 	HeldKeycards.AddUnique(Tier);
 	RecalculateKeycardTier();
 	OnInventoryChanged.Broadcast();
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 }
 
 bool UOneBrahamInventoryComponent::HasKeycardForTier(EOneBrahamAccessTier RequiredTier) const
@@ -473,7 +492,10 @@ void UOneBrahamInventoryComponent::ServerDropKeycardOnDeath()
 
 	HeldKeycards.Remove(BestTier);
 	RecalculateKeycardTier();
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 }
 
 void UOneBrahamInventoryComponent::ServerResetInventory(bool bKeepKeycards)
@@ -497,7 +519,10 @@ void UOneBrahamInventoryComponent::ServerResetInventory(bool bKeepKeycards)
 	}
 
 	OnInventoryChanged.Broadcast();
-	ForceNetUpdate();
+	if (AActor* Owner = GetOwner())
+	{
+		Owner->ForceNetUpdate();
+	}
 }
 
 void UOneBrahamInventoryComponent::RecalculateKeycardTier()

@@ -17,6 +17,9 @@
 
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
+#include "Sound/SoundBase.h"
 #include "Components/SpotLightComponent.h"
 #include "Components/AudioComponent.h"
 #include "NiagaraComponent.h"
@@ -93,7 +96,7 @@ void AOneBrahamWeaponBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 
 	DOREPLIFETIME(AOneBrahamWeaponBase, WeaponState);
 	DOREPLIFETIME(AOneBrahamWeaponBase, AmmoInMagazine);
-	DOREPLIFETIME(AOneBrahamWeaponBase, Attachments);
+	DOREPLIFETIME(AOneBrahamWeaponBase, ReplicatedAttachments);
 	DOREPLIFETIME(AOneBrahamWeaponBase, SkinId);
 	DOREPLIFETIME(AOneBrahamWeaponBase, bFlashlightEnabled);
 	DOREPLIFETIME(AOneBrahamWeaponBase, bLaserEnabled);
@@ -597,7 +600,7 @@ float AOneBrahamWeaponBase::TraceBullet(const FVector& Start, const FVector& Dir
 
 					OutImpact.Location = SecondHit.ImpactPoint;
 					OutImpact.Normal = SecondHit.ImpactNormal;
-					OutImpact.bWasPenetrated = true;
+					OutImpact.bPenetrated = true;
 					OutImpact.bHitCharacter = true;
 					OutImpact.HitBoneName = SecondHit.BoneName;
 					OutHitActor = SecondHit.GetActor();
@@ -708,7 +711,7 @@ int32 AOneBrahamWeaponBase::GetMagazineSize() const
 	{
 		// The delta comes from the attachment table, looked up by the component's
 		// registry, and is cached into the attachment map at attach time.
-		UE_UNUSED(ExtendedMag);
+		(void)ExtendedMag;
 	}
 	return Size;
 }
@@ -723,6 +726,19 @@ void AOneBrahamWeaponBase::SetAmmoInMagazine(int32 NewAmmo)
 	AmmoInMagazine = FMath::Clamp(NewAmmo, 0, GetMagazineSize());
 	OnRep_Ammo();
 	ForceNetUpdate();
+}
+
+bool AOneBrahamWeaponBase::ConsumeRound()
+{
+	if (!HasAuthority() || AmmoInMagazine <= 0)
+	{
+		return false;
+	}
+
+	--AmmoInMagazine;
+	OnRep_Ammo();
+	ForceNetUpdate();
+	return true;
 }
 
 float AOneBrahamWeaponBase::GetReloadDuration() const
@@ -819,7 +835,7 @@ float AOneBrahamWeaponBase::ServerMelee()
 		return 0.f;
 	}
 
-	if (AOneBrahamWeaponComponent* Component = OwningWeaponComponent.Get())
+	if (UOneBrahamWeaponComponent* Component = OwningWeaponComponent.Get())
 	{
 		if (!Component->CanMelee())
 		{
@@ -870,6 +886,11 @@ float AOneBrahamWeaponBase::ServerMelee()
 	}), Definition->MeleeCooldown, false);
 
 	return Damage;
+}
+
+void AOneBrahamWeaponBase::SetOwningWeaponComponent(UOneBrahamWeaponComponent* InComponent)
+{
+	OwningWeaponComponent = InComponent;
 }
 
 void AOneBrahamWeaponBase::ResetShotTracking()
@@ -1358,8 +1379,27 @@ void AOneBrahamWeaponBase::OnRep_Ammo()
 	}
 }
 
+void AOneBrahamWeaponBase::PreReplication(IRepChangedPropertyTracker& ChangedPropertyTracker)
+{
+	Super::PreReplication(ChangedPropertyTracker);
+
+	ReplicatedAttachments.Reset(Attachments.Num());
+	for (const TPair<EOneBrahamAttachmentSlot, FName>& Pair : Attachments)
+	{
+		FOneBrahamAttachmentEntry& Entry = ReplicatedAttachments.AddDefaulted_GetRef();
+		Entry.Slot = Pair.Key;
+		Entry.AttachmentId = Pair.Value;
+	}
+}
+
 void AOneBrahamWeaponBase::OnRep_Attachments()
 {
+	Attachments.Reset();
+	for (const FOneBrahamAttachmentEntry& Entry : ReplicatedAttachments)
+	{
+		Attachments.Add(Entry.Slot, Entry.AttachmentId);
+	}
+
 	RebuildAttachmentMeshes();
 
 	if (WeaponLight != nullptr)

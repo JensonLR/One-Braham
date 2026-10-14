@@ -24,7 +24,7 @@ class ONEBRAHAM_API UOneBrahamCameraShake : public UCameraShakeBase
 	GENERATED_BODY()
 
 public:
-	UOneBrahamCameraShake();
+	UOneBrahamCameraShake(const FObjectInitializer& ObjectInitializer);
 
 	/** Shake class used for explosions; resolved lazily and cached. */
 	static TSubclassOf<UCameraShakeBase> GetExplosionShakeClass();

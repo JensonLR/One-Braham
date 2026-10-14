@@ -112,7 +112,7 @@ public:
 
 	/** Server: opens the zone. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Access")
-	bool ServerUnlock(EOneBrahamUnlockMethod Method, int32 UnlockerPlayerId = INDEX_NONE);
+	bool ServerUnlock(EOneBrahamUnlockMethod Method, int32 UnlockerPlayerId = -1);
 
 	/** Server: closes the zone again (the lockdown director, or a reset). */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Access")
@@ -164,7 +164,7 @@ public:
 
 	/** Authority-side, matching the project's naming: the server is the system of record. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Access")
-	bool IsSystemAuthoritative() const { return GetOwner() != nullptr && GetOwner()->HasAuthority(); }
+	bool IsSystemAuthoritative() const { return GetOwnerRole() == ROLE_Authority; }
 
 protected:
 	/** Server: the one place the flag, the delegates and the net update change. */

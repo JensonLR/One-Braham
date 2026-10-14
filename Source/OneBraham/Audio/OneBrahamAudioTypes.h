@@ -10,6 +10,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/SoftObjectPtr.h"
+#include "Engine/DataAsset.h"
 #include "OneBrahamAudioTypes.generated.h"
 
 class USoundBase;

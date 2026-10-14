@@ -142,7 +142,10 @@ void AOneBrahamImpactFallbackActor::Initialise(const FOneBrahamImpactInfo& Impac
 		if (UMaterialInterface* DecalMaterial = LoadObject<UMaterialInterface>(nullptr, *DecalPath))
 		{
 			Hole->SetDecalMaterial(DecalMaterial);
-			Hole->SetDecalSize(FVector(4.f, 4.f, 4.f));
+			// UDecalComponent has no SetDecalSize(); write the property and push it
+			// to the render thread, since the component is already registered.
+			Hole->DecalSize = FVector(4.f, 4.f, 4.f);
+			Hole->MarkRenderStateDirty();
 			Hole->SetVisibility(true);
 			Hole->SetLifeSpan(LifeSeconds + 22.f);
 		}
@@ -204,7 +207,8 @@ void AOneBrahamImpactFallbackActor::Initialise(const FOneBrahamImpactInfo& Impac
 
 		// Fade the crumbs out with the actor rather than letting them stack up in
 		// a twelve-player firefight: this effect can run forty times a second.
-		Crumb->SetLifeSpan(LifeSeconds + 0.9f);
+		// Components have no lifespan of their own; each crumb is owned by this
+		// actor and is destroyed with it when Tick() reaches LifeSeconds.
 		Crumbs.Add(Crumb);
 	}
 }

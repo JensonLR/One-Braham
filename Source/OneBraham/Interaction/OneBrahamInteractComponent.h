@@ -93,7 +93,7 @@ public:
 	bool bIsHoldInteraction = false;
 
 	/** Interactors currently interacting with US (revive/execute targeting). */
-	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Interaction")
+	UPROPERTY()
 	TArray<TWeakObjectPtr<AActor>> IncomingInteractors;
 
 protected:

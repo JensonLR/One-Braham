@@ -350,8 +350,8 @@ void AOneBrahamExtractionTerminal::ApplyHighlight(bool bEnabled)
 	// interactable that wants to light up writes the same value.
 	static constexpr int32 OBInteractionStencil = 2;
 
-	SetRenderCustomDepth(bEnabled);
-
+	// Custom depth is per primitive component (the actor root is a bare scene
+	// component), so the two visible meshes carry the outline.
 	if (BodyMesh != nullptr)
 	{
 		BodyMesh->SetRenderCustomDepth(bEnabled);

@@ -45,7 +45,6 @@ UOneBrahamCharacterMovementComponent::UOneBrahamCharacterMovementComponent()
 
 	// Crouch: the office floors have 2.2 m ceilings and 1.1 m cubicle tops.
 	NavAgentProps.bCanCrouch = true;
-	CrouchedHalfHeight = 58.f;
 	SetCrouchedHalfHeight(58.f);
 	bCanWalkOffLedgesWhenCrouching = true;
 
@@ -67,7 +66,7 @@ void UOneBrahamCharacterMovementComponent::BeginPlay()
 	Super::BeginPlay();
 
 	CurrentSurface = ResolveSurfaceUnderfoot();
-	MovementState = EOneBrahamMovementMode::Normal;
+	OBMovementState = EOneBrahamMovementMode::Normal;
 }
 
 void UOneBrahamCharacterMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -78,11 +77,11 @@ void UOneBrahamCharacterMovementComponent::TickComponent(float DeltaTime, ELevel
 	LeanTarget = FMath::Clamp(LeanTarget, -1.f, 1.f);
 	LeanAmount = FMath::FInterpTo(LeanAmount, LeanTarget, DeltaTime, 8.f);
 
-	if (MovementState == EOneBrahamMovementMode::Mantling)
+	if (OBMovementState == EOneBrahamMovementMode::Mantling)
 	{
 		TickMantle(DeltaTime);
 	}
-	else if (MovementState == EOneBrahamMovementMode::Sliding)
+	else if (OBMovementState == EOneBrahamMovementMode::Sliding)
 	{
 		TickSlide(DeltaTime);
 	}
@@ -106,12 +105,12 @@ float UOneBrahamCharacterMovementComponent::GetMaxSpeed() const
 		return JogSpeed * StumbleSpeedMultiplier;
 	}
 
-	if (MovementState == EOneBrahamMovementMode::DownedCrawl)
+	if (OBMovementState == EOneBrahamMovementMode::DownedCrawl)
 	{
 		return DownedCrawlSpeed;
 	}
 
-	switch (MovementState)
+	switch (OBMovementState)
 	{
 	case EOneBrahamMovementMode::Sliding:
 		// Sliding decays from the sprint speed to a walk over its duration.
@@ -161,7 +160,7 @@ float UOneBrahamCharacterMovementComponent::GetMaxSpeed() const
 
 float UOneBrahamCharacterMovementComponent::GetMaxAcceleration() const
 {
-	if (MovementState == EOneBrahamMovementMode::Mantling)
+	if (OBMovementState == EOneBrahamMovementMode::Mantling)
 	{
 		return 0.f;
 	}
@@ -170,8 +169,8 @@ float UOneBrahamCharacterMovementComponent::GetMaxAcceleration() const
 
 bool UOneBrahamCharacterMovementComponent::DoJump(bool bReplayingMoves, float DeltaTime)
 {
-	if (bMovementLocked || MovementState == EOneBrahamMovementMode::Mantling ||
-		MovementState == EOneBrahamMovementMode::DownedCrawl || IsCrouching())
+	if (bMovementLocked || OBMovementState == EOneBrahamMovementMode::Mantling ||
+		OBMovementState == EOneBrahamMovementMode::DownedCrawl || IsCrouching())
 	{
 		// Crouched jumps are disabled: this is an office, not a parkour course,
 		// and crouch-jumping is the classic way to get onto geometry the level
@@ -189,7 +188,7 @@ void UOneBrahamCharacterMovementComponent::OnMovementModeChanged(EMovementMode P
 	// Landing: apply a wet-marble stumble if the player was sprinting and lands
 	// on a slick surface. This is the ONE BRAHAM "physics comedy" that is not a
 	// joke: it is what actually happens when you run on wet marble.
-	if (PreviousMovementMode == MOVE_Falling && MovementState == MOVE_Walking && bEnableWetStumble && bSprinting)
+	if (PreviousMovementMode == MOVE_Falling && MovementMode == MOVE_Walking && bEnableWetStumble && bSprinting)
 	{
 		const EOneBrahamFootstepSurface LandingSurface = ResolveSurfaceUnderfoot();
 		const bool bSlick = LandingSurface == EOneBrahamFootstepSurface::Marble ||
@@ -214,13 +213,13 @@ void UOneBrahamCharacterMovementComponent::UpdateBasedMovement(float DeltaSecond
 // ==========================================================================
 void UOneBrahamCharacterMovementComponent::SetOBMovementState(EOneBrahamMovementMode NewMode)
 {
-	if (MovementState == NewMode)
+	if (OBMovementState == NewMode)
 	{
 		return;
 	}
 
-	const EOneBrahamMovementMode OldMode = MovementState;
-	MovementState = NewMode;
+	const EOneBrahamMovementMode OldMode = OBMovementState;
+	OBMovementState = NewMode;
 
 	switch (NewMode)
 	{
@@ -258,7 +257,7 @@ void UOneBrahamCharacterMovementComponent::SetOBMovementState(EOneBrahamMovement
 		break;
 	}
 
-	OnMovementModeChanged.Broadcast(NewMode);
+	OnOBMovementModeChanged.Broadcast(NewMode);
 	OB_NET_LOG("Movement mode %s -> %s", *UEnum::GetValueAsString(OldMode), *UEnum::GetValueAsString(NewMode));
 }
 
@@ -300,6 +299,36 @@ void UOneBrahamCharacterMovementComponent::SetCrouchRequested(bool bCrouch)
 	}
 }
 
+bool UOneBrahamCharacterMovementComponent::CanUnCrouch() const
+{
+	if (!HasValidData())
+	{
+		return false;
+	}
+
+	// Same test the engine's UnCrouch runs: grow the capsule back to the class
+	// default height (keeping the feet where they are) and see if it overlaps.
+	const ACharacter* DefaultCharacter = CharacterOwner->GetClass()->GetDefaultObject<ACharacter>();
+	const UCapsuleComponent* Capsule = CharacterOwner->GetCapsuleComponent();
+	const float ScaledHalfHeightAdjust =
+		(DefaultCharacter->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight() - Capsule->GetUnscaledCapsuleHalfHeight()) * Capsule->GetShapeScale();
+
+	if (ScaledHalfHeightAdjust <= 0.f)
+	{
+		return true;
+	}
+
+	FCollisionQueryParams CapsuleParams(SCENE_QUERY_STAT(OBUnCrouchTrace), false, CharacterOwner);
+	FCollisionResponseParams ResponseParam;
+	InitCollisionParams(CapsuleParams, ResponseParam);
+
+	const FCollisionShape StandingShape = GetPawnCapsuleCollisionShape(SHRINK_HeightCustom, -ScaledHalfHeightAdjust);
+	const FVector StandingLocation = UpdatedComponent->GetComponentLocation() - GetGravityDirection() * ScaledHalfHeightAdjust;
+
+	return !GetWorld()->OverlapBlockingTestByChannel(StandingLocation, GetWorldToGravityTransform(),
+		UpdatedComponent->GetCollisionObjectType(), StandingShape, CapsuleParams, ResponseParam);
+}
+
 void UOneBrahamCharacterMovementComponent::SetMovementLocked(bool bLocked)
 {
 	bMovementLocked = bLocked;
@@ -335,8 +364,8 @@ bool UOneBrahamCharacterMovementComponent::CanStartSlide() const
 
 	const float Now = World->GetTimeSeconds();
 
-	if (MovementState == EOneBrahamMovementMode::Mantling ||
-		MovementState == EOneBrahamMovementMode::DownedCrawl ||
+	if (OBMovementState == EOneBrahamMovementMode::Mantling ||
+		OBMovementState == EOneBrahamMovementMode::DownedCrawl ||
 		bMovementLocked || IsCrouching() || IsFalling())
 	{
 		return false;
@@ -427,8 +456,8 @@ bool UOneBrahamCharacterMovementComponent::TryStartMantle()
 		return false;
 	}
 
-	if (MovementState == EOneBrahamMovementMode::Mantling ||
-		MovementState == EOneBrahamMovementMode::DownedCrawl ||
+	if (OBMovementState == EOneBrahamMovementMode::Mantling ||
+		OBMovementState == EOneBrahamMovementMode::DownedCrawl ||
 		bMovementLocked)
 	{
 		return false;
@@ -510,7 +539,7 @@ bool UOneBrahamCharacterMovementComponent::TryStartMantle()
 	SetOBMovementState(EOneBrahamMovementMode::Mantling);
 
 	// The anim BP plays the vault montage; this broadcast is what it listens to.
-	OnMovementModeChanged.Broadcast(EOneBrahamMovementMode::Mantling);
+	OnOBMovementModeChanged.Broadcast(EOneBrahamMovementMode::Mantling);
 	return true;
 }
 
@@ -535,7 +564,8 @@ void UOneBrahamCharacterMovementComponent::TickMantle(float DeltaTime)
 	const FVector Desired = FMath::Lerp(MantleStartLocation, MantleTargetLocation, Curve);
 	FVector Delta = Desired - CharacterOwner->GetActorLocation();
 	Delta.Z *= 1.f;
-	Delta.XY *= 1.f;
+	Delta.X *= 1.f;
+	Delta.Y *= 1.f;
 
 	FHitResult Hit(1.f);
 	// Sweep so a miscalculated ledge cannot push the player through a wall.

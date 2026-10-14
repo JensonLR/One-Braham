@@ -18,6 +18,7 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "UObject/Package.h"
 
 #include "Characters/OneBrahamHealthComponent.h"
 #include "Core/OneBrahamGameSettings.h"
@@ -348,7 +349,9 @@ bool FOneBrahamBrandPaletteTest::RunTest(const FString& Parameters)
 		};
 
 		FString NavyLine;
-		for (const FString& Line : FString(Ini).ParseIntoArrayLines(true))
+		TArray<FString> Lines;
+		Ini.ParseIntoArrayLines(Lines, true);
+		for (const FString& Line : Lines)
 		{
 			if (Line.StartsWith(TEXT("BrandNavy=(")))
 			{

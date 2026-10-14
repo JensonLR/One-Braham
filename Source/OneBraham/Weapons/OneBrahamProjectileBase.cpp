@@ -12,6 +12,7 @@
 #include "Access/OneBrahamBreakableGlass.h"
 #include "Audio/OneBrahamAudioManagerComponent.h"
 #include "Data/OneBrahamMatchSettingsAsset.h"
+#include "Voice/OneBrahamVoiceSubsystem.h"
 
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -21,6 +22,8 @@
 #include "NiagaraFunctionLibrary.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
+#include "Engine/DamageEvents.h"
+#include "Engine/OverlapResult.h"
 #include "EngineUtils.h"
 #include "DrawDebugHelpers.h"
 #include "Net/UnrealNetwork.h"
@@ -273,7 +276,7 @@ void AOneBrahamProjectileBase::OnProjectileBounce(const FHitResult& ImpactResult
 		{
 			// Grenades do not damage on impact - the design forbids "cooking" and
 			// ricochet kills because they are unreadable in a tactical shooter.
-			UE_UNUSED(Character);
+			(void)Character;
 		}
 	}
 }

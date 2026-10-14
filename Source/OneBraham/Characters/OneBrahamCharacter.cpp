@@ -3,6 +3,7 @@
 #include "Characters/OneBrahamCharacter.h"
 
 #include "OneBraham.h"
+#include "Core/OneBrahamGameMode.h"
 #include "Core/OneBrahamGameSettings.h"
 #include "Core/OneBrahamGameplayTags.h"
 #include "Core/OneBrahamPlayerController.h"
@@ -24,6 +25,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SpotLightComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/World.h"
 #include "Engine/DamageEvents.h"
 #include "GameFramework/PlayerController.h"
@@ -638,7 +640,7 @@ void AOneBrahamCharacter::ApplyArchetype(FGameplayTag ArchetypeTag)
 	}
 
 	Appearance.BodyVariant = Definition->BodyVariant;
-	Appearance.SquadColorIndex = GetPlayerState<AOneBrahamPlayerState>() ? FMath::Abs(GetPlayerState<AOneBrahamPlayerState>()->PlayerId) % 4 : 0;
+	Appearance.SquadColorIndex = GetPlayerState<AOneBrahamPlayerState>() ? FMath::Abs(GetPlayerState<AOneBrahamPlayerState>()->GetPlayerId()) % 4 : 0;
 
 	if (Definition->BodyMesh.IsValid() && GetMesh() != nullptr)
 	{
@@ -672,7 +674,11 @@ void AOneBrahamCharacter::ApplyArchetype(FGameplayTag ArchetypeTag)
 
 void AOneBrahamCharacter::ApplyCosmetics(const TMap<FName, FName>& InCosmetics)
 {
-	Appearance.EquippedCosmetics = InCosmetics;
+	Appearance.EquippedCosmetics.Reset(InCosmetics.Num());
+	for (const TPair<FName, FName>& Pair : InCosmetics)
+	{
+		Appearance.EquippedCosmetics.Add({ Pair.Key, Pair.Value });
+	}
 
 	// Cosmetic meshes are modular skeletal/static meshes parented to the body
 	// (jacket, fleece, hi-vis, lanyard, badge, backpack). They are looked up from
@@ -938,7 +944,12 @@ void AOneBrahamCharacter::ApplyLifeStateVisuals(EOneBrahamLifeState NewState)
 void AOneBrahamCharacter::OnRep_Appearance()
 {
 	ApplyArchetype(Appearance.ArchetypeTag);
-	ApplyCosmetics(Appearance.EquippedCosmetics);
+	TMap<FName, FName> Cosmetics;
+	for (const FOneBrahamNamePairEntry& Entry : Appearance.EquippedCosmetics)
+	{
+		Cosmetics.Add(Entry.Key, Entry.Value);
+	}
+	ApplyCosmetics(Cosmetics);
 }
 
 void AOneBrahamCharacter::ApplyMatchSettings(UOneBrahamMatchSettingsAsset* Settings)
@@ -1098,7 +1109,7 @@ void AOneBrahamCharacter::ServerOnDied(AController* Killer, const FOneBrahamDama
 	}
 
 	OB_MATCH_LOG("'%s' was killed by '%s' on floor %d (%.1f damage, %s).",
-		PlayerState ? *PlayerState->GetPlayerName() : *GetName(),
+		GetPlayerState() ? *GetPlayerState()->GetPlayerName() : *GetName(),
 		Killer && Killer->PlayerState ? *Killer->PlayerState->GetPlayerName() : TEXT("the building"),
 		CurrentFloorIndex,
 		Report.FinalDamage,
@@ -1210,7 +1221,7 @@ void AOneBrahamCharacter::Landed(const FHitResult& Hit)
 	HealthComponent->ApplyDamage(Damage, nullptr, Report, nullptr);
 
 	OB_MATCH_LOG("'%s' landed hard on floor %d at %.0f cm/s (%.1f damage).",
-		PlayerState ? *PlayerState->GetPlayerName() : *GetName(), CurrentFloorIndex, EffectiveFallSpeed, Damage);
+		GetPlayerState() ? *GetPlayerState()->GetPlayerName() : *GetName(), CurrentFloorIndex, EffectiveFallSpeed, Damage);
 }
 
 void AOneBrahamCharacter::FellOutOfWorld(const UDamageType& DamageType)

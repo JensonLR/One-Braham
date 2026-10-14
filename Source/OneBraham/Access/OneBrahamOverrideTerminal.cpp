@@ -122,7 +122,7 @@ void AOneBrahamOverrideTerminal::BeginPlay()
 		*TerminalId.ToString(),
 		*TargetZoneId.ToString(),
 		*PairedTerminalId.ToString(),
-		bTripsAlarm ? "armed" : "silent");
+		bTripsAlarm ? TEXT("armed") : TEXT("silent"));
 }
 
 void AOneBrahamOverrideTerminal::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const

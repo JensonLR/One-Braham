@@ -15,6 +15,7 @@
 #include "Weapons/OneBrahamWeaponComponent.h"
 
 #include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "Materials/MaterialInterface.h"
 #include "NavigationSystem.h"
@@ -468,7 +469,7 @@ void AOneBrahamBreachableWall::OnInteractionEnd_Implementation(AOneBrahamPlayerC
 	// nothing is spent.
 	if (!Inventory->ServerPlaceUtility(Weapons, BreachChargeUtilityIndex))
 	{
-		OB_ACCESS_WARN("Charge placement refused on wall '%s' for player %d.",
+		UE_LOG(LogOneBrahamAccess, Warning, TEXT("[OB.ACCESS] Charge placement refused on wall '%s' for player %d."),
 			*WallId.ToString(),
 			Interactor->GetPlayerState<AOneBrahamPlayerState>() != nullptr
 				? Interactor->GetPlayerState<AOneBrahamPlayerState>()->GetPlayerId()

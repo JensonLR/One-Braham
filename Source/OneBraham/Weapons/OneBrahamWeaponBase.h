@@ -22,6 +22,7 @@ class UOneBrahamWeaponDefinition;
 class USkeletalMeshComponent;
 class UStaticMeshComponent;
 class UNiagaraComponent;
+class UNiagaraSystem;
 class UAudioComponent;
 class USpotLightComponent;
 
@@ -60,6 +61,7 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void PreReplication(IRepChangedPropertyTracker& ChangedPropertyTracker) override;
 
 	// ======================================================================
 	//  Setup
@@ -211,10 +213,22 @@ public:
 	/** Seconds left on the current reload, 0 when not reloading. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Weapon")
 	float GetReloadTimeRemaining() const;
-protected:
+
+	/** The weapon state machine's current state. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Weapon")
+	EOneBrahamWeaponState GetWeaponState() const { return WeaponState; }
+
+	/** True while this weapon is on the ground and can be picked up. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Weapon")
+	bool IsGroundPickup() const { return bIsGroundPickup; }
+
+	/** Server: flags the weapon as on the ground (pickable) or held. */
+	void SetIsGroundPickup(bool bOnGround) { bIsGroundPickup = bOnGround; }
 
 	UFUNCTION(NetMulticast, Unreliable, Category = "One Braham|Weapon")
 	void MulticastPlayDryFire();
+
+protected:
 
 	/** Plays the tracer as a travelling projectile-like effect the client sees. */
 	void PlayTracerLocal(const FVector& Start, const FVector& End, bool bSuppressed);
@@ -228,9 +242,14 @@ protected:
 	UPROPERTY(ReplicatedUsing = OnRep_Ammo, BlueprintReadOnly, Category = "One Braham|Weapon")
 	int32 AmmoInMagazine = 0;
 
-	/** Attachment ids by slot, replicated so other clients see the right model. */
-	UPROPERTY(ReplicatedUsing = OnRep_Attachments, BlueprintReadOnly, Category = "One Braham|Weapon")
+	/** Attachment ids by slot. Authoritative on the server; rebuilt from
+	 *  ReplicatedAttachments on clients so they see the right model. */
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Weapon")
 	TMap<EOneBrahamAttachmentSlot, FName> Attachments;
+
+	/** Wire form of Attachments (see FOneBrahamAttachmentEntry). */
+	UPROPERTY(ReplicatedUsing = OnRep_Attachments)
+	TArray<FOneBrahamAttachmentEntry> ReplicatedAttachments;
 
 	/** The cosmetic skin. Replicated with a rep notify so every machine paints
 	 *  the weapon it can see: a material instance is local to the machine that
@@ -261,7 +280,9 @@ protected:
 	TObjectPtr<UStaticMeshComponent> PickupMesh = nullptr;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "One Braham|Components")
-		/**
+	TObjectPtr<UNiagaraComponent> MuzzleFlashComponent = nullptr;
+
+	/**
 	 * Conventional generated FX, used when the weapon definition does not name its
 	 * own. Resolved once, at InitialiseFromDefinition.
 	 *
@@ -279,8 +300,6 @@ protected:
 	UPROPERTY(Transient) TObjectPtr<UNiagaraSystem> CachedMuzzleFlash = nullptr;
 	UPROPERTY(Transient) TObjectPtr<UNiagaraSystem> CachedShellEject = nullptr;
 	UPROPERTY(Transient) TObjectPtr<UNiagaraSystem> CachedTracer = nullptr;
-
-TObjectPtr<UNiagaraComponent> MuzzleFlashComponent = nullptr;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "One Braham|Components")
 	TObjectPtr<USpotLightComponent> MuzzleLight = nullptr;
@@ -365,7 +384,7 @@ public:
 public:
 	/** Called by the weapon component so the weapon can read attachments/skins. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Weapon")
-	void SetOwningWeaponComponent(class UOneBrahamWeaponComponent* InComponent) { OwningWeaponComponent = InComponent; }
+	void SetOwningWeaponComponent(class UOneBrahamWeaponComponent* InComponent);
 
 	/** Server diagnostics: how many shots this weapon has fired. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Weapon")

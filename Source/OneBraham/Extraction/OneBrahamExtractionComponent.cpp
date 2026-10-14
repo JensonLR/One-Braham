@@ -87,7 +87,7 @@ void UOneBrahamExtractionComponent::TickComponent(float DeltaTime, ELevelTick Ti
 		return;
 	}
 
-	if (!HasAuthority())
+	if (GetOwnerRole() != ROLE_Authority)
 	{
 		// Clients advance the countdown locally so the HUD reads as a smooth clock,
 		// and snap back to the authoritative value every time a packet lands.
@@ -228,7 +228,7 @@ void UOneBrahamExtractionComponent::TickComponent(float DeltaTime, ELevelTick Ti
 
 bool UOneBrahamExtractionComponent::ServerCallExtraction(int32 SquadId, AOneBrahamPlayerState* CallingPlayer, FText& OutRefusal)
 {
-	if (!HasAuthority())
+	if (GetOwnerRole() != ROLE_Authority)
 	{
 		OutRefusal = NSLOCTEXT("OneBraham", "Extraction_ServerOnly", "Only the host can authorise a winch.");
 		return false;
@@ -315,21 +315,24 @@ bool UOneBrahamExtractionComponent::ServerCallExtraction(int32 SquadId, AOneBrah
 
 void UOneBrahamExtractionComponent::ServerSetHelipadLocation(const FVector& Location, float InHoldRadiusCm)
 {
-	if (!HasAuthority())
+	if (GetOwnerRole() != ROLE_Authority)
 	{
 		return;
 	}
 
 	HelipadLocation = Location;
 	HoldRadiusCm = FMath::Max(200.f, InHoldRadiusCm);
-	ForceNetUpdate();
+	if (AActor* OwnerActor = GetOwner())
+	{
+		OwnerActor->ForceNetUpdate();
+	}
 
 	OB_MATCH_LOG("Winch pad set to %s (radius %.0f cm)", *Location.ToCompactString(), HoldRadiusCm);
 }
 
 void UOneBrahamExtractionComponent::ServerSkipToHolding()
 {
-	if (!HasAuthority())
+	if (GetOwnerRole() != ROLE_Authority)
 	{
 		return;
 	}
@@ -348,7 +351,7 @@ void UOneBrahamExtractionComponent::ServerSkipToHolding()
 
 void UOneBrahamExtractionComponent::ServerAbortExtraction(EOneBrahamExtractionFailReason Reason)
 {
-	if (!HasAuthority())
+	if (GetOwnerRole() != ROLE_Authority)
 	{
 		return;
 	}

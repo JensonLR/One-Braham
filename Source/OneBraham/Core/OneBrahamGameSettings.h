@@ -11,6 +11,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
 #include "Engine/DataAsset.h"
+#include "Core/OneBrahamTypes.h"
 #include "OneBrahamGameSettings.generated.h"
 
 class UInputMappingContext;

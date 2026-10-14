@@ -158,7 +158,7 @@ bool FOneBrahamEngineFreeChecksTest::RunTest(const FString& Parameters)
 		}
 	}
 
-	TestEqual(TEXT("every engine-free check ran"), Checked, UE_ARRAY_COUNT(EngineFreeChecks));
+	TestEqual(TEXT("every engine-free check ran"), Checked, static_cast<int32>(UE_ARRAY_COUNT(EngineFreeChecks)));
 	TestFalse(TEXT("and Python was found"), Launcher.IsEmpty());
 
 	return true;

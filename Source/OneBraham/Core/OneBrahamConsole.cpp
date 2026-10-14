@@ -8,9 +8,12 @@
 #include "Core/OneBrahamGameMode.h"
 #include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamPlayerController.h"
+#include "Core/OneBrahamPlayerState.h"
 #include "Characters/OneBrahamCharacter.h"
 #include "Extraction/OneBrahamExtractionComponent.h"
+#include "Weapons/OneBrahamWeaponBase.h"
 #include "Weapons/OneBrahamWeaponComponent.h"
+#include "Data/OneBrahamWeaponDataAsset.h"
 #include "Lockdown/OneBrahamLockdownComponent.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
@@ -21,7 +24,7 @@ UOneBrahamConsole::UOneBrahamConsole()
 {
 }
 
-void UOneBrahamConsole::PostRender_Console_GameViewport(UCanvas* Canvas)
+void UOneBrahamConsole::PostRender_Console(UCanvas* Canvas)
 {
 	// Shipping builds keep the console available for the ops team on dedicated
 	// servers, but clients only see it when the player asked for it with ~ and
@@ -38,10 +41,10 @@ void UOneBrahamConsole::PostRender_Console_GameViewport(UCanvas* Canvas)
 		// replication overlay, `ob.netbudget` reports the frame budget.
 	}
 #endif
-	Super::PostRender_Console_GameViewport(Canvas);
+	Super::PostRender_Console(Canvas);
 }
 
-bool UOneBrahamConsole::ConsoleCommand(const FString& Command)
+void UOneBrahamConsole::ConsoleCommand(const FString& Command)
 {
 	// Route ONE BRAHAM QA commands, then fall through to the engine console.
 	//
@@ -65,57 +68,57 @@ bool UOneBrahamConsole::ConsoleCommand(const FString& Command)
 		if (Verb == TEXT("ob.give"))
 		{
 			OBGiveWeapon(ArgList.Num() > 0 ? ArgList[0] : TEXT("W_Carbine556"));
-			return true;
+			return;
 		}
 		if (Verb == TEXT("ob.lockdown"))
 		{
 			OBSetLockdownStage(ArgList.Num() > 0 ? FCString::Atoi(*ArgList[0]) : -1);
-			return true;
+			return;
 		}
 		if (Verb == TEXT("ob.endmatch"))
 		{
 			OBEndMatch(ArgList.Num() > 0 ? FCString::Atoi(*ArgList[0]) : -1);
-			return true;
+			return;
 		}
 		if (Verb == TEXT("ob.extraction.fast"))
 		{
 			OBExtractionFast();
-			return true;
+			return;
 		}
 		if (Verb == TEXT("ob.extraction.abort"))
 		{
 			OBExtractionAbort();
-			return true;
+			return;
 		}
 		if (Verb == TEXT("ob.netbudget"))
 		{
 			OBReportNetBudget();
-			return true;
+			return;
 		}
 		if (Verb == TEXT("ob.audio.dump"))
 		{
 			OBDumpAudio();
-			return true;
+			return;
 		}
 		if (Verb == TEXT("ob.bench.skydeck"))
 		{
 			// Seconds per floor, so a short pass can be run while iterating.
 			OBBenchSkydeck(ArgList.Num() > 0 ? FCString::Atof(*ArgList[0]) : 6.f);
-			return true;
+			return;
 		}
 		if (Verb == TEXT("ob.bench.skydeck.stop"))
 		{
 			OBStopBench();
-			return true;
+			return;
 		}
 		if (Verb == TEXT("ob.weapon.remove"))
 		{
 			OBRemoveCurrentWeapon();
-			return true;
+			return;
 		}
 	}
 
-	return Super::ConsoleCommand(Command);
+	Super::ConsoleCommand(Command);
 }
 
 void UOneBrahamConsole::OBDumpAudio()

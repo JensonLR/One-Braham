@@ -26,6 +26,7 @@ public:
 	AOneBrahamPlayerState();
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void PreReplication(IRepChangedPropertyTracker& ChangedPropertyTracker) override;
 	virtual void CopyProperties(APlayerState* PlayerState) override;
 	virtual void ClientInitialize(AController* C) override;
 
@@ -168,9 +169,14 @@ public:
 	// ======================================================================
 	//  Cosmetics (replicated so other clients render the correct outfit)
 	// ======================================================================
-	/** Slot tag name -> cosmetic id. Populated from UOneBrahamSaveSettings on login. */
-	UPROPERTY(ReplicatedUsing = OnRep_Cosmetics, BlueprintReadOnly, Category = "One Braham|Cosmetics")
+	/** Slot tag name -> cosmetic id. Populated from UOneBrahamSaveSettings on login.
+	 *  Authoritative on the server; rebuilt from ReplicatedCosmetics on clients. */
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Cosmetics")
 	TMap<FName, FName> EquippedCosmetics;
+
+	/** Wire form of EquippedCosmetics (see FOneBrahamNamePairEntry). */
+	UPROPERTY(ReplicatedUsing = OnRep_Cosmetics)
+	TArray<FOneBrahamNamePairEntry> ReplicatedCosmetics;
 
 	// ======================================================================
 	//  API

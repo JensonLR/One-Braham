@@ -7,9 +7,11 @@
 #include "Core/OneBrahamPlayerController.h"
 #include "Core/OneBrahamPlayerState.h"
 #include "Characters/OneBrahamCharacter.h"
+#include "Characters/OneBrahamDownedComponent.h"
 #include "Characters/OneBrahamHealthComponent.h"
 #include "Interaction/OneBrahamInteractionInterface.h"
 #include "Net/UnrealNetwork.h"
+#include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
@@ -225,7 +227,10 @@ void UOneBrahamInteractComponent::ServerBeginInteraction_Implementation(AActor* 
 		bTargetNotified = false;
 	}
 
-	ForceNetUpdate();
+	if (AActor* OwnerActor = GetOwner())
+	{
+		OwnerActor->ForceNetUpdate();
+	}
 }
 
 void UOneBrahamInteractComponent::ServerEndInteraction_Implementation(bool bCompleted)
@@ -272,7 +277,10 @@ void UOneBrahamInteractComponent::ServerEndInteraction_Implementation(bool bComp
 	RequiredHoldSeconds = 0.f;
 
 	OnHoldProgressChanged.Broadcast(0.f);
-	ForceNetUpdate();
+	if (AActor* OwnerActor = GetOwner())
+	{
+		OwnerActor->ForceNetUpdate();
+	}
 }
 
 // ==========================================================================
@@ -353,7 +361,10 @@ void UOneBrahamInteractComponent::TickHoldProgress(float DeltaTime)
 		RequiredHoldSeconds = 0.f;
 
 		OnHoldProgressChanged.Broadcast(0.f);
-		ForceNetUpdate();
+		if (AActor* OwnerActor = GetOwner())
+		{
+			OwnerActor->ForceNetUpdate();
+		}
 	}
 }
 

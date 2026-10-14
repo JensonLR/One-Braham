@@ -28,6 +28,7 @@ class UCommonActivatableWidget;
 class AOneBrahamCharacter;
 class USoundBase;
 class UUserWidget;
+class UMaterialParameterCollection;
 
 /** What the player is currently looking at, for the interaction prompt. */
 USTRUCT(BlueprintType)
@@ -211,9 +212,13 @@ public:
 	float GetFlashRemaining() const { return FlashRemaining; }
 
 protected:
+	/** What the 10 Hz interaction trace last found; read by GetInteractionTarget. */
+	FOneBrahamInteractionTarget CurrentInteractionTarget;
+
 	/** Per-tick flash decay, called from PlayerTick. */
 	void TickFlash(float DeltaTime);
 
+public:
 	// ======================================================================
 	//  Spectating
 	// ======================================================================
@@ -265,7 +270,6 @@ protected:
 	//  Anti-cheat / RPC budget
 	// ======================================================================
 	/** Returns false (and logs) when this client has exceeded its RPC budget. */
-	UFUNCTION(BlueprintCallable, Category = "One Braham|Security")
 	bool CheckRPCBudget(const TCHAR* RPCLabel);
 
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Security")

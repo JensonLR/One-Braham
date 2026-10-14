@@ -160,7 +160,7 @@ void UOneBrahamDownedComponent::EnterDownedState(AActor* Killer, const FOneBraha
 	}
 
 	OB_MATCH_LOG("'%s' is down (killer '%s', %.1fs bleed-out, %d revives left).",
-		State ? *State->GetPlayerName() : *Character->GetName(),
+		Character->GetPlayerState() ? *Character->GetPlayerState()->GetPlayerName() : *Character->GetName(),
 		Killer && Killer->GetInstigator() ? *Killer->GetInstigator()->GetName() : TEXT("unknown"),
 		BleedOutSeconds,
 		Character->GetPlayerState<AOneBrahamPlayerState>() ? Character->GetPlayerState<AOneBrahamPlayerState>()->RemainingRevives : 0);
@@ -314,7 +314,7 @@ void UOneBrahamDownedComponent::SetReviveProgress(float Progress, AActor* Revive
 
 	ReviveProgress = FMath::Clamp(Progress, 0.f, 1.f);
 	OnReviveProgress.Broadcast(ReviveProgress, Reviver);
-	ForceNetUpdate();
+	GetOwner()->ForceNetUpdate();
 }
 
 void UOneBrahamDownedComponent::ServerRevive(AController* ReviverController)

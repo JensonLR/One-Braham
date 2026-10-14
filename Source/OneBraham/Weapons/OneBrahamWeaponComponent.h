@@ -41,6 +41,8 @@ class UOneBrahamWeaponDataAsset;
 class UOneBrahamWeaponDefinition;
 class UOneBrahamInventoryComponent;
 class USkeletalMeshComponent;
+struct FOneBrahamAttachmentDefinition;
+struct FOneBrahamWeaponSkin;
 class UAnimMontage;
 
 /** One entry in the lag-compensation history: where everyone's hitboxes were. */
@@ -56,7 +58,7 @@ struct FOneBrahamHitboxSnapshot
 	UPROPERTY() TMap<int32, FTransform> ChestTransforms;
 	UPROPERTY() TMap<int32, FTransform> PelvisTransforms;
 	/** Per-player full body pose: bone name -> world transform (used for limb hits). */
-	UPROPERTY() TMap<int32, TMap<FName, FTransform>> BoneTransforms;
+	TMap<int32, TMap<FName, FTransform>> BoneTransforms;
 };
 
 /** Fired on the shooter's machine when the server confirms one of their hits. */
@@ -73,6 +75,7 @@ public:
 	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void PreReplication(IRepChangedPropertyTracker& ChangedPropertyTracker) override;
 
 	// ======================================================================
 	//  Feedback
@@ -307,10 +310,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "One Braham|Weapons")
 	UOneBrahamWeaponDefinition* GetWeaponDefinition(FName WeaponId) const;
 
-	UFUNCTION(BlueprintPure, Category = "One Braham|Weapons")
 	const FOneBrahamAttachmentDefinition* GetAttachmentDefinition(FName AttachmentId) const;
 
-	UFUNCTION(BlueprintPure, Category = "One Braham|Weapons")
 	const FOneBrahamWeaponSkin* GetSkinDefinition(FName SkinId) const;
 
 	/** Returns the slot an attachment belongs in (used by the weapon actor). */
@@ -328,7 +329,7 @@ public:
 	//  RPCs
 	// ======================================================================
 	UFUNCTION(Server, Unreliable, Category = "One Braham|Weapons")
-	void ServerRequestFire(FVector_NetQuantize AimOrigin, FVector_NetQuantizeNormal AimDirection, int32 ClientShotIndex);
+	void ServerRequestFire(FVector_NetQuantize AimOrigin, FVector_NetQuantizeNormal AimDirection, int32 InClientShotIndex);
 
 	UFUNCTION(Server, Reliable, Category = "One Braham|Weapons")
 	void ServerRequestReload();
@@ -388,15 +389,26 @@ public:
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Weapons")
 	bool bMeleeOnCooldown = false;
 
-	/** Reserve ammo per weapon id (the pool the reload pulls from). */
-	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Weapons")
+	/** Reserve ammo per weapon id (the pool the reload pulls from).
+	 *  Authoritative on the server; rebuilt from ReplicatedReserveAmmo on clients. */
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Weapons")
 	TMap<FName, int32> ReserveAmmoByWeapon;
 
-	/** All weapons this player owns, by slot. */
-	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Weapons")
+	/** All weapons this player owns, by slot.
+	 *  Authoritative on the server; rebuilt from ReplicatedOwnedWeapons on clients. */
+	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Weapons")
 	TMap<EOneBrahamWeaponSlot, TObjectPtr<AOneBrahamWeaponBase>> OwnedWeapons;
 
+	/** Wire forms of the two maps above (see the entries in OneBrahamTypes.h). */
+	UPROPERTY(ReplicatedUsing = OnRep_ReserveAmmo)
+	TArray<FOneBrahamReserveAmmoEntry> ReplicatedReserveAmmo;
+
+	UPROPERTY(ReplicatedUsing = OnRep_OwnedWeapons)
+	TArray<FOneBrahamOwnedWeaponEntry> ReplicatedOwnedWeapons;
+
 protected:
+	UFUNCTION() void OnRep_ReserveAmmo();
+	UFUNCTION() void OnRep_OwnedWeapons();
 	UFUNCTION() void OnRep_CurrentWeapon();
 	UFUNCTION() void OnRep_Reloading();
 
@@ -434,9 +446,6 @@ protected:
 	/** Character/controller shortcuts. */
 	AOneBrahamCharacter* GetCharacter() const;
 	AOneBrahamPlayerController* GetOneBrahamPlayerController() const;
-
-	/** Called by the weapon when it finishes drawing. */
-	void OnWeaponReady();
 
 	TWeakObjectPtr<AOneBrahamCharacter> CachedCharacter;
 
@@ -480,6 +489,9 @@ protected:
 	FVector2D WeaponKickOffset = FVector2D::ZeroVector;
 
 public:
+	/** Called by the weapon when it finishes drawing. */
+	void OnWeaponReady();
+
 	/** The visual kick currently applied to the 1P weapon mesh, in cm. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Weapons")
 	FVector2D GetWeaponKickOffset() const { return WeaponKickOffset; }

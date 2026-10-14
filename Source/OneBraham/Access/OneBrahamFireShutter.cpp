@@ -14,6 +14,7 @@
 #include "Components/BoxComponent.h"
 #include "Components/PointLightComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/OverlapResult.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
@@ -135,8 +136,8 @@ void AOneBrahamFireShutter::BeginPlay()
 
 	OB_ACCESS_LOG("Shutter '%s' online: floor %d, %s%s",
 		*ShutterId.ToString(), FloorIndex,
-		bAllowLockdownClose ? "lockdown-sealable" : "never seals",
-		bStartClosed ? ", starts closed" : "");
+		bAllowLockdownClose ? TEXT("lockdown-sealable") : TEXT("never seals"),
+		bStartClosed ? TEXT(", starts closed") : TEXT(""));
 }
 
 void AOneBrahamFireShutter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -266,7 +267,7 @@ bool AOneBrahamFireShutter::IsDoorwayBlocked() const
 		// building does not care, and neither does the clearing crew.
 		if (const AOneBrahamCharacter* Character = Cast<AOneBrahamCharacter>(Pawn))
 		{
-			if (Character->IsEliminated())
+			if (Character->LifeState != EOneBrahamLifeState::Alive)
 			{
 				continue;
 			}
@@ -396,7 +397,7 @@ void AOneBrahamFireShutter::OnRep_Closed()
 		WarningLight->SetIntensity(600.f);
 	}
 
-	OB_ACCESS_LOG("Shutter '%s' %s.", *ShutterId.ToString(), bClosed ? "closing" : "opening");
+	OB_ACCESS_LOG("Shutter '%s' %s.", *ShutterId.ToString(), bClosed ? TEXT("closing") : TEXT("opening"));
 }
 
 // ===========================================================================

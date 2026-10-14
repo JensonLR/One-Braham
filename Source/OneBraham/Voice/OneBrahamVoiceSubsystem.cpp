@@ -6,12 +6,15 @@
 #include "OneBraham.h"
 #include "Audio/OneBrahamAudioManagerComponent.h"
 #include "Characters/OneBrahamCharacter.h"
+#include "Characters/OneBrahamHealthComponent.h"
 #include "Core/OneBrahamGameSettings.h"
 #include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamPlayerController.h"
 #include "Core/OneBrahamPlayerState.h"
 #include "Data/OneBrahamMatchSettingsAsset.h"
 #include "Voice/OneBrahamProximityVoiceComponent.h"
+#include "Weapons/OneBrahamWeaponBase.h"
+#include "Weapons/OneBrahamWeaponComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "TimerManager.h"
@@ -30,6 +33,42 @@ namespace
 	/** Voice policy: how long between ambient mutters for one character. */
 	constexpr float AmbientLineMinInterval = 38.f;
 	constexpr float AmbientLineMaxInterval = 95.f;
+
+	/**
+	 * True when the character took damage or fired their held weapon within the
+	 * last WindowSeconds. Server-side: both timestamps are authoritative there.
+	 */
+	bool HasRecentCombatActivity(const AOneBrahamCharacter* Character, float WindowSeconds)
+	{
+		const UWorld* World = Character != nullptr ? Character->GetWorld() : nullptr;
+		if (World == nullptr)
+		{
+			return false;
+		}
+
+		const float Now = World->GetTimeSeconds();
+
+		if (const UOneBrahamHealthComponent* Health = Character->GetHealthComponent())
+		{
+			if (Now - Health->GetLastDamageTime() < WindowSeconds)
+			{
+				return true;
+			}
+		}
+
+		if (const UOneBrahamWeaponComponent* Weapons = Character->GetWeaponComponent())
+		{
+			if (const AOneBrahamWeaponBase* Weapon = Weapons->GetCurrentWeapon())
+			{
+				if (Now - Weapon->GetLastShotTime() < WindowSeconds)
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
 }
 
 // ==========================================================================
@@ -78,7 +117,7 @@ void UOneBrahamVoiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 				// Bigger rooms get a slightly wider relay budget: a 12-player TDM uses
 				// a lot more talking than three squads creeping up a stairwell.
-				const int32 ExtraFrames = Settings->MaxPlayers > 12 ? 20 : 10;
+				const int32 ExtraFrames = Settings->GetExpectedPlayerCount() > 12 ? 20 : 10;
 				ChatConfig.MaxFramesPerSecond = FMath::Clamp(
 					ChatConfig.SendFramesPerSecond + ExtraFrames, 40, 120);
 			}
@@ -158,7 +197,7 @@ bool UOneBrahamVoiceSubsystem::SpeakContextualLine(AActor* Speaker, FName LineId
 
 	// --- Line selection ---------------------------------------------------
 	const FOneBrahamVoiceLine* Line = LineSet != nullptr
-		? LineSet->PickLine(LineId, Character->GetArchetypeTag(), Random)
+		? LineSet->PickLine(LineId, Character->Appearance.ArchetypeTag, Random)
 		: nullptr;
 
 	if (Line == nullptr)
@@ -192,7 +231,7 @@ bool UOneBrahamVoiceSubsystem::SpeakContextualLine(AActor* Speaker, FName LineId
 		FMath::Max(Priority, static_cast<float>(Line->Priority) / 3.f), 0.f, 1.f);
 
 	// --- Deliver ----------------------------------------------------------
-	UOneBrahamProximityVoiceComponent* VoiceComponent = Character->GetVoiceComponent();
+	UOneBrahamProximityVoiceComponent* VoiceComponent = Character->FindComponentByClass<UOneBrahamProximityVoiceComponent>();
 	if (VoiceComponent == nullptr)
 	{
 		OB_VOICE_LOG("Character '%s' has no proximity voice component.", *Character->GetName());
@@ -297,7 +336,7 @@ void UOneBrahamVoiceSubsystem::HandleAmbientLineTimer()
 	for (TActorIterator<AOneBrahamCharacter> It(World); It; ++It)
 	{
 		AOneBrahamCharacter* Character = *It;
-		if (Character == nullptr || !Character->IsAlive())
+		if (Character == nullptr || Character->LifeState != EOneBrahamLifeState::Alive)
 		{
 			continue;
 		}
@@ -314,7 +353,7 @@ void UOneBrahamVoiceSubsystem::HandleAmbientLineTimer()
 			continue; // this one has had their say for the match
 		}
 
-		if (Character->HasRecentCombatActivity(20.f))
+		if (HasRecentCombatActivity(Character, 20.f))
 		{
 			continue;
 		}
@@ -385,7 +424,7 @@ void UOneBrahamVoiceSubsystem::SetTransmitting(const AActor* Context, bool bTran
 		&& State->VoiceChannel != EOneBrahamVoiceChannel::None;
 
 	UOneBrahamProximityVoiceComponent* VoiceComponent = Character != nullptr
-		? Character->GetVoiceComponent()
+		? Character->FindComponentByClass<UOneBrahamProximityVoiceComponent>()
 		: nullptr;
 
 	if (VoiceComponent != nullptr)
@@ -533,7 +572,7 @@ bool UOneBrahamVoiceSubsystem::ConsumeRelayBudget(APlayerState* Talker, int32 Fr
 
 	// Clamp defensively: a modified client can send any size, and the budget is
 	// the last line of defence before the server relays it to five other players.
-	const int32 ClampedBytes = FMath::Clamp(FrameBytes, 0, MAX_VOICE_FRAME_BYTES);
+	const int32 ClampedBytes = FMath::Clamp(FrameBytes, 0, ONE_BRAHAM_MAX_VOICE_FRAME_BYTES);
 
 	UWorld* World = GetWorld();
 	const float Now = World != nullptr ? World->GetTimeSeconds() : 0.f;

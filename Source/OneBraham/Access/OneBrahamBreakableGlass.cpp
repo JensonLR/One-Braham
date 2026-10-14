@@ -4,6 +4,7 @@
 
 #include "VFX/OneBrahamVFXStatics.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/DamageEvents.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
@@ -126,12 +127,17 @@ float AOneBrahamBreakableGlass::TakeDamage(float DamageAmount, FDamageEvent cons
 	FVector ImpactPoint = GetPaneCentre();
 	FVector ImpactNormal = GetActorForwardVector();
 
-	if (DamageEvent.HitInfo.bBlockingHit || !DamageEvent.HitInfo.ImpactPoint.IsNearlyZero())
+	// Only point damage carries a hit result; any other event type uses the causer.
+	const FHitResult* PointHit = DamageEvent.IsOfType(FPointDamageEvent::ClassID)
+		? &static_cast<const FPointDamageEvent&>(DamageEvent).HitInfo
+		: nullptr;
+
+	if (PointHit != nullptr && (PointHit->bBlockingHit || !PointHit->ImpactPoint.IsNearlyZero()))
 	{
-		ImpactPoint = DamageEvent.HitInfo.ImpactPoint;
-		ImpactNormal = DamageEvent.HitInfo.ImpactNormal.IsNearlyZero()
+		ImpactPoint = PointHit->ImpactPoint;
+		ImpactNormal = PointHit->ImpactNormal.IsNearlyZero()
 			? (ImpactPoint - GetActorLocation()).GetSafeNormal()
-			: DamageEvent.HitInfo.ImpactNormal;
+			: FVector(PointHit->ImpactNormal);
 	}
 	else if (DamageCauser != nullptr)
 	{

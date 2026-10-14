@@ -189,9 +189,6 @@ protected:
 	UFUNCTION() void OnRep_Health();
 	UFUNCTION() void OnRep_Armour();
 
-	/** Maps a bone name to a hit zone multiplier. */
-	float GetZoneMultiplier(EOneBrahamHitZone Zone) const;
-
 	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Health")
 	bool bDead = false;
 
@@ -210,4 +207,8 @@ public:
 	 * the last 5 seconds. Used for assists in the killfeed and scoreboard.
 	 */
 	void GetRecentAttackers(TArray<AActor*>& OutAttackers) const;
+
+	/** Maps a bone name to a hit zone multiplier. Public so the damage tests can
+	 *  check the table without going through a full hit. */
+	float GetZoneMultiplier(EOneBrahamHitZone Zone) const;
 };

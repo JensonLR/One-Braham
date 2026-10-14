@@ -241,7 +241,7 @@ USoundBase* UOneBrahamAudioManagerComponent::ResolveSound(FName SoundId, const F
 		{
 			// Non-blocking: this play falls back to the synthesiser, the next one
 			// after the stream completes uses the authored asset.
-			Entry->Sound.LoadAsync();
+			Entry->Sound.LoadAsync(FLoadSoftObjectPathAsyncDelegate());
 		}
 	}
 
@@ -1438,9 +1438,9 @@ void UOneBrahamAudioManagerComponent::SetTinnitusState(bool bActive, float Durat
 	TargetLowPassHz = OBLowPassFlashed;
 }
 
-void UOneBrahamAudioManagerComponent::SetDeafened(bool bDeafened)
+void UOneBrahamAudioManagerComponent::SetDeafened(bool bInDeafened)
 {
-	bDeafened = bDeafened;
+	bDeafened = bInDeafened;
 
 	if (bDeafened)
 	{
@@ -1496,7 +1496,7 @@ void UOneBrahamAudioManagerComponent::UpdateMusicDirector(float DeltaTime)
 		return;
 	}
 
-	const UOneBrahamGameState* GS = GetWorld() != nullptr ? GetWorld()->GetGameState<AOneBrahamGameState>() : nullptr;
+	const AOneBrahamGameState* GS = GetWorld() != nullptr ? GetWorld()->GetGameState<AOneBrahamGameState>() : nullptr;
 	if (GS == nullptr)
 	{
 		return;

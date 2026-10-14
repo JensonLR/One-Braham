@@ -56,7 +56,20 @@ void AOneBrahamPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	DOREPLIFETIME(AOneBrahamPlayerState, bSelfMuted);
 	DOREPLIFETIME(AOneBrahamPlayerState, bIsTransmitting);
 	DOREPLIFETIME_CONDITION(AOneBrahamPlayerState, MutedPlayerIds, COND_OwnerOnly);
-	DOREPLIFETIME(AOneBrahamPlayerState, EquippedCosmetics);
+	DOREPLIFETIME(AOneBrahamPlayerState, ReplicatedCosmetics);
+}
+
+void AOneBrahamPlayerState::PreReplication(IRepChangedPropertyTracker& ChangedPropertyTracker)
+{
+	Super::PreReplication(ChangedPropertyTracker);
+
+	// Rebuilt every send so no write site has to remember to sync; replication
+	// still only transmits when the array actually differs.
+	ReplicatedCosmetics.Reset(EquippedCosmetics.Num());
+	for (const TPair<FName, FName>& Pair : EquippedCosmetics)
+	{
+		ReplicatedCosmetics.Add({ Pair.Key, Pair.Value });
+	}
 }
 
 void AOneBrahamPlayerState::CopyProperties(APlayerState* PlayerState)
@@ -265,7 +278,7 @@ void AOneBrahamPlayerState::ServerSetPlayerMuted_Implementation(int32 TargetPlay
 			for (APlayerState* Other : GS->PlayerArray)
 			{
 				AOneBrahamPlayerState* OtherState = Cast<AOneBrahamPlayerState>(Other);
-				if (OtherState == nullptr || OtherState->PlayerId != TargetPlayerId)
+				if (OtherState == nullptr || OtherState->GetPlayerId() != TargetPlayerId)
 				{
 					continue;
 				}
@@ -378,6 +391,12 @@ bool AOneBrahamPlayerState::StoreLoadout(FName PrimaryWeaponId, FName SidearmWea
 
 void AOneBrahamPlayerState::OnRep_Cosmetics()
 {
+	EquippedCosmetics.Reset();
+	for (const FOneBrahamNamePairEntry& Entry : ReplicatedCosmetics)
+	{
+		EquippedCosmetics.Add(Entry.Key, Entry.Value);
+	}
+
 	if (AOneBrahamCharacter* Character = GetOneBrahamCharacter())
 	{
 		Character->ApplyCosmetics(EquippedCosmetics);

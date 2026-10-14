@@ -17,6 +17,7 @@
 #include "Perception/AISenseConfig_Sight.h"
 #include "Perception/AISense_Hearing.h"
 #include "Perception/AISense_Sight.h"
+#include "Weapons/OneBrahamWeaponBase.h"
 #include "Weapons/OneBrahamWeaponComponent.h"
 
 namespace
@@ -569,7 +570,7 @@ void AOneBrahamBotController::UpdateFiring(float DeltaSeconds)
 	}
 
 	const AOneBrahamWeaponBase* Weapon = Weapons->GetCurrentWeapon();
-	if (Weapon == nullptr || Weapon->WeaponState != EOneBrahamWeaponState::Ready)
+	if (Weapon == nullptr || Weapon->GetWeaponState() != EOneBrahamWeaponState::Ready)
 	{
 		Weapons->SetTriggerHeld(false);
 		return;

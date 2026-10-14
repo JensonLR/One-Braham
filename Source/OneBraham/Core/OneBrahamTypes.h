@@ -10,6 +10,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/NetSerialization.h"
+#include "Engine/EngineTypes.h"
 #include "GameplayTagContainer.h"
 #include "OneBrahamTypes.generated.h"
 
@@ -20,6 +21,8 @@
 UENUM(BlueprintType)
 enum class EOneBrahamTraceChannel : uint8
 {
+	/** Not a channel. Reflection requires every UENUM to have a zero entry. */
+	None = 0 UMETA(Hidden),
 	/** Bullet traces, melee, breaching. */
 	Weapon = ECC_GameTraceChannel1,
 	/** Breakable glass panels only. */
@@ -680,12 +683,59 @@ enum class EOneBrahamVoiceChatMode : uint8
 };
 
 // ==========================================================================
+//  Replication entries - the wire form of the keyed state
+// --------------------------------------------------------------------------
+//  Unreal does not replicate TMap. Each replicated map in this project stays a
+//  TMap for gameplay code and is mirrored into an array of these entries: the
+//  server rebuilds the array in PreReplication, the client's OnRep rebuilds
+//  the map. Only the array goes over the wire.
+// ==========================================================================
+
+class AOneBrahamWeaponBase;
+
+USTRUCT(BlueprintType)
+struct FOneBrahamNamePairEntry
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly) FName Key = NAME_None;
+	UPROPERTY(BlueprintReadOnly) FName Value = NAME_None;
+};
+
+USTRUCT(BlueprintType)
+struct FOneBrahamAttachmentEntry
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly) EOneBrahamAttachmentSlot Slot = EOneBrahamAttachmentSlot::Optic;
+	UPROPERTY(BlueprintReadOnly) FName AttachmentId = NAME_None;
+};
+
+USTRUCT(BlueprintType)
+struct FOneBrahamReserveAmmoEntry
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly) FName WeaponId = NAME_None;
+	UPROPERTY(BlueprintReadOnly) int32 Rounds = 0;
+};
+
+USTRUCT(BlueprintType)
+struct FOneBrahamOwnedWeaponEntry
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly) EOneBrahamWeaponSlot Slot = EOneBrahamWeaponSlot::Primary;
+	UPROPERTY(BlueprintReadOnly) TObjectPtr<AOneBrahamWeaponBase> Weapon = nullptr;
+};
+
+// ==========================================================================
 //  Delegates - shared across health, weapons, match, UI
 // ==========================================================================
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOneBrahamHealthChanged, float, NewHealth, float, MaxHealth, float, Delta);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOneBrahamLifeStateChanged, EOneBrahamLifeState, OldState, EOneBrahamLifeState, NewState);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOneBrahamDamaged, AActor*, DamageInstigator, const FOneBrahamDamageReport&, Report);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOneBrahamDamaged, AActor*, DamageInstigator, const FOneBrahamDamageReport&, Report);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOneBrahamWeaponChanged, class AOneBrahamWeaponBase*, NewWeapon, class AOneBrahamWeaponBase*, OldWeapon);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOneBrahamAmmoChanged, int32, AmmoInMagazine, int32, ReserveAmmo);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOneBrahamReloadStateChanged, bool, bReloading);

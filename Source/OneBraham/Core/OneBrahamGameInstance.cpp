@@ -14,6 +14,7 @@
 #include "OnlineSubsystem.h"
 #include "OnlineSubsystemUtils.h"
 #include "OnlineSessionSettings.h"
+#include "Online/OnlineSessionNames.h"
 #include "Online.h"
 #include "MoviePlayer.h"
 #include "Misc/CommandLine.h"
@@ -790,7 +791,7 @@ void UOneBrahamGameInstance::ShowLoadingScreen(const FText& StatusText, float Pr
 	{
 		// The mode briefing doubles as the loading-screen caption ("ASCENT. Twelve
 		// people. One lift lobby. Don't be the one who takes the stairs alone.").
-		LoadingScreen.PlaybackType = MT_PreLoadScreen;
+		LoadingScreen.PlaybackType = MT_LoadingLoop;
 	}
 
 	GetMoviePlayer()->SetupLoadingScreen(LoadingScreen);

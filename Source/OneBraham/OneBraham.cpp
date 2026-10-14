@@ -94,7 +94,7 @@ public:
 		// Dedicated server detection - used to disable client-only subsystems
 		// (voice capture, UMG overlays, Steam overlay hooks).
 		const bool bIsDedicatedServer = IsRunningDedicatedServer();
-		const bool bIsPlayInEditor = UE_BUILD_EDITOR && GIsEditor;
+		const bool bIsPlayInEditor = WITH_EDITOR && GIsEditor;
 
 		UE_LOG(LogOneBraham, Log, TEXT("[OB] Instance type: %s%s"),
 			bIsDedicatedServer ? TEXT("DEDICATED SERVER") : TEXT("CLIENT"),

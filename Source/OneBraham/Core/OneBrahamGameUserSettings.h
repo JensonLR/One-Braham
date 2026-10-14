@@ -13,6 +13,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameUserSettings.h"
+#include "InputCoreTypes.h"
 #include "Core/OneBrahamTypes.h"
 #include "OneBrahamGameUserSettings.generated.h"
 
@@ -82,6 +83,7 @@ public:
 	// --- Lifecycle --------------------------------------------------------
 	virtual void ApplySettings(bool bCheckForCommandLineOverrides) override;
 	virtual void SetToDefaults() override;
+	virtual bool IsDirty() const override;
 
 	/** Picks a sane first-run preset from GPU class + VRAM. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Settings")
@@ -101,17 +103,12 @@ public:
 	void SetResolutionScalePercent(float Percent, bool bApplyImmediately = true);
 
 	/**
-	 * Sets the frame cap for the menu and for gameplay separately.
-	 *
-	 * The `using` is load-bearing: this method hides the engine's
-	 * UGameUserSettings::SetFrameRateLimit(float), and without pulling that back
-	 * into scope every one-argument call in this class - including the one inside
-	 * this method - fails to compile.
+	 * Sets the frame cap for the menu and for gameplay separately. Named apart
+	 * from the engine's SetFrameRateLimit(float), which is itself a UFUNCTION:
+	 * reflection does not allow an overload of an inherited UFUNCTION's name.
 	 */
-	using UGameUserSettings::SetFrameRateLimit;
-
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Graphics")
-	void SetFrameRateLimit(int32 MenuLimit, int32 GameplayLimit);
+	void SetMenuAndGameplayFrameRateLimits(int32 MenuLimit, int32 GameplayLimit);
 
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Graphics")
 	void SetAdvancedGraphicOption(FName OptionName, int32 Value, bool bApplyImmediately = true);
@@ -321,4 +318,10 @@ private:
 	UPROPERTY(config) int32 DetectedVramMb = 0;
 
 	UPROPERTY(config) bool bHardwarePresetApplied = false;
+
+	/** Flags a change made with bApplyImmediately=false; cleared by ApplySettings. */
+	void MarkSettingsDirty() { bOBSettingsDirty = true; }
+
+	/** True while a deferred change is waiting for ApplySettings. Not saved. */
+	bool bOBSettingsDirty = false;
 };

@@ -34,7 +34,7 @@
 class UBoxComponent;
 class USpotLightComponent;
 class UOneBrahamExtractionComponent;
-struct FLifetimeProperty;
+class FLifetimeProperty;
 
 UCLASS(Blueprintable)
 class ONEBRAHAM_API AOneBrahamExtractionPad : public AActor

@@ -10,6 +10,7 @@
 #include "Extraction/OneBrahamExtractionComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/PlayerState.h"
 
 AOneBrahamGameState::AOneBrahamGameState()
@@ -234,7 +235,7 @@ void AOneBrahamGameState::MulticastWarningBanner_Implementation(const FText& Tex
 
 void AOneBrahamGameState::LogNetBudget()
 {
-	const UWorld* World = GetWorld();
+	UWorld* World = GetWorld();
 	if (World == nullptr)
 	{
 		return;

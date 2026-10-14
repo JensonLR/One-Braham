@@ -146,7 +146,6 @@ FProgressBarStyle UOneBrahamUIStyle::ProgressBarStyle(const FLinearColor& FillCo
 	Style.SetMarqueeImage(SolidBrush(FillColour));
 
 	Style.EnableFillAnimation = false;
-	Style.bUseChunksStyle = false;
 
 	return Style;
 }

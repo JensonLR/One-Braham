@@ -20,8 +20,8 @@ class ONEBRAHAM_API UOneBrahamConsole : public UConsole
 public:
 	UOneBrahamConsole();
 
-	virtual void PostRender_Console_GameViewport(UCanvas* Canvas) override;
-	virtual bool ConsoleCommand(const FString& Command) override;
+	virtual void PostRender_Console(UCanvas* Canvas) override;
+	virtual void ConsoleCommand(const FString& Command) override;
 
 	/** QA helpers, routed by ConsoleCommand and named for the command each one
 	 *  answers, so the table here and the table in Docs/18 section 6 are the same

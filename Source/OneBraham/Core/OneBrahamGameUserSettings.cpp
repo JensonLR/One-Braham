@@ -17,6 +17,7 @@
 #include "Camera/CameraComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Engine/Engine.h"
+#include "UObject/Package.h"
 #include "Engine/World.h"
 #include "Misc/CommandLine.h"
 
@@ -38,7 +39,7 @@ UOneBrahamGameUserSettings* UOneBrahamGameUserSettings::GetOneBrahamSettings()
 		// shipping builds must never hard-fail on a settings class mismatch.
 		Settings = NewObject<UOneBrahamGameUserSettings>(GetTransientPackage(), UOneBrahamGameUserSettings::StaticClass());
 		Settings->AddToRoot();
-		GEngine->SetGameUserSettings(Settings);
+		GEngine->GameUserSettings = Settings;
 		OB_WARN("Engine GameUserSettings was not UOneBrahamGameUserSettings - replaced at runtime.");
 	}
 	return Settings;
@@ -300,6 +301,12 @@ void UOneBrahamGameUserSettings::ApplySettings(bool bCheckForCommandLineOverride
 	OnSettingsChanged.Broadcast();
 
 	Super::ApplySettings(bCheckForCommandLineOverrides);
+	bOBSettingsDirty = false;
+}
+
+bool UOneBrahamGameUserSettings::IsDirty() const
+{
+	return Super::IsDirty() || bOBSettingsDirty;
 }
 
 void UOneBrahamGameUserSettings::SetUpscaler(EOneBrahamUpscaler NewUpscaler, bool bApplyImmediately)
@@ -339,18 +346,13 @@ void UOneBrahamGameUserSettings::SetResolutionScalePercent(float Percent, bool b
 	}
 }
 
-void UOneBrahamGameUserSettings::SetFrameRateLimit(int32 MenuLimit, int32 GameplayLimit)
+void UOneBrahamGameUserSettings::SetMenuAndGameplayFrameRateLimits(int32 MenuLimit, int32 GameplayLimit)
 {
 	FPSLimitMenu = FMath::Clamp(MenuLimit, 30, 360);
 	FPSLimitGameplay = FMath::Clamp(GameplayLimit, 0, 360);
 
-	// Qualified on purpose. This class declares its own two-argument
-	// SetFrameRateLimit, which hides the engine's one-argument
-	// UGameUserSettings::SetFrameRateLimit(float) - a member of the same name in
-	// a derived class hides every base overload of that name. Unqualified, this
-	// line resolves against the two-argument version, finds no viable candidate,
-	// and stops the build. The engine setter is the one that actually caps the
-	// frame rate; the two fields above are the menu's remembered preferences.
+	// The engine setter is the one that actually caps the frame rate; the two
+	// fields above are the menu's remembered preferences.
 	UGameUserSettings::SetFrameRateLimit(static_cast<float>(FPSLimitGameplay));
 	ApplySettings(false);
 }

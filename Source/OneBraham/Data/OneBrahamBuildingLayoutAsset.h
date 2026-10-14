@@ -115,7 +115,6 @@ public:
 
 	/** The floor description for an index, or null. Never assumes the array is
 	 *  dense: a designer deleting a floor row must not make the plan crash. */
-	UFUNCTION(BlueprintPure, Category = "One Braham|Building")
 	const FOneBrahamFloorDescription* FindFloor(int32 FloorIndex) const;
 
 	/** The lift's wording for a floor: "Floor 9 - Server and comms" on the

@@ -443,8 +443,16 @@ namespace OneBrahamProceduralAudio
 	/** The bed for an id, or null when the id is not one of ours. */
 	const FAmbienceRecipe* GetAmbienceRecipe(FName SoundId)
 	{
+		// A plain aggregate rather than TPair: TTuple's templated constructor
+		// cannot deduce a nested braced recipe initialiser.
+		struct FAmbienceEntry
+		{
+			FName Key;
+			FAmbienceRecipe Value;
+		};
+
 		// Ordered as the bank is, so the two read side by side.
-		static const TPair<FName, FAmbienceRecipe> Recipes[] = {
+		static const FAmbienceEntry Recipes[] = {
 			// Street: rain on the canopy over traffic, and a bus idling.
 			{ TEXT("AMB_Plaza_Street"),   { 7.f, 0.62f, 0.55f, 38.f, 57.f, 0.16f, 3.6f, 118.f, 0.20f, 0.22f, 0.30f } },
 			// The same weather on glass, close and brighter, no traffic.
@@ -469,7 +477,7 @@ namespace OneBrahamProceduralAudio
 			{ TEXT("AMB_London_Bed"),     { 8.f, 0.40f, 0.44f, 45.f, 71.f, 0.14f, 0.f, 0.f, 0.f, 0.09f, 0.20f } }
 		};
 
-		for (const TPair<FName, FAmbienceRecipe>& Pair : Recipes)
+		for (const FAmbienceEntry& Pair : Recipes)
 		{
 			if (Pair.Key == SoundId)
 			{

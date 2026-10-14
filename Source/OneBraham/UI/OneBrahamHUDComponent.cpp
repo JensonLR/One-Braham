@@ -11,6 +11,7 @@
 #include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamGameplayTags.h"
 #include "Data/OneBrahamBuildingLayoutAsset.h"
+#include "Data/OneBrahamWeaponDataAsset.h"
 #include "Core/OneBrahamGameUserSettings.h"
 #include "Core/OneBrahamPlayerController.h"
 #include "Core/OneBrahamPlayerState.h"
@@ -666,9 +667,9 @@ void UOneBrahamHUDComponent::GatherHUDData()
 	//
 	// "How far through the hold am I" belongs to the interaction component, and it
 	// is replicated, so the ring is honest on a client.
-	if (const AOneBrahamPlayerController* OwningController = Cast<AOneBrahamPlayerController>(GetOwner()))
+	if (const AOneBrahamPlayerController* OwnerController = Cast<AOneBrahamPlayerController>(GetOwner()))
 	{
-		const FOneBrahamInteractionTarget& Target = OwningController->GetInteractionTarget();
+		const FOneBrahamInteractionTarget& Target = OwnerController->GetInteractionTarget();
 
 		// "Something to say", not "something under the crosshair": an interactable
 		// that returns an empty prompt has nothing to offer right now (a breached
@@ -843,7 +844,7 @@ void UOneBrahamHUDComponent::GatherHUDData()
 		Data.VoiceChannelName = Voice->GetChannelDisplayName(Data.VoiceChannel);
 	}
 
-	if (const UOneBrahamProximityVoiceComponent* VoiceComponent = Character->GetVoiceComponent())
+	if (const UOneBrahamProximityVoiceComponent* VoiceComponent = Character->FindComponentByClass<UOneBrahamProximityVoiceComponent>())
 	{
 		Data.bLocalTransmitting = VoiceComponent->IsLocalTransmitting();
 		Data.bMicrophoneAvailable = VoiceComponent->HasWorkingMicrophone();
@@ -1365,7 +1366,7 @@ void UOneBrahamHUDComponent::GatherQuickLineData(FOneBrahamQuickLineData& OutDat
 		return;
 	}
 
-	if (const UOneBrahamProximityVoiceComponent* Voice = Character->GetVoiceComponent())
+	if (const UOneBrahamProximityVoiceComponent* Voice = Character->FindComponentByClass<UOneBrahamProximityVoiceComponent>())
 	{
 		OutData.bTransmitting = Voice->IsLocalTransmitting();
 	}

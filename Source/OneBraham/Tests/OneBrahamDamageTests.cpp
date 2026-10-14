@@ -19,6 +19,7 @@
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
+#include "UObject/Package.h"
 
 #include "Characters/OneBrahamDownedComponent.h"
 #include "Characters/OneBrahamHealthComponent.h"

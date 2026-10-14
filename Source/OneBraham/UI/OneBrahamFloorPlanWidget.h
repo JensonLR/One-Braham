@@ -69,7 +69,7 @@ public:
 protected:
 	/** One floor row, top-down: the Skydeck row is drawn first. */
 	void PaintFloorRow(FSlateWindowElementList& OutDrawElements, int32 LayerId,
-		const FGeometry& Geometry, const FOneBrahamFloorPlanFloor& Floor, float RowTop, float RowHeight) const;
+		const FGeometry& Geometry, const FOneBrahamFloorPlanFloor& Floor, float RowTop, float InRowHeight) const;
 
 	/** The building's name, the local floor label, the extraction banner and the
 	 *  footer. Drawn in panel space: the caller passes the panel's own geometry,

@@ -34,18 +34,10 @@ bool FOneBrahamVoiceCodec::Initialise()
 
 	FVoiceModule& VoiceModule = FVoiceModule::Get();
 
-	Encoder = VoiceModule.CreateVoiceEncoder();
-	Decoder = VoiceModule.CreateVoiceDecoder();
-
-	if (Encoder.IsValid() && !Encoder->StartEncoder(SampleRate, NumChannels))
-	{
-		Encoder.Reset();
-	}
-
-	if (Decoder.IsValid() && !Decoder->StartDecoder(SampleRate, NumChannels))
-	{
-		Decoder.Reset();
-	}
+	// The module initialises the codec objects itself and returns null when that
+	// fails, so a valid pointer here is a ready-to-use encoder/decoder.
+	Encoder = VoiceModule.CreateVoiceEncoder(SampleRate, NumChannels, EAudioEncodeHint::VoiceEncode_Voice);
+	Decoder = VoiceModule.CreateVoiceDecoder(SampleRate, NumChannels);
 
 	// Log the frame cap relationship once at startup: 640 raw bytes is comfortably
 	// inside the 1024 byte budget from the build configuration, and the assertion
@@ -65,13 +57,13 @@ void FOneBrahamVoiceCodec::Shutdown()
 {
 	if (Encoder.IsValid())
 	{
-		Encoder->DestroyEncoder();
+		Encoder->Destroy();
 		Encoder.Reset();
 	}
 
 	if (Decoder.IsValid())
 	{
-		Decoder->DestroyDecoder();
+		Decoder->Destroy();
 		Decoder.Reset();
 	}
 }
@@ -102,9 +94,12 @@ bool FOneBrahamVoiceCodec::EncodeFrame(const TArray<uint8>& RawPcm, TArray<uint8
 		TArray<uint8> Compressed;
 		Compressed.SetNumZeroed(FMath::Min(MaxTransportFrameBytes - 2, RawPcm.Num() + 64));
 
-		uint32 CompressedSize = 0;
-		const bool bOk = Encoder->Encode(RawPcm, CompressedSize,
-			Compressed.GetData());
+		// In: buffer capacity. Out: bytes actually written. The return value is the
+		// count of trailing raw bytes the codec could not fit into a whole slice.
+		uint32 CompressedSize = static_cast<uint32>(Compressed.Num());
+		const int32 UnencodedBytes = Encoder->Encode(RawPcm.GetData(), static_cast<uint32>(RawPcm.Num()),
+			Compressed.GetData(), CompressedSize);
+		const bool bOk = (UnencodedBytes == 0);
 
 		if (bOk && CompressedSize > 0 && (int32)CompressedSize <= (MaxTransportFrameBytes - 2))
 		{
@@ -139,12 +134,21 @@ bool FOneBrahamVoiceCodec::DecodeFrame(const TArray<uint8>& Frame, TArray<uint8>
 
 	if (CodecFlag == 1 && IsUsingEngineCodec())
 	{
-		TArray<uint8> Payload(Frame.GetData() + 2, PayloadBytes);
+		// Size the output for the announced length with headroom; the decoder
+		// reports the real decoded size back through RawSize.
+		const int32 MaxRawBytes = FMath::Max(LengthHint * 4, RawFrameBytes) * 2;
+		OutRawPcm.SetNumUninitialized(MaxRawBytes);
 
-		if (Decoder->Decode(Payload, OutRawPcm) && OutRawPcm.Num() > 0)
+		uint32 RawSize = static_cast<uint32>(MaxRawBytes);
+		Decoder->Decode(Frame.GetData() + 2, static_cast<uint32>(PayloadBytes), OutRawPcm.GetData(), RawSize);
+
+		if (RawSize > 0 && RawSize <= static_cast<uint32>(MaxRawBytes))
 		{
+			OutRawPcm.SetNum(static_cast<int32>(RawSize), EAllowShrinking::No);
 			return true;
 		}
+
+		OutRawPcm.Reset();
 
 		UE_LOG(LogOneBrahamVoice, Verbose, TEXT("[OB.VOICE] Decode failed for a compressed frame; dropping."));
 		return false;
@@ -196,7 +200,11 @@ bool FOneBrahamVoiceCapture::Start(const FString& DeviceName)
 		return false;
 	}
 
-	Capture = FVoiceModule::Get().CreateVoiceCapture();
+	// The module initialises the capture object for the requested device/format
+	// and returns null when that fails.
+	Capture = FVoiceModule::Get().CreateVoiceCapture(DeviceName,
+		FOneBrahamVoiceCodec::SampleRate,
+		FOneBrahamVoiceCodec::NumChannels);
 
 	if (!Capture.IsValid())
 	{
@@ -205,16 +213,14 @@ bool FOneBrahamVoiceCapture::Start(const FString& DeviceName)
 		return false;
 	}
 
-	const EVoiceCaptureState::Type StartResult = Capture->Start(
-		DeviceName,
-		FOneBrahamVoiceCodec::SampleRate,
-		FOneBrahamVoiceCodec::NumChannels);
-
-	if (StartResult != EVoiceCaptureState::Ok)
+	if (!Capture->Start())
 	{
+		uint32 Unused = 0;
+		const EVoiceCaptureState::Type CaptureState = Capture->GetCaptureState(Unused);
 		UE_LOG(LogOneBrahamVoice, Warning,
-			TEXT("[OB.VOICE] Starting capture failed (state %d). Check the microphone in Settings -> Audio."),
-			static_cast<int32>(StartResult));
+			TEXT("[OB.VOICE] Starting capture failed (state %s). Check the microphone in Settings -> Audio."),
+			EVoiceCaptureState::ToString(CaptureState));
+		Capture->Shutdown();
 		Capture.Reset();
 		return false;
 	}
@@ -256,8 +262,19 @@ bool FOneBrahamVoiceCapture::PullFrames(TArray<TArray<uint8>>& OutFrames)
 		return false;
 	}
 
+	// Size the scratch buffer to whatever the device has queued, then drain it.
 	uint32 AvailableBytes = 0;
-	const EVoiceCaptureState::Type State = Capture->GetVoiceData(PullScratch, AvailableBytes);
+	EVoiceCaptureState::Type State = Capture->GetCaptureState(AvailableBytes);
+
+	if (State == EVoiceCaptureState::Ok && AvailableBytes > 0)
+	{
+		if (PullScratch.Num() < static_cast<int32>(AvailableBytes))
+		{
+			PullScratch.SetNumUninitialized(static_cast<int32>(AvailableBytes));
+		}
+
+		State = Capture->GetVoiceData(PullScratch.GetData(), static_cast<uint32>(PullScratch.Num()), AvailableBytes);
+	}
 
 	if (State == EVoiceCaptureState::NotCapturing)
 	{

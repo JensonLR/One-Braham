@@ -57,52 +57,52 @@ UOneBrahamBuildingLayoutAsset::UOneBrahamBuildingLayoutAsset()
 	// (check_building_layout.py) because the first version of this file put the
 	// executive wing on floor 11 and the server floor on 10, which is a game that
 	// tells players they are somewhere they are not.
-	AddFloor(0,  "Ground_Plaza",
+	AddFloor(0,  TEXT("Ground_Plaza"),
 		NSLOCTEXT("OneBraham", "Area_0", "Ground plaza and reception"),
 		NSLOCTEXT("OneBraham", "AreaShort_0", "PLAZA"), false, false);
-	AddFloor(1,  "Lobby",
+	AddFloor(1,  TEXT("Lobby"),
 		NSLOCTEXT("OneBraham", "Area_1", "Lobby"),
 		NSLOCTEXT("OneBraham", "AreaShort_1", "LOBBY"), false, false);
-	AddFloor(2,  "Mezzanine",
+	AddFloor(2,  TEXT("Mezzanine"),
 		NSLOCTEXT("OneBraham", "Area_2", "Mezzanine and lift lobby"),
 		NSLOCTEXT("OneBraham", "AreaShort_2", "MEZZANINE"), false, false);
-	AddFloor(3,  "OpenPlan",
+	AddFloor(3,  TEXT("OpenPlan"),
 		NSLOCTEXT("OneBraham", "Area_3", "Open plan office, north"),
 		NSLOCTEXT("OneBraham", "AreaShort_3", "OFFICES"), false, false);
-	AddFloor(4,  "OpenPlan",
+	AddFloor(4,  TEXT("OpenPlan"),
 		NSLOCTEXT("OneBraham", "Area_4", "Open plan office, south"),
 		NSLOCTEXT("OneBraham", "AreaShort_4", "OFFICES"), false, false);
-	AddFloor(5,  "OpenPlan",
+	AddFloor(5,  TEXT("OpenPlan"),
 		NSLOCTEXT("OneBraham", "Area_5", "Open plan office and kitchenette"),
 		NSLOCTEXT("OneBraham", "AreaShort_5", "OFFICES"), false, true);
-	AddFloor(6,  "OpenPlan",
+	AddFloor(6,  TEXT("OpenPlan"),
 		NSLOCTEXT("OneBraham", "Area_6", "Open plan office, meeting rooms"),
 		NSLOCTEXT("OneBraham", "AreaShort_6", "OFFICES"), false, false);
-	AddFloor(7,  "OpenPlan",
+	AddFloor(7,  TEXT("OpenPlan"),
 		NSLOCTEXT("OneBraham", "Area_7", "Open plan office, east wing"),
 		NSLOCTEXT("OneBraham", "AreaShort_7", "OFFICES"), false, false);
-	AddFloor(8,  "OpenPlan",
+	AddFloor(8,  TEXT("OpenPlan"),
 		NSLOCTEXT("OneBraham", "Area_8", "Open plan office, plant room"),
 		NSLOCTEXT("OneBraham", "AreaShort_8", "OFFICES"), false, false);
-	AddFloor(9,  "ServerComms",
+	AddFloor(9,  TEXT("ServerComms"),
 		NSLOCTEXT("OneBraham", "Area_9", "Server and comms"),
 		NSLOCTEXT("OneBraham", "AreaShort_9", "SERVER"), false, true);
-	AddFloor(10, "ServerComms",
+	AddFloor(10, TEXT("ServerComms"),
 		NSLOCTEXT("OneBraham", "Area_10", "Server hall and network operations"),
 		NSLOCTEXT("OneBraham", "AreaShort_10", "SERVER"), false, false);
-	AddFloor(11, "ServerComms",
+	AddFloor(11, TEXT("ServerComms"),
 		NSLOCTEXT("OneBraham", "Area_11", "Comms room and roof riser"),
 		NSLOCTEXT("OneBraham", "AreaShort_11", "COMMS"), false, false);
-	AddFloor(12, "Executive",
+	AddFloor(12, TEXT("Executive"),
 		NSLOCTEXT("OneBraham", "Area_12", "Executive wing and boardroom"),
 		NSLOCTEXT("OneBraham", "AreaShort_12", "EXECUTIVE"), false, true);
-	AddFloor(13, "Canteen",
+	AddFloor(13, TEXT("Canteen"),
 		NSLOCTEXT("OneBraham", "Area_13", "Canteen and terrace"),
 		NSLOCTEXT("OneBraham", "AreaShort_13", "CANTEEN"), true, false);
-	AddFloor(14, "Canteen",
+	AddFloor(14, TEXT("Canteen"),
 		NSLOCTEXT("OneBraham", "Area_14", "Canteen and south terrace"),
 		NSLOCTEXT("OneBraham", "AreaShort_14", "CANTEEN"), true, true);
-	AddFloor(15, "Skydeck",
+	AddFloor(15, TEXT("Skydeck"),
 		NSLOCTEXT("OneBraham", "Area_15", "Skydeck and extraction"),
 		NSLOCTEXT("OneBraham", "AreaShort_15", "SKYDECK"), true, false);
 
