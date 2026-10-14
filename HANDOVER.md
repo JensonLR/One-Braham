@@ -62,7 +62,7 @@ does.
 
 | Command | Expected | What it proves |
 | --- | --- | --- |
-| `python3 Tools/Python/run_all.py --text-only` | `BUILD OK: 18 step(s) succeeded` | every textual check in the project, in the order they must run |
+| `python3 Tools/Python/onebraham/run_all.py --text-only` | `BUILD OK: 18 step(s) succeeded` | every textual check in the project, in the order they must run |
 | `python3 Tools/Python/onebraham/validate_project.py` | `31 pass, 2 warn, 0 fail` | the two warnings are the fresh-clone manifest and surface coverage; anything else is a regression |
 | `python3 Tools/Python/onebraham/check_doc_numbers.py` | `89 numbers checked. agree. OK` | every count quoted in `Docs/17` and the README against the count the tooling produces |
 | `python3 Tools/Python/onebraham/check_interaction.py` | `checks: 222` | the interaction surface: classes, tables, tags, montage chain, interface conformance |

@@ -22,7 +22,7 @@ that gets disabled after a month.
 ```bat
 Scripts\RunTests.bat                    all OneBraham.* tests
 Scripts\RunTests.bat OneBraham.Weapons   one category
-Scripts\RunTests.bat smoke               the smoke category on a dedicated server
+Scripts\RunTests.bat smoke               the match-boot composition check
 ```
 
 The suites are in `Source/OneBraham/Tests/`, one file per category, entirely inside
@@ -116,8 +116,9 @@ or a hole nobody has noticed yet.
 
 ## 3. The 12-player smoke run
 
-`Scripts\RunTests.bat smoke` runs the `OneBraham.Multiplayer` category on a
-dedicated server process. The automatic part is the composition check: the classes
+`Scripts\RunTests.bat smoke` runs `OneBraham.Multiplayer.Smoke` in the headless
+editor (it is an editor-context test; a Shipping server has no automation
+framework to run it in). The automatic part is the composition check: the classes
 the config names exist, the mode's squad maths gives twelve players, and the
 building table backs it.
 

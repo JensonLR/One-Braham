@@ -1,0 +1,13 @@
+# Windows scripts are checked out with CRLF: cmd.exe misreads labels and
+# multi-line blocks in an LF batch file, and Windows PowerShell 5.1 prefers it.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+*.psm1  text eol=crlf
+
+# Shell scripts must stay LF or bash refuses them on the Linux server boxes.
+*.sh    text eol=lf
+
+# Unreal binaries, never diffed or normalised.
+*.uasset binary
+*.umap   binary

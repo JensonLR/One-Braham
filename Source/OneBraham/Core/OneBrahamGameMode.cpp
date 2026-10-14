@@ -103,6 +103,7 @@ void AOneBrahamGameMode::InitGame(const FString& MapName, const FString& Options
 	// Bot practice: `?Bots=6` fills the roster on a listen server for testing.
 	int32 BotCount = 0;
 	bBotPracticeMode = FParse::Value(*Options, TEXT("Bots="), BotCount) && BotCount > 0;
+	RequestedBotCount = bBotPracticeMode ? BotCount : 0;
 
 	OB_MATCH_LOG("InitGame map='%s' mode=%s teams=%d teamSize=%d bots=%d dedicated=%s",
 		*MapName,
@@ -167,9 +168,11 @@ void AOneBrahamGameMode::StartPlay()
 	StartWarmup();
 
 	// Night Shift and bot practice use the AI director; ASCENT explicitly does not.
+	// `?Bots=N` is the number of bots, as the option says. It used to be parsed
+	// and then ignored in favour of PlayersPerTeam - 1 per squad.
 	if (bBotPracticeMode)
 	{
-		PopulateWithBots(MatchSettings->PlayersPerTeam - 1);
+		PopulateWithBots(RequestedBotCount);
 	}
 	else if (MatchSettings->Mode == EOneBrahamMatchMode::NightShift)
 	{
@@ -1434,25 +1437,30 @@ void AOneBrahamGameMode::Announce(const FText& Text, bool bTannoy)
 // ==========================================================================
 //  Bots
 // ==========================================================================
-void AOneBrahamGameMode::PopulateWithBots(int32 BotsPerTeam)
+void AOneBrahamGameMode::PopulateWithBots(int32 TotalBots)
 {
 	// Bot practice is explicitly NOT the shipping ASCENT experience: ASCENT has
 	// no AI manager. Bots exist so QA can test the map, the weapon balance and
 	// the extraction flow without 11 other people.
 	UWorld* World = GetWorld();
-	if (World == nullptr || BotsPerTeam <= 0)
+	if (World == nullptr || TotalBots <= 0)
 	{
 		return;
 	}
 
 	bBotPracticeMode = true;
 
+	// Dealt round the squads like cards: eleven bots across three squads is
+	// 4/4/3, and never more than the squads can hold.
 	int32 BotsSpawned = 0;
-	const int32 TeamsToFill = SquadToTeamMap.Num();
+	const int32 TeamsToFill = FMath::Max(1, SquadToTeamMap.Num());
+	const int32 SquadSize = MatchSettings != nullptr ? FMath::Max(1, MatchSettings->PlayersPerTeam) : 4;
+	const int32 Total = FMath::Min(TotalBots, TeamsToFill * SquadSize);
 
-	for (int32 TeamIndex = 0; TeamIndex < TeamsToFill; ++TeamIndex)
+	for (int32 Dealt = 0; Dealt < Total; ++Dealt)
 	{
-		for (int32 Index = 0; Index < BotsPerTeam; ++Index)
+		const int32 TeamIndex = Dealt % TeamsToFill;
+		const int32 Index = Dealt / TeamsToFill;
 		{
 			FActorSpawnParameters SpawnParams;
 			SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;

@@ -57,7 +57,7 @@ DOCS_17 = os.path.join(python_root, "Docs", "17_Build_Automation.md")
 DOCS_DIR = os.path.join(python_root, "Docs")
 
 #: Every script extension the repository uses.
-SCRIPT_SUFFIXES = (".bat", ".sh", ".vdf")
+SCRIPT_SUFFIXES = (".bat", ".sh", ".vdf", ".ps1", ".psm1")
 
 #: A path in the documentation: Scripts\RunAll.bat or Scripts/RunAll.sh
 DOC_SCRIPT_PATH = re.compile(r'Scripts[\\/]([A-Za-z_][A-Za-z0-9_]*\.[A-Za-z0-9]+)')

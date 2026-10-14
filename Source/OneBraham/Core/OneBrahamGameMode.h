@@ -170,7 +170,7 @@ public:
 	//  Bots (practice mode only - ASCENT ships with no AI opponents)
 	// ======================================================================
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Bots")
-	void PopulateWithBots(int32 BotsPerTeam);
+	void PopulateWithBots(int32 TotalBots);
 
 	UFUNCTION(BlueprintPure, Category = "One Braham|Bots")
 	bool IsBotPracticeMode() const { return bBotPracticeMode; }
@@ -252,6 +252,9 @@ protected:
 	float WarmupEndTime = 0.f;
 
 	bool bBotPracticeMode = false;
+
+	/** `?Bots=N` from the travel options: the total, dealt round the squads. */
+	int32 RequestedBotCount = 0;
 	bool bMatchFinished = false;
 
 	/** Parsed from the travel options. */

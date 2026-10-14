@@ -4,8 +4,8 @@ using UnrealBuildTool;
 using System.Collections.Generic;
 
 /// <summary>
-/// Dedicated server target. Packaged by PackageServer.ps1 / PackageServer.bat
-/// and by Scripts/PackageServer.sh for Linux hosts.
+/// Dedicated server target. Packaged by Scripts/PackageServer.ps1 (and its .bat
+/// wrapper) on Windows, and by Scripts/Package.sh Server on a Linux host.
 ///
 /// Notes:
 ///  - WITH_SERVER_CODE keeps all Server_* RPC validation paths compiled in.
