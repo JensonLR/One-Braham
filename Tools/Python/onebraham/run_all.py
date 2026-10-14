@@ -26,7 +26,9 @@ USAGE
             -script="Tools/Python/onebraham/run_all.py"
 
     Outside the editor, for the text-only steps:
-        PYTHONPATH=Tools/Python python3 Tools/Python/onebraham/run_all.py --text-only
+        python3 Tools/Python/onebraham/run_all.py --text-only
+        (this script puts Tools/Python on sys.path itself, so it needs no
+         PYTHONPATH; the checkers run by hand still do)
         (input_ini, cpp_symbols, uht_contracts, soft_paths, calls, tags, layout,
          voice_lines, input_actions and doc_numbers: none needs a running editor,
          so all ten work on a fresh checkout and in CI)
@@ -47,6 +49,11 @@ import io
 import os
 import sys
 import time
+
+# The package this file lives in, put on the path before importing it, so this
+# script runs from a bare shell as well as under `PYTHONPATH=Tools/Python`. The
+# checks it runs are importable modules, and a checkout is not installed.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from onebraham import common as C
 
