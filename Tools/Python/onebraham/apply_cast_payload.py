@@ -175,8 +175,8 @@ def build_archetype_struct(report, registry, entry):
             for key, value in personality.items():
                 try:
                     existing.set_editor_property(key, float(value))
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    report.failed(entry.get("id", "?"), u"personality.{0}: {1}".format(key, exc))
             archetype.set_editor_property("personality", existing)
     except Exception as exc:  # noqa: BLE001
         report.failed(entry.get("id", "?"), u"personality: {0}".format(exc))
@@ -200,8 +200,8 @@ def build_archetype_struct(report, registry, entry):
         if path:
             try:
                 archetype.set_editor_property(prop, unreal.SoftObjectPath(path))
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                report.failed(entry.get("id", "?"), u"{0}: {1}".format(prop, exc))
 
     # The animation class: the authored ABP (parented on UOneBrahamAnimInstance
     # by build_characters), or the C++ instance itself until the ABP exists, so
@@ -285,8 +285,8 @@ def apply_payload(report, registry, payload):
     try:
         registry.set_editor_property("competitive_banned_cosmetic_ids",
                                      [unreal.Name(b) for b in banned])
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        report.failed("DA_CharacterRegistry", u"competitive_banned_cosmetic_ids: {0}".format(exc))
 
     if banned:
         report.failed("cosmetic integrity",

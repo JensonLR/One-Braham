@@ -448,8 +448,8 @@ def _apply_definition(report, asset, weapon, blueprints):
         for prop, value in fields:
             try:
                 spread.set_editor_property(prop, value)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                report.failed(context, u"spread.{0}: {1}".format(prop, exc))
         try:
             asset.set_editor_property("spread", spread)
         except Exception as exc:  # noqa: BLE001
@@ -475,8 +475,8 @@ def _apply_definition(report, asset, weapon, blueprints):
         for prop, value in fields:
             try:
                 recoil.set_editor_property(prop, value)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                report.failed(context, u"recoil.{0}: {1}".format(prop, exc))
         try:
             asset.set_editor_property("recoil", recoil)
         except Exception as exc:  # noqa: BLE001

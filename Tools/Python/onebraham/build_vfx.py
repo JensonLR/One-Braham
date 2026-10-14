@@ -295,8 +295,8 @@ def build_decal_materials(report):
             if physical is not None:
                 try:
                     asset.set_editor_property("phys_material", physical)
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    report.failed(name, u"phys_material: {0}".format(exc))
 
         unreal.EditorAssetLibrary.save_asset(path)
         report.created_asset(path)

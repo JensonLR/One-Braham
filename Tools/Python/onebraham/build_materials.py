@@ -218,14 +218,22 @@ def build_physical_materials(report):
             report.failed("PM_OB_" + name, "could not create physical material")
             continue
 
-        surface_type = index  # EPhysicalSurface ordering mirrors the ini
-        try:
-            asset.set_editor_property("surface_type", unreal.PhysicalSurface(surface_type))
-        except Exception:  # noqa: BLE001
-            # Setting surface_type by enum is not exposed in every build; the
-            # ini already declares the names in this order, so the fallback is a
-            # no-op rather than a wrong value.
-            pass
+        # The surface type is what footsteps, impacts and decals read. The ini
+        # declares SurfaceType1..N in PHYSICAL_SURFACE_NAMES order, and Python
+        # exposes them as enum members (SURFACE_TYPE1...). A material left on
+        # the default surface sounds like nothing, so a miss is a failure.
+        surface = None
+        for member in (u"SURFACE_TYPE{0}".format(index), u"SURFACE_TYPE_{0}".format(index)):
+            surface = getattr(unreal.PhysicalSurface, member, None)
+            if surface is not None:
+                break
+        if surface is None:
+            report.failed("PM_OB_" + name, u"no unreal.PhysicalSurface member for SurfaceType{0}".format(index))
+        else:
+            try:
+                asset.set_editor_property("surface_type", surface)
+            except Exception as exc:  # noqa: BLE001
+                report.failed("PM_OB_" + name, u"surface_type: {0}".format(exc))
 
         # How the surface behaves under movement. These are what make concrete
         # feel like concrete and lino feel like lino when someone slides into a
@@ -234,8 +242,8 @@ def build_physical_materials(report):
         try:
             asset.set_editor_property("friction", friction)
             asset.set_editor_property("restitution", 0.05 if name not in ("Fabric",) else 0.0)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            report.failed(name, u"friction/restitution: {0}".format(exc))
 
         if created:
             unreal.EditorAssetLibrary.save_asset(u"{0}/{1}".format(C.MATERIALS, asset.get_name()))
@@ -639,15 +647,15 @@ def _apply_instance(material_instance, master, base_key, roughness, metallic,
             material_instance, "Roughness", roughness)
         library.set_material_instance_scalar_parameter_value(
             material_instance, "Metallic", metallic)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        C.warn(u"  {0}: {1}".format(material_instance.get_name(), exc))
 
     if surface_index is not None:
         try:
             library.set_material_instance_scalar_parameter_value(
                 material_instance, "SurfaceTypeIndex", float(surface_index))
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            C.warn(u"  {0}: {1}".format(material_instance.get_name(), exc))
 
     for key, value in extras.items():
         try:
@@ -664,8 +672,8 @@ def _apply_instance(material_instance, master, base_key, roughness, metallic,
     if physical is not None:
         try:
             material_instance.set_editor_property("phys_material", physical)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            C.warn(u"  {0}: {1}".format(material_instance.get_name(), exc))
 
 
 def build_surface_instances(report, masters, physicals):

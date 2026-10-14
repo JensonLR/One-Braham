@@ -1054,6 +1054,27 @@ def check_python_api_names(v, _config_only):
             problems.append(u"{0}:{1} names property '{2}'; a bool's Python name drops the b ('{3}')".format(
                 name, text[:match.start()].count("\n") + 1, prop, prop[2:]))
 
+    # A property set inside try/except: pass is how every one of the above went
+    # unnoticed: the name was wrong, the set threw, and the build said OK. A
+    # failed set is reported (report.failed, or C.warn where there is no report).
+    for name in sorted(os.listdir(tools)):
+        if not name.endswith(".py") or name == "validate_project.py":
+            continue
+        lines = read_text(os.path.join(tools, name)).split("\n")
+        for index, line in enumerate(lines):
+            if not re.match(r"\s*except\b[^:]*:\s*(#.*)?$", line):
+                continue
+            following = index + 1
+            while following < len(lines) and lines[following].strip().startswith("#"):
+                following += 1
+            if following >= len(lines) or lines[following].strip() != "pass":
+                continue
+            start = index - 1
+            while start > 0 and not lines[start].strip().startswith("try:"):
+                start -= 1
+            if any("set_editor_property" in body for body in lines[start:index]):
+                problems.append(u"{0}:{1} swallows a failed set_editor_property; report it".format(name, index + 1))
+
     if problems:
         v.fail("python api", u"; ".join(problems))
     else:

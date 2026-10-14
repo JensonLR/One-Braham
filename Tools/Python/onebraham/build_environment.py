@@ -1642,8 +1642,8 @@ def build_lighting(report, floor_index):
                 # 4000 K: the colour of a building's own lighting, everywhere.
                 component.set_editor_property("LightColor", unreal.Color(255, 246, 232, 232))
                 component.set_editor_property("Mobility", unreal.ComponentMobility.STATIC)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                report.failed("rect light, floor {0}".format(floor_index), u"{0}".format(exc))
 
             _label(light, "Ceiling_Light_{0}_F{1:02d}_{2}".format(area_name, floor_index, spawn_count))
             spawn_count += 1
@@ -1862,8 +1862,8 @@ def build_skydeck_climate(report):
             component.set_editor_property("Intensity", 2.2)
             component.set_editor_property("LightColor", unreal.Color(214, 222, 232, 255))
             component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            report.failed("Sun_London_Overcast", u"{0}".format(exc))
 
     fog = _spawn(unreal.ExponentialHeightFog, unreal.Vector(0.0, 0.0, deck_z))
     if fog is not None:
@@ -1872,8 +1872,8 @@ def build_skydeck_climate(report):
             component = fog.component
             component.set_editor_property("FogDensity", 0.012)
             component.set_editor_property("FogHeightFalloff", 0.12)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            report.failed("Fog_London", u"{0}".format(exc))
 
     skylight = _spawn(unreal.SkyLight, unreal.Vector(0.0, 0.0, deck_z + 400.0))
     if skylight is not None:
@@ -1881,8 +1881,8 @@ def build_skydeck_climate(report):
         try:
             skylight.sky_light_component.set_editor_property("Intensity", 0.8)
             skylight.sky_light_component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            report.failed("Skylight_OneBraham", u"{0}".format(exc))
 
     # Post-process: a corporate colour grade (slightly desaturated, cool shadows,
     # a small amount of grain) so the building reads as a building even in the
@@ -2292,8 +2292,8 @@ def build_fire_drill_arena(report, materials):
                 component.set_editor_property("AttenuationRadius", 900.0)
                 component.set_editor_property("SourceWidth", 80.0)
                 component.set_editor_property("SourceHeight", 80.0)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                report.failed("FIRE DRILL arena light", u"{0}".format(exc))
 
     # The whole arena: an unscaled bounds volume is a 2 m cube, and FIRE DRILL's
     # bots had nowhere to walk.
