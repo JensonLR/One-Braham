@@ -51,6 +51,7 @@
 AOneBrahamPlayerController::AOneBrahamPlayerController()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	SettingsWidgetClass = TSoftClassPtr<UUserWidget>(FSoftObjectPath(TEXT("/Game/OneBraham/UI/Menus/WBP_Settings.WBP_Settings_C")));
 	bShowMouseCursor = false;
 	bEnableClickEvents = false;
 	bEnableMouseOverEvents = false;
@@ -452,6 +453,16 @@ namespace
 	}
 }
 
+namespace
+{
+	/** What a key may do while a menu is up: close it, and talk to the squad. */
+	const TSet<FName>& MenuActions()
+	{
+		static const TSet<FName> Actions = { FName(TEXT("IA_PauseMenu")), FName(TEXT("IA_PushToTalk")) };
+		return Actions;
+	}
+}
+
 void AOneBrahamPlayerController::RefreshBindingsContext()
 {
 	if (!IsLocalController())
@@ -469,16 +480,80 @@ void AOneBrahamPlayerController::RefreshBindingsContext()
 	{
 		Subsystem->RemoveMappingContext(BindingsMappingContext);
 	}
+	if (MenuBindingsMappingContext != nullptr)
+	{
+		Subsystem->RemoveMappingContext(MenuBindingsMappingContext);
+	}
 
-	BindingsMappingContext = BuildBindingsContext();
+	BindingsMappingContext = BuildBindingsContext(nullptr, TEXT("IMC_OneBraham_Bindings"));
+	MenuBindingsMappingContext = BuildBindingsContext(&MenuActions(), TEXT("IMC_OneBraham_MenuBindings"));
 
+	// A rebind made in the settings screen arrives here with the pause menu
+	// still open: the menu set goes back in, not the gameplay one.
+	if (UInputMappingContext* Active = bPauseMenuOpen ? MenuBindingsMappingContext.Get() : BindingsMappingContext.Get())
+	{
+		Subsystem->AddMappingContext(Active, 0);
+	}
+}
+
+void AOneBrahamPlayerController::SetMenuInput(bool bMenu)
+{
+	bShowMouseCursor = bMenu;
+
+	if (bMenu)
+	{
+		SetInputMode(FInputModeGameAndUI());
+	}
+	else
+	{
+		SetInputMode(FInputModeGameOnly());
+	}
+
+	UEnhancedInputLocalPlayerSubsystem* Subsystem = IsLocalController()
+		? ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer())
+		: nullptr;
+	if (Subsystem == nullptr)
+	{
+		return;
+	}
+
+	UInputMappingContext* const Gameplay[] = { BindingsMappingContext.Get(), CommonMappingContext.Get(), GameplayMappingContext.Get() };
+
+	if (bMenu)
+	{
+		for (UInputMappingContext* Context : Gameplay)
+		{
+			if (Context != nullptr)
+			{
+				Subsystem->RemoveMappingContext(Context);
+			}
+		}
+		if (MenuBindingsMappingContext != nullptr)
+		{
+			Subsystem->AddMappingContext(MenuBindingsMappingContext, 0);
+		}
+		return;
+	}
+
+	if (MenuBindingsMappingContext != nullptr)
+	{
+		Subsystem->RemoveMappingContext(MenuBindingsMappingContext);
+	}
 	if (BindingsMappingContext != nullptr)
 	{
 		Subsystem->AddMappingContext(BindingsMappingContext, 0);
 	}
+	if (CommonMappingContext != nullptr)
+	{
+		Subsystem->AddMappingContext(CommonMappingContext, 0);
+	}
+	if (GameplayMappingContext != nullptr)
+	{
+		Subsystem->AddMappingContext(GameplayMappingContext, 1);
+	}
 }
 
-UInputMappingContext* AOneBrahamPlayerController::BuildBindingsContext()
+UInputMappingContext* AOneBrahamPlayerController::BuildBindingsContext(const TSet<FName>* OnlyActions, const TCHAR* ContextName)
 {
 	if (InputConfig == nullptr)
 	{
@@ -489,11 +564,19 @@ UInputMappingContext* AOneBrahamPlayerController::BuildBindingsContext()
 	GatherKeyBindings(TEXT("KeyboardBinding"), Bindings);
 	GatherKeyBindings(TEXT("GamepadBinding"), Bindings);
 
-	UInputMappingContext* Context = NewObject<UInputMappingContext>(this, TEXT("IMC_OneBraham_Bindings"), RF_Transient);
+	// A unique name: the context is rebuilt on every rebind, and NewObject with a
+	// name already taken under the same outer replaces the live one in place.
+	UInputMappingContext* Context = NewObject<UInputMappingContext>(this,
+		MakeUniqueObjectName(this, UInputMappingContext::StaticClass(), FName(ContextName)), RF_Transient);
 	int32 Mapped = 0;
 
 	for (const FOBKeyBinding& Binding : Bindings)
 	{
+		if (OnlyActions != nullptr && !OnlyActions->Contains(Binding.Action))
+		{
+			continue;
+		}
+
 		// IA_Move -> the Move field: the naming rule build_input.py assigns by,
 		// read through reflection so a new action needs no new line here.
 		const FString ActionName = Binding.Action.ToString();
@@ -535,7 +618,7 @@ UInputMappingContext* AOneBrahamPlayerController::BuildBindingsContext()
 		++Mapped;
 	}
 
-	OB_LOG("Input: %d key binding(s) from [OneBraham.Input].", Mapped);
+	OB_LOG("Input: %s carries %d key binding(s) from [OneBraham.Input].", ContextName, Mapped);
 	return Context;
 }
 
@@ -1448,39 +1531,96 @@ void AOneBrahamPlayerController::Input_ClipMarker(const FInputActionValue& Value
 // ==========================================================================
 void AOneBrahamPlayerController::TogglePauseMenu()
 {
+	if (!IsLocalController())
+	{
+		return;
+	}
+
 	bPauseMenuOpen = !bPauseMenuOpen;
 
 	if (bPauseMenuOpen)
 	{
-		if (PauseMenuWidgetClass != nullptr)
+		// One instance for the life of the controller: Escape twice used to stack
+		// a second authored menu over the first, and nothing ever removed either.
+		if (PauseMenuWidgetClass != nullptr && PauseMenuWidget == nullptr)
 		{
-			if (UUserWidget* Widget = CreateWidget<UUserWidget>(this, PauseMenuWidgetClass))
+			PauseMenuWidget = CreateWidget<UUserWidget>(this, PauseMenuWidgetClass);
+		}
+
+		if (PauseMenuWidget != nullptr)
+		{
+			if (!PauseMenuWidget->IsInViewport())
 			{
-				Widget->AddToViewport(50);
-				bShowMouseCursor = true;
-				SetInputMode(FInputModeGameAndUI());
+				PauseMenuWidget->AddToViewport(50);
 			}
 		}
-		else
+		else if (HUDComponent != nullptr)
 		{
-			// No widget authored yet: fall back to the engine pause so QA can at
-			// least halt the game from a code-only checkout.
-			SetPause(true);
+			HUDComponent->SetPauseMenuVisible(true);
 		}
 	}
 	else
 	{
-		// The pause widget removes itself on close; here we only restore input.
-		if (!IsRunningDedicatedServer())
+		if (PauseMenuWidget != nullptr)
 		{
-			if (UOneBrahamHUDWidget* HudWidget = Cast<UOneBrahamHUDWidget>(HUDComponent ? HUDComponent->GetRootWidget() : nullptr))
-			{
-				HudWidget->TogglePauseMenu(false);
-			}
+			PauseMenuWidget->RemoveFromParent();
 		}
-		bShowMouseCursor = false;
-		SetInputMode(FInputModeGameOnly());
-		SetPause(false);
+		if (SettingsWidget != nullptr)
+		{
+			SettingsWidget->RemoveFromParent();
+		}
+		if (HUDComponent != nullptr)
+		{
+			HUDComponent->SetPauseMenuVisible(false);
+		}
+	}
+
+	SetMenuInput(bPauseMenuOpen);
+}
+
+void AOneBrahamPlayerController::OpenSettingsMenu()
+{
+	if (!IsLocalController())
+	{
+		return;
+	}
+
+	if (SettingsWidget == nullptr)
+	{
+		if (UClass* WidgetClass = SettingsWidgetClass.LoadSynchronous())
+		{
+			SettingsWidget = CreateWidget<UUserWidget>(this, WidgetClass);
+		}
+	}
+
+	if (SettingsWidget == nullptr)
+	{
+		OB_WARN("OpenSettingsMenu: no settings widget at %s. Run Tools/Python/onebraham/build_ui.py.",
+			*SettingsWidgetClass.ToString());
+		return;
+	}
+
+	if (!SettingsWidget->IsInViewport())
+	{
+		SettingsWidget->AddToViewport(60);
+	}
+}
+
+void AOneBrahamPlayerController::LeaveMatch()
+{
+	if (!IsLocalController())
+	{
+		return;
+	}
+
+	if (bPauseMenuOpen)
+	{
+		TogglePauseMenu();
+	}
+
+	if (UOneBrahamGameInstance* GameInstance = GetGameInstance<UOneBrahamGameInstance>())
+	{
+		GameInstance->TravelToMainMenu();
 	}
 }
 

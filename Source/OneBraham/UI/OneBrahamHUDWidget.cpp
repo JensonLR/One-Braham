@@ -9,7 +9,10 @@
 #include "UI/OneBrahamCrosshairWidget.h"
 #include "UI/OneBrahamUIStyle.h"
 #include "Blueprint/WidgetTree.h"
+#include "Components/Button.h"
 #include "Components/CanvasPanel.h"
+#include "Core/OneBrahamPlayerController.h"
+#include "Styling/SlateTypes.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Image.h"
 #include "Components/ProgressBar.h"
@@ -457,9 +460,9 @@ void UOneBrahamHUDWidget::BuildDefaultLayout()
 		}
 	}
 
-	// The scoreboard and the pause menu are authored screens in the shipped build
-	// (WBP_Scoreboard and WBP_PauseMenu, documented in Docs/07_UI.md). The code
-	// fallback keeps the toggles working with an empty panel so no input is lost.
+	// The scoreboard can be an authored screen (WBP_OneBrahamScoreboard) and the
+	// pause menu can be one (PauseMenuWidgetClass on the controller); without
+	// them, these panels are the screens - Docs/08 section 4.
 	UTextBlock* ScoreboardTitle = nullptr;
 	Panel_Scoreboard = BuildOverlayPanel(TEXT("Panel_Scoreboard"), ScoreboardTitle);
 
@@ -473,9 +476,11 @@ void UOneBrahamHUDWidget::BuildDefaultLayout()
 	}
 	if (Panel_PauseMenu != nullptr && PauseTitle != nullptr)
 	{
-		PauseTitle->SetText(NSLOCTEXT("OneBraham", "HUD_PausePlaceholder",
-			"PAUSED - press Escape to resume"));
+		// Not "PAUSED": nothing is. The other eleven are still climbing.
+		PauseTitle->SetText(UOneBrahamUIStyle::HeaderLabel(
+			NSLOCTEXT("OneBraham", "HUD_PauseTitle", "Match in progress")));
 	}
+	BuildPauseMenuButtons();
 	if (Panel_DeathScreen != nullptr && DeathTitle != nullptr)
 	{
 		DeathTitle->SetText(NSLOCTEXT("OneBraham", "HUD_DeathTitle", "ELIMINATED"));
@@ -1034,9 +1039,120 @@ void UOneBrahamHUDWidget::SetDeathScreenVisible(bool bVisible, const FText& Caus
 
 void UOneBrahamHUDWidget::TogglePauseMenu(bool bVisible)
 {
+	// The HUD is hit-test invisible so it never steals a click from the game.
+	// The pause menu is the one time it must take one: the widget lets clicks
+	// through to its children while the menu is up, and goes back after.
+	SetVisibility(bVisible ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::HitTestInvisible);
+
 	if (Panel_PauseMenu != nullptr)
 	{
 		Panel_PauseMenu->SetVisibility(bVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+
+	if (bVisible)
+	{
+		BindPauseMenuButtons();
+
+		if (Button_PauseResume != nullptr)
+		{
+			// A pad has no cursor: focus the first button so the d-pad and A work.
+			Button_PauseResume->SetKeyboardFocus();
+		}
+	}
+}
+
+void UOneBrahamHUDWidget::BuildPauseMenuButtons()
+{
+	if (Panel_PauseMenu == nullptr)
+	{
+		return;
+	}
+
+	Button_PauseResume = MakeMenuButton(TEXT("Button_PauseResume"),
+		NSLOCTEXT("OneBraham", "HUD_Pause_Resume", "Resume"), -20.f);
+	Button_PauseSettings = MakeMenuButton(TEXT("Button_PauseSettings"),
+		NSLOCTEXT("OneBraham", "HUD_Pause_Settings", "Settings"), 50.f);
+	Button_PauseLeave = MakeMenuButton(TEXT("Button_PauseLeave"),
+		NSLOCTEXT("OneBraham", "HUD_Pause_Leave", "Leave match"), 120.f);
+}
+
+UButton* UOneBrahamHUDWidget::MakeMenuButton(FName Name, const FText& Label, float OffsetY)
+{
+	if (WidgetTree == nullptr || Panel_PauseMenu == nullptr)
+	{
+		return nullptr;
+	}
+
+	UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
+	if (Button == nullptr)
+	{
+		return nullptr;
+	}
+
+	// Outline at rest, signal blue under the cursor or the pad's focus, navy while
+	// held: the brand palette, and the same three states on both devices.
+	FButtonStyle Style;
+	Style.SetNormal(UOneBrahamUIStyle::OutlineBrush(UOneBrahamUIStyle::LightGrey(), 1.f, 4.f));
+	Style.SetHovered(UOneBrahamUIStyle::SolidBrush(UOneBrahamUIStyle::SignalBlue()));
+	Style.SetPressed(UOneBrahamUIStyle::SolidBrush(UOneBrahamUIStyle::Navy()));
+	Button->SetStyle(Style);
+
+	if (UTextBlock* Text = MakeText(FName(*(Name.ToString() + TEXT("_Label"))), EOneBrahamTextSize::Medium,
+		UOneBrahamUIStyle::LightGrey(), ETextJustify::Center, true))
+	{
+		Text->SetText(UOneBrahamUIStyle::HeaderLabel(Label));
+		Button->AddChild(Text);
+	}
+
+	if (UCanvasPanelSlot* ButtonSlot = Panel_PauseMenu->AddChildToCanvas(Button))
+	{
+		ButtonSlot->SetAnchors(FAnchors(0.5f, 0.5f));
+		ButtonSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+		ButtonSlot->SetPosition(FVector2D(0.f, OffsetY));
+		ButtonSlot->SetSize(FVector2D(360.f, 56.f));
+		ButtonSlot->SetAutoSize(false);
+	}
+
+	return Button;
+}
+
+void UOneBrahamHUDWidget::BindPauseMenuButtons()
+{
+	if (Button_PauseResume != nullptr)
+	{
+		Button_PauseResume->OnClicked.AddUniqueDynamic(this, &UOneBrahamHUDWidget::HandlePauseResume);
+	}
+	if (Button_PauseSettings != nullptr)
+	{
+		Button_PauseSettings->OnClicked.AddUniqueDynamic(this, &UOneBrahamHUDWidget::HandlePauseSettings);
+	}
+	if (Button_PauseLeave != nullptr)
+	{
+		Button_PauseLeave->OnClicked.AddUniqueDynamic(this, &UOneBrahamHUDWidget::HandlePauseLeave);
+	}
+}
+
+void UOneBrahamHUDWidget::HandlePauseResume()
+{
+	if (AOneBrahamPlayerController* Controller = Cast<AOneBrahamPlayerController>(GetOwningPlayer()))
+	{
+		Controller->TogglePauseMenu();
+	}
+}
+
+void UOneBrahamHUDWidget::HandlePauseSettings()
+{
+	if (AOneBrahamPlayerController* Controller = Cast<AOneBrahamPlayerController>(GetOwningPlayer()))
+	{
+		Controller->OpenSettingsMenu();
+	}
+}
+
+void UOneBrahamHUDWidget::HandlePauseLeave()
+{
+	if (AOneBrahamPlayerController* Controller = Cast<AOneBrahamPlayerController>(GetOwningPlayer()))
+	{
+		Controller->LeaveMatch();
 	}
 }
 

@@ -87,10 +87,10 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
 | input_ini | OK | 0.0 | wrote 42 actions (41 with a default key) |
-| cpp_symbols | OK | 0.7 | 597 declarations, all defined; compile hygiene clean |
-| uht_contracts | OK | 1.5 | 816 UE reflection contracts, all satisfied |
-| soft_paths | OK | 0.0 | 37 soft paths, all conventional |
-| calls | OK | 0.3 | 908 call sites, all arities plausible |
+| cpp_symbols | OK | 0.7 | 601 declarations, all defined; compile hygiene clean |
+| uht_contracts | OK | 1.5 | 821 UE reflection contracts, all satisfied |
+| soft_paths | OK | 0.0 | 38 soft paths, all conventional |
+| calls | OK | 0.3 | 916 call sites, all arities plausible |
 | tags | OK | 0.4 | 6 resolvable tag requests and 147 documented tags, all declared |
 | layout | OK | 0.0 | 16 floors, map and layout agree |
 | voice_lines | OK | 0.0 | 42 line references, all declared and documented |

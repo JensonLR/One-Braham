@@ -35,6 +35,7 @@ class UCanvasPanel;
 class UWrapBox;
 class UVerticalBox;
 class UWidget;
+class UButton;
 
 UCLASS()
 class ONEBRAHAM_API UOneBrahamHUDWidget : public UUserWidget
@@ -109,6 +110,25 @@ protected:
 
 	/** Adds a widget filling the whole canvas (anchors 0,0 - 1,1, zero offsets). */
 	void AddStretched(UWidget* Widget);
+
+	// --- pause menu ---------------------------------------------------------
+	/** Resume, settings, leave: the code-built buttons on Panel_PauseMenu. */
+	void BuildPauseMenuButtons();
+
+	/** One outlined, signal-blue-on-hover menu button with an upper-case label. */
+	UButton* MakeMenuButton(FName Name, const FText& Label, float OffsetY);
+
+	/** Binds the three buttons, authored or code-built; safe to call repeatedly. */
+	void BindPauseMenuButtons();
+
+	UFUNCTION()
+	void HandlePauseResume();
+
+	UFUNCTION()
+	void HandlePauseSettings();
+
+	UFUNCTION()
+	void HandlePauseLeave();
 
 	// --- time-based overlays ---------------------------------------------
 	/** Decays the banner, sub-banner and subtitle timers and eases the damage
@@ -220,6 +240,15 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "One Braham|HUD")
 	TObjectPtr<UCanvasPanel> Panel_PauseMenu = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "One Braham|HUD")
+	TObjectPtr<UButton> Button_PauseResume = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "One Braham|HUD")
+	TObjectPtr<UButton> Button_PauseSettings = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "One Braham|HUD")
+	TObjectPtr<UButton> Button_PauseLeave = nullptr;
 
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "One Braham|HUD")
 	TObjectPtr<UCanvasPanel> Panel_Downed = nullptr;

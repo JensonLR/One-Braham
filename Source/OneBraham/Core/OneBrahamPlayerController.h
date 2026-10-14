@@ -137,8 +137,13 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|UI")
 	TSubclassOf<class UOneBrahamHUDWidget> HUDWidgetClass;
 
+	/** An authored pause screen. Empty uses the HUD's own panel (resume, settings, leave). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|UI")
 	TSubclassOf<UUserWidget> PauseMenuWidgetClass;
+
+	/** WBP_Settings, opened over the pause menu. Defaults to the pipeline's path. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|UI")
+	TSoftClassPtr<UUserWidget> SettingsWidgetClass;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|UI")
 	TSubclassOf<UUserWidget> DeathScreenWidgetClass;
@@ -149,8 +154,26 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "One Braham|UI")
 	TObjectPtr<class UOneBrahamHUDWidget> HUDWidget;
 
+	/**
+	 * Opens or closes the pause menu. It never pauses the world: this is a PvP
+	 * match with eleven other people in it, and SetPause on a listen host froze
+	 * all of them. While it is open the gameplay keys are swapped out for the
+	 * menu bindings (pause and push to talk), so a stick nudge or a trigger
+	 * cannot move or fire the body standing in the corridor.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|UI")
 	void TogglePauseMenu();
+
+	/** WBP_Settings over the pause menu; closed with it. */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|UI")
+	void OpenSettingsMenu();
+
+	/**
+	 * Back to the main menu. On a listen host that ends the match for everyone,
+	 * which is what leaving a match you are hosting means.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|UI")
+	void LeaveMatch();
 
 	UFUNCTION(BlueprintCallable, Category = "One Braham|UI")
 	void SetScoreboardVisible(bool bVisible);
@@ -414,7 +437,10 @@ protected:
 	 * by design (keys are data, rebindable; shape is design), so without this
 	 * context no key in the game would do anything.
 	 */
-	UInputMappingContext* BuildBindingsContext();
+	UInputMappingContext* BuildBindingsContext(const TSet<FName>* OnlyActions, const TCHAR* ContextName);
+
+	/** Swaps the gameplay contexts for the menu bindings, or back. */
+	void SetMenuInput(bool bMenu);
 
 	UFUNCTION()
 	void OnRep_Spectating();
@@ -448,6 +474,16 @@ protected:
 	/** The context RefreshBindingsContext last installed; transient, rebuilt on rebind. */
 	UPROPERTY(Transient)
 	TObjectPtr<UInputMappingContext> BindingsMappingContext;
+
+	/** The same section filtered to what works in a menu: pause, and push to talk. */
+	UPROPERTY(Transient)
+	TObjectPtr<UInputMappingContext> MenuBindingsMappingContext;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UUserWidget> PauseMenuWidget;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UUserWidget> SettingsWidget;
 
 	/**
 	 * GFrameCounter of the last interaction begin. Tap and hold share a key by
