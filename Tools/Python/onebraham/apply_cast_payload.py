@@ -242,7 +242,7 @@ def build_cosmetic_slot_struct(report, registry, entry):
     _set("display_name", unreal.Text(entry.get("display_name", entry.get("id", ""))))
     _set("parent_bone", unreal.Name(entry.get("parent_bone", "spine_03")))
     _set("attach_socket", unreal.Name(entry.get("socket", "")))
-    _set("b_hidden_when_armed", bool(entry.get("hidden_when_armed", False)))
+    _set("hidden_when_armed", bool(entry.get("hidden_when_armed", False)))
 
     return slot
 

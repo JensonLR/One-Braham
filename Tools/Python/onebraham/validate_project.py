@@ -1040,6 +1040,20 @@ def check_python_api_names(v, _config_only):
             for match in re.finditer(r"\bunreal\." + bad + r"\b", text):
                 problems.append(u"{0}:{1} uses unreal.{2}; use {3}".format(
                     name, text[:match.start()].count("\n") + 1, bad, good))
+    # A bool property's Python name drops its b: bIntegralSuppressor is
+    # integral_suppressor, and "b_integral_suppressor" is neither that nor the
+    # C++ name. Five properties (the suppressed pistol's suppressor, shell-by-
+    # shell reload, cover penetration, tracer hiding, hiding cosmetics when
+    # armed) were never set that way.
+    for name in sorted(os.listdir(tools)):
+        if not name.endswith(".py") or name == "validate_project.py":
+            continue
+        text = read_text(os.path.join(tools, name))
+        for match in re.finditer(r"""_editor_property\(\s*["'](b_[a-z0-9_]+)["']|_set\([^"'\n]*["'](b_[a-z0-9_]+)["']""", text):
+            prop = match.group(1) or match.group(2)
+            problems.append(u"{0}:{1} names property '{2}'; a bool's Python name drops the b ('{3}')".format(
+                name, text[:match.start()].count("\n") + 1, prop, prop[2:]))
+
     if problems:
         v.fail("python api", u"; ".join(problems))
     else:

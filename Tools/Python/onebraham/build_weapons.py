@@ -486,7 +486,7 @@ def _apply_definition(report, asset, weapon, blueprints):
     thickness, retention = weapon["pen"]
     _set(asset, "max_penetration_thickness", thickness, report, context)
     _set(asset, "penetration_damage_retention", retention, report, context)
-    _set(asset, "b_can_penetrate_cover", thickness > 0.0, report, context)
+    _set(asset, "can_penetrate_cover", thickness > 0.0, report, context)
 
     # --- ammunition ------------------------------------------------------
     _set(asset, "magazine_size", weapon["mag"], report, context)
@@ -496,7 +496,7 @@ def _apply_definition(report, asset, weapon, blueprints):
     _set(asset, "reload_time_empty", weapon["reload"][1], report, context)
 
     if weapon.get("per_shell"):
-        _set(asset, "b_per_shell_reload", True, report, context)
+        _set(asset, "per_shell_reload", True, report, context)
         _set(asset, "per_shell_reload_time", weapon.get("shell_time", 0.6), report, context)
 
     # --- handling --------------------------------------------------------
@@ -512,7 +512,7 @@ def _apply_definition(report, asset, weapon, blueprints):
     audible, interior, suppressed = weapon["audio"]
     _set(asset, "audible_radius", audible, report, context)
     _set(asset, "interior_audible_radius", interior, report, context)
-    _set(asset, "b_integral_suppressor", suppressed, report, context)
+    _set(asset, "integral_suppressor", suppressed, report, context)
 
     sound_prefix = {
         "W_Pistol": "SFX_Gunshot_Pistol",
@@ -533,7 +533,7 @@ def _apply_definition(report, asset, weapon, blueprints):
     C.log(u"  audio cue for {0}: {1} (radius {2:.0f} cm)".format(weapon_id, sound_prefix, audible))
 
     # --- VFX -------------------------------------------------------------
-    _set(asset, "b_hide_tracer", not weapon["tracer"], report, context)
+    _set(asset, "hide_tracer", not weapon["tracer"], report, context)
 
     # --- loot ------------------------------------------------------------
     min_floor, max_floor = weapon["floors"]

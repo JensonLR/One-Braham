@@ -68,10 +68,12 @@ SOUND_CLASSES = [
     ("SC_OneBraham_Announcement",  "SC_OneBraham_Voice",   -1.0,  False),
 ]
 
+# Each submix carries one dynamics processor (Synthesis plugin), as
+# (submix, processor, attack ms, release ms, threshold dB, ratio).
 SUBMIXES = [
-    ("SS_OneBraham_Master",  0.10, 0.0),    # attack, release (seconds)
-    ("SS_OneBraham_Weapon",  0.02, 0.25),   # hard, fast: gunfire must not pump
-    ("SS_OneBraham_Voice",   0.05, 0.15),   # gentle: human speech compresses badly
+    ("SS_OneBraham_Master",  "LIMITER",    1.0, 100.0, -1.0, 20.0),   # the -1 dBFS ceiling
+    ("SS_OneBraham_Weapon",  "COMPRESSOR", 2.0, 250.0, -12.0, 4.0),   # hard, fast: gunfire must not pump
+    ("SS_OneBraham_Voice",   "COMPRESSOR", 5.0, 150.0, -18.0, 2.5),   # gentle: speech compresses badly
 ]
 
 # Reverb sends, as (submix, wet level). The building's acoustic language:
@@ -180,6 +182,30 @@ def _create(asset_name, package_path, asset_class, factory):
 #  Sound classes and the mix
 # ---------------------------------------------------------------------------
 
+def _dynamics_preset(submix_name, kind, attack_ms, release_ms, threshold_db, ratio, report):
+    """The dynamics processor preset a submix's effect chain carries."""
+    preset_name = submix_name.replace("SS_", "SFX_") + "_Dynamics"
+    factory = unreal.SoundEffectSubmixPresetFactory()
+    factory.set_editor_property("SoundEffectSubmixPresetClass", unreal.SubmixEffectDynamicsProcessorPreset)
+    preset, _created = _create(preset_name, C.AUDIO_MIX, unreal.SubmixEffectDynamicsProcessorPreset, factory)
+    if preset is None:
+        report.failed(preset_name, "could not create the dynamics processor preset")
+        return None
+
+    # The settings are a struct: read a copy, change it, write it back.
+    settings = preset.get_editor_property("settings")
+    settings.set_editor_property("dynamics_processor_type",
+                                 getattr(unreal.SubmixEffectDynamicsProcessorType, kind))
+    settings.set_editor_property("attack_time_msec", attack_ms)
+    settings.set_editor_property("release_time_msec", release_ms)
+    settings.set_editor_property("threshold_db", threshold_db)
+    settings.set_editor_property("ratio", ratio)
+    preset.set_editor_property("settings", settings)
+
+    unreal.EditorAssetLibrary.save_asset(u"{0}/{1}".format(C.AUDIO_MIX, preset_name))
+    return preset
+
+
 def build_sound_classes(report):
     classes = {}
 
@@ -198,10 +224,15 @@ def build_sound_classes(report):
             except Exception as exc:  # noqa: BLE001
                 report.failed(name, u"could not set parent: {0}".format(exc))
 
+        # Volume lives in the class's Properties struct, not on the class: read a
+        # copy, change it, write it back. (A direct "Volume" set used to fail
+        # inside a bare except, so no class ever got its Docs/12 level.)
         try:
-            asset.set_editor_property("Volume", 10.0 ** (volume_db / 20.0))
-        except Exception:  # noqa: BLE001
-            pass
+            properties = asset.get_editor_property("properties")
+            properties.set_editor_property("volume", 10.0 ** (volume_db / 20.0))
+            asset.set_editor_property("properties", properties)
+        except Exception as exc:  # noqa: BLE001
+            report.failed(name, u"could not set its volume: {0}".format(exc))
 
         path = u"{0}/{1}".format(C.AUDIO_MIX, name)
         unreal.EditorAssetLibrary.save_asset(path)
@@ -214,7 +245,7 @@ def build_sound_classes(report):
 def build_submixes(report):
     subs = {}
 
-    for name, attack, release in SUBMIXES:
+    for name, kind, attack_ms, release_ms, threshold_db, ratio in SUBMIXES:
         asset, created = _create(name, C.AUDIO_MIX, unreal.SoundSubmix,
                                  unreal.SoundSubmixFactory())
         if asset is None:
@@ -223,12 +254,16 @@ def build_submixes(report):
 
         # A compressor on the weapon submix is the difference between "loud" and
         # "painful": four carbines in a stairwell is a 130 dB event, and without
-        # it the master clips and the mix collapses.
+        # it the master clips and the mix collapses. A submix has no dynamics of
+        # its own; it carries a dynamics processor preset in its effect chain.
+        # (An earlier version set AttackTime/ReleaseTime on the submix, which has
+        # no such properties, inside a bare except: no compressor ever existed.)
         try:
-            asset.set_editor_property("AttackTime", attack)
-            asset.set_editor_property("ReleaseTime", release)
-        except Exception:  # noqa: BLE001
-            pass
+            preset = _dynamics_preset(name, kind, attack_ms, release_ms, threshold_db, ratio, report)
+            if preset is not None:
+                asset.set_editor_property("submix_effect_chain", [preset])
+        except Exception as exc:  # noqa: BLE001
+            report.failed(name, u"could not attach its dynamics processor: {0}".format(exc))
 
         path = u"{0}/{1}".format(C.AUDIO_MIX, name)
         unreal.EditorAssetLibrary.save_asset(path)
