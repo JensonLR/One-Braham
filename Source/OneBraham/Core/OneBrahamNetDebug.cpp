@@ -144,7 +144,7 @@ void UOneBrahamNetDebugSubsystem::Refresh()
 	{
 		AActor* Actor = *It;
 
-		if (Actor == nullptr || !Actor->bReplicates)
+		if (Actor == nullptr || !Actor->GetIsReplicated())
 		{
 			continue;
 		}

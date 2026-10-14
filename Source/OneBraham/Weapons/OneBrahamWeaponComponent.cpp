@@ -1679,7 +1679,7 @@ void UOneBrahamWeaponComponent::CaptureHitboxSnapshot()
 			continue;
 		}
 
-		const int32 PlayerId = State->PlayerId;
+		const int32 PlayerId = State->GetPlayerId();
 		const USkeletalMeshComponent* Body = Character->GetMesh();
 
 		if (Body != nullptr)

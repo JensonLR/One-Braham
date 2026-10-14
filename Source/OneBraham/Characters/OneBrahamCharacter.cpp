@@ -683,7 +683,7 @@ void AOneBrahamCharacter::ApplyArchetype(FGameplayTag ArchetypeTag)
 	}
 
 	Appearance.BodyVariant = Definition->BodyVariant;
-	Appearance.SquadColorIndex = GetPlayerState<AOneBrahamPlayerState>() ? FMath::Abs(GetPlayerState<AOneBrahamPlayerState>()->PlayerId) % 4 : 0;
+	Appearance.SquadColorIndex = GetPlayerState<AOneBrahamPlayerState>() ? FMath::Abs(GetPlayerState<AOneBrahamPlayerState>()->GetPlayerId()) % 4 : 0;
 
 	if (Definition->BodyMesh.IsValid() && GetMesh() != nullptr)
 	{

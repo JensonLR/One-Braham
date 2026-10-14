@@ -932,7 +932,7 @@ void AOneBrahamGameMode::RebuildSquadInfo()
 		}
 
 		FOneBrahamSquadMemberInfo Member;
-		Member.PlayerId = State->PlayerId;
+		Member.PlayerId = State->GetPlayerId();
 		Member.PlayerName = State->GetPlayerName();
 		Member.ArchetypeTag = State->ArchetypeTag;
 		Member.LifeState = State->LifeState;
@@ -1335,7 +1335,7 @@ void AOneBrahamGameMode::PostLogin(APlayerController* NewPlayer)
 			TEXT("BusinessAnalyst"), TEXT("Graduate"), TEXT("FinanceBroker"),
 			TEXT("ITOperations"), TEXT("FacilitiesSecurity"), TEXT("Consultant")
 		};
-		const int32 Index = FMath::Abs(State->PlayerId) % UE_ARRAY_COUNT(DefaultArchetypes);
+		const int32 Index = FMath::Abs(State->GetPlayerId()) % UE_ARRAY_COUNT(DefaultArchetypes);
 		State->ArchetypeTag = FGameplayTag::RequestGameplayTag(
 			FName(*FString::Printf(TEXT("OB.Character.Archetype.%s"), DefaultArchetypes[Index])), false);
 	}
@@ -1355,7 +1355,7 @@ void AOneBrahamGameMode::PostLogin(APlayerController* NewPlayer)
 		FText::FromString(State->GetPlayerName())), false);
 
 	OB_MATCH_LOG("PostLogin: '%s' (id=%d, team=%s, squad=%d). Players=%d",
-		*State->GetPlayerName(), State->PlayerId, *UEnum::GetValueAsString(State->Team), State->SquadId,
+		*State->GetPlayerName(), State->GetPlayerId(), *UEnum::GetValueAsString(State->Team), State->SquadId,
 		GetNumPlayers());
 }
 

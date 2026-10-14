@@ -43,6 +43,22 @@ WHY THIS EXISTS
          not complete: it is a net for the properties a project like this one is
          likely to reach for, and it says so rather than implying it is a proof.
 
+    Two more, found the same way - by hand, in code that had been reviewed:
+
+      5. A read or write of an engine member that UE5 made private. PlayerId,
+         Score and the spectator flags on APlayerState, and bReplicates, bHidden,
+         bCanBeDamaged, Role and RemoteRole on AActor, are reached through
+         GetPlayerId(), GetScore(), GetIsReplicated(), IsHidden() and friends.
+         `State->PlayerId` reads like the obvious thing and does not compile;
+         there were six of them. The PlayerState names are only checked on a
+         receiver this file declares as a player state, because the project's
+         own structs have a PlayerId and a Score too.
+      6. A parameter or local that has the name of a member of its own class.
+         UE5 builds with shadow-variable warnings as errors, and even where it
+         compiled it was a bug: `SetDeafened(bool bDeafened)` assigned the
+         parameter to itself and the member never changed, and the HUD's
+         `OwningController` local hid the member it was named after.
+
 HOW IT PARSES
     Not with a regex over the whole file, which is what the first version of this
     tool did and why it reported 177 "missing" functions of which 170 were macro
@@ -482,6 +498,55 @@ def engine_ancestors(class_name, classes, seen=None):
     return out
 
 
+#: Engine members that are private in UE5, and the accessor to use instead.
+ENGINE_PRIVATE_PLAYER_STATE = {
+    "PlayerId": "GetPlayerId()", "Score": "GetScore()/SetScore()",
+    "bIsSpectator": "IsSpectator()", "bOnlySpectator": "IsOnlyASpectator()",
+    "bIsABot": "IsABot()", "bIsInactive": "IsInactive()",
+    "ExactPing": "GetPingInMilliseconds()", "CompressedPing": "GetCompressedPing()",
+    "PlayerNamePrivate": "GetPlayerName()",
+}
+ENGINE_PRIVATE_ACTOR = {
+    "bReplicates": "GetIsReplicated()/SetReplicates()", "bHidden": "IsHidden()",
+    "bCanBeDamaged": "CanBeDamaged()/SetCanBeDamaged()",
+    "RemoteRole": "GetRemoteRole()", "Role": "GetLocalRole()",
+}
+
+#: `AOneBrahamPlayerState* OtherState`, `const APlayerState* PS`.
+PLAYER_STATE_VARIABLE = re.compile(r'\b[A-Z][A-Za-z0-9_]*PlayerState\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)')
+
+#: A local declared at the start of a statement, or in an `if (Type* X = ...)`.
+LOCAL_DECLARATION = re.compile(
+    r'(?:^|[;{(]|\bif\s*\()\s*(?:const\s+)?'
+    r'(?:auto|bool|float|double|int32|uint8|uint32|int64|[AUFTE][A-Z][A-Za-z0-9_]*(?:\s*<[^;()=]*>)?)'
+    r'\s*[*&]?\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;|\{)', re.MULTILINE)
+
+
+def data_members(body):
+    """Names of the data members declared at the top level of a class body."""
+    names = set()
+
+    for statement in split_statements(body):
+        text = " ".join(statement.split())
+
+        if not text.endswith(";") or text.startswith(("using ", "friend ", "typedef ", "enum ")):
+            continue
+
+        # Drop UPROPERTY(...) and similar macro prefixes, then anything that is a
+        # function declaration: a '(' before any '=' is a parameter list.
+        text = re.sub(r'^(?:[A-Z_][A-Z0-9_]*\s*\([^()]*(?:\([^()]*\)[^()]*)*\)\s*)+', "", text)
+        head = text.split("=", 1)[0]
+
+        if "(" in head:
+            continue
+
+        match = re.search(r'([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*\d+\s*)?(?:\[[^\]]*\]\s*)?$', head.rstrip(";").strip())
+        if match and " " in head.strip():
+            names.add(match.group(1))
+
+    return names
+
+
 def run_hygiene():
     """(checks, problems) for the rules that are not about linking.
 
@@ -545,6 +610,89 @@ def run_hygiene():
                     u"and the tuning UI write the project's member and the engine never "
                     u"sees the value".format(class_name, member,
                                              u"/".join(sorted(ancestors)))))
+
+    # --- engine members UE5 made private ----------------------------------
+    for rel, path in files:
+        if not rel.endswith(".cpp"):
+            continue
+
+        text = strip_comments_and_strings(io.open(path, encoding="utf-8", errors="ignore").read())
+        receivers = set(PLAYER_STATE_VARIABLE.findall(text))
+        checks += 1
+
+        receiver_pattern = r'(?:\b(?:%s)|GetPlayerState\s*<[^>]*>\s*\(\s*\))' % u"|".join(
+            re.escape(name) for name in sorted(receivers)) if receivers else r'GetPlayerState\s*<[^>]*>\s*\(\s*\)'
+
+        for match in re.finditer(receiver_pattern + r'\s*->\s*(%s)\b(?!\s*\()' % u"|".join(ENGINE_PRIVATE_PLAYER_STATE), text):
+            field = match.group(1)
+            problems.append((
+                rel, text[:match.start()].count("\n") + 1,
+                u"APlayerState::{0} is private in UE5 - use {1}".format(field, ENGINE_PRIVATE_PLAYER_STATE[field])))
+
+        for match in re.finditer(r'->\s*(%s)\b(?!\s*\()' % u"|".join(ENGINE_PRIVATE_ACTOR), text):
+            field = match.group(1)
+            problems.append((
+                rel, text[:match.start()].count("\n") + 1,
+                u"AActor::{0} is private in UE5 - use {1}".format(field, ENGINE_PRIVATE_ACTOR[field])))
+
+    # --- a parameter or local named like a member of its own class --------
+    members = {}
+
+    def _members_of(class_name, seen=None):
+        seen = seen or set()
+        if class_name in seen or class_name not in classes:
+            return set()
+        seen.add(class_name)
+        if class_name not in members:
+            bases, body, _rel = classes[class_name]
+            own = data_members(body)
+            for base in re.findall(r'[AUIF][A-Za-z0-9_]+', bases):
+                own |= _members_of(base, seen)
+            members[class_name] = own
+        return members[class_name]
+
+    for rel, path in files:
+        if not rel.endswith(".cpp"):
+            continue
+
+        text = strip_comments_and_strings(io.open(path, encoding="utf-8", errors="ignore").read())
+
+        for match in DEFINITION.finditer(text):
+            class_name = match.group(1)
+            if class_name not in classes:
+                continue
+
+            own = _members_of(class_name)
+            if not own:
+                continue
+
+            close = text.find(")", match.end())
+            brace = text.find("{", close)
+            semicolon = text.find(";", close)
+            if close == -1 or brace == -1 or (semicolon != -1 and semicolon < brace):
+                continue
+
+            checks += 1
+            params = text[match.end():close]
+            line = text[:match.start()].count("\n") + 1
+            found = []
+
+            for param in params.split(","):
+                name = re.search(r'([A-Za-z_][A-Za-z0-9_]*)\s*(?:=[^,]*)?$', param.strip())
+                if name and name.group(1) in own and len(param.split()) > 1:
+                    found.append((u"parameter", name.group(1)))
+
+            body = _braced_body(text, brace)
+            for local in LOCAL_DECLARATION.finditer(body):
+                if local.group(1) in own:
+                    found.append((u"local", local.group(1)))
+
+            for kind, name in found:
+                problems.append((
+                    rel, line,
+                    u"{0}::{1} has a {2} called {3}, which is a member of {0}: an error "
+                    u"under UE5's shadow-variable level, and the member is not the one "
+                    u"being written".format(class_name, match.group(2), kind, name)))
 
     # --- the same function defined twice ---------------------------------
     seen = {}
@@ -625,7 +773,8 @@ def build_all():
             C.log(u"      {0}:{1} {2}".format(rel, line, message))
     else:
         C.log(u"  no scoped enum is compared with an operator it does not have, no "
-              u"member shadows an engine property, no function is defined twice. OK")
+              u"member shadows an engine property, no engine-private member is read, no "
+              u"parameter or local hides a member, no function is defined twice. OK")
 
     return _SymbolReport(checked, missing, hygiene, hygiene_checks)
 
@@ -646,8 +795,8 @@ def main():
         C.log(u"  every declared member function has a definition. OK")
 
     if not hygiene and not missing:
-        C.log(u"  hygiene: scoped enums, shadowed engine properties, duplicate "
-              u"definitions. OK")
+        C.log(u"  hygiene: scoped enums, shadowed engine properties, engine-private "
+              u"members, shadowed members, duplicate definitions. OK")
         return 0
 
     for rel, line, message in hygiene:

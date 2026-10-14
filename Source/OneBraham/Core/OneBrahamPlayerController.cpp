@@ -2180,7 +2180,7 @@ void AOneBrahamPlayerController::ReportViolation(const FString& Reason, float Se
 		const AOneBrahamPlayerState* State = GetPlayerState<AOneBrahamPlayerState>();
 		OB_AUDIT_LOG("SECURITY: player='%s' id=%d reason='%s' severity=%.1f score=%d",
 			State ? *State->GetPlayerName() : *GetName(),
-			State ? State->PlayerId : -1,
+			State ? State->GetPlayerId() : -1,
 			*Reason,
 			Severity,
 			ViolationScore);

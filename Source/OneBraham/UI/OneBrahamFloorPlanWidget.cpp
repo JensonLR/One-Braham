@@ -56,8 +56,10 @@ bool UOneBrahamFloorPlanWidget::HasDownedSquadmate() const
 }
 
 void UOneBrahamFloorPlanWidget::PaintFloorRow(FSlateWindowElementList& OutDrawElements, int32 LayerId,
-	const FGeometry& Geometry, const FOneBrahamFloorPlanFloor& Floor, float RowTop, float RowHeight) const
+	const FGeometry& Geometry, const FOneBrahamFloorPlanFloor& Floor, float RowTop) const
 {
+	// RowHeight is the member. It used to arrive as a parameter of the same name,
+	// always the member's value, which is a shadowing error under UE5's defaults.
 	const float RowLeft = PanelPadding;
 	const float RowWidth = LabelColumnWidth;
 	const bool bLocal = Floor.bLocalPlayerFloor;
@@ -409,7 +411,7 @@ int32 UOneBrahamFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeom
 			break;
 		}
 
-		PaintFloorRow(OutDrawElements, ContentLayer, PanelGeometry, PlanData.Floors[Index], RowTop, RowHeight);
+		PaintFloorRow(OutDrawElements, ContentLayer, PanelGeometry, PlanData.Floors[Index], RowTop);
 	}
 
 	return CurrentLayer + 3;

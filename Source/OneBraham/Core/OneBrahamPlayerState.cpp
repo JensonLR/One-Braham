@@ -265,7 +265,7 @@ void AOneBrahamPlayerState::ServerSetPlayerMuted_Implementation(int32 TargetPlay
 			for (APlayerState* Other : GS->PlayerArray)
 			{
 				AOneBrahamPlayerState* OtherState = Cast<AOneBrahamPlayerState>(Other);
-				if (OtherState == nullptr || OtherState->PlayerId != TargetPlayerId)
+				if (OtherState == nullptr || OtherState->GetPlayerId() != TargetPlayerId)
 				{
 					continue;
 				}
