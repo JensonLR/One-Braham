@@ -11,6 +11,7 @@
 #include "Core/OneBrahamGameUserSettings.h"
 #include "Core/OneBrahamPlayerState.h"
 #include "Core/OneBrahamSaveSettings.h"
+#include "Data/OneBrahamCosmeticDataAsset.h"
 #include "Data/OneBrahamCharacterDataAsset.h"
 #include "Characters/OneBrahamCharacter.h"
 #include "Characters/OneBrahamHealthComponent.h"
@@ -219,10 +220,17 @@ void AOneBrahamPlayerController::SendProfileToServer()
 		ServerSetLoadout(Loadout.PrimaryWeaponId, Loadout.SidearmWeaponId, Loadout.UtilityIds, Loadout.WeaponSkinId);
 	}
 
+	// A locked item is not sent: its slot falls back to the archetype's default
+	// outfit. A profile edited by hand gets the same outfit as everyone else.
+	const UOneBrahamCosmeticDataAsset* Catalogue = UOneBrahamCosmeticDataAsset::LoadCatalogue();
 	TArray<FName> Slots;
 	TArray<FName> Options;
 	for (const TPair<FName, FName>& Pair : Profile->EquippedCosmetics)
 	{
+		if (!Catalogue->IsUnlockedFor(Profile, Pair.Value))
+		{
+			continue;
+		}
 		Slots.Add(Pair.Key);
 		Options.Add(Pair.Value);
 	}

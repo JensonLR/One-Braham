@@ -128,6 +128,27 @@ only if the signed result contains it (`ISteamInventory::CheckResultSteamID` on
 the result handle). Earnable options stay profile-checked; nothing earnable is
 worth forging. `Docs/20` carries this as a release item.
 
+### Earned options
+
+Four options are earned rather than issued. `UOneBrahamCosmeticDataAsset` (the
+`DA_CosmeticCatalogue` asset, with the same rows compiled in as its defaults)
+names each one with the `OB.Cosmetic.Unlock.*` tag that opens it. The tags come
+from achievements (`Docs/19` section 9) and are kept in the profile.
+
+| Option | Opened by | Achievement |
+| --- | --- | --- |
+| `Jacket_Bomber` | `OB.Cosmetic.Unlock.Milestone.Extract5` | Frequent Flyer: five extractions |
+| `BagTag_Event` | `OB.Cosmetic.Unlock.Milestone.NoDamageExtract` | Conscientious Objector: extract having dealt no damage |
+| `Fleece_Branded` | `OB.Cosmetic.Unlock.Milestone.ServerFloorWin` | Hold the Floor: last squad standing on floors 9-11 |
+| `HiVis_Orange` | `OB.Cosmetic.Unlock.Achievement.FireDrill50` | Fire Warden: 50 FIRE DRILL wins |
+
+The wardrobe shows a locked option with the catalogue's line under it
+(`UOneBrahamUILibrary::GetCosmeticLockText`). `SendProfileToServer` never sends
+a locked option: its slot falls back to the archetype's default outfit. None of
+the four is a starter item or an archetype default, so locking one never leaves
+a slot bare. `check_cosmetic_ids.py` enforces that, along with registered tags,
+no duplicate rows, and a row for every tag an achievement grants.
+
 ---
 
 ## 4. Competitive integrity

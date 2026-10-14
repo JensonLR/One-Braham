@@ -12,6 +12,7 @@
 #include "Misc/Paths.h"
 
 #include "Core/OneBrahamSaveSettings.h"
+#include "Data/OneBrahamCosmeticDataAsset.h"
 #include "Online/OneBrahamSteamSubsystem.h"
 #include "OneBraham.h"
 
@@ -135,6 +136,34 @@ bool FOneBrahamAchievementTableTest::RunTest(const FString& Parameters)
 		TestFalse(FString::Printf(TEXT("%s is unique"), *Id), Seen.Contains(Id));
 		Seen.Add(Id);
 		TestFalse(FString::Printf(TEXT("%s is not earned by a fresh profile"), *Id), Entry.IsEarned(*Fresh));
+	}
+
+	// Every cosmetic an achievement grants opens on that achievement, and only then.
+	const UOneBrahamCosmeticDataAsset* Catalogue = UOneBrahamCosmeticDataAsset::LoadCatalogue();
+	if (TestNotNull(TEXT("cosmetic catalogue"), Catalogue))
+	{
+		TestTrue(TEXT("an unlisted id is issued to everyone"), Catalogue->IsUnlockedFor(Fresh, FName(TEXT("Jacket_Chino"))));
+		for (const FOneBrahamAchievementDefinition& Entry : UOneBrahamSteamSubsystem::GetAchievementDefinitions())
+		{
+			if (Entry.UnlockTag == nullptr)
+			{
+				continue;
+			}
+			const FOneBrahamCosmeticUnlock* Row = Catalogue->Unlocks.FindByPredicate([&Entry](const FOneBrahamCosmeticUnlock& Candidate)
+			{
+				return Candidate.UnlockTag == FName(Entry.UnlockTag);
+			});
+			if (!TestNotNull(FString::Printf(TEXT("%s opens a cosmetic"), Entry.Id), Row))
+			{
+				continue;
+			}
+			TestFalse(FString::Printf(TEXT("%s is locked on a fresh profile"), *Row->CosmeticId.ToString()),
+				Catalogue->IsUnlockedFor(Fresh, Row->CosmeticId));
+			UOneBrahamSaveSettings* Earned = NewObject<UOneBrahamSaveSettings>(GetTransientPackage(), NAME_None, RF_Transient);
+			Earned->EarnedUnlockTags.Add(Row->UnlockTag);
+			TestTrue(FString::Printf(TEXT("%s opens with its tag"), *Row->CosmeticId.ToString()),
+				Catalogue->IsUnlockedFor(Earned, Row->CosmeticId));
+		}
 	}
 
 	// The rich presence tokens the code sends exist in the Steam token file.

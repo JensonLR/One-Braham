@@ -43,7 +43,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `check_weapon_ids.py` | the ten weapons as four places describe them: the armoury table in `build_weapons.py` that generates the definition assets, the `WeaponSpawnTable` default in `OneBrahamMatchSettingsAsset.cpp` that the floor loot rolls, every weapon id literal anywhere in `Source/`, and the two tables in `Docs/05` - ids, order, damage, pellets, RPM, magazine, reserve, loot weights and floor gates | **no** | yes |
 | `check_audio_ids.py` | the cue list: the bank's rows, what `OneBrahamProceduralAudio` can synthesise (recipes, branches, beds, UI substrings), the audio builder's `AMBIENCE`/`MUSIC` beds, the zone table against the building layout's area ids, the music cue table against `EOneBrahamMusicState`, and the briefs in `Docs/12` - every cue either audible or written down | **no** | yes |
 | `check_hud_strings.py` | the HUD's copy: the `HUD_STRINGS` list `build_ui.py` generates `DT_HUDStrings` from, the rows compiled into `OneBrahamHUDStrings`, the keys the code asks the table for, and the ownership table in `Docs/08` that says which layer shows each one | **no** | yes |
-| `check_cosmetic_ids.py` | the wardrobe: `COSMETIC_SLOTS` / `COSMETIC_OPTIONS` in `build_characters.py`, the compiled-in `CosmeticSlots` default (names, parent bones, offsets), the starter outfit in `UOneBrahamGameInstance`, and the slot table in `Docs/13` - names and option counts | **no** | yes |
+| `check_cosmetic_ids.py` | the wardrobe: `COSMETIC_SLOTS` / `COSMETIC_OPTIONS` in `build_characters.py`, the compiled-in `CosmeticSlots` default (names, parent bones, offsets), the starter outfit in `UOneBrahamGameInstance`, and the slot table in `Docs/13` - names and option counts ; the earned-cosmetic catalogue: every locked id is a wardrobe option that no starter outfit or archetype default issues, every tag is registered, and every tag an achievement grants has a row | **no** | yes |
 | `check_interaction.py` | the interaction surface: every class that implements `IOneBrahamInteractionInterface` against the table in `Docs/13` section 9, every number in that table against the constant or property default it names, every `OB.Interaction.*` tag either claimed by an emitter or written down as declared-and-waiting, and every verb against the montage `PlayInteractionMontage` would load for it | **no** | yes |
 | `report_uncalled.py` | **a report, not a gate**: every member function declared, defined and never called anywhere in the module, tagged `[BP]` when it exists for a Blueprint to call and `[net]` when it is an RPC. Run by hand before and after a wiring batch; `HANDOVER.md` section 4.2 is the triage of the current list. It exits 0 whatever it finds, because "this has no caller" is a question rather than a failure | **no** | by hand |
 | `validate_project.py` | the health check and a markdown report | either | yes |
@@ -87,10 +87,10 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
 | input_ini | OK | 0.0 | wrote 42 actions (41 with a default key) |
-| cpp_symbols | OK | 0.7 | 754 declarations, all defined; compile hygiene clean |
-| uht_contracts | OK | 1.5 | 892 UE reflection contracts, all satisfied |
-| soft_paths | OK | 0.0 | 38 soft paths, all conventional |
-| calls | OK | 0.3 | 1185 call sites, all arities plausible |
+| cpp_symbols | OK | 0.7 | 757 declarations, all defined; compile hygiene clean |
+| uht_contracts | OK | 1.5 | 917 UE reflection contracts, all satisfied |
+| soft_paths | OK | 0.0 | 39 soft paths, all conventional |
+| calls | OK | 0.3 | 1192 call sites, all arities plausible |
 | tags | OK | 0.4 | 0 resolvable tag requests and 147 documented tags, all declared |
 | layout | OK | 0.0 | 16 floors, map and layout agree |
 | voice_lines | OK | 0.0 | 118 line references, all declared and documented |
@@ -100,7 +100,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | doc_files | OK | 0.1 | 72 documented paths, all on disk |
 | doc_types | OK | 0.1 | 61 documented type names, all declared |
 | weapon_ids | OK | 0.1 | 122 weapon-id checks, the armoury and the spawn table agree |
-| cosmetic_ids | OK | 0.1 | 135 cosmetic checks, one wardrobe |
+| cosmetic_ids | OK | 0.1 | 149 cosmetic checks, one wardrobe |
 | hud_strings | OK | 0.1 | 99 HUD-string checks, 31 rows and 11 widgets, every one shown |
 | audio_ids | OK | 0.2 | 305 audio-id checks, every cue audible or documented |
 | interaction_ids | OK | 0.3 | 281 interaction checks, 10 interactables, every verb, tag, tuning number and override accounted for |

@@ -48,7 +48,7 @@ all. Each one is a system with a single owner:
 
 | Folder | Contents | Belongs to |
 | --- | --- | --- |
-| `Core/` | Types, tags, settings, game instance, game state, player state, controller, game mode, spawn points, save/settings, the console and its QA commands, the `ob.NetDebug` overlay and the `ob.Bench.Skydeck` flythrough | PART 3 |
+| `Core/` | Types, tags, settings, game instance, game state, player state, controller, game mode, spawn points, save/settings, the console and its QA commands, the `ob.NetDebug` overlay and the `ob.Bench.Skydeck` flythrough, the server's game session, `UOneBrahamGameplayStatics` | PART 3 |
 | `Characters/` | Character, movement, health, downed, ragdoll | PART 4 |
 | `Weapons/` | Weapon base, weapon component, inventory, projectile | PART 5 |
 | `Access/` | Access zone (the door), keycard, override terminal, fire shutter, breach interface | PART 6 |
@@ -57,10 +57,10 @@ all. Each one is a system with a single owner:
 | `Interaction/` | the interaction interface and the interact component | PART 3 |
 | `Bots/` | the bot controller and behaviour | PART 3 |
 | `Voice/` | types, line set, codec, subsystem, proximity component | PART 7 |
-| `UI/` | HUD types, style, HUD component, HUD widget, crosshair, compass | PART 8 |
+| `UI/` | HUD types, style, HUD component, HUD widget, crosshair, compass, `UOneBrahamUILibrary` (achievements, wardrobe locks, ping bands, the overlay) | PART 8 |
 | `Audio/` | procedural audio, types, bank asset, audio manager component | PART 12 |
 | `VFX/` | VFX statics, camera shake | PART 11 |
-| `Data/` | weapon definition/registry, match settings, character data asset | PART 3 |
+| `Data/` | weapon definition/registry, match settings, character data asset, the cosmetic catalogue (earned items) | PART 3 |
 | `Online/` | the Steam subsystem: career record, achievements, stats, rich presence, overlay | PART 19 |
 | `Tests/` | the automation suite, one file per system it covers | PART 18 |
 

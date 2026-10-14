@@ -371,6 +371,37 @@ def build_animation_blueprint(report):
     return asset
 
 
+def build_cosmetic_catalogue(report):
+    """Creates DA_CosmeticCatalogue: the earned-cosmetic rows, for designers.
+
+    A new UOneBrahamCosmeticDataAsset carries the shipping rows from its
+    constructor, so the asset is created and left alone: an existing one keeps
+    whatever a designer has changed. The game falls back to the class defaults
+    when the asset does not exist, so this is never what makes unlocks work.
+    """
+    path = u"{0}/DA_CosmeticCatalogue".format(C.CHARACTERS)
+    catalogue_class = getattr(unreal, "OneBrahamCosmeticDataAsset", None)
+    if catalogue_class is None:
+        report.failed("DA_CosmeticCatalogue", "UOneBrahamCosmeticDataAsset is not available; "
+                      "compile the project before running the character build.")
+        return None
+
+    if unreal.EditorAssetLibrary.does_asset_exist(path):
+        report.updated_asset(path)
+        return unreal.EditorAssetLibrary.load_asset(path)
+
+    factory = unreal.DataAssetFactory()
+    factory.set_editor_property("DataAssetClass", catalogue_class)
+    asset = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
+        "DA_CosmeticCatalogue", C.CHARACTERS, catalogue_class, factory)
+    if asset is None:
+        report.failed("DA_CosmeticCatalogue", "could not create the asset")
+        return None
+    unreal.EditorAssetLibrary.save_loaded_asset(asset)
+    report.created_asset(path)
+    return asset
+
+
 def build_voice_casting(report):
     """Creates DA_VoiceLines: the casting table the voice subsystem reads."""
     path = u"{0}/DA_VoiceLines".format(C.VOICE)
@@ -403,6 +434,7 @@ def build_all():
 
     C.guard(report, "directories", _ensure_dirs)
     C.guard(report, "character registry", build_registry, report)
+    C.guard(report, "cosmetic catalogue", build_cosmetic_catalogue, report)
     C.guard(report, "animation blueprint", build_animation_blueprint, report)
     C.guard(report, "voice casting", build_voice_casting, report)
 

@@ -147,6 +147,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Session")
 	void DestroyCurrentSession();
 
+	/** Latency budget for matchmaking: reject servers above this. */
+	static constexpr int32 MaxAcceptablePingMs = 120;
+
 	/** True while a matchmaking search is running (rich presence reads it). */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Session")
 	bool IsMatchmaking() const { return bMatchmakingActive; }
@@ -274,9 +277,6 @@ protected:
 
 	bool bMatchmakingActive = false;
 	bool bLoadingScreenActive = false;
-
-	/** Latency budget for matchmaking: reject servers above this. */
-	static constexpr int32 MaxAcceptablePingMs = 120;
 
 	/** Matchmaking timeout in seconds before we fall back to hosting our own. */
 	static constexpr float MatchmakingTimeoutSeconds = 12.f;
