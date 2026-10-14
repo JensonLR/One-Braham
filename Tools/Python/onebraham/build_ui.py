@@ -182,7 +182,7 @@ def build_hud_strings(report):
         return None
 
     factory = unreal.DataTableFactory()
-    factory.set_editor_property("struct", row_struct)
+    factory.set_editor_property("struct", row_struct.static_struct())
 
     try:
         table = unreal.AssetToolsHelpers.get_asset_tools().create_asset(

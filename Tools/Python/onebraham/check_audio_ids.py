@@ -102,7 +102,7 @@ PY_ROW = re.compile(r'\(\s*(?:"[^"]*",\s*)?"((?:AMB|MUS)_[A-Za-z0-9_]+)"')
 ZONE_ENTRY = re.compile(r'\{\s*TEXT\("([A-Za-z0-9_]+)"\),\s*TEXT\("(AMB_[A-Za-z0-9_]+)"\)\s*\}')
 
 #: An area id the layout declares: AddFloor(0, "Ground_Plaza", ...)
-AREA_ID = re.compile(r'AddFloor\(\s*\d+\s*,\s*"([A-Za-z0-9_]+)"')
+AREA_ID = re.compile(r'AddFloor\(\s*\d+\s*,\s*(?:TEXT\(\s*)?"([A-Za-z0-9_]+)"')
 
 #: The music cue table.
 MUSIC_ENTRY = re.compile(r'MusicCueByState\.Add\(EOneBrahamMusicState::(\w+),\s*FName\(TEXT\("(MUS_[A-Za-z0-9_]+)"\)\)\)')

@@ -193,6 +193,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	/** The intact wall face. Blocking while whole. */
@@ -233,6 +234,9 @@ protected:
 private:
 	/** Recompute the mesh scales and offsets from WallDimensionsCm. */
 	void RebuildGeometry();
+
+	/** Paints every wall piece with WallMaterial, in the editor and in play. */
+	void ApplyWallMaterial();
 
 	/** Swap the collision and visibility to the opened state. Safe to call twice. */
 	void ApplyBreachedState();

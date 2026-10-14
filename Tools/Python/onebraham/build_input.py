@@ -180,7 +180,8 @@ def build_actions(report):
             report.updated_asset(path)
             continue
 
-        factory = unreal.InputActionFactory()
+        factory = unreal.DataAssetFactory()
+        factory.set_editor_property("data_asset_class", unreal.InputAction)
         action = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
             name, C.INPUT, unreal.InputAction, factory)
 
@@ -230,7 +231,8 @@ def build_contexts(report, actions):
             contexts[name] = unreal.EditorAssetLibrary.load_asset(path)
             report.updated_asset(path)
         else:
-            factory = unreal.InputMappingContextFactory()
+            factory = unreal.DataAssetFactory()
+            factory.set_editor_property("data_asset_class", unreal.InputMappingContext)
             context = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
                 name, C.INPUT, unreal.InputMappingContext, factory)
 
@@ -289,11 +291,9 @@ def build_input_config(report, actions):
             continue
 
         try:
-            # The UPROPERTY is exposed lower_camel in Python: WeaponSlotPrimary ->
-            # weapon_slot_primary.
-            snake = "".join(["_" + ch.lower() if ch.isupper() else ch
-                             for ch in field]).lstrip("_")
-            config.set_editor_property(snake, action)
+            # set_editor_property takes the C++ property name as-is; deriving the
+            # Python name by hand breaks on acronyms (ToggleHUD -> toggle_hud).
+            config.set_editor_property(field, action)
             assigned += 1
         except Exception as exc:  # noqa: BLE001
             report.failed(field, u"could not assign: {0}".format(exc))

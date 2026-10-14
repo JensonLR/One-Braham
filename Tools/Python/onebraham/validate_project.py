@@ -551,7 +551,7 @@ def check_access(v, config_only):
     gate = [z for z, (_p, t, _f) in ids.items() if "Skydeck" in z]
     if not gate:
         problems.append("no zone leads to the Skydeck: ASCENT cannot be won")
-    elif "Skydeck" not in ids[gate[0]][1]:
+    elif "skydeck" not in str(ids[gate[0]][1]).lower():
         problems.append(u"the Skydeck zone is tier {0}, which is not the top tier".format(
             ids[gate[0]][1]))
 
@@ -1845,6 +1845,14 @@ def write_report(validator):
 
 def build_all(config_only=False):
     validator = Validator()
+
+    # The level checks read whatever level the editor has open. After a fresh
+    # content build that is the last streaming floor the builder created, so
+    # open the persistent map first.
+    if C.IN_EDITOR and not config_only:
+        persistent = "{0}/{1}".format(C.MAPS, C.MAP_PERSISTENT)
+        if unreal.EditorAssetLibrary.does_asset_exist(persistent):
+            unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).load_level(persistent)
 
     checks = [
         ("content paths", check_content_paths),

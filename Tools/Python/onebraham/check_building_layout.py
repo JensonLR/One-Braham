@@ -56,7 +56,7 @@ LAYOUT_SOURCE = os.path.join(python_root, "Source", "OneBraham", "Data",
 
 #: AddFloor(Index, "AreaId", NSLOCTEXT(...), NSLOCTEXT(...), bEndgame, bBreachable)
 ADD_FLOOR = re.compile(
-    r'AddFloor\(\s*(\d+)\s*,\s*"([^"]+)"\s*,'      # index, area id
+    r'AddFloor\(\s*(\d+)\s*,\s*(?:TEXT\(\s*)?"([^"]+)"\s*\)?\s*,'      # index, area id
     r'\s*NSLOCTEXT\([^)]*\)\s*,\s*NSLOCTEXT\([^)]*\)\s*,'  # two labels
     r'\s*(true|false)\s*,\s*(true|false)\s*\)',     # endgame, breachable
     re.DOTALL)

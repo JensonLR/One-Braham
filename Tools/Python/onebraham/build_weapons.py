@@ -467,7 +467,7 @@ def _apply_definition(report, asset, weapon, blueprints):
     thickness, retention = weapon["pen"]
     _set(asset, "max_penetration_thickness", thickness, report, context)
     _set(asset, "penetration_damage_retention", retention, report, context)
-    _set(asset, "b_can_penetrate_cover", thickness > 0.0, report, context)
+    _set(asset, "bCanPenetrateCover", thickness > 0.0, report, context)
 
     # --- ammunition ------------------------------------------------------
     _set(asset, "magazine_size", weapon["mag"], report, context)
@@ -477,7 +477,7 @@ def _apply_definition(report, asset, weapon, blueprints):
     _set(asset, "reload_time_empty", weapon["reload"][1], report, context)
 
     if weapon.get("per_shell"):
-        _set(asset, "b_per_shell_reload", True, report, context)
+        _set(asset, "bPerShellReload", True, report, context)
         _set(asset, "per_shell_reload_time", weapon.get("shell_time", 0.6), report, context)
 
     # --- handling --------------------------------------------------------
@@ -513,7 +513,7 @@ def _apply_definition(report, asset, weapon, blueprints):
     C.log(u"  audio cue for {0}: {1} (radius {2:.0f} cm)".format(weapon_id, sound_prefix, audible))
 
     # --- VFX -------------------------------------------------------------
-    _set(asset, "b_hide_tracer", not weapon["tracer"], report, context)
+    _set(asset, "bHideTracer", not weapon["tracer"], report, context)
 
     # --- loot ------------------------------------------------------------
     min_floor, max_floor = weapon["floors"]
@@ -535,10 +535,12 @@ def _apply_definition(report, asset, weapon, blueprints):
 
 def build_registry(report, definitions):
     """DA_WeaponRegistry: the list every system reads through."""
-    registry_class = getattr(unreal, "OneBrahamWeaponRegistry", None)
+    # The registry is a UOneBrahamWeaponDataAsset: the weapon component loads
+    # DA_WeaponRegistry as exactly that type.
+    registry_class = getattr(unreal, "OneBrahamWeaponDataAsset", None)
     if registry_class is None:
         report.skipped_asset(u"{0}/DA_WeaponRegistry".format(C.DATA),
-                             "UOneBrahamWeaponRegistry is not reflected yet - compile the "
+                             "UOneBrahamWeaponDataAsset is not reflected yet - compile the "
                              "OneBraham module, then re-run this script")
         return None
 
@@ -549,8 +551,10 @@ def build_registry(report, definitions):
         registry = unreal.EditorAssetLibrary.load_asset(path)
         report.updated_asset(path)
     else:
+        factory = unreal.DataAssetFactory()
+        factory.set_editor_property("data_asset_class", registry_class)
         registry = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
-            asset_name, C.DATA, registry_class, unreal.DataAssetFactory())
+            asset_name, C.DATA, registry_class, factory)
         if registry is None:
             report.failed(asset_name, "could not create the weapon registry")
             return None

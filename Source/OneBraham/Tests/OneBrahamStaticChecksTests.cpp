@@ -65,8 +65,11 @@ namespace
 		// They run from Scripts/RunAll.bat, where a missing toolchain is loud.
 	};
 
-	/** The python launchers to try, in order. */
-	const TCHAR* PythonLaunchers[] = { TEXT("python3"), TEXT("python"), TEXT("py") };
+	/** The python launchers to try, in order. ExecProcess does not search PATH
+	 *  on macOS, so the usual absolute locations follow the bare names. */
+	const TCHAR* PythonLaunchers[] = {
+		TEXT("python3"), TEXT("python"), TEXT("py"),
+		TEXT("/opt/homebrew/bin/python3"), TEXT("/usr/local/bin/python3"), TEXT("/usr/bin/python3") };
 
 	/** Runs one check in a child process. Returns the exit code, or -1 if the
 	 *  launcher could not be started at all. */

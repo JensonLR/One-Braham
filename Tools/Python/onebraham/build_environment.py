@@ -928,7 +928,6 @@ def build_override_terminals(report):
                 _label(actor, terminal_id)
                 try:
                     actor.set_editor_property("TerminalId", unreal.Name(terminal_id))
-                    actor.set_editor_property("FloorIndex", floor)
                     actor.set_editor_property("PairedTerminalId", unreal.Name(paired or ""))
                     actor.set_editor_property("ZoneLinkRadius", 900.0)
                 except Exception as exc:  # noqa: BLE001
@@ -994,6 +993,10 @@ def build_breachable_walls(report, materials):
                     # correct before it is ever played.
                     actor.call_method("SetWallDimensions",
                                       (unreal.Vector(size[0], size[1], size[2]), True))
+                    # Same for the finish: the construction script ran at spawn,
+                    # before WallMaterial was set.
+                    for piece in actor.get_components_by_class(unreal.StaticMeshComponent):
+                        piece.set_material(0, material)
                 except Exception as exc:  # noqa: BLE001
                     report.failed("breachable wall " + wall_id, str(exc))
 
@@ -1262,7 +1265,7 @@ def build_post_process(report, floor_index):
 
         # Exposure: manual range, so a dark plant room does not auto-brighten the
         # whole floor and a bright one does not auto-dim it.
-        settings.set_editor_property("AutoExposureMethod", unreal.AutoExposureMethod.AEM_Manual)
+        settings.set_editor_property("AutoExposureMethod", unreal.AutoExposureMethod.AEM_MANUAL)
         settings.set_editor_property("AutoExposureMinBrightness", float(min_brightness))
         settings.set_editor_property("AutoExposureMaxBrightness", float(max_brightness))
 
@@ -1409,13 +1412,13 @@ def build_skydeck_climate(report):
         try:
             ppv.set_editor_property("Unbound", True)
             settings = ppv.settings
-            settings.set_editor_property("OverrideFilmGrainIntensity", True)
+            settings.set_editor_property("bOverride_FilmGrainIntensity", True)
             settings.set_editor_property("FilmGrainIntensity", 0.18)
-            settings.set_editor_property("OverrideColorSaturation", True)
+            settings.set_editor_property("bOverride_ColorSaturation", True)
             settings.set_editor_property("ColorSaturation", unreal.Vector4(0.94, 0.94, 0.94, 1.0))
-            settings.set_editor_property("OverrideAutoExposureMinBrightness", True)
+            settings.set_editor_property("bOverride_AutoExposureMinBrightness", True)
             settings.set_editor_property("AutoExposureMinBrightness", 0.65)
-            settings.set_editor_property("OverrideAutoExposureMaxBrightness", True)
+            settings.set_editor_property("bOverride_AutoExposureMaxBrightness", True)
             settings.set_editor_property("AutoExposureMaxBrightness", 1.6)
         except Exception as exc:  # noqa: BLE001
             report.failed("Post-process volume", str(exc))
@@ -1438,9 +1441,12 @@ def build_floor_level(report, floor_index, materials):
         return level_path
 
     try:
-        level_subsystem.new_level(level_path)
+        created = level_subsystem.new_level(level_path)
     except Exception as exc:  # noqa: BLE001
         report.failed(level_path, u"could not create streaming level: {0}".format(exc))
+        return None
+    if not created:
+        report.failed(level_path, u"could not create streaming level")
         return None
 
     build_floor_shell(report, floor_index, materials)
@@ -1459,20 +1465,43 @@ def build_floor_level(report, floor_index, materials):
     return level_path
 
 
-def build_persistent_level(report, materials, manifest):
-    """Creates the persistent level: the shell, the town, and the references."""
+def open_fresh_persistent_level(report):
+    """Opens a fresh persistent level for this build.
+
+    Every actor in it is generated and spawned without looking for an earlier
+    copy, so an existing level is replaced rather than added to: re-running the
+    build must not stack a second set of spawn points on the first.
+    """
     level_subsystem = _level_subsystem()
     persistent_path = "{0}/{1}".format(C.MAPS, C.MAP_PERSISTENT)
 
+    # The level subsystem reports failure by returning False, not by raising.
     if unreal.EditorAssetLibrary.does_asset_exist(persistent_path):
-        C.log(u"persistent level exists; rebuilding its persistent actors")
+        if not level_subsystem.load_level(persistent_path):
+            report.failed(persistent_path, u"could not open the existing persistent level")
+            return False
+        actors = _actor_subsystem()
+        generated = [a for a in actors.get_all_level_actors()
+                     if not isinstance(a, (unreal.WorldSettings, unreal.Brush))]
+        actors.destroy_actors(generated)
+        C.log(u"  persistent level reopened; {0} generated actors cleared".format(len(generated)))
+        report.updated_asset(persistent_path)
     else:
-        try:
-            level_subsystem.new_level(persistent_path)
-            report.created_asset(persistent_path)
-        except Exception as exc:  # noqa: BLE001
-            report.failed(persistent_path, u"could not create: {0}".format(exc))
-            return None
+        if not level_subsystem.new_level(persistent_path):
+            report.failed(persistent_path, u"could not create the persistent level")
+            return False
+        report.created_asset(persistent_path)
+    return True
+
+
+def build_persistent_level(report, materials, manifest):
+    """Builds the persistent level: the shell, the town, and the references.
+
+    The level is already open - open_fresh_persistent_level ran before the
+    gameplay anchors were spawned into it.
+    """
+    level_subsystem = _level_subsystem()
+    persistent_path = "{0}/{1}".format(C.MAPS, C.MAP_PERSISTENT)
 
     # --- The building shell -----------------------------------------------
     # A single exterior mass so the tower is visible from the Skydeck, the lobby
@@ -1539,6 +1568,12 @@ def build_all(write_manifest=True):
 
     C.step(1, 6, "materials")
     materials = C.guard(report, "materials", build_materials, report) or {}
+
+    # Everything from here to the persistent-level save is spawned into the
+    # persistent level, so it has to be the open level before step 2.
+    if not C.guard(report, "persistent level", open_fresh_persistent_level, report):
+        C.log(report.summary())
+        return report
 
     C.step(2, 6, "gameplay anchors")
     _SURFACE_USAGE.clear()
@@ -1695,6 +1730,21 @@ def write_build_manifest(manifest):
     """
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
     path = os.path.join(project_root, "Tools", "Python", "onebraham_build_manifest.json")
+
+    # Surfaces are recorded as geometry is placed, which happens after build_all
+    # first fills the manifest - take the usage at write time, not before. Floor
+    # levels that already existed were skipped and recorded nothing, so what the
+    # previous manifest says about them still stands.
+    usage = {}
+    if os.path.isfile(path):
+        try:
+            with open(path) as handle:
+                usage = json.load(handle).get("surface_usage") or {}
+        except Exception:  # noqa: BLE001
+            usage = {}
+    for name, places in _SURFACE_USAGE.items():
+        usage[name] = sorted(set(usage.get(name, [])) | set(places))
+    manifest["surface_usage"] = usage
 
     with open(path, "w") as handle:
         json.dump(manifest, handle, indent=2, sort_keys=True)

@@ -116,14 +116,7 @@ void AOneBrahamBreachableWall::BeginPlay()
 
 	RemainingIntegrity = BreachIntegrity;
 
-	if (WallMaterial != nullptr)
-	{
-		for (UStaticMeshComponent* Piece : { WallMesh, FrameWest, FrameEast, FrameLintel })
-		{
-			Piece->SetMaterial(0, WallMaterial);
-		}
-	}
-
+	ApplyWallMaterial();
 	RebuildGeometry();
 
 	// A wall that starts breached is a wall somebody opened before we got here.
@@ -174,6 +167,29 @@ FVector2D AOneBrahamBreachableWall::GetClampedOpeningSize() const
 	return FVector2D(
 		FMath::Clamp(static_cast<float>(OpeningSizeCm.X), FMath::Min(MinOpeningWidthCm, MaxWidth), MaxWidth),
 		FMath::Clamp(static_cast<float>(OpeningSizeCm.Y), FMath::Min(MinOpeningHeightCm, MaxHeight), MaxHeight));
+}
+
+void AOneBrahamBreachableWall::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+
+	// Placed and edited walls show their real finish in the editor, not the
+	// engine grid they would otherwise wear until BeginPlay.
+	ApplyWallMaterial();
+	RebuildGeometry();
+}
+
+void AOneBrahamBreachableWall::ApplyWallMaterial()
+{
+	if (WallMaterial == nullptr)
+	{
+		return;
+	}
+
+	for (UStaticMeshComponent* Piece : { WallMesh, FrameWest, FrameEast, FrameLintel })
+	{
+		Piece->SetMaterial(0, WallMaterial);
+	}
 }
 
 void AOneBrahamBreachableWall::RebuildGeometry()

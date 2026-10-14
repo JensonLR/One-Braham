@@ -651,14 +651,14 @@ def build_master_highlight(report):
     scene = _expr(material, unreal.MaterialExpressionSceneTexture, -900, -300)
     try:
         scene.set_editor_property("scene_texture_id",
-                                  unreal.SceneTextureId.PPI_PostProcessInput0)
+                                  unreal.SceneTextureId.PPI_POST_PROCESS_INPUT0)
     except Exception as exc:  # noqa: BLE001
         C.warn(u"  scene texture id not settable: {0}".format(exc))
 
     stencil = _expr(material, unreal.MaterialExpressionSceneTexture, -900, 0)
     try:
         stencil.set_editor_property("scene_texture_id",
-                                    unreal.SceneTextureId.PPI_CustomStencil)
+                                    unreal.SceneTextureId.PPI_CUSTOM_STENCIL)
     except Exception as exc:  # noqa: BLE001
         C.warn(u"  custom stencil id not settable: {0}".format(exc))
 
