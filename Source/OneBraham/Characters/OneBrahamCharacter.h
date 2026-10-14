@@ -341,6 +341,14 @@ protected:
 	/** Cheap 2 Hz floor detection: floor index from world Z, cached. */
 	void UpdateFloorIndex(float DeltaSeconds);
 
+	/**
+	 * Every machine with a listener, every character: hands this frame's speed
+	 * and the surface underfoot to the listener's audio manager, which owns the
+	 * stride. Footsteps were silent - nothing called TickFootstepAudio - in a
+	 * game whose stealth layer is "carpet is quiet, metal stairs are not".
+	 */
+	void TickFootsteps(float DeltaSeconds);
+
 	/** Handles the animation-relevant state (sprint/ADS/crouch) for the ABP. */
 	void UpdateAnimationState();
 
@@ -441,6 +449,10 @@ protected:
 private:
 	/** Accumulators for the 2 Hz/10 Hz subsystems. */
 	float FloorCheckAccumulator = 0.f;
+
+	/** The ground under this character, re-classified at 4 Hz by a short trace. */
+	EOneBrahamFootstepSurface FootstepSurface = EOneBrahamFootstepSurface::Concrete;
+	float FootstepSurfaceAccumulator = 0.f;
 
 	/** Server: the accumulator for the 4 Hz authoritative movement check. */
 	float SpeedReportAccumulator = 0.f;

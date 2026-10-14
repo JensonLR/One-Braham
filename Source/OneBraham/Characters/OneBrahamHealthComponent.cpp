@@ -231,9 +231,10 @@ float UOneBrahamHealthComponent::ApplyDamage(float RawDamage, AActor* DamageInst
 	}
 
 	// --- Armour -----------------------------------------------------------
+	float Absorbed = 0.f;
 	if (Armour > 0.f)
 	{
-		const float Absorbed = FMath::Min(Armour, Damage * ArmourAbsorption);
+		Absorbed = FMath::Min(Armour, Damage * ArmourAbsorption);
 		Armour -= Absorbed;
 		Damage -= Absorbed;
 		OnArmourChanged.Broadcast(Armour, MaxArmour);
@@ -258,7 +259,9 @@ float UOneBrahamHealthComponent::ApplyDamage(float RawDamage, AActor* DamageInst
 	// every client, so a broadcast from here reaches a remote player's HUD never,
 	// and the indicator drew on the host's screen and nowhere else. The client
 	// RPC below is what reaches the machine with someone sitting at it.
-	if (ActualDamage > 0.f)
+	// A hit the armour took all of is still a hit: the player has to know
+	// they are being shot, and that the vest is what is keeping them up.
+	if (ActualDamage > 0.f || Absorbed > 0.f)
 	{
 		FVector InstigatorLocation = FVector::ZeroVector;
 
@@ -276,7 +279,8 @@ float UOneBrahamHealthComponent::ApplyDamage(float RawDamage, AActor* DamageInst
 		if (AOneBrahamPlayerController* OwnerPC = OwnerCharacter != nullptr
 			? Cast<AOneBrahamPlayerController>(OwnerCharacter->GetController()) : nullptr)
 		{
-			OwnerPC->ClientDamageTaken(ActualDamage, InstigatorLocation);
+			OwnerPC->ClientDamageTaken(ActualDamage, InstigatorLocation,
+				Report.HitZone == EOneBrahamHitZone::Head, Absorbed > 0.f);
 		}
 	}
 

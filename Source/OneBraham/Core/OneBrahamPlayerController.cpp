@@ -1650,7 +1650,7 @@ void AOneBrahamPlayerController::ClientShowBanner_Implementation(const FText& Te
 	}
 }
 
-void AOneBrahamPlayerController::ClientDamageTaken_Implementation(float Damage, FVector_NetQuantize InstigatorLocation)
+void AOneBrahamPlayerController::ClientDamageTaken_Implementation(float Damage, FVector_NetQuantize InstigatorLocation, bool bHeadshot, bool bArmourAbsorbed)
 {
 	// The screen-edge arc. The HUD converts the world position into a bearing
 	// against the character's own facing, so a player who has already turned
@@ -1666,9 +1666,17 @@ void AOneBrahamPlayerController::ClientDamageTaken_Implementation(float Damage, 
 	// player's mix, their hearing-damage setting and the impact category's limits
 	// - and it is the flesh-impact cue, played flat, because it happened to the
 	// person listening.
+	//
+	// Then the thud in the head (UI_Damage_Taken), pitched by what happened:
+	// higher for a head hit, lower when the vest took it. A hit the armour
+	// absorbed whole draws no flesh impact, because no flesh was involved.
 	if (UOneBrahamAudioManagerComponent* Audio = GetAudioManager())
 	{
-		Audio->PlayLocalUISound(TEXT("SFX_Bullet_Impact_Flesh"));
+		if (Damage > 0.f)
+		{
+			Audio->PlayLocalUISound(TEXT("SFX_Bullet_Impact_Flesh"));
+		}
+		Audio->PlayDamageTakenCue(bArmourAbsorbed, bHeadshot);
 	}
 }
 
@@ -1810,11 +1818,35 @@ void AOneBrahamPlayerController::TickFlash(float DeltaTime)
 // ==========================================================================
 //  Spectating
 // ==========================================================================
+void AOneBrahamPlayerController::SetSpectating(bool bSpectating)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	const bool bChanged = bIsSpectating != bSpectating;
+	bIsSpectating = bSpectating;
+	ForceNetUpdate();
+
+	if (bChanged && IsLocalController())
+	{
+		OnRep_Spectating();
+	}
+}
+
 void AOneBrahamPlayerController::OnRep_Spectating()
 {
 	if (bIsSpectating)
 	{
 		ApplySpectatorView();
+	}
+
+	// Watching is not being there: the world goes distant, the music leads
+	// (Docs/12, "Deafened (spectating)"), and comes back on the respawn.
+	if (UOneBrahamAudioManagerComponent* Audio = GetAudioManager())
+	{
+		Audio->SetDeafened(bIsSpectating);
 	}
 }
 
@@ -1828,38 +1860,23 @@ void AOneBrahamPlayerController::ApplySpectatorView()
 		return;
 	}
 
+	// Resolved through the player states, which every machine has. This walked
+	// the player controllers, and a client has exactly one - its own - so on
+	// every remote client the target was never found and spectating fell
+	// through to the free camera every time.
 	AOneBrahamCharacter* Target = nullptr;
-	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	for (APlayerState* State : GS->PlayerArray)
 	{
-		if (AOneBrahamPlayerController* OtherPC = Cast<AOneBrahamPlayerController>(It->Get()))
+		const AOneBrahamPlayerState* OtherState = Cast<AOneBrahamPlayerState>(State);
+		if (OtherState == nullptr || OtherState == GetPlayerState<AOneBrahamPlayerState>())
 		{
-			if (OtherPC != this && OtherPC->SpectatedPlayerId == SpectatedPlayerId)
-			{
-				Target = OtherPC->GetOneBrahamCharacter();
-				break;
-			}
+			continue;
 		}
-	}
 
-	if (Target == nullptr)
-	{
-		// Fall back to any living pawn matching the id via PlayerState lookup.
-		for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+		if (OtherState->GetPlayerId() == SpectatedPlayerId && !OtherState->IsEliminated())
 		{
-			AOneBrahamPlayerController* OtherPC = Cast<AOneBrahamPlayerController>(It->Get());
-			if (OtherPC == nullptr || OtherPC == this)
-			{
-				continue;
-			}
-
-			if (AOneBrahamPlayerState* OtherState = OtherPC->GetPlayerState<AOneBrahamPlayerState>())
-			{
-				if (OtherState->PlayerId == SpectatedPlayerId && !OtherState->IsEliminated())
-				{
-					Target = OtherPC->GetOneBrahamCharacter();
-					break;
-				}
-			}
+			Target = Cast<AOneBrahamCharacter>(OtherState->GetPawn());
+			break;
 		}
 	}
 
@@ -1952,7 +1969,7 @@ void AOneBrahamPlayerController::ServerBeginSpectating_Implementation(int32 Pref
 		{
 			if (OtherState->LifeState == EOneBrahamLifeState::Alive || OtherState->LifeState == EOneBrahamLifeState::Downed)
 			{
-				Candidates.Add(OtherState->PlayerId);
+				Candidates.Add(OtherState->GetPlayerId());
 			}
 		}
 	}
@@ -1961,9 +1978,8 @@ void AOneBrahamPlayerController::ServerBeginSpectating_Implementation(int32 Pref
 	{
 		// Everyone is dead: watch the Skydeck cameras. -2 is the "no survivors"
 		// sentinel the spectator HUD renders as a locked-off security feed.
-		bIsSpectating = true;
 		SpectatedPlayerId = -2;
-		ForceNetUpdate();
+		SetSpectating(true);
 		return;
 	}
 
@@ -1988,9 +2004,8 @@ void AOneBrahamPlayerController::ServerBeginSpectating_Implementation(int32 Pref
 		NewTarget = Candidates.IsValidIndex(CurrentIndex + 1) ? Candidates[CurrentIndex + 1] : Candidates[0];
 	}
 
-	bIsSpectating = true;
 	SpectatedPlayerId = NewTarget;
-	ForceNetUpdate();
+	SetSpectating(true);
 }
 
 void AOneBrahamPlayerController::PingLookDirection()

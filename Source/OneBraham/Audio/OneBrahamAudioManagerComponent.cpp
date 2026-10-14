@@ -532,6 +532,12 @@ void UOneBrahamAudioManagerComponent::ApplyUserSettings()
 	if (UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings())
 	{
 		Settings->ApplyAudioSettings();
+
+		// The voice output slider and the voice chat switch. Both were saved and
+		// neither reached a speaker: voice playback read the Voice and Master
+		// faders and nothing else. "Muted" mode is the microphone, not the ears,
+		// so only turning voice chat off silences other people.
+		SetVoiceBusGain(Settings->VoiceOutputGain, !Settings->bVoiceChatEnabled);
 	}
 
 	if (UAudioComponent* Music = Beds.FindRef(BedMusic))
@@ -948,57 +954,6 @@ void UOneBrahamAudioManagerComponent::PlayFuseBeep(const FVector& Location, bool
 			RegisterCuePlayed(FName(TEXT("SFX_FuseBeep")), Component);
 		}
 	}
-}
-
-void UOneBrahamAudioManagerComponent::PlayImpact(FName SoundIdPrefix, const FHitResult& Hit, float VolumeScale, AActor* IgnoredActor)
-{
-	if (Hit.bBlockingHit == false && Hit.GetActor() == nullptr)
-	{
-		return;
-	}
-
-	// Flesh and glass read differently enough that they get their own ids; every
-	// other surface resolves through the physical material of the hit component.
-	EOneBrahamFootstepSurface Surface = EOneBrahamFootstepSurface::Concrete;
-
-	if (const UPrimitiveComponent* Component = Hit.GetComponent())
-	{
-		Surface = ClassifyGroundSurface(Component->GetBodyInstance() != nullptr
-			? Component->GetBodyInstance()->GetSimplePhysicalMaterial()
-			: nullptr);
-	}
-
-	FName Suffix;
-	switch (Surface)
-	{
-	case EOneBrahamFootstepSurface::Metal:
-	case EOneBrahamFootstepSurface::Grating:
-	case EOneBrahamFootstepSurface::ServerRack:
-	case EOneBrahamFootstepSurface::Decking:
-		Suffix = FName(TEXT("Metal"));
-		break;
-	case EOneBrahamFootstepSurface::Wood:
-	case EOneBrahamFootstepSurface::Plasterboard:
-		Suffix = FName(TEXT("Wood"));
-		break;
-	case EOneBrahamFootstepSurface::Glass:
-	case EOneBrahamFootstepSurface::BallisticGlass:
-		Suffix = FName(TEXT("Glass"));
-		break;
-	case EOneBrahamFootstepSurface::Carpet:
-	case EOneBrahamFootstepSurface::Fabric:
-		Suffix = FName(TEXT("Carpet"));
-		break;
-	case EOneBrahamFootstepSurface::Flesh:
-		Suffix = FName(TEXT("Flesh"));
-		break;
-	default:
-		Suffix = FName(TEXT("Concrete"));
-		break;
-	}
-
-	const FName SoundId = FName(*FString::Printf(TEXT("%s_%s"), *SoundIdPrefix.ToString(), *Suffix.ToString()));
-	PlaySoundAtLocation(SoundId, Hit.ImpactPoint, VolumeScale, FMath::FRandRange(0.95f, 1.06f), IgnoredActor);
 }
 
 void UOneBrahamAudioManagerComponent::PlayImpactSound(const FOneBrahamImpactInfo& Impact, float VolumeScale)
@@ -1443,9 +1398,12 @@ void UOneBrahamAudioManagerComponent::SetTinnitusState(bool bActive, float Durat
 	TargetLowPassHz = OBLowPassFlashed;
 }
 
-void UOneBrahamAudioManagerComponent::SetDeafened(bool bDeafened)
+void UOneBrahamAudioManagerComponent::SetDeafened(bool bInDeafened)
 {
-	bDeafened = bDeafened;
+	// The parameter used to be called bDeafened, the member's name, so this line
+	// assigned the parameter to itself and the member never changed: shadowing
+	// is an error under UE5's defaults, and was a silent no-op before that.
+	bDeafened = bInDeafened;
 
 	if (bDeafened)
 	{
@@ -1564,11 +1522,6 @@ void UOneBrahamAudioManagerComponent::UpdateMusicDirector(float DeltaTime)
 // ===========================================================================
 //  Queries / debug
 // ===========================================================================
-
-const FOneBrahamSoundBankEntry* UOneBrahamAudioManagerComponent::FindBankEntry(FName SoundId) const
-{
-	return Bank != nullptr ? Bank->FindEntry(SoundId) : nullptr;
-}
 
 bool UOneBrahamAudioManagerComponent::HasCue(FName SoundId) const
 {

@@ -853,10 +853,15 @@ USoundAttenuation* UOneBrahamProximityVoiceComponent::GetVoiceAttenuation()
 
 float UOneBrahamProximityVoiceComponent::GetBusVolumeForVoice() const
 {
-	// Local helper: the audio manager owns bus volumes, but voice playback is
-	// driven from this component, so we resolve the shared value from the same
-	// settings object the manager reads. Reading the settings directly avoids a
-	// dependency loop between the two components.
+	// The listener's audio manager owns the voice bus: the Voice and Master
+	// faders, the voice output gain and the voice chat switch. Reading the two
+	// faders here directly is how the other two never reached a speaker.
+	if (const UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this))
+	{
+		return Audio->GetBusVolume(EOneBrahamAudioBus::Voice);
+	}
+
+	// No listener yet (the first frame of a level): the faders alone.
 	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
 	if (Settings == nullptr)
 	{

@@ -365,6 +365,40 @@ void AOneBrahamProjectileBase::MulticastDetonationFeedback_Implementation(FVecto
 		// Blueprint able to override it (`Docs/11` section 6).
 		break;
 	}
+
+	// The bang. Nothing played one: every grenade in the game went off in
+	// silence. This multicast is the one place that runs on every machine with
+	// the type and the position, and the listener's manager owns the mix. The
+	// frag and the charge go through PlayExplosion, which also rings the ears of
+	// a player inside the radius; the flashbang's ringing is the flash effect's
+	// own, decided by line of sight, so it gets the bang alone.
+	UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this);
+	if (Audio == nullptr)
+	{
+		return;
+	}
+
+	switch (UtilityType)
+	{
+	case EOneBrahamUtilityType::Frag:
+		Audio->PlayExplosion(DetonationLocation, BlastRadius, FName(TEXT("SFX_Frag_Explosion")));
+		break;
+
+	case EOneBrahamUtilityType::BreachCharge:
+		Audio->PlayExplosion(DetonationLocation, BreachRadius, FName(TEXT("SFX_Breach_Explosion")));
+		break;
+
+	case EOneBrahamUtilityType::Flashbang:
+		Audio->PlaySoundAtLocation(FName(TEXT("SFX_Flashbang_Bang")), DetonationLocation, 1.f, 1.f, this);
+		break;
+
+	case EOneBrahamUtilityType::Smoke:
+		Audio->PlaySoundAtLocation(FName(TEXT("SFX_Smoke_Deploy")), DetonationLocation, 1.f, 1.f, this);
+		break;
+
+	default:
+		break;
+	}
 }
 
 void AOneBrahamProjectileBase::OnProjectileStop(const FHitResult& ImpactResult)
@@ -380,6 +414,11 @@ void AOneBrahamProjectileBase::Detonate()
 	}
 
 	bDetonated = true;
+
+	// A charge set off early (shot, or by another blast) still has a fuse
+	// running; bDetonated stops a second blast, and this stops the call.
+	ClearTimers();
+
 	OnRep_Detonated();
 
 	switch (UtilityType)
@@ -797,5 +836,4 @@ void AOneBrahamProjectileBase::OnRep_FuseRemaining()
 void AOneBrahamProjectileBase::ClearTimers()
 {
 	GetWorldTimerManager().ClearTimer(FuseTimerHandle);
-	GetWorldTimerManager().ClearTimer(CleanupTimerHandle);
 }

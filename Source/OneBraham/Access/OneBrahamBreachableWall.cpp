@@ -356,9 +356,9 @@ void AOneBrahamBreachableWall::MulticastPlayBreachEffects_Implementation(const F
 			continue;
 		}
 
+		// The charge that did this played its own blast; the wall adds its fall.
 		if (UOneBrahamAudioManagerComponent* Audio = PC->GetAudioManager())
 		{
-			Audio->PlaySoundAtLocation(FName(TEXT("SFX_Breach_Explosion")), Origin, 1.3f, 1.f, this);
 			Audio->PlaySoundAtLocation(FName(TEXT("SFX_Wall_Collapse")), Origin, 1.1f, 0.96f, this);
 		}
 	}

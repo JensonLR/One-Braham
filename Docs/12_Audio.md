@@ -234,7 +234,11 @@ magazine was empty. A shell-by-shell shotgun reload plays only the first.
 ## 7. Footsteps
 
 Fifteen surfaces, one cue each, scheduled by the audio manager from the physical
-material of the surface the character is standing on. There is no per-character
+material of the surface the character is standing on. Every character calls
+`TickFootstepAudio` on the listener's manager every frame
+(`AOneBrahamCharacter::TickFootsteps`), with the surface re-classified at 4 Hz by
+a 60 cm trace below the capsule while it moves, because the movement
+component's floor sweep does not return a physical material. There is no per-character
 step animation event driving audio — the stride length is calculated from speed
 in `TickFootstepAudio`, so a slow walk produces quiet, widely-spaced steps and a
 sprint produces loud, close ones, with no asset duplication.
@@ -262,7 +266,11 @@ they come out of the table rather than out of a designer's memory.
 | Ducking | `SM_OneBraham_VoiceDuck` | 0.45× beds while anyone transmits, 250 ms release |
 | Flashbang | `SetTinnitusState` | 400 Hz low-pass + ringing bed, 1.4–6 s by distance and line of sight |
 | Downed | `SetDownedAudioState` | 900 Hz low-pass, world −12 dB, heartbeat at 110 bpm rising to 150 |
-| Deafened (spectating) | `SetDeafened` | everything distant, music leads |
+| Deafened (spectating) | `SetDeafened`, from `AOneBrahamPlayerController::OnRep_Spectating` | everything distant, music leads; lifted on the respawn |
+| Damage taken | `PlayDamageTakenCue`, from `ClientDamageTaken` | `UI_Damage_Taken`, pitched up for a head hit and down when the armour took it; `SFX_Bullet_Impact_Flesh` as well only when health was lost. A hit the armour absorbed whole still plays the thud |
+| Voice output | `SetVoiceBusGain`, from the settings | the voice output slider and the voice chat switch, applied to every speaker through `GetBusVolume(Voice)`. Voice chat mode `Muted` is the microphone only |
+| Announcements | `PlayAnnouncementChime`, from `UOneBrahamVoiceSubsystem::SpeakAnnouncement` | the Tannoy two-tone, then the line 0.9 s later; the chime plays even for a line with no recording, because the subtitle still needs announcing |
+| Grenades | `AOneBrahamProjectileBase::MulticastDetonationFeedback` | frag and breach charge through `PlayExplosion` (with its ear-ring inside the radius), flashbang bang and smoke pop as one-shots. A breached wall adds `SFX_Wall_Collapse`; the blast is the charge's |
 | Low health | `GetBusVolume` consumers | heartbeat and breathing scale from 40 HP down |
 | Purge | `SetLockdownAudio` | alarm bed + sprinkler, and the purge tick tone every 0.2 s |
 | Extraction | `SetExtractionAudio` | rotor bed, 2D sub-layer, positioned on the pad, speeding up from `Broadcast` to `Arriving` |

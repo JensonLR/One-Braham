@@ -354,7 +354,7 @@ void AOneBrahamAccessZone::PlayDoorEffects(EOneBrahamUnlockMethod Method, bool b
 				Audio->PlaySoundAtLocation(FName(TEXT("SFX_Keycard_Use")), Location, 0.9f, 1.f, this);
 				break;
 			case EOneBrahamUnlockMethod::Breach:
-				Audio->PlaySoundAtLocation(FName(TEXT("SFX_Breach_Explosion")), Location, 1.f, 1.f, this);
+				// The charge that opened it played the blast where it went off.
 				break;
 			case EOneBrahamUnlockMethod::Escalation:
 				// The building does it for you: no click, just the mechanism.
@@ -758,17 +758,11 @@ void AOneBrahamAccessZone::ApplyBreachDamage(float Damage, AActor* Breacher, con
 
 	UOneBrahamVFXStatics::SpawnExplosion(this, GetBarrierCentre(), 320.f, /*bBreach*/ true);
 
-	// Everyone on the floor hears that. That is the cost of the shortcut.
-	if (UWorld* World = GetWorld())
-	{
-		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-		{
-			if (UOneBrahamAudioManagerComponent* Audio = GetAudioFor(Cast<AOneBrahamPlayerController>(It->Get())))
-			{
-				Audio->PlaySoundAtLocation(FName(TEXT("SFX_Breach_Explosion")), GetBarrierCentre(), 1.2f, 1.f, this);
-			}
-		}
-	}
+	// Everyone on the floor hears it, and the charge is what they hear: the
+	// projectile plays the blast through every listener's mix
+	// (AOneBrahamProjectileBase::MulticastDetonationFeedback). This played a
+	// second blast once per player controller, so a listen host heard it twelve
+	// times over and the clients heard it from the charge only.
 }
 
 float AOneBrahamAccessZone::GetBreachIntegrity01() const

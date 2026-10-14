@@ -126,9 +126,6 @@ public:
 	 */
 	void PlayReloadCue(EOneBrahamReloadCue Cue, AActor* Shooter);
 
-	/** Impact foley resolved from the physical material of whatever was hit. */
-	void PlayImpact(FName SoundIdPrefix, const FHitResult& Hit, float VolumeScale = 1.f, AActor* IgnoredActor = nullptr);
-
 	/**
 	 * Impact cue from a replicated impact report. This is the single entry point
 	 * used by UOneBrahamVFXStatics on every machine, so the dust and the sound
@@ -192,7 +189,7 @@ public:
 	void SetTinnitusState(bool bActive, float DurationSeconds);
 
 	/** Spectating after death: everything gets distant. */
-	void SetDeafened(bool bDeafened);
+	void SetDeafened(bool bInDeafened);
 
 	/** Ref-counted voice duck (0.45x on the beds while anyone is talking). */
 	void PushVoiceDuck();
@@ -204,8 +201,6 @@ public:
 	// ======================================================================
 	//  Queries
 	// ======================================================================
-	const FOneBrahamSoundBankEntry* FindBankEntry(FName SoundId) const;
-
 	/** True when a cue exists as an asset or as a synthesised fallback. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Audio")
 	bool HasCue(FName SoundId) const;

@@ -626,18 +626,36 @@ void UOneBrahamVoiceSubsystem::SpeakAnnouncement(FName LineId)
 	OnVoiceLineSpoken.Broadcast(nullptr, LineId, Line->Subtitle, Duration);
 
 	// Play the announcement 2D on the local machine. Every machine receives the
-	// same replicated trigger from the match director, so no RPC is needed, but
-	// only the two nearest floors actually hear a building announcement.
+	// same replicated trigger from the match director, so no RPC is needed.
+	//
+	// The Tannoy's two-tone chime goes first, through the mix, and the voice
+	// follows it: that is how a building announcement sounds in every office in
+	// London, and the chime is what makes a player stop and listen. The chime
+	// plays even when the line has no recording yet, because the subtitle still
+	// needs announcing.
 	if (UWorld* World = GetWorld())
 	{
-		const bool bNearby = true;
+		constexpr float ChimeLeadSeconds = 0.9f;
+
+		if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(World))
+		{
+			Audio->PlayAnnouncementChime();
+		}
 
 		if (USoundBase* LineSound = Line->Sound.LoadSynchronous())
 		{
-			if (bNearby)
+			FTimerHandle Unused;
+			TWeakObjectPtr<UWorld> WeakWorld(World);
+			TWeakObjectPtr<USoundBase> WeakSound(LineSound);
+			World->GetTimerManager().SetTimer(Unused, FTimerDelegate::CreateLambda([WeakWorld, WeakSound]()
 			{
-				UGameplayStatics::SpawnSound2D(World, LineSound, 1.f, 1.f, 0.f, nullptr, false, true);
-			}
+				UWorld* LiveWorld = WeakWorld.Get();
+				USoundBase* Sound = WeakSound.Get();
+				if (LiveWorld != nullptr && Sound != nullptr)
+				{
+					UGameplayStatics::SpawnSound2D(LiveWorld, Sound, 1.f, 1.f, 0.f, nullptr, false, true);
+				}
+			}), ChimeLeadSeconds, false);
 		}
 		else
 		{

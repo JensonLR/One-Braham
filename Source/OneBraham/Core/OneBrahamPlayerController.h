@@ -211,7 +211,7 @@ public:
 	 * bullet that follows it, and this fires on every hit that lands.
 	 */
 	UFUNCTION(BlueprintCallable, Client, Unreliable, Category = "One Braham|UI")
-	void ClientDamageTaken(float Damage, FVector_NetQuantize InstigatorLocation);
+	void ClientDamageTaken(float Damage, FVector_NetQuantize InstigatorLocation, bool bHeadshot, bool bArmourAbsorbed);
 
 	/** Blinds this client with a flashbang: white-out, tinnitus, temporary deafness. */
 	UFUNCTION(BlueprintCallable, Client, Reliable, Category = "One Braham|Effects")
@@ -232,6 +232,15 @@ public:
 	/** Remaining flash duration on this client (0 = not flashed). */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Effects")
 	float GetFlashRemaining() const { return FlashRemaining; }
+
+	/**
+	 * Server: enters or leaves spectating. Replicates bIsSpectating, and runs the
+	 * local half (view, deafened mix) at once on a listen host, whose own
+	 * controller never receives its own RepNotify. The respawn path used to
+	 * write the protected flag directly from the character, which does not
+	 * compile, and would have skipped the local half if it had.
+	 */
+	void SetSpectating(bool bSpectating);
 
 protected:
 	/** Per-tick flash decay, called from PlayerTick. */

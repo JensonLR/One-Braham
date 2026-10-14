@@ -219,11 +219,10 @@ protected:
 
 	TWeakObjectPtr<class AOneBrahamCharacter> Thrower;
 
-	/** Clears the detonation timers. */
+	/** Clears the fuse. Called the moment the grenade goes off. */
 	void ClearTimers();
 
 	FTimerHandle FuseTimerHandle;
-	FTimerHandle CleanupTimerHandle;
 
 	/** How many times it has bounced - a grenade that bounced is more likely to
 	 *  have been a bad throw, and the "cook-off" quip fires from the audio manager. */

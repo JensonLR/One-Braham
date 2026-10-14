@@ -22,6 +22,7 @@
 
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Components/SpotLightComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/World.h"
@@ -191,6 +192,7 @@ void AOneBrahamCharacter::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 
 	UpdateLean(DeltaSeconds);
+	TickFootsteps(DeltaSeconds);
 
 	// Floor detection at 2 Hz - it only changes when someone takes the stairs.
 	FloorCheckAccumulator += DeltaSeconds;
@@ -325,6 +327,49 @@ void AOneBrahamCharacter::HandleMoveInput(const FVector2D& Input)
 
 	AddMovementInput(Forward, Input.Y);
 	AddMovementInput(Right, Input.X);
+}
+
+void AOneBrahamCharacter::TickFootsteps(float DeltaSeconds)
+{
+	// The listener's manager: null on a dedicated server, which has no ears.
+	UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this);
+	const UCharacterMovementComponent* Movement = GetCharacterMovement();
+
+	if (Audio == nullptr || Movement == nullptr || HealthComponent == nullptr || !HealthComponent->IsAlive())
+	{
+		return;
+	}
+
+	// The CMC's floor sweep does not ask for a physical material, so the surface
+	// is a trace of its own: 60 cm below the capsule, four times a second, and
+	// only while moving. A floor changes when somebody walks off it.
+	const float Speed2D = GetVelocity().Size2D();
+	FootstepSurfaceAccumulator += DeltaSeconds;
+
+	if (Speed2D > 40.f && FootstepSurfaceAccumulator >= 0.25f)
+	{
+		FootstepSurfaceAccumulator = 0.f;
+
+		const float HalfHeight = GetCapsuleComponent() != nullptr ? GetCapsuleComponent()->GetScaledCapsuleHalfHeight() : 90.f;
+		const FVector Start = GetActorLocation();
+		const FVector End = Start - FVector(0.f, 0.f, HalfHeight + 60.f);
+
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(OBFootstepSurface), /*bTraceComplex*/ false, this);
+		Params.bReturnPhysicalMaterial = true;
+
+		FHitResult Hit;
+		if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params))
+		{
+			FootstepSurface = UOneBrahamAudioManagerComponent::ClassifyGroundSurface(Hit.PhysMaterial.Get());
+		}
+	}
+
+	// bSprintRequested is local input and does not replicate; above jog speed is
+	// what a sprint sounds like from anywhere else.
+	const bool bSprinting = bSprintRequested || Speed2D > 440.f;
+
+	Audio->TickFootstepAudio(this, FootstepSurface, Speed2D, bIsCrouched, bSprinting,
+		Movement->IsFalling(), IsLocallyControlled());
 }
 
 void AOneBrahamCharacter::HandleJumpPressed()
@@ -1153,7 +1198,7 @@ void AOneBrahamCharacter::ServerOnRespawned()
 	if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(GetController()))
 	{
 		PC->ClientShowDeathScreen(false, FText::GetEmpty());
-		PC->bIsSpectating = false;
+		PC->SetSpectating(false);
 	}
 
 	bSprintRequested = false;
