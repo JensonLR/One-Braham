@@ -342,6 +342,11 @@ public:
 	UFUNCTION(Server, Reliable, Category = "One Braham|Weapons")
 	void ServerRequestFireMode();
 
+	/** The owning client's ADS state. Spread, recoil and the aim walk speed are all
+	 *  computed on the server from bAimingDownSights, so it has to be told. */
+	UFUNCTION(Server, Reliable, Category = "One Braham|Weapons")
+	void ServerSetAimingDownSights(bool bAiming);
+
 	UFUNCTION(Server, Reliable, Category = "One Braham|Weapons")
 	void ServerRequestMelee();
 

@@ -187,7 +187,7 @@ protected:
 	// ======================================================================
 	void StartWarmup();
 	void StartActiveMatch();
-	void FinishMatch(EOneBrahamTeam WinningTeam, const FString& WinningSquadName, bool bNoSurvivors, int32 ExtractedCount, EOneBrahamExtractionFailReason FailReason);
+	void FinishMatch(EOneBrahamMatchEnding Ending, EOneBrahamTeam WinningTeam, const FString& WinningSquadName, int32 ExtractedCount, EOneBrahamExtractionFailReason FailReason);
 
 	/** Applies the settings-derived defaults to the GameMode's player classes. */
 	void ConfigureClassesFromSettings();

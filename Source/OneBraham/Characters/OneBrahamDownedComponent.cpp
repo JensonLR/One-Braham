@@ -3,6 +3,7 @@
 #include "Characters/OneBrahamDownedComponent.h"
 
 #include "OneBraham.h"
+#include "Core/OneBrahamGameMode.h"
 #include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamPlayerController.h"
 #include "Core/OneBrahamPlayerState.h"
@@ -144,6 +145,12 @@ void UOneBrahamDownedComponent::EnterDownedState(AActor* Killer, const FOneBraha
 	if (AOneBrahamPlayerState* State = Character->GetPlayerState<AOneBrahamPlayerState>())
 	{
 		State->LifeState = EOneBrahamLifeState::Downed;
+	}
+
+	// The squad panel and the end conditions read the roster, not the player state.
+	if (AOneBrahamGameMode* GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<AOneBrahamGameMode>() : nullptr)
+	{
+		GameMode->EvaluateMatchEndConditions();
 	}
 
 	// --- Feedback ---------------------------------------------------------
@@ -355,6 +362,11 @@ void UOneBrahamDownedComponent::ServerRevive(AController* ReviverController)
 	{
 		State->LifeState = EOneBrahamLifeState::Alive;
 		State->RemainingRevives = FMath::Max(0, State->RemainingRevives - 1);
+	}
+
+	if (AOneBrahamGameMode* GameMode = GetWorld() != nullptr ? GetWorld()->GetAuthGameMode<AOneBrahamGameMode>() : nullptr)
+	{
+		GameMode->EvaluateMatchEndConditions();
 	}
 
 	if (UOneBrahamHealthComponent* Health = Character->GetHealthComponent())

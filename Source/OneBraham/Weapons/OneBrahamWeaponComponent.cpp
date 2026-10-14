@@ -1948,9 +1948,17 @@ void UOneBrahamWeaponComponent::OnRep_Reloading()
 
 void UOneBrahamWeaponComponent::SetAimingDownSights(bool bAiming)
 {
-	// ADS is a pure presentation + spread change; the spread change is applied
-	// server-side from the replicated flag, so a modified client cannot get the
-	// ADS accuracy benefit without the movement penalty.
+	// Spread, recoil and the aim walk speed are computed on the server from the
+	// replicated flag, so a modified client cannot get the ADS accuracy without
+	// the movement penalty. The owning client applies it at once for the camera
+	// and tells the server; until this RPC existed the server never heard, so
+	// every shot was scored as hip fire and the next replication snapped the
+	// owner's sight back down.
+	if (bAimingDownSights == bAiming)
+	{
+		return;
+	}
+
 	bAimingDownSights = bAiming;
 
 	// Sprinting overrides ADS: you drop the sight to run.
@@ -1959,5 +1967,45 @@ void UOneBrahamWeaponComponent::SetAimingDownSights(bool bAiming)
 		GetCharacter()->SetSprintRequested(false);
 	}
 
+	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
+	{
+		const APawn* Pawn = Cast<APawn>(GetOwner());
+		if (Pawn != nullptr && Pawn->IsLocallyControlled())
+		{
+			ServerSetAimingDownSights(bAiming);
+		}
+		return;
+	}
+
 	ForceNetUpdate();
+}
+
+void UOneBrahamWeaponComponent::ServerSetAimingDownSights_Implementation(bool bAiming)
+{
+	AOneBrahamCharacter* Character = GetCharacter();
+	if (Character == nullptr)
+	{
+		return;
+	}
+
+	if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(Character->GetController()))
+	{
+		if (!PC->CheckRPCBudget(TEXT("ServerSetAimingDownSights")))
+		{
+			return;
+		}
+	}
+
+	// Raising the sight is refused where the server says it is impossible; the
+	// replicated false then puts the client right. Lowering is always allowed.
+	if (bAiming)
+	{
+		if (CurrentWeapon == nullptr || Character->LifeState != EOneBrahamLifeState::Alive)
+		{
+			ForceNetUpdate();
+			return;
+		}
+	}
+
+	SetAimingDownSights(bAiming);
 }

@@ -711,6 +711,23 @@ struct FOneBrahamPlayerSummary
 	int32 Score = 0;
 };
 
+/** How a match ended: the four endings of Docs/06 section 7, plus FIRE DRILL's score limit. */
+UENUM(BlueprintType)
+enum class EOneBrahamMatchEnding : uint8
+{
+	None = 0,
+	/** A squad completed the 30 s winch hold. */
+	Extracted = 1,
+	/** Every other squad was eliminated before anyone extracted. */
+	LastSquadStanding = 2,
+	/** Every squad was eliminated, the purge included. */
+	NoSurvivors = 3,
+	/** The hard time limit was reached. */
+	TimeOut = 4,
+	/** FIRE DRILL: a team reached the score limit. */
+	ScoreLimit = 5
+};
+
 USTRUCT(BlueprintType)
 struct FOneBrahamMatchResult
 {
@@ -718,6 +735,10 @@ struct FOneBrahamMatchResult
 
 	UPROPERTY(BlueprintReadOnly, Category = "Result")
 	EOneBrahamMatchMode Mode = EOneBrahamMatchMode::Ascent;
+
+	/** Which of the endings this was; the results screen's headline is chosen from it. */
+	UPROPERTY(BlueprintReadOnly, Category = "Result")
+	EOneBrahamMatchEnding Ending = EOneBrahamMatchEnding::None;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Result")
 	EOneBrahamTeam WinningTeam = EOneBrahamTeam::None;

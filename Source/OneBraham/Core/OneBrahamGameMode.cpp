@@ -472,7 +472,7 @@ void AOneBrahamGameMode::CompleteMatchWithExtraction(EOneBrahamTeam WinningTeam,
 		return;
 	}
 
-	FinishMatch(WinningTeam, WinningSquadName, /*bNoSurvivors*/ false, ExtractedCount, EOneBrahamExtractionFailReason::None);
+	FinishMatch(EOneBrahamMatchEnding::Extracted, WinningTeam, WinningSquadName, ExtractedCount, EOneBrahamExtractionFailReason::None);
 }
 
 void AOneBrahamGameMode::CompleteMatchNoSurvivors()
@@ -482,11 +482,13 @@ void AOneBrahamGameMode::CompleteMatchNoSurvivors()
 		return;
 	}
 
-	FinishMatch(EOneBrahamTeam::None, FString(), /*bNoSurvivors*/ true, 0, EOneBrahamExtractionFailReason::CallersEliminated);
+	FinishMatch(EOneBrahamMatchEnding::NoSurvivors, EOneBrahamTeam::None, FString(), 0, EOneBrahamExtractionFailReason::CallersEliminated);
 }
 
-void AOneBrahamGameMode::FinishMatch(EOneBrahamTeam WinningTeam, const FString& WinningSquadName, bool bNoSurvivors, int32 ExtractedCount, EOneBrahamExtractionFailReason FailReason)
+void AOneBrahamGameMode::FinishMatch(EOneBrahamMatchEnding Ending, EOneBrahamTeam WinningTeam, const FString& WinningSquadName, int32 ExtractedCount, EOneBrahamExtractionFailReason FailReason)
 {
+	const bool bNoSurvivors = Ending == EOneBrahamMatchEnding::NoSurvivors;
+
 	bMatchFinished = true;
 	SetMatchPhase(EOneBrahamMatchPhase::Complete);
 
@@ -497,6 +499,7 @@ void AOneBrahamGameMode::FinishMatch(EOneBrahamTeam WinningTeam, const FString& 
 	}
 
 	GS->MatchResult = BuildMatchResult(WinningTeam, WinningSquadName, bNoSurvivors, ExtractedCount);
+	GS->MatchResult.Ending = Ending;
 	GS->OnMatchResultReady.Broadcast(GS->MatchResult);
 
 	// End-of-match announcements: the Tannoy gets the last word, as it should.
@@ -504,6 +507,12 @@ void AOneBrahamGameMode::FinishMatch(EOneBrahamTeam WinningTeam, const FString& 
 	if (bNoSurvivors)
 	{
 		Announcement = FText::FromString(TEXT("All staff accounted for. There are no survivors. Please await further instruction."));
+	}
+	else if (Ending == EOneBrahamMatchEnding::LastSquadStanding)
+	{
+		Announcement = FText::Format(
+			FText::FromString(TEXT("{0}, you are the only occupants remaining. The building is yours. Nobody else's.")),
+			FText::FromString(WinningSquadName.IsEmpty() ? TEXT("Remaining staff") : WinningSquadName));
 	}
 	else if (WinningTeam != EOneBrahamTeam::None)
 	{
@@ -518,8 +527,8 @@ void AOneBrahamGameMode::FinishMatch(EOneBrahamTeam WinningTeam, const FString& 
 
 	Announce(Announcement, true);
 
-	OB_MATCH_LOG("MATCH COMPLETE: winner=%s squad='%s' noSurvivors=%d extracted=%d duration=%.1fs reason=%s",
-		*UEnum::GetValueAsString(WinningTeam), *WinningSquadName, bNoSurvivors ? 1 : 0, ExtractedCount,
+	OB_MATCH_LOG("MATCH COMPLETE: ending=%s winner=%s squad='%s' noSurvivors=%d extracted=%d duration=%.1fs reason=%s",
+		*UEnum::GetValueAsString(Ending), *UEnum::GetValueAsString(WinningTeam), *WinningSquadName, bNoSurvivors ? 1 : 0, ExtractedCount,
 		GetWorld()->GetTimeSeconds() - MatchStartTime,
 		*UEnum::GetValueAsString(FailReason));
 
@@ -748,8 +757,9 @@ void AOneBrahamGameMode::AddTeamScoreByIndex(int32 TeamIndex, int32 Amount)
 	if (GS->TeamScores[TeamIndex] >= MatchSettings->ScoreToWin)
 	{
 		const EOneBrahamTeam WinningTeam = TeamIndex == 0 ? EOneBrahamTeam::InternalStaff : EOneBrahamTeam::ExternalContractors;
-		FinishMatch(WinningTeam, WinningTeam == EOneBrahamTeam::InternalStaff ? TEXT("Internal Staff") : TEXT("External Contractors"),
-			false, 0, EOneBrahamExtractionFailReason::None);
+		FinishMatch(EOneBrahamMatchEnding::ScoreLimit, WinningTeam,
+			WinningTeam == EOneBrahamTeam::InternalStaff ? TEXT("Internal Staff") : TEXT("External Contractors"),
+			0, EOneBrahamExtractionFailReason::None);
 	}
 }
 
@@ -776,8 +786,9 @@ void AOneBrahamGameMode::HandleMatchTimeLimitReached()
 		? EOneBrahamTeam::None
 		: (BestIndex == 0 ? EOneBrahamTeam::InternalStaff : EOneBrahamTeam::ExternalContractors);
 
-	FinishMatch(WinningTeam, bDraw ? TEXT("Draw") : (BestIndex == 0 ? TEXT("Internal Staff") : TEXT("External Contractors")),
-		false, 0, EOneBrahamExtractionFailReason::LoiterExpired);
+	FinishMatch(EOneBrahamMatchEnding::TimeOut, WinningTeam,
+		bDraw ? TEXT("Draw") : (BestIndex == 0 ? TEXT("Internal Staff") : TEXT("External Contractors")),
+		0, EOneBrahamExtractionFailReason::LoiterExpired);
 }
 
 void AOneBrahamGameMode::EvaluateMatchEndConditions()
@@ -787,9 +798,23 @@ void AOneBrahamGameMode::EvaluateMatchEndConditions()
 		return;
 	}
 
+	// The roster is a snapshot of the player states, taken on join and leave. A
+	// death or a down changes the player state only, so without this rebuild
+	// every member still read Alive here and neither "no survivors" nor "last
+	// squad standing" could ever fire, and the squad panel showed the dead as up.
+	RebuildSquadInfo();
+
 	// ASCENT ends in "no survivors" when every squad is eliminated before any
 	// extraction. FIRE DRILL never ends this way because players respawn.
 	if (MatchSettings->Mode != EOneBrahamMatchMode::Ascent)
+	{
+		return;
+	}
+
+	// Nothing ends a match that has not started: the warmup plaza is for
+	// arriving, and a squad that has not filled yet is not "eliminated".
+	const EOneBrahamMatchPhase Phase = GetMatchPhase();
+	if (Phase != EOneBrahamMatchPhase::Active && Phase != EOneBrahamMatchPhase::Extraction)
 	{
 		return;
 	}
@@ -800,22 +825,55 @@ void AOneBrahamGameMode::EvaluateMatchEndConditions()
 		return;
 	}
 
-	bool bAnySquadAlive = false;
+	// Squads that ever had anyone in them: an empty roster slot is not an
+	// opponent, and a match that started with one squad (bot practice with the
+	// bots disabled, a QA box) must not be "won" by it the moment it starts.
+	int32 PopulatedSquads = 0;
+	int32 AliveSquads = 0;
+	const FOneBrahamSquadInfo* LastAlive = nullptr;
+
 	for (const FOneBrahamSquadInfo& Squad : GS->Squads)
 	{
+		if (Squad.Members.Num() == 0)
+		{
+			continue;
+		}
+
+		++PopulatedSquads;
+
 		if (Squad.IsAlive())
 		{
-			bAnySquadAlive = true;
-			break;
+			++AliveSquads;
+			LastAlive = &Squad;
 		}
 	}
 
 	const bool bExtractionInProgress = GS->GetExtractionComponent() != nullptr &&
 		GS->GetExtractionComponent()->IsExtractionActive();
 
-	if (!bAnySquadAlive && !bExtractionInProgress)
+	if (AliveSquads == 0 && !bExtractionInProgress)
 	{
 		CompleteMatchNoSurvivors();
+		return;
+	}
+
+	// Docs/06 section 7: every other squad eliminated, extraction not completed.
+	// The survivors win where they stand; making them hold the winch against
+	// nobody for 30 s is a wait, not a game.
+	if (AliveSquads == 1 && PopulatedSquads >= 2 && LastAlive != nullptr)
+	{
+		const FString SquadName = LastAlive->SquadName.IsEmpty()
+			? GetSquadDisplayName(LastAlive->SquadId)
+			: LastAlive->SquadName.ToString();
+
+		int32 Survivors = 0;
+		for (const FOneBrahamSquadMemberInfo& Member : LastAlive->Members)
+		{
+			Survivors += Member.LifeState == EOneBrahamLifeState::Alive || Member.LifeState == EOneBrahamLifeState::Downed ? 1 : 0;
+		}
+
+		FinishMatch(EOneBrahamMatchEnding::LastSquadStanding, LastAlive->Team, SquadName, Survivors,
+			EOneBrahamExtractionFailReason::None);
 	}
 }
 
@@ -836,7 +894,7 @@ void AOneBrahamGameMode::DebugForceMatchResult(int32 WinningTeamIndex)
 		? GS->Squads[WinningTeamIndex].Team
 		: EOneBrahamTeam::Alpha;
 
-	FinishMatch(Team, SquadName, false, MatchSettings ? MatchSettings->PlayersPerTeam : 4, EOneBrahamExtractionFailReason::None);
+	FinishMatch(EOneBrahamMatchEnding::Extracted, Team, SquadName, MatchSettings ? MatchSettings->PlayersPerTeam : 4, EOneBrahamExtractionFailReason::None);
 }
 
 // ==========================================================================
