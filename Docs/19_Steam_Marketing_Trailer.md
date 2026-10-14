@@ -243,6 +243,13 @@ because Steam refuses a write before that. Each query re-sends anything the
 profile has earned that Steam lacks, so an achievement earned offline or lost
 to a crash goes up at the next start.
 
+The online subsystem only knows the achievements listed as `Achievement_N_Id`
+under `[OnlineSubsystemSteam]` in `Config/DefaultEngine.ini`, numbered from 0
+without gaps. It ignores a write to any other id. The list there is the table
+above, in the same order. `check_cosmetic_ids` fails the build when the code,
+the ini and this table disagree. The same ids must exist as API names on the
+Steamworks partner site.
+
 ### Stats
 
 All six are `INT`, set by the game and never decremented. The game writes the

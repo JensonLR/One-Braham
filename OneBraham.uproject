@@ -61,6 +61,7 @@
 			"Enabled": true,
 			"SupportedTargetPlatforms": [
 				"Win64",
+				"Mac",
 				"Linux"
 			]
 		},
@@ -88,6 +89,7 @@
 	],
 	"TargetPlatforms": [
 		"Windows",
+		"Mac",
 		"Linux"
 	],
 	"EpicSampleNameHash": "",

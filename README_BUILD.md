@@ -14,7 +14,7 @@ script; each one stops on the first failure and logs to `Saved/Logs/Scripts/`.
 
 | | |
 | --- | --- |
-| Windows 10/11 x64 | the client is Windows-first; the server also builds for Linux |
+| Windows 10/11 x64 | the client is Windows-first; the server also builds for Linux. A Mac can develop the game but not package it (see Working on a Mac) |
 | Unreal Engine 5.5 or newer | Epic Games Launcher, with the "Linux" target platform if you want a Linux server |
 | Visual Studio 2022 | the "Game development with C++" workload, and the .NET desktop components UBT uses |
 | Python 3.9+ | on `PATH`, for the engine-free checks |
@@ -45,6 +45,31 @@ Each step proves something the next one relies on:
 | 4 | the map is sound, no asset references something missing, the content cooks | `Saved/Validation/` has one report per check |
 | 5 | the match rules, weapons, damage, voice, input and replication contracts hold at runtime | the automation log names the test |
 | 6–7 | the shipping builds exist where the run scripts look for them | the archive step in the BuildCookRun log |
+
+## Working on a Mac
+
+A Mac can run the editor, compile the game module, build the content and play
+in the editor. It cannot package the shipped builds: the client is packaged on
+Windows and the server on Windows or Linux. Requirements for UE 5.5, from
+Epic's [macOS development requirements](https://dev.epicgames.com/documentation/en-us/unreal-engine/macos-development-requirements-for-unreal-engine):
+
+| | |
+| --- | --- |
+| macOS | Ventura 13.5 or newer |
+| Xcode | 15.2 or newer, 15.4+ recommended. Open it once after installing, and accept the licence |
+| Hardware | Apple Silicon. 16 GB is the minimum and 32 GB is recommended. Nanite and virtual shadow maps need an M2 or newer; on an M1 the engine draws the fallback meshes |
+| Python 3 | for step 0 (`python3` from Xcode's command line tools is enough) |
+
+```
+0.  Scripts/RunAll.sh                   the engine-free checks
+2.  Scripts/BuildEditor.sh --generate   Xcode project, then compile OneBrahamEditor (Mac, Development)
+3.  Scripts/BuildContent.sh             every generated asset and the map, in the editor
+```
+
+Both scripts find a Launcher install at `/Users/Shared/Epic Games/UE_5.5`.
+For anything else, set `UE_ROOT`. Then open `OneBraham.uproject` and play in
+the editor. Steam works on a Mac with the Steam client running. Without it, online
+services are off and practice and LAN games still work.
 
 ## Other targets
 

@@ -100,7 +100,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | doc_files | OK | 0.1 | 72 documented paths, all on disk |
 | doc_types | OK | 0.1 | 61 documented type names, all declared |
 | weapon_ids | OK | 0.1 | 122 weapon-id checks, the armoury and the spawn table agree |
-| cosmetic_ids | OK | 0.1 | 149 cosmetic checks, one wardrobe |
+| cosmetic_ids | OK | 0.1 | 152 cosmetic checks, one wardrobe |
 | hud_strings | OK | 0.1 | 98 HUD-string checks, 31 rows and 7 widgets, every one shown |
 | audio_ids | OK | 0.2 | 308 audio-id checks, every cue audible or documented |
 | interaction_ids | OK | 0.3 | 281 interaction checks, 10 interactables, every verb, tag, tuning number and override accounted for |

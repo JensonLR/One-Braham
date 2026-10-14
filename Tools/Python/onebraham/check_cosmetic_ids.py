@@ -72,6 +72,15 @@ CATALOGUE = os.path.join(python_root, "Source", "OneBraham", "Data",
 STEAM = os.path.join(python_root, "Source", "OneBraham", "Online",
                      "OneBrahamSteamSubsystem.cpp")
 GAME_INI = os.path.join(python_root, "Config", "DefaultGame.ini")
+ENGINE_INI = os.path.join(python_root, "Config", "DefaultEngine.ini")
+DOCS_19 = os.path.join(python_root, "Docs", "19_Steam_Marketing_Trailer.md")
+
+#: An achievement definition row: { TEXT("ACH_..."), ...
+ACHIEVEMENT_ROW = re.compile(r'\{\s*TEXT\("(ACH_[A-Z0-9_]+)"\)')
+
+#: OnlineSubsystemSteam reads the achievement list from these keys and ignores
+#: a write to any id not on it.
+ACHIEVEMENT_INI = re.compile(r'^\s*Achievement_(\d+)_Id\s*=\s*"?([A-Za-z0-9_]+)"?\s*$', re.M)
 
 #: A catalogue row: AddUnlock(TEXT("Jacket_Bomber"), TEXT("OB.Cosmetic.Unlock..."), ...
 CATALOGUE_ROW = re.compile(r'AddUnlock\(TEXT\("([A-Za-z0-9_]+)"\),\s*TEXT\("([A-Za-z0-9_.]+)"\)')
@@ -396,6 +405,32 @@ def run(source_root=None):
         if tag not in catalogue_tags:
             problems.append((u"an achievement grants '{0}' and no catalogue row opens "
                              u"anything with it".format(tag), u"catalogue"))
+
+    # 7. The achievement list three places must share: the definitions in the
+    #    Steam subsystem, the Achievement_N_Id keys OnlineSubsystemSteam reads
+    #    (it drops a write to any id it was not told about, and stops reading
+    #    at the first missing index), and the table in Docs/19.
+    code_ids = ACHIEVEMENT_ROW.findall(read(STEAM))
+    ini_rows = sorted((int(index), ach) for index, ach in ACHIEVEMENT_INI.findall(read(ENGINE_INI)))
+    ini_ids = [ach for _index, ach in ini_rows]
+    checks += 1
+    if [index for index, _ach in ini_rows] != list(range(len(ini_rows))):
+        problems.append((u"the Achievement_N_Id keys in Config/DefaultEngine.ini are not numbered "
+                         u"0, 1, 2... without gaps; Steam stops reading at the first gap",
+                         u"achievements"))
+    checks += 1
+    if sorted(code_ids) != sorted(ini_ids):
+        problems.append((u"the Steam subsystem defines {0} and Config/DefaultEngine.ini lists {1}; "
+                         u"an achievement missing from the ini never unlocks on Steam".format(
+                             u", ".join(sorted(set(code_ids) - set(ini_ids))) or u"nothing extra",
+                             u", ".join(sorted(set(ini_ids) - set(code_ids))) or u"nothing extra"),
+                         u"achievements"))
+    doc_ids = re.findall(r'^\| `(ACH_[A-Z0-9_]+)` \|', read(DOCS_19), re.M)
+    checks += 1
+    if sorted(code_ids) != sorted(doc_ids):
+        problems.append((u"Docs/19's achievement table lists {0} and the code defines {1}".format(
+                             u", ".join(sorted(doc_ids)), u", ".join(sorted(code_ids))),
+                         u"achievements"))
 
     section = DOC_SECTION.search(read(DOCS_13))
     doc_rows = DOC_SLOT_ROW.findall(section.group(1) if section else u"")

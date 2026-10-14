@@ -25,13 +25,14 @@ walk-throughs; this file is the index.
 | Script | What it does |
 | --- | --- |
 | `BuildEditor.ps1` / `BuildEditor.bat` | Compiles with Unreal Build Tool. `-Target Editor` (default), `Game`, `Server` or `All`; `-Configuration Development` (default), `DebugGame`, `Shipping`; `-Clean`. Runs `check_cpp_symbols.py` and `check_uht_contracts.py` after a successful compile. |
+| `BuildEditor.sh` | macOS or Linux: compiles `OneBrahamEditor` (Development) for this machine. `--generate` also writes the Xcode or Makefile project, and `--dry-run` prints the commands. Finds the engine from `UE_ROOT` or the Launcher's `/Users/Shared/Epic Games/UE_5.5`, and stops with instructions if Xcode is not set up. |
 
 ## Content
 
 | Script | What it does |
 | --- | --- |
 | `BuildContent.bat` | Runs `Tools/Python/onebraham/run_all.py` in the editor: materials, the map, props, weapons, the cast, audio, input, UI, VFX, then validation. Exit code 0 means every step passed. |
-| `BuildContent.sh` | The same on a Linux host. |
+| `BuildContent.sh` | The same on a macOS or Linux host (`UE_ROOT`, or the Launcher install on a Mac). |
 | `Import_Font.bat` | Imports the UI font and points `F_OneBrahamSans` at it. |
 
 `BuildContent` takes the same switches as `run_all.py`:
