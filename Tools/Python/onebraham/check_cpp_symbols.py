@@ -566,6 +566,11 @@ def data_members(body):
     return names
 
 
+# A decimal integer followed directly by f: not after a digit, letter, dot or
+# underscore (so 0.5f, 1e3f, 0x1f and Name2f stay out).
+INTEGER_FLOAT_SUFFIX = re.compile(r'(?<![\w.])([0-9]+f)\b')
+
+
 def run_hygiene():
     """(checks, problems) for the rules that are not about linking.
 
@@ -597,6 +602,20 @@ def run_hygiene():
                     u"{0} is a scoped enum and has no relational or bitwise operator: "
                     u"'{1} {2}::' cannot compile - compare against the values it can be"
                     .format(match.group(1), match.group(0)[:2].strip(), match.group(1))))
+
+    # --- an integer literal with a float suffix ---------------------------
+    # "0f" is not a C++ literal: the suffix needs a decimal point or exponent
+    # ("0.f", "1e3f"). MSVC and clang both reject it; Python and C# accept it,
+    # which is how it gets typed.
+    for rel, path in files:
+        text = strip_comments_and_strings(io.open(path, encoding="utf-8", errors="ignore").read())
+        checks += 1
+        for match in INTEGER_FLOAT_SUFFIX.finditer(text):
+            line = text[:match.start()].count("\n") + 1
+            problems.append((
+                rel, line,
+                u"'{0}' is not a C++ literal: a float suffix needs a decimal point - write '{1}.f'"
+                .format(match.group(1), match.group(1)[:-1])))
 
     # --- a member that shadows an engine property -------------------------
     for class_name in sorted(classes):
@@ -860,7 +879,7 @@ def main():
     if not hygiene and not missing:
         C.log(u"  hygiene: scoped enums, shadowed engine properties, engine-private "
               u"members, shadowed members, per-controller audio, soft-pointer IsValid, "
-              u"duplicate definitions. OK")
+              u"duplicate definitions, integer float literals. OK")
         return 0
 
     for rel, line, message in hygiene:
