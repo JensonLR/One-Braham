@@ -899,6 +899,23 @@ def check_config(v, _config_only):
         else:
             v.pass_("config", u"{0} settings present".format(mode))
 
+    # The content pipeline is Python run inside the editor: -run=pythonscript
+    # needs the Python plugin enabled in this project (Epic: per project), and
+    # the builders call the Editor Scripting Utilities.
+    try:
+        import json
+        with io.open(os.path.join(os.path.dirname(CONFIG_DIR), "OneBraham.uproject"), encoding="utf-8") as handle:
+            plugins = dict((p.get("Name"), p.get("Enabled")) for p in json.load(handle).get("Plugins", []))
+    except (IOError, OSError, ValueError) as exc:
+        plugins = {}
+        v.fail("config", u"OneBraham.uproject could not be read: {0}".format(exc))
+    missing_plugins = [name for name in ("PythonScriptPlugin", "EditorScriptingUtilities") if not plugins.get(name)]
+    if missing_plugins:
+        v.fail("config", u"OneBraham.uproject does not enable {0}".format(u", ".join(missing_plugins)),
+               u"Scripts/BuildContent cannot run a single builder without them")
+    else:
+        v.pass_("config", u"editor Python and scripting plugins enabled")
+
     # The game net driver. With no definition the engine's IpNetDriver carries
     # every connection and a Steam lobby join, which resolves to a steam.<id>
     # P2P address, cannot connect. The engine's own row must be cleared first or

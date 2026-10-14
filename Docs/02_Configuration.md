@@ -89,10 +89,9 @@ the only way this can fail, and it fails silently.
 ```ini
 [/Script/OnlineSubsystemUtils.IpNetDriver]
 NetServerMaxTickRate=60
-MaxClientRate=96000
-MaxInternetClientRate=96000
-[/Script/Engine.NetDriver]
-bReplicateUsingRegisteredSubObjectList=True
+MaxClientRate=100000
+MaxInternetClientRate=100000
+[ConsoleVariables]
 net.UseAdaptiveNetUpdateFrequency=1
 ```
 
@@ -100,13 +99,13 @@ net.UseAdaptiveNetUpdateFrequency=1
 
 ```ini
 [/Script/OnlineSubsystemSteam.SteamNetDriver]
-NetConnectionClassName=OnlineSubsystemSteam.SteamNetConnection
+NetConnectionClassName="OnlineSubsystemSteam.SteamNetConnection"
 [/Script/Engine.GameEngine]
 !NetDriverDefinitions=ClearArray
 +NetDriverDefinitions=(DefName="GameNetDriver",DriverClassName="OnlineSubsystemSteam.SteamNetDriver",DriverClassNameFallback="OnlineSubsystemUtils.IpNetDriver")
 +NetDriverDefinitions=(DefName="DemoNetDriver",DriverClassName="/Script/Engine.DemoNetDriver",DriverClassNameFallback="/Script/Engine.DemoNetDriver")
 [OnlineSubsystemSteam]
-bEnabled=True
+bEnabled=true
 SteamDevAppId=480          ; replaced by the real AppID at release, see Scripts/steam_app_build.vdf
 ```
 
@@ -216,6 +215,11 @@ RunUnderOneProcess=True
 [/Script/PythonScriptPlugin.PythonScriptPluginSettings]
 +AdditionalPaths=(Path="Tools/Python")
 ```
+
+The Python plugin itself is enabled in `OneBraham.uproject` (`PythonScriptPlugin`,
+editor only). Epic's docs say it must be enabled per project, and
+`-run=pythonscript`, which every content builder runs through, does nothing
+without it.
 
 `RunUnderOneProcess=True` matters: three clients in one process is the only way
 to iterate on the door and shutter logic without a second machine, and it makes
