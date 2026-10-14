@@ -19,6 +19,161 @@ namespace OneBrahamMovement
 	static constexpr uint8 CMOVE_Slide = 2;
 }
 
+// ==========================================================================
+//  Saved moves: the intent that travels with every move
+// ==========================================================================
+namespace
+{
+	class FSavedMove_OneBraham : public FSavedMove_Character
+	{
+	public:
+		typedef FSavedMove_Character Super;
+
+		uint8 bSavedWantsToSprint : 1;
+		uint8 bSavedWantsToWalk : 1;
+		uint8 bSavedWantsToSlide : 1;
+		uint8 bSavedWantsToMantle : 1;
+
+		FSavedMove_OneBraham()
+		{
+			bSavedWantsToSprint = 0;
+			bSavedWantsToWalk = 0;
+			bSavedWantsToSlide = 0;
+			bSavedWantsToMantle = 0;
+		}
+
+		virtual void Clear() override
+		{
+			Super::Clear();
+			bSavedWantsToSprint = 0;
+			bSavedWantsToWalk = 0;
+			bSavedWantsToSlide = 0;
+			bSavedWantsToMantle = 0;
+		}
+
+		virtual uint8 GetCompressedFlags() const override
+		{
+			uint8 Result = Super::GetCompressedFlags();
+			Result |= bSavedWantsToSprint ? FLAG_Custom_0 : 0;
+			Result |= bSavedWantsToWalk ? FLAG_Custom_1 : 0;
+			Result |= bSavedWantsToSlide ? FLAG_Custom_2 : 0;
+			Result |= bSavedWantsToMantle ? FLAG_Custom_3 : 0;
+			return Result;
+		}
+
+		virtual bool CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* InCharacter, float MaxDelta) const override
+		{
+			const FSavedMove_OneBraham* Other = static_cast<const FSavedMove_OneBraham*>(NewMove.Get());
+			// A move that starts a slide or a mantle is never merged away.
+			if (bSavedWantsToSprint != Other->bSavedWantsToSprint || bSavedWantsToWalk != Other->bSavedWantsToWalk
+				|| bSavedWantsToSlide || Other->bSavedWantsToSlide || bSavedWantsToMantle || Other->bSavedWantsToMantle)
+			{
+				return false;
+			}
+			return Super::CanCombineWith(NewMove, InCharacter, MaxDelta);
+		}
+
+		virtual void SetMoveFor(ACharacter* InCharacter, float InDeltaTime, FVector const& NewAccel,
+			FNetworkPredictionData_Client_Character& ClientData) override
+		{
+			Super::SetMoveFor(InCharacter, InDeltaTime, NewAccel, ClientData);
+			if (const UOneBrahamCharacterMovementComponent* Movement = Cast<UOneBrahamCharacterMovementComponent>(InCharacter->GetCharacterMovement()))
+			{
+				bSavedWantsToSprint = Movement->bWantsToSprint;
+				bSavedWantsToWalk = Movement->bWantsToWalk;
+				bSavedWantsToSlide = Movement->bWantsToSlide;
+				bSavedWantsToMantle = Movement->bWantsToMantle;
+			}
+		}
+
+		virtual void PrepMoveFor(ACharacter* InCharacter) override
+		{
+			Super::PrepMoveFor(InCharacter);
+			if (UOneBrahamCharacterMovementComponent* Movement = Cast<UOneBrahamCharacterMovementComponent>(InCharacter->GetCharacterMovement()))
+			{
+				Movement->bWantsToSprint = bSavedWantsToSprint;
+				Movement->bWantsToWalk = bSavedWantsToWalk;
+				Movement->bWantsToSlide = bSavedWantsToSlide;
+				Movement->bWantsToMantle = bSavedWantsToMantle;
+			}
+		}
+	};
+
+	class FNetworkPredictionData_Client_OneBraham : public FNetworkPredictionData_Client_Character
+	{
+	public:
+		explicit FNetworkPredictionData_Client_OneBraham(const UCharacterMovementComponent& ClientMovement)
+			: FNetworkPredictionData_Client_Character(ClientMovement)
+		{
+		}
+
+		virtual FSavedMovePtr AllocateNewMove() override
+		{
+			return FSavedMovePtr(new FSavedMove_OneBraham());
+		}
+	};
+}
+
+FNetworkPredictionData_Client* UOneBrahamCharacterMovementComponent::GetPredictionData_Client() const
+{
+	if (ClientPredictionData == nullptr)
+	{
+		UOneBrahamCharacterMovementComponent* MutableThis = const_cast<UOneBrahamCharacterMovementComponent*>(this);
+		MutableThis->ClientPredictionData = new FNetworkPredictionData_Client_OneBraham(*this);
+	}
+	return ClientPredictionData;
+}
+
+void UOneBrahamCharacterMovementComponent::UpdateFromCompressedFlags(uint8 Flags)
+{
+	Super::UpdateFromCompressedFlags(Flags);
+	bWantsToSprint = (Flags & FSavedMove_Character::FLAG_Custom_0) != 0;
+	bWantsToWalk = (Flags & FSavedMove_Character::FLAG_Custom_1) != 0;
+	bWantsToSlide = (Flags & FSavedMove_Character::FLAG_Custom_2) != 0;
+	bWantsToMantle = (Flags & FSavedMove_Character::FLAG_Custom_3) != 0;
+}
+
+void UOneBrahamCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
+{
+	Super::UpdateCharacterStateBeforeMovement(DeltaSeconds);
+
+	// Intent into state, identically on the owning client and on the server.
+	if (!bWantsToSprint)
+	{
+		bSprintSpentBySlide = false;
+	}
+	SetSprinting(bWantsToSprint && !bWantsToWalk && !bSprintSpentBySlide);
+
+	if (bWantsToMantle)
+	{
+		bWantsToMantle = false;
+		TryStartMantle();
+	}
+	if (bWantsToSlide)
+	{
+		bWantsToSlide = false;
+		TryStartSlide();
+	}
+}
+
+void UOneBrahamCharacterMovementComponent::UpdateCharacterStateAfterMovement(float DeltaSeconds)
+{
+	Super::UpdateCharacterStateAfterMovement(DeltaSeconds);
+
+	// The move-time clocks, and the two scripted states, advance with the move.
+	SlideCooldownRemaining = FMath::Max(0.f, SlideCooldownRemaining - DeltaSeconds);
+	SprintElapsed = bSprinting ? SprintElapsed + DeltaSeconds : 0.f;
+
+	if (MovementState == EOneBrahamMovementMode::Mantling)
+	{
+		TickMantle(DeltaSeconds);
+	}
+	else if (MovementState == EOneBrahamMovementMode::Sliding)
+	{
+		TickSlide(DeltaSeconds);
+	}
+}
+
 UOneBrahamCharacterMovementComponent::UOneBrahamCharacterMovementComponent()
 {
 	// --- Engine defaults we deliberately change ---------------------------
@@ -78,15 +233,8 @@ void UOneBrahamCharacterMovementComponent::TickComponent(float DeltaTime, ELevel
 	LeanTarget = FMath::Clamp(LeanTarget, -1.f, 1.f);
 	LeanAmount = FMath::FInterpTo(LeanAmount, LeanTarget, DeltaTime, 8.f);
 
-	if (MovementState == EOneBrahamMovementMode::Mantling)
-	{
-		TickMantle(DeltaTime);
-	}
-	else if (MovementState == EOneBrahamMovementMode::Sliding)
-	{
-		TickSlide(DeltaTime);
-	}
-
+	// Mantle and slide advance inside the move (UpdateCharacterStateAfterMovement),
+	// so they are predicted and replayed with it.
 	UpdateSurfaceInteraction(DeltaTime);
 }
 
@@ -115,13 +263,10 @@ float UOneBrahamCharacterMovementComponent::GetMaxSpeed() const
 	{
 	case EOneBrahamMovementMode::Sliding:
 		// Sliding decays from the sprint speed to a walk over its duration.
-		if (GetWorld() != nullptr)
 		{
-			const float Elapsed = GetWorld()->GetTimeSeconds() - SlideStartTime;
-			const float Alpha = FMath::Clamp(Elapsed / FMath::Max(0.01f, SlideDuration), 0.f, 1.f);
+			const float Alpha = FMath::Clamp(SlideElapsed / FMath::Max(0.01f, SlideDuration), 0.f, 1.f);
 			return FMath::Lerp(WalkSpeed, SprintSpeed, 1.f - Alpha);
 		}
-		return WalkSpeed;
 
 	case EOneBrahamMovementMode::Mantling:
 		return 0.f; // fully scripted
@@ -151,7 +296,7 @@ float UOneBrahamCharacterMovementComponent::GetMaxSpeed() const
 	{
 		return SprintSpeed * (OBCharacter != nullptr ? OBCharacter->GetSprintSpeedMultiplier() : 1.f);
 	}
-	if (OBCharacter != nullptr && OBCharacter->IsWalking())
+	if (bWantsToWalk)
 	{
 		return WalkSpeed;
 	}
@@ -270,11 +415,7 @@ void UOneBrahamCharacterMovementComponent::SetSprinting(bool bInSprinting)
 	}
 
 	bSprinting = bInSprinting;
-
-	if (bSprinting && GetWorld() != nullptr)
-	{
-		SprintStartTime = GetWorld()->GetTimeSeconds();
-	}
+	SprintElapsed = 0.f;
 }
 
 void UOneBrahamCharacterMovementComponent::SetCrouchRequested(bool bCrouch)
@@ -327,13 +468,10 @@ float UOneBrahamCharacterMovementComponent::GetAuthoritativeMaxSpeed() const
 // ==========================================================================
 bool UOneBrahamCharacterMovementComponent::CanStartSlide() const
 {
-	const UWorld* World = GetWorld();
-	if (World == nullptr || CharacterOwner == nullptr)
+	if (CharacterOwner == nullptr)
 	{
 		return false;
 	}
-
-	const float Now = World->GetTimeSeconds();
 
 	if (MovementState == EOneBrahamMovementMode::Mantling ||
 		MovementState == EOneBrahamMovementMode::DownedCrawl ||
@@ -342,14 +480,14 @@ bool UOneBrahamCharacterMovementComponent::CanStartSlide() const
 		return false;
 	}
 
-	if (Now - LastSlideTime < SlideCooldown)
+	if (SlideCooldownRemaining > 0.f)
 	{
 		return false;
 	}
 
 	// You must actually have been sprinting: this is what stops slide-spam from
 	// becoming a movement mechanic.
-	if (!bSprinting || (Now - SprintStartTime) < SlideMinSprintTime)
+	if (!bSprinting || SprintElapsed < SlideMinSprintTime)
 	{
 		return false;
 	}
@@ -370,20 +508,15 @@ bool UOneBrahamCharacterMovementComponent::CanStartSlide() const
 
 bool UOneBrahamCharacterMovementComponent::TryStartSlide()
 {
-	if (!GetOwner() || !GetOwner()->HasAuthority())
-	{
-		// Server-authoritative: the client predicts nothing here, so a failed
-		// slide is never desynced from the server's view of the world.
-		return false;
-	}
-
+	// Predicted: runs on the owning client and on the server from the same
+	// saved move, so both start (or refuse) the same slide.
 	if (!CanStartSlide())
 	{
 		return false;
 	}
 
-	SlideStartTime = GetWorld()->GetTimeSeconds();
-	LastSlideTime = SlideStartTime;
+	SlideElapsed = 0.f;
+	SlideCooldownRemaining = SlideCooldown;
 
 	const FVector SlideDirection = Velocity.GetSafeNormal2D();
 	Velocity = (SlideDirection.IsNearlyZero() ? CharacterOwner->GetActorForwardVector() : SlideDirection) * SlideInitialSpeed;
@@ -394,13 +527,8 @@ bool UOneBrahamCharacterMovementComponent::TryStartSlide()
 
 void UOneBrahamCharacterMovementComponent::TickSlide(float DeltaTime)
 {
-	UWorld* World = GetWorld();
-	if (World == nullptr)
-	{
-		return;
-	}
-
-	const float Elapsed = World->GetTimeSeconds() - SlideStartTime;
+	SlideElapsed += DeltaTime;
+	const float Elapsed = SlideElapsed;
 
 	// Friction bleed: exponential decay reads more naturally than linear.
 	Velocity *= FMath::Pow(FMath::Clamp(1.f - SlideFriction, 0.1f, 1.f), DeltaTime * 10.f);
@@ -412,8 +540,9 @@ void UOneBrahamCharacterMovementComponent::TickSlide(float DeltaTime)
 	if (bTimedOut || bTooSlow || IsFalling())
 	{
 		SetOBMovementState(IsCrouching() ? EOneBrahamMovementMode::Crouched : EOneBrahamMovementMode::Normal);
-		// Sliding drains the sprint: the player must re-sprint to slide again.
-		bSprinting = false;
+		// Sliding drains the sprint: the player must let go and sprint again.
+		bSprintSpentBySlide = true;
+		SetSprinting(false);
 	}
 }
 
@@ -422,7 +551,9 @@ void UOneBrahamCharacterMovementComponent::TickSlide(float DeltaTime)
 // ==========================================================================
 bool UOneBrahamCharacterMovementComponent::TryStartMantle()
 {
-	if (!GetOwner() || !GetOwner()->HasAuthority() || CharacterOwner == nullptr)
+	// Predicted like the slide: both machines run the same ledge traces on the
+	// same move. The server's world is the one that decides if they disagree.
+	if (CharacterOwner == nullptr)
 	{
 		return false;
 	}
@@ -503,7 +634,7 @@ bool UOneBrahamCharacterMovementComponent::TryStartMantle()
 		+ Forward * 6.f
 		+ FVector(0.f, 0.f, HalfHeight + 2.f);
 
-	MantleStartTime = World->GetTimeSeconds();
+	MantleElapsed = 0.f;
 	MantleAlpha = 0.f;
 	Velocity = FVector::ZeroVector;
 
@@ -516,13 +647,13 @@ bool UOneBrahamCharacterMovementComponent::TryStartMantle()
 
 void UOneBrahamCharacterMovementComponent::TickMantle(float DeltaTime)
 {
-	UWorld* World = GetWorld();
-	if (World == nullptr || CharacterOwner == nullptr)
+	if (CharacterOwner == nullptr)
 	{
 		return;
 	}
 
-	const float Elapsed = World->GetTimeSeconds() - MantleStartTime;
+	MantleElapsed += DeltaTime;
+	const float Elapsed = MantleElapsed;
 	const float LinearAlpha = FMath::Clamp(Elapsed / FMath::Max(0.05f, MantleDuration), 0.f, 1.f);
 
 	// Two-phase curve: pull up (fast) then step forward (slower). Ease-in-out.

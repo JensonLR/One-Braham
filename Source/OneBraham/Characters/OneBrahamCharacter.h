@@ -186,13 +186,13 @@ public:
 	void SetSprintRequested(bool bSprint);
 
 	UFUNCTION(BlueprintPure, Category = "One Braham|Character")
-	bool IsSprintRequested() const { return bSprintRequested; }
+	bool IsSprintRequested() const;
 
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Character")
 	void ToggleWalkState();
 
 	UFUNCTION(BlueprintPure, Category = "One Braham|Character")
-	bool IsWalking() const { return bWalking; }
+	bool IsWalking() const;
 
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Character")
 	void ToggleCrouchState();
@@ -283,25 +283,15 @@ public:
 	FOneBrahamDamaged OnDamageReported;
 
 	// ======================================================================
-	//  Server RPCs (all rate limited through AOneBrahamPlayerController)
+	//  Server RPCs (all rate limited through AOneBrahamPlayerController).
+	//  Sprint, walk, slide and mantle are not here: they ride in the movement
+	//  component's saved moves (UOneBrahamCharacterMovementComponent).
 	// ======================================================================
-	UFUNCTION(Server, Reliable, Category = "One Braham|Character")
-	void ServerSetSprint(bool bSprint);
-
-	UFUNCTION(Server, Reliable, Category = "One Braham|Character")
-	void ServerSetWalk(bool bWalk);
-
 	UFUNCTION(Server, Reliable, Category = "One Braham|Character")
 	void ServerSetCrouch(bool bCrouch);
 
 	UFUNCTION(Server, Unreliable, Category = "One Braham|Character")
 	void ServerSetLean(float Lean);
-
-	UFUNCTION(Server, Reliable, Category = "One Braham|Character")
-	void ServerRequestMantle(FVector_NetQuantize LedgeLocation);
-
-	UFUNCTION(Server, Reliable, Category = "One Braham|Character")
-	void ServerRequestSlide();
 
 	/** Client tells the server its floor so the HUD/audio can update without a full trace. */
 	UFUNCTION(Server, Unreliable, Category = "One Braham|Character")

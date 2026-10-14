@@ -15,8 +15,13 @@
 //   * Wet-floor micro-stumble on marble/puddles (cosmetic + slight accel loss)
 //   * Ladder-free stair climbing with step-up (stairs are the main vertical)
 //
-// Server authority: every one of these is decided on the server. The client
-// sends intent (via the character) and reconciles with the server's state.
+// Server authority with client prediction: the player's intent (sprint, walk,
+// slide, mantle) rides in the saved moves' compressed flags, so the owning
+// client and the server run the same movement code on the same inputs, frame
+// for frame. The server's result is still the one that counts; it just agrees
+// with the client's, so nobody is corrected for starting a sprint. Every timer
+// that decides a slide or a mantle advances with the move's own delta time, not
+// the world clock, so a move replayed after a correction lands where it did.
 
 #pragma once
 
@@ -58,6 +63,28 @@ public:
 	virtual float GetMaxSpeed() const override;
 	virtual float GetMaxAcceleration() const override;
 	virtual bool DoJump(bool bReplayingMoves, float DeltaTime) override;
+
+	// --- Prediction ------------------------------------------------------
+	virtual class FNetworkPredictionData_Client* GetPredictionData_Client() const override;
+	virtual void UpdateFromCompressedFlags(uint8 Flags) override;
+	virtual void UpdateCharacterStateBeforeMovement(float DeltaSeconds) override;
+	virtual void UpdateCharacterStateAfterMovement(float DeltaSeconds) override;
+
+	/** The player's intent, set by the character on the owning machine and
+	 *  carried to the server in the saved moves. */
+	void RequestSprint(bool bWants) { bWantsToSprint = bWants; }
+	void RequestWalk(bool bWants) { bWantsToWalk = bWants; }
+	/** One-shot: consumed by the next move. */
+	void RequestSlide() { bWantsToSlide = true; }
+	void RequestMantle() { bWantsToMantle = true; }
+
+	bool WantsToSprint() const { return bWantsToSprint; }
+	bool WantsToWalk() const { return bWantsToWalk; }
+
+	bool bWantsToSprint = false;
+	bool bWantsToWalk = false;
+	bool bWantsToSlide = false;
+	bool bWantsToMantle = false;
 	virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
 	virtual void UpdateBasedMovement(float DeltaSeconds) override;
 	virtual void PhysCustom(float deltaTime, int32 Iterations) override;
@@ -264,11 +291,17 @@ protected:
 
 	float LeanTarget = 0.f;
 	float MantleAlpha = 0.f;
-	float MantleStartTime = 0.f;
-	float SlideStartTime = 0.f;
-	float LastSlideTime = -100.f;
-	float SprintStartTime = -100.f;
 	float StumbleEndTime = -100.f;
+
+	// Move-time timers: advanced by each move's delta, so a replayed move
+	// reproduces them exactly (the world clock would not).
+	float MantleElapsed = 0.f;
+	float SlideElapsed = 0.f;
+	float SlideCooldownRemaining = 0.f;
+	float SprintElapsed = 0.f;
+
+	/** A slide spends the sprint: true until the player lets go of sprint. */
+	bool bSprintSpentBySlide = false;
 
 	FVector MantleStartLocation = FVector::ZeroVector;
 	FVector MantleTargetLocation = FVector::ZeroVector;

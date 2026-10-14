@@ -384,6 +384,18 @@ void AOneBrahamCharacter::HandleJumpReleased()
 	StopJumping();
 }
 
+bool AOneBrahamCharacter::IsSprintRequested() const
+{
+	// The movement component holds the intent on every machine that simulates
+	// this pawn: the owner sets it, the server reads it from the saved moves.
+	return OBCharacterMovement != nullptr ? OBCharacterMovement->WantsToSprint() : bSprintRequested;
+}
+
+bool AOneBrahamCharacter::IsWalking() const
+{
+	return OBCharacterMovement != nullptr ? OBCharacterMovement->WantsToWalk() : bWalking;
+}
+
 void AOneBrahamCharacter::SetSprintRequested(bool bSprint)
 {
 	if (bSprintRequested == bSprint)
@@ -393,15 +405,11 @@ void AOneBrahamCharacter::SetSprintRequested(bool bSprint)
 
 	bSprintRequested = bSprint;
 
-	// Movement caps are server-authoritative; the client forwards the intent.
-	if (!HasAuthority())
-	{
-		ServerSetSprint(bSprint);
-	}
-
+	// The intent rides in the next saved move; the movement component turns it
+	// into a sprint on this machine and on the server from the same move.
 	if (OBCharacterMovement != nullptr)
 	{
-		OBCharacterMovement->SetSprinting(bSprint && !bWalking);
+		OBCharacterMovement->RequestSprint(bSprint);
 	}
 
 	// Sprinting while aiming is not allowed: ADS forces the aim speed.
@@ -415,14 +423,9 @@ void AOneBrahamCharacter::ToggleWalkState()
 {
 	bWalking = !bWalking;
 
-	if (!HasAuthority())
+	if (OBCharacterMovement != nullptr)
 	{
-		ServerSetWalk(bWalking);
-	}
-
-	if (OBCharacterMovement != nullptr && bWalking)
-	{
-		OBCharacterMovement->SetSprinting(false);
+		OBCharacterMovement->RequestWalk(bWalking);
 	}
 }
 
@@ -496,13 +499,10 @@ void AOneBrahamCharacter::TryStartMantle()
 		return;
 	}
 
-	if (!HasAuthority())
-	{
-		ServerRequestMantle(GetActorLocation());
-		return;
-	}
-
-	OBCharacterMovement->TryStartMantle();
+	// Predicted: the request travels in the saved move and both machines run
+	// the same ledge traces. The server's own world decides; it never takes a
+	// ledge position from the client.
+	OBCharacterMovement->RequestMantle();
 }
 
 void AOneBrahamCharacter::TryStartSlide()
@@ -512,13 +512,7 @@ void AOneBrahamCharacter::TryStartSlide()
 		return;
 	}
 
-	if (!HasAuthority())
-	{
-		ServerRequestSlide();
-		return;
-	}
-
-	OBCharacterMovement->TryStartSlide();
+	OBCharacterMovement->RequestSlide();
 }
 
 // ==========================================================================
@@ -1224,6 +1218,11 @@ void AOneBrahamCharacter::ServerOnRespawned()
 	bSprintRequested = false;
 	bCrouchRequested = false;
 	bWalking = false;
+	if (OBCharacterMovement != nullptr)
+	{
+		OBCharacterMovement->RequestSprint(false);
+		OBCharacterMovement->RequestWalk(false);
+	}
 	LeanInput = 0.f;
 
 	if (OBCharacterMovement != nullptr)
@@ -1320,46 +1319,6 @@ void AOneBrahamCharacter::FellOutOfWorld(const UDamageType& DamageType)
 // ==========================================================================
 //  Server RPCs
 // ==========================================================================
-void AOneBrahamCharacter::ServerSetSprint_Implementation(bool bSprint)
-{
-	if (!HasAuthority())
-	{
-		return;
-	}
-
-	AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(GetController());
-	if (PC != nullptr && !PC->CheckRPCBudget(TEXT("ServerSetSprint")))
-	{
-		return;
-	}
-
-	bSprintRequested = bSprint;
-	if (OBCharacterMovement != nullptr)
-	{
-		OBCharacterMovement->SetSprinting(bSprint && !bWalking);
-	}
-}
-
-void AOneBrahamCharacter::ServerSetWalk_Implementation(bool bWalk)
-{
-	if (!HasAuthority())
-	{
-		return;
-	}
-
-	AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(GetController());
-	if (PC != nullptr && !PC->CheckRPCBudget(TEXT("ServerSetWalk")))
-	{
-		return;
-	}
-
-	bWalking = bWalk;
-	if (OBCharacterMovement != nullptr && bWalk)
-	{
-		OBCharacterMovement->SetSprinting(false);
-	}
-}
-
 void AOneBrahamCharacter::ServerSetCrouch_Implementation(bool bCrouch)
 {
 	if (!HasAuthority())
@@ -1397,56 +1356,6 @@ void AOneBrahamCharacter::ServerSetLean_Implementation(float Lean)
 	// and the value only moves a camera.
 	LeanInput = FMath::Clamp(Lean, -1.f, 1.f);
 	LeanAmount = LeanInput;
-}
-
-void AOneBrahamCharacter::ServerRequestMantle_Implementation(FVector_NetQuantize LedgeLocation)
-{
-	if (!HasAuthority())
-	{
-		return;
-	}
-
-	AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(GetController());
-	if (PC != nullptr && !PC->CheckRPCBudget(TEXT("ServerRequestMantle")))
-	{
-		return;
-	}
-
-	// Anti-cheat: trust the server's own ledge detection, never the client's
-	// reported ledge location. The client value is only used for logging.
-	const FVector ClientClaim = LedgeLocation;
-	if (FVector::DistSquared(ClientClaim, GetActorLocation()) > FMath::Square(400.f))
-	{
-		if (PC != nullptr)
-		{
-			PC->ReportViolation(TEXT("Mantle claim far from pawn"), 2.f);
-		}
-		return;
-	}
-
-	if (OBCharacterMovement != nullptr)
-	{
-		OBCharacterMovement->TryStartMantle();
-	}
-}
-
-void AOneBrahamCharacter::ServerRequestSlide_Implementation()
-{
-	if (!HasAuthority())
-	{
-		return;
-	}
-
-	AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(GetController());
-	if (PC != nullptr && !PC->CheckRPCBudget(TEXT("ServerRequestSlide")))
-	{
-		return;
-	}
-
-	if (OBCharacterMovement != nullptr)
-	{
-		OBCharacterMovement->TryStartSlide();
-	}
 }
 
 void AOneBrahamCharacter::ServerReportFloor_Implementation(int32 FloorIndex)

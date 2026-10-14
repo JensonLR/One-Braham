@@ -75,6 +75,25 @@ Anti-cheat basics (thresholds in `Config/DefaultGame.ini` `[OneBrahamAntiCheat]`
 * Reported and kicked, not silently tolerated. The reason is written to the
   player's session so a support ticket can be answered.
 
+### Movement prediction
+
+Sprint, walk, slide and mantle are predicted. The player's intent travels in
+the character movement's saved moves (`FSavedMove_OneBraham`, compressed flags
+`Custom_0` to `Custom_3`), not in separate RPCs, so the owning client and the
+server run the same movement code on the same input, move for move. The server's
+result still decides; it simply agrees, so nobody is corrected for starting a
+sprint, and a slide or a mantle starts on the client's own frame.
+
+Two details make that hold under replay. First, every timer that decides a slide
+or a mantle (time sliding, cooldown left, time sprinting, mantle progress)
+advances by each move's own delta time, never by the world clock, so a move
+replayed after a correction lands exactly where it first did. Second, the
+mantle's ledge traces run on both machines from the same move. The server's
+world wins if they disagree, and it never takes a ledge position from the
+client. These used to be four RPCs (`ServerSetSprint`, `ServerSetWalk`,
+`ServerRequestSlide`, `ServerRequestMantle`), and the client and server changed
+speed at different moments, which is what a correction is.
+
 ### The RPC budget
 
 Every Server RPC is a door the client can open as often as it likes, so every
