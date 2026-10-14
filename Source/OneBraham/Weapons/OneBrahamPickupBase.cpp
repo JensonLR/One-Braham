@@ -72,6 +72,12 @@ void AOneBrahamPickupBase::Tick(float DeltaSeconds)
 
 	TimeOnGround += DeltaSeconds;
 
+	// Level loot neither ages nor fades; nothing below applies to it.
+	if (bPermanentLoot)
+	{
+		return;
+	}
+
 	// Age out: a floor covered in unclaimed weapons is a performance problem and
 	// an information problem (the player cannot tell what is actually there).
 	if (HasAuthority() && GroundLifetimeSeconds > 0.f && !bPermanentLoot)
@@ -124,6 +130,12 @@ void AOneBrahamPickupBase::ServerDropAt(const FVector& Location, bool bScatter)
 	bIsOnGround = true;
 	TimeOnGround = 0.f;
 	bDroppedFromCorpse = true;
+
+	// A drop is a drop, whatever the gun's history: a rifle first found on a
+	// desk and dropped by its dead owner ages out and is locked to the body
+	// like any other. (bPermanentLoot used to stick, so it was neither.)
+	// ServerPlaceAsLoot sets it again after calling this.
+	bPermanentLoot = false;
 
 	// Ground collides with the world so the player can walk up to it, and with
 	// nothing else: a dropped gun should never body-block a doorway.

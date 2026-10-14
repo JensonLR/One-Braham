@@ -3,6 +3,7 @@
 // OneBrahamFireShutter.cpp
 
 #include "Access/OneBrahamFireShutter.h"
+#include "Core/OneBrahamLightUtils.h"
 #include "Voice/OneBrahamVoiceDirector.h"
 
 #include "OneBraham.h"
@@ -187,8 +188,7 @@ void AOneBrahamFireShutter::Tick(float DeltaSeconds)
 			? (FMath::Fmod(StateElapsed, 0.5f) < 0.25f ? 2600.f : 120.f)
 			: 0.f;
 
-		const float Current = WarningLight->Intensity;
-		WarningLight->SetIntensity(FMath::FInterpTo(Current, TargetIntensity, DeltaSeconds, 14.f));
+		OneBrahamLights::Ease(WarningLight, WarningLight->GetLightColor(), TargetIntensity, DeltaSeconds, 14.f);
 	}
 }
 

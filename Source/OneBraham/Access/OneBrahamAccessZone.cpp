@@ -3,6 +3,7 @@
 // OneBrahamAccessZone.cpp
 
 #include "Access/OneBrahamAccessZone.h"
+#include "Core/OneBrahamLightUtils.h"
 #include "Voice/OneBrahamVoiceDirector.h"
 
 #include "OneBraham.h"
@@ -253,8 +254,7 @@ void AOneBrahamAccessZone::Tick(float DeltaSeconds)
 			Intensity *= 1.6f;
 		}
 
-		ReaderLight->SetLightColor(Desired);
-		ReaderLight->SetIntensity(FMath::FInterpTo(ReaderLight->Intensity, Intensity, DeltaSeconds, 10.f));
+		OneBrahamLights::Ease(ReaderLight, Desired, Intensity, DeltaSeconds, 10.f);
 	}
 }
 

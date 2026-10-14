@@ -3,6 +3,7 @@
 // OneBrahamOverrideTerminal.cpp
 
 #include "Access/OneBrahamOverrideTerminal.h"
+#include "Core/OneBrahamLightUtils.h"
 #include "Characters/OneBrahamCharacter.h"
 #include "Voice/OneBrahamVoiceDirector.h"
 
@@ -182,8 +183,7 @@ void AOneBrahamOverrideTerminal::Tick(float DeltaSeconds)
 		Intensity = 380.f;
 	}
 
-	ScreenLight->SetLightColor(Desired);
-	ScreenLight->SetIntensity(FMath::FInterpTo(ScreenLight->Intensity, Intensity, DeltaSeconds, 12.f));
+	OneBrahamLights::Ease(ScreenLight, Desired, Intensity, DeltaSeconds, 12.f);
 }
 
 // ===========================================================================
