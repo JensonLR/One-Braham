@@ -2105,6 +2105,7 @@ def build_all(write_manifest=True):
 
     C.step(5, 6, "fire drill arena")
     C.guard(report, "fire drill arena", build_fire_drill_arena, report, materials)
+    C.guard(report, "front-end maps", build_front_end_maps, report)
 
     C.step(6, 6, "manifest")
     if write_manifest:
@@ -2112,6 +2113,51 @@ def build_all(write_manifest=True):
 
     C.log(report.summary())
     return report
+
+
+def build_front_end_maps(report):
+    """Builds L_MainMenu and L_Loading.
+
+    L_MainMenu is where a client starts (GameDefaultMap) and where a match
+    returns to. Its world settings name AOneBrahamMenuGameMode, whose controller
+    puts the C++ main menu on screen: the level itself is an empty room with a
+    light, because the menu covers it.
+
+    L_Loading is the seamless-travel transition map (TransitionMap). It runs the
+    engine's base game mode, so the match's game mode never initialises a match
+    in the half-second a travel spends there.
+    """
+    built = []
+    for name, mode_class in ((C.MAP_MAIN_MENU, "OneBrahamMenuGameMode"), (C.MAP_LOADING, "GameModeBase")):
+        path = "{0}/{1}".format(C.MAPS, name)
+        if not _open_level_for_build(report, path):
+            continue
+
+        game_mode = getattr(unreal, mode_class, None)
+        if game_mode is None:
+            report.failed(name, u"{0} is not available; compile the project first".format(mode_class))
+            continue
+        try:
+            settings = _editor_world().get_world_settings()
+            settings.set_editor_property("default_game_mode", game_mode)
+        except Exception as exc:  # noqa: BLE001
+            report.failed(name, u"world settings: {0}".format(exc))
+            continue
+
+        if name == C.MAP_MAIN_MENU:
+            # One soft light so the level is not black in the editor; the
+            # menu's own backdrop is what a player sees.
+            light = _actor_subsystem().spawn_actor_from_class(
+                unreal.DirectionalLight, unreal.Vector(0.0, 0.0, 400.0), unreal.Rotator(roll=0.0, pitch=-45.0, yaw=0.0))
+            if light is not None:
+                light.set_actor_label("MainMenu_Light")
+                light.tags = [unreal.Name(GENERATED_TAG_PREFIX + name)]
+
+        if _save_build_level(report, path):
+            built.append(name)
+
+    C.log(u"  front-end maps: {0}".format(", ".join(built) or "none"))
+    return built
 
 
 def build_fire_drill_arena(report, materials):

@@ -22,8 +22,6 @@ WHAT IT CREATES
     /Game/OneBraham/UI/HUD/WBP_QuickLineWheel        the comms wheel (C++ draws it)
     /Game/OneBraham/UI/HUD/WBP_FloorPlan             the floor plan (C++ draws it)
     /Game/OneBraham/UI/Menus/WBP_MainMenu
-    /Game/OneBraham/UI/Menus/WBP_DeployScreen        archetype + loadout
-    /Game/OneBraham/UI/Menus/WBP_Wardrobe            cosmetics (the monetisation)
     /Game/OneBraham/UI/Menus/WBP_Settings            video/audio/controls/gameplay
     /Game/OneBraham/UI/Menus/WBP_Results
     /Game/OneBraham/UI/Fonts/F_OneBrahamSans         (import target; see Docs/15)
@@ -49,12 +47,9 @@ WIDGETS = [
      "code-drawn layout is used until a designer starts overriding elements."),
     ("WBP_OneBrahamScoreboard", C.UI_HUD, "OneBrahamHUDWidget",
      "Hold-Tab scoreboard. Optional: the C++ widget already draws one."),
-    ("WBP_MainMenu",        C.UI + "/Menus", None,
-     "Play / Settings / Wardrobe / Quit. Steam overlay aware."),
-    ("WBP_DeployScreen",    C.UI + "/Menus", None,
-     "Archetype carousel, loadout selection, squad display, ready-up."),
-    ("WBP_Wardrobe",        C.UI + "/Menus", None,
-     "Cosmetics. Cosmetic-only monetisation: nothing here changes gameplay."),
+    ("WBP_MainMenu",        C.UI + "/Menus", "OneBrahamMainMenuWidget",
+     "The front end. Subclasses the C++ menu (play, loadout, server browser, "
+     "wardrobe, achievements, settings); empty by default."),
     ("WBP_Settings",        C.UI + "/Menus", "OneBrahamSettingsWidget",
      "Video, audio, controls, gameplay, accessibility. Subclasses the C++ "
      "screen, which builds every page and the rebinding list; empty by default."),
@@ -62,8 +57,6 @@ WIDGETS = [
      "End-of-match: survivors, damage, objectives, progression."),
     ("WBP_LoadingScreen",   C.UI + "/Menus", None,
      "Map name, mode, squad, and a flat map of floors climbed so far."),
-    ("WBP_ServerBrowser",   C.UI + "/Menus", None,
-     "Steam server list, favourites, ping, mode filter."),
     ("WBP_QuickLineWheel",  C.UI_HUD, "OneBrahamQuickLineWidget",
      "The comms wheel: eight segments, clockwise from the top. Subclasses the "
      "C++ widget, which already draws the ring, the labels and the cooldowns - "

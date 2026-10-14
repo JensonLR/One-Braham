@@ -18,13 +18,26 @@ DefaultEngine.ini → <Platform>/<Platform>Engine.ini → DefaultGame.ini → De
 
 ```ini
 [/Script/EngineSettings.GameMapsSettings]
-GameDefaultMap=/Game/OneBraham/Maps/L_Persistent_OneBraham.L_Persistent_OneBraham
+GameDefaultMap=/Game/OneBraham/Maps/L_MainMenu.L_MainMenu
 EditorStartupMap=/Game/OneBraham/Maps/L_Persistent_OneBraham.L_Persistent_OneBraham
+ServerDefaultMap=/Game/OneBraham/Maps/L_Persistent_OneBraham.L_Persistent_OneBraham
 GlobalDefaultGameMode=/Script/OneBraham.OneBrahamGameMode
 GameInstanceClass=/Script/OneBraham.OneBrahamGameInstance
+TransitionMap=/Game/OneBraham/Maps/L_Loading.L_Loading
 ```
 
+A client starts in the main menu; a dedicated server starts in the match map;
+the editor opens the building. `L_MainMenu` names its own game mode
+(`AOneBrahamMenuGameMode`) in its world settings, and so does `L_Loading` (the
+engine's base game mode), so the global default is the match's.
+
 If the game boots into an empty world, this is the block that broke.
+
+### Cook list (`DefaultGame.ini`)
+
+`+MapsToCook` lists the four maps `build_environment.py` makes. Every line needs
+its `+`. A plain `MapsToCook=` line replaces the value before it, and that is how
+this list once cooked only its last entry.
 
 ### Renderer
 

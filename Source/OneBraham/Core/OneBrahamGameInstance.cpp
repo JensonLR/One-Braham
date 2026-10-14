@@ -530,6 +530,19 @@ void UOneBrahamGameInstance::CancelMatchmaking()
 	OnMatchmakingStatus.Broadcast(NSLOCTEXT("OneBraham", "MatchmakingCancelled", "Matchmaking cancelled."), 0.f);
 }
 
+void UOneBrahamGameInstance::StartPracticeMatch(EOneBrahamMatchMode Mode, int32 BotCount)
+{
+	CancelMatchmaking();
+	SetPendingMatchMode(Mode);
+	bPendingLAN = true;
+	PendingServerName = TEXT("One Braham - Practice");
+
+	// The game mode reads ?Bots= (AOneBrahamGameMode::InitGame) and fills the
+	// roster; the cap is the match's own player count less the player.
+	const int32 Cap = FMath::Max(1, (GetMatchSettings(Mode) ? GetMatchSettings(Mode)->GetExpectedPlayerCount() : 12) - 1);
+	TravelToMatchMap(FString::Printf(TEXT("%s?Bots=%d"), *BuildTravelOptions(), FMath::Clamp(BotCount, 1, Cap)));
+}
+
 void UOneBrahamGameInstance::RefreshServerBrowser(bool bLANOnly)
 {
 	IOnlineSubsystem* OnlineSubsystem = IOnlineSubsystem::Get();

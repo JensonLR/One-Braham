@@ -65,9 +65,8 @@ VOICE = GAME_ROOT + "/Voice"
 # strings are load-bearing in three places at once - do not rename casually.
 MAP_PERSISTENT = "L_Persistent_OneBraham"
 MAP_FIRE_DRILL = "L_FireDrill_Arena"
-MAP_TUTORIAL = "L_Tutorial_SignIn"
+MAP_MAIN_MENU = "L_MainMenu"
 MAP_LOADING = "L_Loading"
-MAP_BENCHMARK = "L_Benchmark_Skydeck"
 
 # ---------------------------------------------------------------------------
 #  Naming conventions

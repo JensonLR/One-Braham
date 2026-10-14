@@ -134,6 +134,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Session")
 	void CancelMatchmaking();
 
+	/**
+	 * Offline practice: a standalone match of Mode with BotCount bots filling
+	 * the roster. No session, no network: the same game mode and the same map.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Session")
+	void StartPracticeMatch(EOneBrahamMatchMode Mode, int32 BotCount);
+
 	/** Fires a one-shot async Steam session search for the server browser. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Session")
 	void RefreshServerBrowser(bool bLANOnly = false);
