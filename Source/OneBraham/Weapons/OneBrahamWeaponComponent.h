@@ -150,6 +150,13 @@ public:
 	 * Called by AOneBrahamPickupBase when a player interacts with a dropped
 	 * weapon. Returns the taken weapon, or null when the pickup is illegal.
 	 */
+	/**
+	 * Server: adds Share (0-1) of each carried weapon's maximum reserve to its
+	 * pool, capped at the maximum. Returns the rounds added in total; zero means
+	 * the pouches were full and an ammo box should stay where it is.
+	 */
+	int32 ServerAddReserveShare(float Share);
+
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Weapons")
 	AOneBrahamWeaponBase* ServerPickupFromWorld(AOneBrahamWeaponBase* WorldWeapon);
 

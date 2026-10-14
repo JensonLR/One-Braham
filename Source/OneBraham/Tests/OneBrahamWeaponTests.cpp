@@ -14,7 +14,10 @@
 #include "Misc/AutomationTest.h"
 
 #include "Core/OneBrahamTypes.h"
+#include "Data/OneBrahamMatchSettingsAsset.h"
 #include "Data/OneBrahamWeaponDataAsset.h"
+#include "Loot/OneBrahamLootSubsystem.h"
+#include "Math/RandomStream.h"
 #include "OneBraham.h"
 
 #if WITH_AUTOMATION_TESTS
@@ -265,6 +268,52 @@ bool FOneBrahamWeaponLootTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("a floor 6 weapon never spawns on the ground floor"), GatedOnGround, 0);
 	TestTrue(TEXT("a floor 6 weapon can spawn on the executive floor"), GatedUpstairs > 0);
+
+	// The match's own draw (UOneBrahamLootSubsystem::ChooseWeapon) reads the
+	// mode's spawn table when there is one, with the same gates, and hands back
+	// the utility a table entry bundles with its weapon.
+	UOneBrahamMatchSettingsAsset* Settings = NewObject<UOneBrahamMatchSettingsAsset>(
+		GetTransientPackage(), NAME_None, RF_Transient);
+	Settings->WeaponSpawnTable.Reset();
+
+	FOneBrahamSpawnTableEntry Sidearm;
+	Sidearm.WeaponId = TEXT("W_Pistol");
+	Sidearm.Weight = 1.f;
+	Sidearm.MinFloor = 0;
+	Sidearm.MaxFloor = 15;
+	Settings->WeaponSpawnTable.Add(Sidearm);
+
+	FOneBrahamSpawnTableEntry Breacher;
+	Breacher.WeaponId = TEXT("W_MarksmanRifle");
+	Breacher.Weight = 50.f;
+	Breacher.MinFloor = 6;
+	Breacher.MaxFloor = 15;
+	Breacher.BundledUtilityIds = { TEXT("Utility_Smoke") };
+	Settings->WeaponSpawnTable.Add(Breacher);
+
+	FRandomStream TableStream(20261014);
+	bool bGatedOnGround = false;
+	bool bBundleSeen = false;
+
+	for (int32 Roll = 0; Roll < 200; ++Roll)
+	{
+		TArray<FName> Bundled;
+		if (UOneBrahamLootSubsystem::ChooseWeapon(Settings, Registry, 0, TableStream, &Bundled) == TEXT("W_MarksmanRifle"))
+		{
+			bGatedOnGround = true;
+		}
+
+		Bundled.Reset();
+		if (UOneBrahamLootSubsystem::ChooseWeapon(Settings, Registry, 12, TableStream, &Bundled) == TEXT("W_MarksmanRifle"))
+		{
+			bBundleSeen |= Bundled.Contains(FName(TEXT("Utility_Smoke")));
+		}
+	}
+
+	TestFalse(TEXT("the table's floor gate holds on the ground floor"), bGatedOnGround);
+	TestTrue(TEXT("a table entry's bundled utility comes with it"), bBundleSeen);
+	TestEqual(TEXT("an empty floor range draws nothing"),
+		UOneBrahamLootSubsystem::ChooseWeapon(Settings, Registry, 99, TableStream), FName(NAME_None));
 
 	// The registry's own validator is the content pipeline's contract.
 	TArray<FString> Problems;

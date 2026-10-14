@@ -387,7 +387,9 @@ mystery bug three weeks later.
 
 **What a build makes, in order.** The persistent level is opened (or created)
 first, and the gameplay anchors go into it: spawn points, access zones,
-terminals, breach walls, shutters, the winch and the Skydeck climate. Then each
+terminals, breach walls, shutters, loot points (`build_loot_points`, about one
+per 5 m² of room, the first two in each room also allowed to hold a keycard),
+the winch and the Skydeck climate. Then each
 floor is built as its own level, and every floor is attached to the persistent
 level as an always-loaded sublevel. Every actor the builder spawns carries an
 `OB_Generated:<level>` tag, and a rebuild removes exactly those before placing

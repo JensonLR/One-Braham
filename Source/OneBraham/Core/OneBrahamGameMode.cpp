@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Core/OneBrahamGameMode.h"
+#include "Loot/OneBrahamLootSubsystem.h"
 #include "Data/OneBrahamCharacterDataAsset.h"
 
 #include "OneBraham.h"
@@ -228,8 +229,24 @@ void AOneBrahamGameMode::Tick(float DeltaSeconds)
 // ==========================================================================
 //  Match flow
 // ==========================================================================
+void AOneBrahamGameMode::SpawnMatchLoot()
+{
+	UOneBrahamLootSubsystem* Loot = GetWorld() != nullptr ? GetWorld()->GetSubsystem<UOneBrahamLootSubsystem>() : nullptr;
+	if (Loot == nullptr || Loot->HasSpawned() || MatchSettings == nullptr)
+	{
+		return;
+	}
+
+	UOneBrahamWeaponDataAsset* Registry = UOneBrahamGameSettings::Get().WeaponRegistry.LoadSynchronous();
+	Loot->SpawnMatchLoot(MatchSettings, Registry);
+}
+
 void AOneBrahamGameMode::StartWarmup()
 {
+	// The building is stocked before anyone is let in: a desk that is empty in
+	// the warmup and holds a rifle a minute later is a desk nobody checks twice.
+	SpawnMatchLoot();
+
 	SetMatchPhase(EOneBrahamMatchPhase::Warmup);
 	WarmupEndTime = GetWorld()->GetTimeSeconds() + static_cast<float>(MatchSettings->WarmupSeconds);
 
@@ -253,6 +270,9 @@ void AOneBrahamGameMode::HandleWarmupComplete()
 
 void AOneBrahamGameMode::StartActiveMatch()
 {
+	// Usually already done in the warmup; a mode with no warmup comes straight here.
+	SpawnMatchLoot();
+
 	SetMatchPhase(EOneBrahamMatchPhase::Active);
 	MatchStartTime = GetWorld()->GetTimeSeconds();
 

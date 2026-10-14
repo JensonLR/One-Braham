@@ -180,10 +180,12 @@ NATIVE_TAG = re.compile(
 #: be possible by accident. Asserted so the list can only shrink on
 #: purpose: the day a tag leaves it, somebody has built the thing it was waiting
 #: for, and the day one arrives, somebody has decided it is not emit-able yet.
-LEDGER_SIZE = 7
+LEDGER_SIZE = 4
 
-#: How many rows Table 5 must have. The six classes that implement the interface.
-TABLE5_SIZE = 7
+#: How many rows Table 5 must have: the classes that implement the interface.
+#: The supply pickup took it to eight, and the ledger to four (ammo, utility and
+#: medkit were waiting on exactly that actor).
+TABLE5_SIZE = 8
 
 #: `60 cm/s (`UOneBrahamCharacterMovementComponent::DownedCrawlSpeed`)`: a number,
 #: its unit, and the name of the property that defines it. `\u00b2` is written as

@@ -222,6 +222,84 @@ def frame_problems():
         found.append((u"_floor_z no longer puts the lobby at Z 0 and the plaza a storey below "
                       u"(Docs/09 section 1, OneBrahamConstants::FloorZ)", None))
 
+    found.extend(loot_capacity_problems())
+    return found
+
+
+MATCH_SETTINGS_SOURCE = os.path.join(python_root, "Source", "OneBraham", "Data",
+                                     "OneBrahamMatchSettingsAsset.cpp")
+
+#: `if (Floor == 0) { ... }`, `else if (Floor <= 8) { ... }`, `else { ... }`
+LOOT_BRANCH = re.compile(r'(if\s*\(\s*Floor\s*==\s*0\s*\)|else\s+if\s*\(\s*Floor\s*<=\s*(\d+)\s*\)|else)\s*\{([^{}]*)\}')
+LOOT_FIELD = re.compile(r'Profile\.(WeaponSpawns|AmmoSpawns|UtilitySpawns|MedkitSpawns|KeycardSpawns)\s*=\s*(\d+)')
+
+
+def loot_demand_per_floor():
+    """floor -> (items asked for, keycards asked for), from the C++ default profiles."""
+    try:
+        text = io.open(MATCH_SETTINGS_SOURCE, encoding="utf-8").read()
+    except IOError:
+        return {}
+
+    start = text.find("FloorLootProfiles.Num() == 0")
+    if start < 0:
+        return {}
+
+    demand = {}
+    previous_last = -1
+    for match in LOOT_BRANCH.finditer(text, start):
+        fields = dict((name, int(value)) for name, value in LOOT_FIELD.findall(match.group(3)))
+        if not fields:
+            continue
+
+        if match.group(1).startswith("if"):
+            last = 0
+        elif match.group(2):
+            last = int(match.group(2))
+        else:
+            last = C.FLOOR_COUNT
+
+        for floor in range(previous_last + 1, last + 1):
+            demand[floor] = (sum(fields.values()), fields.get("KeycardSpawns", 0))
+        previous_last = last
+
+        if last >= C.FLOOR_COUNT:
+            break
+
+    return demand
+
+
+def loot_capacity_problems():
+    """Every floor has at least as many loot points as its default profile asks for.
+
+    The runtime places what it can and logs the rest as unplaced, so a floor
+    short of points is a quieter floor rather than an error: exactly the kind
+    of thing that is only noticed when a playtester says the mezzanine is empty.
+    """
+    from onebraham import build_environment as E
+
+    demand = loot_demand_per_floor()
+    if not demand:
+        return [(u"the default loot profiles were not found in Data/OneBrahamMatchSettingsAsset.cpp", None)]
+
+    points = E.loot_points_per_floor()
+    keycard_points = {}
+    for area in C.AREAS:
+        name, (first, last), cx, cy, _sx, _sy = C.area_centre(area)
+        cards = sum(1 for room in E.ROOM_PROGRAMMES.get(name, [])
+                    for _x, _y, card in E.loot_points_for_room(room, cx, cy) if card)
+        for floor in range(first, last + 1):
+            keycard_points[floor] = cards
+
+    found = []
+    for floor, (items, cards) in sorted(demand.items()):
+        if points.get(floor, 0) < items:
+            found.append((u"floor {0} asks for {1} loot items and the map has {2} loot points".format(
+                floor, items, points.get(floor, 0)), None))
+        if keycard_points.get(floor, 0) < cards:
+            found.append((u"floor {0} asks for {1} keycards and has {2} points that may hold one".format(
+                floor, cards, keycard_points.get(floor, 0)), None))
+
     return found
 
 

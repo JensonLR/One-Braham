@@ -186,6 +186,9 @@ protected:
 	//  Internal flow
 	// ======================================================================
 	void StartWarmup();
+
+	/** Stocks the building from the match settings' loot profiles, once. */
+	void SpawnMatchLoot();
 	void StartActiveMatch();
 	void FinishMatch(EOneBrahamMatchEnding Ending, EOneBrahamTeam WinningTeam, const FString& WinningSquadName, int32 ExtractedCount, EOneBrahamExtractionFailReason FailReason);
 

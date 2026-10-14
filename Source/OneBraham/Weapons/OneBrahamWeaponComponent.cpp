@@ -584,6 +584,50 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerPickupFromWorld(AOneBraha
 	return WorldWeapon;
 }
 
+int32 UOneBrahamWeaponComponent::ServerAddReserveShare(float Share)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || Share <= 0.f)
+	{
+		return 0;
+	}
+
+	int32 Added = 0;
+
+	for (const TPair<EOneBrahamWeaponSlot, TObjectPtr<AOneBrahamWeaponBase>>& Pair : OwnedWeapons)
+	{
+		const AOneBrahamWeaponBase* Weapon = Pair.Value;
+		if (Weapon == nullptr || Weapon->Definition == nullptr || Weapon->Definition->MaxReserve <= 0)
+		{
+			continue;
+		}
+
+		const FName WeaponId = Weapon->Definition->WeaponId;
+		const int32 MaxReserve = Weapon->Definition->MaxReserve;
+		int32& Reserve = ReserveAmmoByWeapon.FindOrAdd(WeaponId, 0);
+
+		const int32 Grant = FMath::Min(FMath::Max(1, FMath::RoundToInt(MaxReserve * Share)), MaxReserve - Reserve);
+		if (Grant > 0)
+		{
+			Reserve += Grant;
+			Added += Grant;
+		}
+	}
+
+	if (Added > 0)
+	{
+		SyncReplicatedInventory();
+
+		if (CurrentWeapon != nullptr)
+		{
+			OnWeaponAmmoChanged(CurrentWeapon->GetAmmoInMagazine());
+		}
+
+		ForceNetUpdate();
+	}
+
+	return Added;
+}
+
 void UOneBrahamWeaponComponent::DropAllOnDeath()
 {
 	if (!GetOwner()->HasAuthority())

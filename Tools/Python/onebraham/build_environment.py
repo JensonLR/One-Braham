@@ -832,6 +832,107 @@ def build_vertical_circulation(report, materials):
 #  Gameplay anchors
 # ===========================================================================
 
+#: Rooms no loot is placed in: the pad and the edge rails are where a player
+#: should be looking at the sky and the other squads, not the floor.
+LOOT_EXCLUDED_ROOMS = {"Helipad", "Edge_Rail_North", "Edge_Rail_South"}
+
+#: One loot point per this many square metres of room, three to sixteen a room.
+LOOT_SQUARE_METRES_PER_POINT = 5.0
+LOOT_POINTS_MIN, LOOT_POINTS_MAX = 3, 16
+
+#: The first points in each room may also hold a keycard: a floor issues its
+#: cards from desks people work at, two a room, never from a stairwell.
+LOOT_KEYCARD_POINTS_PER_ROOM = 2
+
+#: Bit values of EOneBrahamLootCategory (Loot/OneBrahamLootSpawnPoint.h).
+LOOT_MASK_DEFAULT = 0b01111     # weapon, ammo, utility, medkit
+LOOT_MASK_WITH_KEYCARD = 0b11111
+
+
+def loot_points_for_room(room, centre_x, centre_y):
+    """(x, y, is_keycard_point) for one room, centred on the area centre.
+
+    A grid over the room, inset 60 cm from its walls, so the points are spread
+    across the room rather than stacked in its middle. Pure, so the engine-free
+    check can count what a floor will have before an editor ever runs.
+    """
+    name, rx, ry, size_x, size_y = room
+    if name in LOOT_EXCLUDED_ROOMS:
+        return []
+
+    area_m2 = (size_x * size_y) / 10000.0
+    count = int(max(LOOT_POINTS_MIN, min(LOOT_POINTS_MAX, round(area_m2 / LOOT_SQUARE_METRES_PER_POINT))))
+
+    columns = max(1, int(math.ceil(math.sqrt(count * size_x / max(size_y, 1.0)))))
+    rows = max(1, int(math.ceil(count / float(columns))))
+
+    inset_x = min(60.0, size_x / 4.0)
+    inset_y = min(60.0, size_y / 4.0)
+    span_x = max(0.0, size_x - 2.0 * inset_x)
+    span_y = max(0.0, size_y - 2.0 * inset_y)
+
+    points = []
+    for index in range(count):
+        column = index % columns
+        row = index // columns
+        px = centre_x + rx - span_x / 2.0 + (column + 0.5) * span_x / columns
+        py = centre_y + ry - span_y / 2.0 + (row + 0.5) * span_y / rows
+        points.append((px, py, index < LOOT_KEYCARD_POINTS_PER_ROOM))
+
+    return points
+
+
+def loot_points_per_floor():
+    """floor index -> number of loot points the builder will place."""
+    counts = {}
+    for area in C.AREAS:
+        name, (first, last), cx, cy, _sx, _sy = C.area_centre(area)
+        per_floor = sum(len(loot_points_for_room(room, cx, cy)) for room in ROOM_PROGRAMMES.get(name, []))
+        for floor in range(first, last + 1):
+            counts[floor] = per_floor
+    return counts
+
+
+def build_loot_points(report):
+    """Places AOneBrahamLootSpawnPoint actors in every room of every floor.
+
+    The match settings say how much loot a floor holds; these say where it may
+    be. There are deliberately more points than any floor's profile asks for,
+    so the same room holds its rifle on a different desk next match.
+    """
+    point_class = getattr(unreal, "OneBrahamLootSpawnPoint", None)
+    if point_class is None:
+        report.failed("OneBrahamLootSpawnPoint", "the C++ class is not available; compile the module first")
+        return []
+
+    placed = []
+    for area in C.AREAS:
+        name, (first, last), cx, cy, _sx, _sy = C.area_centre(area)
+        for floor_index in range(first, last + 1):
+            z = _floor_z(floor_index) + 2.0
+            for room in ROOM_PROGRAMMES.get(name, []):
+                for index, (px, py, keycard) in enumerate(loot_points_for_room(room, cx, cy)):
+                    actor = _spawn(point_class, unreal.Vector(px, py, z))
+                    if actor is None:
+                        continue
+
+                    label = "Loot_F{0:02d}_{1}_{2:02d}".format(floor_index, room[0], index)
+                    _label(actor, label)
+                    try:
+                        actor.set_editor_property("FloorIndex", floor_index)
+                        actor.set_editor_property("CategoryMask",
+                                                  LOOT_MASK_WITH_KEYCARD if keycard else LOOT_MASK_DEFAULT)
+                    except Exception as exc:  # noqa: BLE001
+                        report.failed(label, str(exc))
+                        continue
+
+                    placed.append({"label": label, "floor": floor_index, "room": room[0],
+                                   "location": [px, py, z], "keycard": keycard})
+
+    C.log(u"  loot: {0} spawn points".format(len(placed)))
+    return placed
+
+
 def build_spawn_points(report):
     """Places and configures every spawn anchor.
 
@@ -1573,6 +1674,7 @@ def build_persistent_level(report, materials, manifest):
     manifest["terminals"] = C.guard(report, "terminals", build_override_terminals, report) or []
     manifest["breachable_walls"] = C.guard(report, "breachable walls", build_breachable_walls, report, materials) or []
     manifest["shutters"] = C.guard(report, "shutters", build_shutters, report) or []
+    manifest["loot_points"] = C.guard(report, "loot points", build_loot_points, report) or []
 
     # --- The building shell -----------------------------------------------
     # A single exterior mass so the tower is visible from the Skydeck, the lobby

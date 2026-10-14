@@ -31,6 +31,7 @@
 class AOneBrahamCharacter;
 class AOneBrahamPlayerController;
 class UPointLightComponent;
+class UOneBrahamWeaponDataAsset;
 
 UCLASS(Blueprintable)
 class ONEBRAHAM_API AOneBrahamPickupBase : public AOneBrahamWeaponBase, public IOneBrahamInteractionInterface
@@ -57,6 +58,21 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Pickup")
 	void ServerDropAt(const FVector& Location, bool bScatter = true);
+
+	/**
+	 * Server: places this weapon as match loot rather than as a drop. Loot is
+	 * there for the whole match (no age-out), takeable at once (no corpse lock)
+	 * and does not glow like something off a body.
+	 */
+	void ServerPlaceAsLoot(const FVector& Location, float Yaw);
+
+	/**
+	 * Server: spawns WeaponId as a pickup with a full magazine and its starting
+	 * reserve, from the weapon's own Blueprint where it has one, and places it as
+	 * loot. Null if the id is unknown or the spawn failed.
+	 */
+	static AOneBrahamPickupBase* SpawnLoot(UWorld* World, UOneBrahamWeaponDataAsset* Registry, FName WeaponId,
+		const FVector& Location, float Yaw);
 
 	/** Server: takes the weapon into a character's hands. Returns false if they cannot carry it. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Pickup")
@@ -135,4 +151,8 @@ protected:
 	/** True when the drop came from a corpse, for the ground glow colour. */
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Pickup")
 	bool bDroppedFromCorpse = false;
+
+	/** Placed as match loot: never ages out. Replicated because clients run the fade. */
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Pickup")
+	bool bPermanentLoot = false;
 };

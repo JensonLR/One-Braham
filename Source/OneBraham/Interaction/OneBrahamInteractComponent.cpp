@@ -492,6 +492,9 @@ void UOneBrahamInteractComponent::PlayInteractionMontage(FGameplayTag Interactio
 	else if (TagString.Contains(TEXT("Execute")))  { MontageName = TEXT("AM_OB_Interact_Execute"); }
 	else if (TagString.Contains(TEXT("Keycard")))  { MontageName = TEXT("AM_OB_Interact_Keycard"); }
 	else if (TagString.Contains(TEXT("Body")))     { MontageName = TEXT("AM_OB_Interact_Loot"); }
+	else if (TagString.Contains(TEXT("Ammo")))     { MontageName = TEXT("AM_OB_Interact_Loot"); }
+	else if (TagString.Contains(TEXT("Utility")))  { MontageName = TEXT("AM_OB_Interact_Loot"); }
+	else if (TagString.Contains(TEXT("Medkit")))   { MontageName = TEXT("AM_OB_Interact_Loot"); }
 	else if (TagString.Contains(TEXT("Extraction"))) { MontageName = TEXT("AM_OB_Interact_Radio"); }
 	else                                           { MontageName = TEXT("AM_OB_Interact_Door"); }
 

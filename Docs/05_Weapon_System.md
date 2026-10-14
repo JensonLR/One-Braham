@@ -182,6 +182,30 @@ finding one changes how a squad plays the rest of the match. How a weapon
 weapon, so the marksman rifle is not just slow to fire, it is slow to be holding
 when somebody comes through the door behind you.
 
+### How a floor is stocked
+
+`UOneBrahamLootSubsystem::SpawnMatchLoot` runs once, on the server, as the warmup
+starts. For each floor's `FOneBrahamFloorLootProfile` it draws that many
+`AOneBrahamLootSpawnPoint`s on that floor, in this order: keycards, weapons,
+ammo, utilities, medkits. Keycards go first because only two points a room may
+hold one.
+
+* **Weapons.** Each weapon is rolled from the `WeaponSpawnTable` by the weights
+  and floor gates in the table above. It spawns as an `AOneBrahamPickupBase`
+  with a full magazine and its starting reserve, plus any bundled utility
+  beside it. Placed loot never ages out and has no pickup lock; those are
+  rules for death drops.
+* **Supplies.** Ammo, utilities and medkits are `AOneBrahamSupplyPickup`. An
+  ammo box adds 35% of each carried weapon's maximum reserve. A pickup the
+  player has no room for stays where it is.
+* **Keycards.** Each one is the floor's `KeycardTier`, issued on that floor.
+
+The map builder places 24 to 56 points a floor, several more than any profile
+asks for. `check_building_layout.py` reads the default profiles out of the C++
+and fails if a floor has fewer points, or fewer keycard-capable points, than
+it asks for. The draw is seeded and the seed is logged; `ob.loot.seed <n>`
+replays a match's loot.
+
 ---
 
 ## 5. Sound as a weapon property
