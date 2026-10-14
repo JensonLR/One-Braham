@@ -25,6 +25,7 @@
 #include "NiagaraFunctionLibrary.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
+#include "Engine/OverlapResult.h"
 #include "EngineUtils.h"
 #include "DrawDebugHelpers.h"
 #include "Net/UnrealNetwork.h"
@@ -571,24 +572,30 @@ void AOneBrahamProjectileBase::ApplyFragDamage()
 	// --- Physical push ----------------------------------------------------
 	// Grenades shove desks, trays, mugs and chairs around. This is a huge part of
 	// how the game feels, and it is Chaos doing it, not bespoke code.
-	for (TActorIterator<AActor> ActorIt(World); ActorIt; ++ActorIt)
+	// A sphere query, not a walk over every actor: the tower holds thousands of
+	// props, and a grenade only reaches the ones within its push radius.
+	const float PushRadius = BlastRadius * 1.4f;
+	FCollisionObjectQueryParams PushObjects;
+	PushObjects.AddObjectTypesToQuery(ECC_PhysicsBody);
+	PushObjects.AddObjectTypesToQuery(ECC_WorldDynamic);
+	FCollisionQueryParams PushParams(SCENE_QUERY_STAT(OneBrahamGrenadePush), false, this);
+
+	TArray<FOverlapResult> Overlaps;
+	World->OverlapMultiByObjectType(Overlaps, Origin, FQuat::Identity, PushObjects,
+		FCollisionShape::MakeSphere(PushRadius), PushParams);
+
+	TSet<UPrimitiveComponent*> Pushed;
+	for (const FOverlapResult& Overlap : Overlaps)
 	{
-		AActor* Actor = *ActorIt;
-		if (Actor == nullptr || Actor == this || Actor->IsA(AOneBrahamCharacter::StaticClass()))
+		UPrimitiveComponent* Primitive = Overlap.GetComponent();
+		if (Primitive == nullptr || !Primitive->IsSimulatingPhysics() || Pushed.Contains(Primitive)
+			|| Cast<AOneBrahamCharacter>(Primitive->GetOwner()) != nullptr)
 		{
 			continue;
 		}
+		Pushed.Add(Primitive);
 
-		UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(Actor->GetRootComponent());
-		if (Primitive == nullptr || !Primitive->IsSimulatingPhysics())
-		{
-			continue;
-		}
-
-		const FVector ToActor = Actor->GetActorLocation() - Origin;
-		const float Distance = ToActor.Size();
-		const float PushRadius = BlastRadius * 1.4f;
-
+		const float Distance = FVector::Dist(Primitive->GetComponentLocation(), Origin);
 		if (Distance > PushRadius || Distance < KINDA_SMALL_NUMBER)
 		{
 			continue;
