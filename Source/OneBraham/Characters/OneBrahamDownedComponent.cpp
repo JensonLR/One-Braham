@@ -3,6 +3,7 @@
 #include "Characters/OneBrahamDownedComponent.h"
 
 #include "OneBraham.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 #include "Core/OneBrahamGameMode.h"
 #include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamPlayerController.h"
@@ -156,6 +157,8 @@ void UOneBrahamDownedComponent::EnterDownedState(AActor* Killer, const FOneBraha
 	// --- Feedback ---------------------------------------------------------
 	OnDownedStateChanged.Broadcast(true, BleedOutRemaining);
 	TriggerDownVoiceLine();
+	bFinalWordsSaid = false;
+	FOneBrahamVoiceDirector::OnDowned(Character);
 
 	if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(Character->GetController()))
 	{
@@ -208,6 +211,13 @@ void UOneBrahamDownedComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		{
 			Voice->SpeakContextualLine(GetOwner(), QuipsSpoken == 1 ? TEXT("V_DOWNED_CALL_HELP") : TEXT("V_DOWNED_QUIP"));
 		}
+	}
+
+	// The last five seconds: they know, and they say so.
+	if (!bFinalWordsSaid && BleedOutRemaining <= 5.f && BleedOutRemaining > 0.f)
+	{
+		bFinalWordsSaid = true;
+		FOneBrahamVoiceDirector::OnBleedingOut(CachedCharacter.Get());
 	}
 
 	// --- Bleed out --------------------------------------------------------

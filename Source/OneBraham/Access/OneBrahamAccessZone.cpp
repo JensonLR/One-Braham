@@ -3,6 +3,7 @@
 // OneBrahamAccessZone.cpp
 
 #include "Access/OneBrahamAccessZone.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 
 #include "OneBraham.h"
 #include "Access/OneBrahamAccessZoneComponent.h"
@@ -581,6 +582,7 @@ bool AOneBrahamAccessZone::OnInteractionStart_Implementation(AOneBrahamPlayerCon
 		const bool bUnlocked = Zone->ServerUnlock(EOneBrahamUnlockMethod::Keycard, PlayerId);
 		if (bUnlocked)
 		{
+			FOneBrahamVoiceDirector::OnAccessGranted(Cast<AOneBrahamCharacter>(Interactor->GetPawn()));
 			OB_ACCESS_LOG("Door '%s' opened by badge (player %d).", *GetZoneId().ToString(), PlayerId);
 			return true;
 		}

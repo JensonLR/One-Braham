@@ -3,6 +3,7 @@
 #include "Characters/OneBrahamHealthComponent.h"
 
 #include "OneBraham.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 #include "Core/OneBrahamGameSettings.h"
 #include "Core/OneBrahamGameplayTags.h"
 #include "Core/OneBrahamPlayerController.h"
@@ -275,6 +276,7 @@ float UOneBrahamHealthComponent::ApplyDamage(float RawDamage, AActor* DamageInst
 		}
 
 		OnDamageTaken.Broadcast(ActualDamage, DamageInstigator, InstigatorLocation);
+		FOneBrahamVoiceDirector::OnDamaged(Cast<AOneBrahamCharacter>(GetOwner()), DamageInstigator, ActualDamage);
 
 		if (AOneBrahamPlayerController* OwnerPC = OwnerCharacter != nullptr
 			? Cast<AOneBrahamPlayerController>(OwnerCharacter->GetController()) : nullptr)

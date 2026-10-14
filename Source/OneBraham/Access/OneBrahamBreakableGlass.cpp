@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Access/OneBrahamBreakableGlass.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 
 #include "VFX/OneBrahamVFXStatics.h"
 #include "Components/StaticMeshComponent.h"
@@ -165,6 +166,8 @@ void AOneBrahamBreakableGlass::Shatter(const FVector& ImpactPoint, const FVector
 	{
 		return;
 	}
+
+	FOneBrahamVoiceDirector::OnGlassBroken(GetWorld(), GetPaneCentre(), FloorIndex);
 
 	// One path for the server and every client. The multicast runs locally on the
 	// authority as well, so the pane's state is set in exactly one place and the

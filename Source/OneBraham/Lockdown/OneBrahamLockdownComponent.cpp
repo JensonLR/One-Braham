@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Lockdown/OneBrahamLockdownComponent.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 
 #include "Audio/OneBrahamAudioManagerComponent.h"
 #include "Characters/OneBrahamCharacter.h"
@@ -238,6 +239,7 @@ void UOneBrahamLockdownComponent::ServerApplyStage(EOneBrahamLockdownStage NewSt
 
 	Stage = NewStage;
 	TimeInStage = 0.f;
+	FOneBrahamVoiceDirector::OnLockdownStage(GetWorld(), NewStage);
 	bWarningFiredForStage = false;
 	bWarningActive = false;
 	SecondsToNextStage = NewStage == EOneBrahamLockdownStage::Purge

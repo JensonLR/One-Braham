@@ -1,6 +1,11 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Interaction/OneBrahamInteractComponent.h"
+#include "Weapons/OneBrahamInventoryComponent.h"
+#include "Access/OneBrahamLift.h"
+#include "Access/OneBrahamOverrideTerminal.h"
+#include "Access/OneBrahamAccessZone.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 
 #include "OneBraham.h"
 #include "Core/OneBrahamGameSettings.h"
@@ -185,8 +190,33 @@ void UOneBrahamInteractComponent::ServerBeginInteraction_Implementation(AActor* 
 	if (!Interface->CanInteract_Implementation(PC))
 	{
 		// Legitimate failure (locked door without a badge): no violation, just a
-		// negative response so the HUD can shake the prompt.
+		// negative response so the HUD can shake the prompt, and the character
+		// says what the problem is.
 		OnPromptChanged.Broadcast(Interface->GetInteractionPrompt_Implementation(PC));
+
+		const UOneBrahamInventoryComponent* Inventory = Character->GetInventoryComponent();
+		const bool bHoldsAnyCard = Inventory != nullptr && Inventory->HighestKeycardTier != EOneBrahamAccessTier::Public;
+		if (Target->IsA<AOneBrahamAccessZone>())
+		{
+			FOneBrahamVoiceDirector::OnAccessRefused(Character, bHoldsAnyCard);
+		}
+		else if (Target->IsA<AOneBrahamOverrideTerminal>())
+		{
+			FOneBrahamVoiceDirector::OnOverrideRefused(Character);
+		}
+		else if (const AOneBrahamLift* Lift = Cast<AOneBrahamLift>(Target))
+		{
+			// Only from inside the car, and only for the refusals worth saying:
+			// "in transit" is the car doing its job.
+			if (Lift->IsInsideCar(Character) && Lift->IsOutOfService())
+			{
+				FOneBrahamVoiceDirector::OnLiftOutOfService(Character);
+			}
+			else if (Lift->IsInsideCar(Character) && !Lift->IsMoving())
+			{
+				FOneBrahamVoiceDirector::OnAccessRefused(Character, bHoldsAnyCard);
+			}
+		}
 		return;
 	}
 

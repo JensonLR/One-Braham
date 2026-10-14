@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Weapons/OneBrahamWeaponComponent.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 
 #include "OneBraham.h"
 #include "Core/OneBrahamGameSettings.h"
@@ -706,6 +707,11 @@ void UOneBrahamWeaponComponent::EquipSlot(EOneBrahamWeaponSlot Slot)
 
 	CurrentSlot = Slot;
 
+	if (Slot == EOneBrahamWeaponSlot::Sidearm && Previous != nullptr && CurrentWeapon != nullptr)
+	{
+		FOneBrahamVoiceDirector::OnSidearmDrawn(GetCharacter());
+	}
+
 	if (Previous != nullptr)
 	{
 		Previous->OnUnequipped();
@@ -860,6 +866,7 @@ void UOneBrahamWeaponComponent::SetTriggerHeld(bool bHeld)
 	if (CurrentWeapon->IsMagazineEmpty())
 	{
 		CurrentWeapon->MulticastPlayDryFire();
+		FOneBrahamVoiceDirector::OnDryFire(GetCharacter());
 		return;
 	}
 
@@ -1294,6 +1301,7 @@ void UOneBrahamWeaponComponent::RequestReload()
 	bIsReloading = true;
 	OnRep_Reloading();
 	OnReloadStateChanged.Broadcast(true);
+	FOneBrahamVoiceDirector::OnReload(GetCharacter(), CurrentWeapon->GetAmmoInMagazine() <= 0);
 
 	// The weapon actor drives the timer; we only mirror the state for the HUD.
 	CurrentWeapon->ServerStartReload();
@@ -1729,7 +1737,13 @@ void UOneBrahamWeaponComponent::UseMedkit()
 
 	if (!Inventory->ServerHasMedkit())
 	{
+		FOneBrahamVoiceDirector::OnMedkitEmpty(GetCharacter());
 		return;
+	}
+
+	if (UOneBrahamVoiceSubsystem* Voice = UOneBrahamVoiceSubsystem::Get(GetOwner()))
+	{
+		Voice->SpeakContextualLine(GetOwner(), TEXT("V_MEDKIT"));
 	}
 
 	// Health is restored at the END of the animation: being shot mid-medkit
@@ -1766,11 +1780,7 @@ void UOneBrahamWeaponComponent::UseMedkit()
 		if (Inventory->ServerConsumeMedkit())
 		{
 			MedHealth->Heal(HealAmount);
-
-			if (UOneBrahamVoiceSubsystem* Voice = UOneBrahamVoiceSubsystem::Get(GetOwner()))
-			{
-				Voice->SpeakContextualLine(GetOwner(), TEXT("V_MEDKIT"));
-			}
+			FOneBrahamVoiceDirector::OnMedkitFinished(MedCharacter);
 		}
 	}), UseSeconds, false);
 }

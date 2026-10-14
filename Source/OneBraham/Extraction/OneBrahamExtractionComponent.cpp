@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Extraction/OneBrahamExtractionComponent.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 
 #include "Audio/OneBrahamAudioManagerComponent.h"
 #include "VFX/OneBrahamCameraShake.h"
@@ -147,6 +148,7 @@ void UOneBrahamExtractionComponent::TickComponent(float DeltaTime, ELevelTick Ti
 		if (Remaining <= 0.f)
 		{
 			ServerSetState(EOneBrahamExtractionState::Arriving);
+			FOneBrahamVoiceDirector::OnHelicopterArriving(GetWorld());
 			break;
 		}
 		break;

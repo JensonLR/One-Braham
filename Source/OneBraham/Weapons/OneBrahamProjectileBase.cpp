@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Weapons/OneBrahamProjectileBase.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 #include "Access/OneBrahamDestructibleProp.h"
 #include "EngineUtils.h"
 
@@ -204,6 +205,13 @@ void AOneBrahamProjectileBase::ServerPlantAsBreachCharge(AActor* HostActor, cons
 	// Restart the fuse from the plant.
 	GetWorldTimerManager().ClearTimer(FuseTimerHandle);
 	GetWorldTimerManager().SetTimer(FuseTimerHandle, this, &AOneBrahamProjectileBase::Detonate, FuseSeconds, false);
+
+	// "Two, one -": the planter counts the squad in, a second and a half out.
+	FTimerHandle CountdownHandle;
+	GetWorldTimerManager().SetTimer(CountdownHandle, FTimerDelegate::CreateWeakLambda(this, [this]()
+	{
+		FOneBrahamVoiceDirector::OnBreachImminent(Thrower.Get());
+	}), FMath::Max(0.1f, FuseSeconds - 1.5f), false);
 
 	OB_WEAPON_LOG("Breach charge planted on '%s' by '%s' (%.1fs fuse).",
 		HostActor ? *HostActor->GetName() : TEXT("world"), *ThrowerName, FuseSeconds);
@@ -658,6 +666,7 @@ void AOneBrahamProjectileBase::ApplyFlashEffect()
 		if (Duration > 0.15f)
 		{
 			PC->ClientApplyFlash(Duration, Facing > 0.85f);
+			FOneBrahamVoiceDirector::OnFlashed(Character, DistanceAlpha * FacingAlpha);
 		}
 	}
 }

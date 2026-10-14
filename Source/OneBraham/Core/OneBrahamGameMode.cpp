@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Core/OneBrahamGameMode.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 #include "Loot/OneBrahamLootSubsystem.h"
 #include "Data/OneBrahamCharacterDataAsset.h"
 
@@ -219,6 +220,13 @@ void AOneBrahamGameMode::Tick(float DeltaSeconds)
 		}
 	}
 
+	// Half way through the clock, each squad notices.
+	if (GS != nullptr && GS->MatchPhase == EOneBrahamMatchPhase::Active && MatchSettings->TimeLimitSeconds > 0
+		&& GS->PhaseElapsedSeconds >= MatchSettings->TimeLimitSeconds * 0.5f)
+	{
+		FOneBrahamVoiceDirector::OnMatchHalfway(GetWorld());
+	}
+
 	// Keep the survivor count fresh for the HUD.
 	if (GS != nullptr && GS != nullptr && (GS->MatchPhase == EOneBrahamMatchPhase::Active || GS->MatchPhase == EOneBrahamMatchPhase::Extraction))
 	{
@@ -250,7 +258,12 @@ void AOneBrahamGameMode::StartWarmup()
 	SetMatchPhase(EOneBrahamMatchPhase::Warmup);
 	WarmupEndTime = GetWorld()->GetTimeSeconds() + static_cast<float>(MatchSettings->WarmupSeconds);
 
-	Announce(FText::FromString(TEXT("Welcome to One Braham. Please sign in at reception.")), true);
+	// The lobby tannoy: five announcements through the warmup, in order, the
+	// building's ordinary morning running a few minutes ahead of its last.
+	LobbyAnnouncementIndex = 0;
+	PlayNextLobbyAnnouncement();
+	GetWorldTimerManager().SetTimer(LobbyAnnouncementHandle, this, &AOneBrahamGameMode::PlayNextLobbyAnnouncement,
+		FMath::Max(6.f, static_cast<float>(MatchSettings->WarmupSeconds) / static_cast<float>(LobbyAnnouncementCount())), true);
 
 	if (MatchSettings->WarmupSeconds > 0)
 	{
@@ -261,6 +274,35 @@ void AOneBrahamGameMode::StartWarmup()
 	{
 		StartActiveMatch();
 	}
+}
+
+int32 AOneBrahamGameMode::LobbyAnnouncementCount()
+{
+	return 5;
+}
+
+FText AOneBrahamGameMode::GetLobbyAnnouncement(int32 Index)
+{
+	switch (Index)
+	{
+	case 0: return NSLOCTEXT("OneBraham", "Lobby_0", "Good morning, and welcome to One Braham. Visitors, please sign in at reception.");
+	case 1: return NSLOCTEXT("OneBraham", "Lobby_1", "Lanyards and passes must be worn and visible at all times inside the building.");
+	case 2: return NSLOCTEXT("OneBraham", "Lobby_2", "The fire alarm will be tested later this morning. No action is required.");
+	case 3: return NSLOCTEXT("OneBraham", "Lobby_3", "Would the owner of a grey estate in loading bay two please return to their vehicle.");
+	case 4: return NSLOCTEXT("OneBraham", "Lobby_4", "The Skydeck remains closed to staff and visitors until further notice. Thank you.");
+	default: return FText::GetEmpty();
+	}
+}
+
+void AOneBrahamGameMode::PlayNextLobbyAnnouncement()
+{
+	if (LobbyAnnouncementIndex >= LobbyAnnouncementCount() || GetMatchPhase() != EOneBrahamMatchPhase::Warmup)
+	{
+		GetWorldTimerManager().ClearTimer(LobbyAnnouncementHandle);
+		return;
+	}
+
+	Announce(GetLobbyAnnouncement(LobbyAnnouncementIndex++), true);
 }
 
 void AOneBrahamGameMode::HandleWarmupComplete()
@@ -275,6 +317,8 @@ void AOneBrahamGameMode::StartActiveMatch()
 
 	SetMatchPhase(EOneBrahamMatchPhase::Active);
 	MatchStartTime = GetWorld()->GetTimeSeconds();
+	GetWorldTimerManager().ClearTimer(LobbyAnnouncementHandle);
+	FOneBrahamVoiceDirector::OnMatchStarted(GetWorld());
 
 	Announce(FText::FromString(TEXT("The lift lobby is open. Ascend.")), true);
 
@@ -354,6 +398,8 @@ void AOneBrahamGameMode::HandleExtractionComplete(int32 WinningSquadId, EOneBrah
 	{
 		return;
 	}
+
+	PendingWinningSquadId = WinningSquadId;
 
 	// Count who actually made it onto the wire: a squad that extracts with two of
 	// its four players has still won, and the result screen says so.
@@ -546,6 +592,7 @@ void AOneBrahamGameMode::FinishMatch(EOneBrahamMatchEnding Ending, EOneBrahamTea
 	}
 
 	Announce(Announcement, true);
+	FOneBrahamVoiceDirector::OnMatchEnded(GetWorld(), PendingWinningSquadId);
 
 	OB_MATCH_LOG("MATCH COMPLETE: ending=%s winner=%s squad='%s' noSurvivors=%d extracted=%d duration=%.1fs reason=%s",
 		*UEnum::GetValueAsString(Ending), *UEnum::GetValueAsString(WinningTeam), *WinningSquadName, bNoSurvivors ? 1 : 0, ExtractedCount,
@@ -882,6 +929,11 @@ void AOneBrahamGameMode::EvaluateMatchEndConditions()
 		return;
 	}
 
+	if (AliveSquads == 2 && PopulatedSquads >= 3)
+	{
+		FOneBrahamVoiceDirector::OnTwoSquadsLeft(GetWorld());
+	}
+
 	// Docs/06 section 7: every other squad eliminated, extraction not completed.
 	// The survivors win where they stand; making them hold the winch against
 	// nobody for 30 s is a wait, not a game.
@@ -897,6 +949,7 @@ void AOneBrahamGameMode::EvaluateMatchEndConditions()
 			Survivors += Member.LifeState == EOneBrahamLifeState::Alive || Member.LifeState == EOneBrahamLifeState::Downed ? 1 : 0;
 		}
 
+		PendingWinningSquadId = LastAlive->SquadId;
 		FinishMatch(EOneBrahamMatchEnding::LastSquadStanding, LastAlive->Team, SquadName, Survivors,
 			EOneBrahamExtractionFailReason::None);
 	}

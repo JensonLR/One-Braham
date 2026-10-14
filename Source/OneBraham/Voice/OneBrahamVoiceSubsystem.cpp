@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Voice/OneBrahamVoiceSubsystem.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 #include "UI/OneBrahamHUDStringTable.h"
 
 #include "OneBraham.h"
@@ -204,6 +205,9 @@ bool UOneBrahamVoiceSubsystem::SpeakContextualLine(AActor* Speaker, FName LineId
 	{
 		LineCooldowns.Add(CooldownKey, Now);
 		LastSpokenTime.Add(State, Now);
+
+		// A squadmate may answer it: "reloading" gets "I've got you".
+		FOneBrahamVoiceDirector::OnLineSpoken(Character, LineId);
 	}
 
 	return bSpoken;
@@ -330,7 +334,7 @@ void UOneBrahamVoiceSubsystem::HandleAmbientLineTimer()
 			TEXT("V_AMBIENT_ELEVATOR"), TEXT("V_AMBIENT_CANTEEN"), TEXT("V_AMBIENT_SERVER_ROOM"),
 			TEXT("V_AMBIENT_RAIN"), TEXT("V_AMBIENT_STAIRS"), TEXT("V_AMBIENT_EXEC"),
 			TEXT("V_AMBIENT_TIRED"), TEXT("V_AMBIENT_COFFEE"), TEXT("V_AMBIENT_MEETING"),
-			TEXT("V_AMBIENT_SKYDECK"), TEXT("V_AMBIENT_PLAZA")
+			TEXT("V_AMBIENT_SKYDECK"), TEXT("V_AMBIENT_PLAZA"), TEXT("V_STEP_GRATING")
 		};
 
 		const FName LineId = AmbientLines[Random.RandRange(0, UE_ARRAY_COUNT(AmbientLines) - 1)];

@@ -3,6 +3,7 @@
 // OneBrahamFireShutter.cpp
 
 #include "Access/OneBrahamFireShutter.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 
 #include "OneBraham.h"
 #include "Audio/OneBrahamAudioManagerComponent.h"
@@ -294,6 +295,11 @@ void AOneBrahamFireShutter::ServerSetClosed(bool bNewClosed, float DurationSecon
 		OB_WARN("Shutter '%s' refused a lockdown close: it is marked never-seal.",
 			*ShutterId.ToString());
 		return;
+	}
+
+	if (bNewClosed)
+	{
+		FOneBrahamVoiceDirector::OnShuttersClosing(GetWorld(), GetActorLocation());
 	}
 
 	PendingDuration = DurationSeconds > 0.f

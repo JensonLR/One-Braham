@@ -189,6 +189,21 @@ protected:
 
 	/** Stocks the building from the match settings' loot profiles, once. */
 	void SpawnMatchLoot();
+
+	/** The warmup's tannoy, one announcement at a time. */
+	void PlayNextLobbyAnnouncement();
+
+public:
+	/** The five lobby announcements, in the order the warmup plays them. */
+	static int32 LobbyAnnouncementCount();
+	static FText GetLobbyAnnouncement(int32 Index);
+
+protected:
+	int32 LobbyAnnouncementIndex = 0;
+	FTimerHandle LobbyAnnouncementHandle;
+
+	/** The squad that won, set just before FinishMatch, for the last words. */
+	int32 PendingWinningSquadId = INDEX_NONE;
 	void StartActiveMatch();
 	void FinishMatch(EOneBrahamMatchEnding Ending, EOneBrahamTeam WinningTeam, const FString& WinningSquadName, int32 ExtractedCount, EOneBrahamExtractionFailReason FailReason);
 

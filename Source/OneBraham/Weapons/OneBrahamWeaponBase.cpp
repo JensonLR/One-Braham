@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Weapons/OneBrahamWeaponBase.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 #include "Weapons/OneBrahamLagCompensationSubsystem.h"
 
 #include "OneBraham.h"
@@ -928,6 +929,10 @@ float AOneBrahamWeaponBase::ServerMelee()
 				Report.Distance = Hit.Distance;
 
 				Damage = Health->ApplyDamage(Report.BaseDamage, Character, Report, Character->GetController());
+				if (Damage > 0.f)
+				{
+					FOneBrahamVoiceDirector::OnMeleeHit(Character);
+				}
 			}
 		}
 	}

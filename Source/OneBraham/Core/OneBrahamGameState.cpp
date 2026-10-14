@@ -1,6 +1,8 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Core/OneBrahamGameState.h"
+#include "Audio/OneBrahamAudioManagerComponent.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 
 #include "OneBraham.h"
 #include "Core/OneBrahamGameplayTags.h"
@@ -215,6 +217,17 @@ void AOneBrahamGameState::AddKillFeedEntry(const FOneBrahamKillFeedEntry& Entry)
 void AOneBrahamGameState::MulticastAnnounce_Implementation(const FText& Announcement, bool bPlayTannoySound)
 {
 	OnAnnouncement.Broadcast(Announcement);
+
+	// The chime before the voice: the building clearing its throat. The flag
+	// arrived here and was only written to the log, so every announcement in
+	// the game was silent text.
+	if (bPlayTannoySound)
+	{
+		if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this))
+		{
+			Audio->PlayAnnouncementChime();
+		}
+	}
 
 	// The Tannoy itself is driven by the audio manager on each client so the
 	// announcement pans from the correct ceiling speaker near the listener.

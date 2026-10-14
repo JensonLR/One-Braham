@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Weapons/OneBrahamPickupBase.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 #include "Data/OneBrahamWeaponDataAsset.h"
 
 #include "Characters/OneBrahamCharacter.h"
@@ -338,6 +339,7 @@ bool AOneBrahamPickupBase::ServerPickupBy(AOneBrahamCharacter* Character)
 	if (Weapons->ServerPickupFromWorld(this) != nullptr)
 	{
 		ServerTakeOffGround();
+		FOneBrahamVoiceDirector::OnLootTaken(Character, /*bWeapon*/ true);
 		return true;
 	}
 

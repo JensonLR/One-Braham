@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Access/OneBrahamDestructibleProp.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 
 #include "Audio/OneBrahamAudioManagerComponent.h"
 #include "Characters/OneBrahamCharacter.h"
@@ -148,6 +149,8 @@ void AOneBrahamDestructibleProp::ServerApplyHazard(AController* EventInstigator)
 	{
 		return;
 	}
+
+	FOneBrahamVoiceDirector::OnPropShorted(GetWorld(), GetActorLocation());
 
 	// A short: everyone pressed against it gets a jolt, credited to the building.
 	for (TActorIterator<AOneBrahamCharacter> It(GetWorld()); It; ++It)

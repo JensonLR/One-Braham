@@ -182,7 +182,7 @@ read the report.
 
 `Docs/10` (materials, lighting, dressing), `Docs/11` (Niagara, with parameters and
 budgets), `Docs/12` (audio classes, mixes, the recording brief), `Docs/13` (six
-archetypes, clothing, cosmetics), `Docs/14` (161 voice lines with per-line
+archetypes, clothing, cosmetics), `Docs/14` (171 voice lines, every one different, with per-line
 direction), `Docs/15` (briefs for everything a person must make), `Docs/16`
 (marketplace fallbacks with licences). Anything an editor has to be told is in
 those documents as instructions, not as wishes — a node graph is a numbered list of

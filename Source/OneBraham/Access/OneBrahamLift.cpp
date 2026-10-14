@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Access/OneBrahamLift.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 
 #include "Audio/OneBrahamAudioManagerComponent.h"
 #include "Characters/OneBrahamCharacter.h"
@@ -467,6 +468,7 @@ void AOneBrahamLift::ServerTryCloseDoors()
 		Report.CauseId = TEXT("LiftDoors");
 		Report.bLethal = DoorCrushDamage >= Health->GetHealth();
 		Health->ApplyDamage(DoorCrushDamage, this, Report, nullptr);
+		FOneBrahamVoiceDirector::OnLiftCrush(Character);
 		bHitSomebody = true;
 	}
 
@@ -634,7 +636,13 @@ bool AOneBrahamLiftCallPanel::OnInteractionStart_Implementation(AOneBrahamPlayer
 		return false;
 	}
 
-	return Lift->ServerRequestStop(StopIndex);
+	const bool bWasHere = Lift->GetCurrentFloor() == Lift->StopFloors[StopIndex];
+	const bool bCalled = Lift->ServerRequestStop(StopIndex);
+	if (bCalled && !bWasHere)
+	{
+		FOneBrahamVoiceDirector::OnLiftCalled(Cast<AOneBrahamCharacter>(Interactor->GetPawn()));
+	}
+	return bCalled;
 }
 
 void AOneBrahamLiftCallPanel::OnInteractionEnd_Implementation(AOneBrahamPlayerController* Interactor, bool bCompleted)

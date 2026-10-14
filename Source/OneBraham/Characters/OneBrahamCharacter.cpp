@@ -3,6 +3,7 @@
 #include "Characters/OneBrahamCharacter.h"
 
 #include "OneBraham.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 #include "Core/OneBrahamGameSettings.h"
 #include "Core/OneBrahamGameplayTags.h"
 #include "Core/OneBrahamPlayerController.h"
@@ -863,6 +864,11 @@ bool AOneBrahamCharacter::OnInteractionStart_Implementation(AOneBrahamPlayerCont
 	if (Verb == EOneBrahamDownedInteraction::Revive)
 	{
 		Downed->SetReviveProgress(0.f, Interactor->GetPawn());
+		FOneBrahamVoiceDirector::OnReviveStarted(Cast<AOneBrahamCharacter>(Interactor->GetPawn()), this);
+	}
+	else if (Verb == EOneBrahamDownedInteraction::Execute)
+	{
+		FOneBrahamVoiceDirector::OnExecuteStarted(Cast<AOneBrahamCharacter>(Interactor->GetPawn()), this);
 	}
 
 	return true;
@@ -880,7 +886,13 @@ void AOneBrahamCharacter::OnInteractionHold_Implementation(AOneBrahamPlayerContr
 	// feedback is the animation of the person doing it.
 	if (Downed->GetInteractionFor(Interactor) == EOneBrahamDownedInteraction::Revive)
 	{
+		// Half way through, the reviver says something to the person on the floor.
+		const float Previous = Downed->GetReviveProgress();
 		Downed->SetReviveProgress(Progress01, Interactor->GetPawn());
+		if (HasAuthority() && Previous < 0.5f && Progress01 >= 0.5f)
+		{
+			FOneBrahamVoiceDirector::OnReviveHalfway(Cast<AOneBrahamCharacter>(Interactor->GetPawn()));
+		}
 	}
 }
 
@@ -1122,6 +1134,8 @@ void AOneBrahamCharacter::ServerOnDied(AController* Killer, const FOneBrahamDama
 	{
 		KillEntry = GameMode->RegisterKill(this, Killer, Report);
 	}
+
+	FOneBrahamVoiceDirector::OnKilled(this, Killer != nullptr ? Cast<AOneBrahamCharacter>(Killer->GetPawn()) : nullptr);
 
 	// Notify the controller so the death screen + spectate flow starts. This is a
 	// Client RPC: the death was detected here, on the server, and the player who

@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Loot/OneBrahamSupplyPickup.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 
 #include "Characters/OneBrahamCharacter.h"
 #include "Components/PointLightComponent.h"
@@ -237,6 +238,10 @@ bool AOneBrahamSupplyPickup::ServerGrantTo(AOneBrahamCharacter* Character)
 
 	if (bGranted)
 	{
+		if (Kind == EOneBrahamSupplyKind::Ammo)
+		{
+			FOneBrahamVoiceDirector::OnLootTaken(Character, /*bWeapon*/ false);
+		}
 		Destroy();
 	}
 

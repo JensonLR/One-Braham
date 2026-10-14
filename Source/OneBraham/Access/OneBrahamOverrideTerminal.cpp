@@ -3,6 +3,8 @@
 // OneBrahamOverrideTerminal.cpp
 
 #include "Access/OneBrahamOverrideTerminal.h"
+#include "Characters/OneBrahamCharacter.h"
+#include "Voice/OneBrahamVoiceDirector.h"
 
 #include "OneBraham.h"
 #include "Access/OneBrahamAccessZone.h"
@@ -371,6 +373,7 @@ bool AOneBrahamOverrideTerminal::OnInteractionStart_Implementation(AOneBrahamPla
 	HoldInteractor = Interactor;
 	HoldLastSeconds = 0.f;
 	bAlarmRaised = false;
+	FOneBrahamVoiceDirector::OnOverrideStarted(Cast<AOneBrahamCharacter>(Interactor->GetPawn()));
 
 	MulticastPlayTerminalEffects(FName(TEXT("SFX_Terminal_Hum")), 0.7f);
 
@@ -404,6 +407,13 @@ void AOneBrahamOverrideTerminal::OnInteractionHold_Implementation(AOneBrahamPlay
 	else
 	{
 		HoldInteractor = Interactor;
+	}
+
+	// Half way through a long hold, the one doing it says how long is left.
+	const float Halfway = GetHoldDuration_Implementation(Interactor) * 0.5f;
+	if (HoldLastSeconds < Halfway && HeldSeconds >= Halfway)
+	{
+		FOneBrahamVoiceDirector::OnOverrideProgress(Cast<AOneBrahamCharacter>(Interactor->GetPawn()));
 	}
 
 	HoldLastSeconds = HeldSeconds;
