@@ -126,7 +126,7 @@ like carpet.
 
 The one master that is not a surface. It is a **post-process material**
 (`MD_POST_PROCESS`, unlit, opaque) applied as a blendable on every floor's
-unbound `PostProcessVolume` by `build_environment.py`.
+bounded `PostProcessVolume` by `build_environment.py`.
 
 ```
   SceneTexture:PostProcessInput0 ----------------.

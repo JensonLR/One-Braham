@@ -401,22 +401,35 @@ derived from the floor's own footprint, so the plaza gets a grid appropriate to
 central visual contrast: fourteen floors of flat, faintly green office light, one
 floor of London weather.
 
-**One unbound `PostProcessVolume` per floor**, carrying that area's grade:
-manual exposure range, bloom, film grain and vignette, from `AREA_GRADE`. The
-ranges are wide on purpose — clamped exposure is what stops a player walking out
-of the plant room into the glazing and being flash-blinded for a second and a
-half.
+**One bounded `PostProcessVolume` per floor**, carrying that area's grade:
+a histogram exposure range, bloom and vignette, from `AREA_GRADE`. Each volume
+is sized to its floor (measured from the brush it spawns with, not assumed) at
+priority 1, over one unbound global volume at priority 0 that sets the
+building's baseline (a slight desaturation). The ranges are wide on purpose:
+clamped exposure is what stops a player walking out of the plant room into the
+glazing and being flash-blinded for a second and a half.
 
-| Area | Exposure range | Bloom | Grain | Vignette |
-| --- | --- | --- | --- | --- |
-| Ground Plaza | 0.35 – 2.4 | 0.85 | 0.030 | 0.42 |
-| Lobby | 0.40 – 2.2 | 0.75 | 0.028 | 0.38 |
-| Mezzanine | 0.45 – 2.1 | 0.70 | 0.026 | 0.36 |
-| Open Plan | 0.60 – 1.9 | 0.55 | 0.022 | 0.30 |
-| Server & Comms | 0.22 – 1.6 | 0.40 | 0.034 | 0.46 |
-| Executive | 0.65 – 2.0 | 0.60 | 0.020 | 0.32 |
-| Canteen | 0.70 – 2.3 | 0.65 | 0.022 | 0.30 |
-| Skydeck | 0.55 – 3.6 | 1.15 | 0.024 | 0.44 |
+Motion blur and film grain are not on any volume. They are the player's
+settings, and a volume value would override the menu.
+
+Every value is written through `_apply_post_process`, which sets the value's
+override flag and writes the settings struct back. Before that, the builder
+edited a copy of the struct (`volume.settings` is a copy in Unreal Python),
+set no override flags and swallowed every failure, so no grade ever reached the
+renderer. The floor volumes were also all unbound at equal priority, so they
+blended into one another. `check_building_layout.py` now fails on a settings
+struct read by attribute, or a motion-blur or grain value on a volume.
+
+| Area | Exposure range | Bloom | Vignette |
+| --- | --- | --- | --- |
+| Ground Plaza | 0.35 – 2.4 | 0.85 | 0.42 |
+| Lobby | 0.40 – 2.2 | 0.75 | 0.38 |
+| Mezzanine | 0.45 – 2.1 | 0.70 | 0.36 |
+| Open Plan | 0.60 – 1.9 | 0.55 | 0.30 |
+| Server & Comms | 0.22 – 1.6 | 0.40 | 0.46 |
+| Executive | 0.65 – 2.0 | 0.60 | 0.32 |
+| Canteen | 0.70 – 2.3 | 0.65 | 0.30 |
+| Skydeck | 0.55 – 3.6 | 1.15 | 0.44 |
 
 **No reflection captures, deliberately.** The project runs Lumen, which builds
 its own reflection scene from the same geometry and lights. A per-floor capture

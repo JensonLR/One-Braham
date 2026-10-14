@@ -220,6 +220,7 @@ def frame_problems():
 
     found.extend(loot_capacity_problems())
     found.extend(rotator_problems())
+    found.extend(post_process_problems())
     return found
 
 
@@ -248,6 +249,40 @@ def rotator_problems():
                 line = text[:match.start()].count("\n") + 1
                 found.append((u"{0}:{1} {2} passes roll/pitch positionally; unreal.Rotator is "
                               u"(roll, pitch, yaw) - use keywords".format(name, line, match.group(0)), None))
+    return found
+
+
+#: A struct read off an actor by attribute: `volume.settings`, `ppv.settings`.
+STRUCT_COPY = re.compile(r'\b\w+\.settings\b(?!\s*=)')
+
+#: Settings the player owns, which a volume value would override.
+PLAYER_OWNED_PP = re.compile(r'(?i)motion_?blur|film_?grain')
+
+
+def post_process_problems():
+    """Post-process and volume settings go through _apply_post_process.
+
+    In Unreal Python, `actor.settings` is a copy: editing it changes nothing,
+    and every grade in the building was lost that way, behind `except: pass`.
+    Motion blur and film grain belong to the settings menu; a volume value
+    overrides the player's choice.
+    """
+    found = []
+    path = os.path.join(python_root, "Tools", "Python", "onebraham", "build_environment.py")
+    text = io.open(path, encoding="utf-8").read()
+    # Docstrings blanked line for line, so they can describe the mistake and
+    # line numbers still match the file.
+    text = re.sub(r'"""[\s\S]*?"""', lambda m: "\n" * m.group(0).count("\n"), text)
+    for number, line in enumerate(text.splitlines(), 1):
+        code = line.split("#", 1)[0]
+        if code.strip().startswith(("u\"", "\"")):
+            continue
+        if STRUCT_COPY.search(code):
+            found.append((u"build_environment.py:{0} reads an actor's settings struct by attribute, "
+                          u"which is a copy; use _apply_post_process".format(number), None))
+        if "set_editor_property" in code and PLAYER_OWNED_PP.search(code):
+            found.append((u"build_environment.py:{0} sets motion blur or film grain on a volume; "
+                          u"the player's settings own those".format(number), None))
     return found
 
 

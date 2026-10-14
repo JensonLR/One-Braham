@@ -643,15 +643,16 @@ def _note_surface(surface_name, place):
 #  plant room into the glazing and being flash-blinded for a second and a half.
 # ---------------------------------------------------------------------------
 AREA_GRADE = {
-    # area,            min brightness, max brightness, bloom, grain, vignette
-    "Ground_Plaza":  (0.35, 2.4, 0.85, 0.030, 0.42),
-    "Lobby":         (0.40, 2.2, 0.75, 0.028, 0.38),
-    "Mezzanine":     (0.45, 2.1, 0.70, 0.026, 0.36),
-    "OpenPlan":      (0.60, 1.9, 0.55, 0.022, 0.30),
-    "ServerComms":   (0.22, 1.6, 0.40, 0.034, 0.46),
-    "Executive":     (0.65, 2.0, 0.60, 0.020, 0.32),
-    "Canteen":       (0.70, 2.3, 0.65, 0.022, 0.30),
-    "Skydeck":       (0.55, 3.6, 1.15, 0.024, 0.44),
+    # area,            min brightness, max brightness, bloom, vignette
+    # (film grain is the player's setting, not the map's)
+    "Ground_Plaza":  (0.35, 2.4, 0.85, 0.42),
+    "Lobby":         (0.40, 2.2, 0.75, 0.38),
+    "Mezzanine":     (0.45, 2.1, 0.70, 0.36),
+    "OpenPlan":      (0.60, 1.9, 0.55, 0.30),
+    "ServerComms":   (0.22, 1.6, 0.40, 0.46),
+    "Executive":     (0.65, 2.0, 0.60, 0.32),
+    "Canteen":       (0.70, 2.3, 0.65, 0.30),
+    "Skydeck":       (0.55, 3.6, 1.15, 0.44),
 }
 
 
@@ -1650,82 +1651,128 @@ def build_lighting(report, floor_index):
     C.log(u"  floor {0:02d} ({1}): {2} ceiling lights".format(floor_index, area_name, spawn_count))
 
 
-def build_post_process(report, floor_index):
-    """Adds the unbound post-process volume that grades this floor.
+def _fit_volume(report, volume, centre, half_extent, label):
+    """Scales a volume so its brush covers centre +/- half_extent (cm).
 
-    Created per floor rather than once in the persistent level because the
-    Skydeck and the server room cannot share an exposure range, and a single
-    global volume is how a game ends up with one floor that looks like a
-    photograph and another that looks like a screenshot of a spreadsheet.
-
-    Every property is set inside the same try/except the rest of this file uses:
-    post-process property names have moved between engine minor versions, and a
-    volume that exists with default settings is still better than a build that
-    failed because one property was renamed.
+    Measured, not assumed: the brush a volume is spawned with is read from its
+    bounds and the scale is the ratio, so this is right whatever size the
+    editor's box builder used. False (and a report line) when the volume has
+    no brush to scale.
     """
-    area_name, origin_x, origin_y, size_x, size_y = _area_for_floor(floor_index)
+    try:
+        volume.set_actor_location(unreal.Vector(*centre), False, False)
+        volume.set_actor_scale3d(unreal.Vector(1.0, 1.0, 1.0))
+        _origin, extent = volume.get_actor_bounds(False)
+        if extent.x <= 1.0 or extent.y <= 1.0 or extent.z <= 1.0:
+            report.failed(label, u"spawned without a brush; cannot be bounded")
+            return False
+        volume.set_actor_scale3d(unreal.Vector(half_extent[0] / extent.x,
+                                               half_extent[1] / extent.y,
+                                               half_extent[2] / extent.z))
+        return True
+    except Exception as exc:  # noqa: BLE001
+        report.failed(label, u"could not size: {0}".format(exc))
+        return False
+
+
+def _apply_post_process(report, volume, label, values):
+    """Writes post-process settings onto a volume, override flags and all.
+
+    Two things went wrong here before, silently. The settings struct is a
+    copy in Unreal Python: editing `volume.settings` changes nothing unless the
+    struct is written back. And a value without its `override_` flag is
+    ignored by the renderer. So every value here sets its flag, the struct is
+    written back once, and a property that will not take is reported rather
+    than swallowed.
+
+    values: {python_property_name: value}; "weighted_blendables" has no flag.
+    """
+    try:
+        settings = volume.get_editor_property("settings")
+    except Exception as exc:  # noqa: BLE001
+        report.failed(label, u"no post-process settings: {0}".format(exc))
+        return False
+
+    for name, value in values.items():
+        try:
+            if name != "weighted_blendables":
+                settings.set_editor_property("override_" + name, True)
+            settings.set_editor_property(name, value)
+        except Exception as exc:  # noqa: BLE001
+            report.failed(label, u"{0}: {1}".format(name, exc))
+
+    try:
+        volume.set_editor_property("settings", settings)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        report.failed(label, u"settings not written back: {0}".format(exc))
+        return False
+
+
+def build_post_process(report, floor_index):
+    """Adds the bounded post-process volume that grades this floor.
+
+    One per floor, because the Skydeck and the server room cannot share an
+    exposure range. Bounded to the floor and above the global baseline
+    (priority 1 over 0): these used to be sixteen unbound volumes at equal
+    priority, which blended every floor's grade into every other floor's.
+
+    Motion blur and film grain are not here. They are the player's settings
+    (UOneBrahamGameUserSettings drives their CVars), and a volume value would
+    override the menu.
+    """
+    area_name, centre_x, centre_y, size_x, size_y = _area_for_floor(floor_index)
     if area_name is None:
         return
 
+    label = "PostProcess_{0}_F{1:02d}".format(area_name, floor_index)
     z = _floor_z(floor_index) + C.CEILING_HEIGHT_CM / 2.0
 
-    volume = _spawn(unreal.PostProcessVolume, unreal.Vector(origin_x, origin_y, z))
+    volume = _spawn(unreal.PostProcessVolume, unreal.Vector(centre_x, centre_y, z))
     if volume is None:
         return
 
-    _label(volume, "PostProcess_{0}_F{1:02d}".format(area_name, floor_index))
+    _label(volume, label)
 
-    min_brightness, max_brightness, bloom, grain, vignette = AREA_GRADE.get(
-        area_name, (0.5, 2.0, 0.6, 0.025, 0.35))
+    min_brightness, max_brightness, bloom, vignette = AREA_GRADE.get(
+        area_name, (0.5, 2.0, 0.6, 0.35))
 
+    # The floor's footprint and storey, a few centimetres inside the slabs so
+    # the floor above and below never share a point.
+    bounded = _fit_volume(report, volume, (centre_x, centre_y, z),
+                          (size_x / 2.0, size_y / 2.0, C.CEILING_HEIGHT_CM / 2.0 - 5.0), label)
     try:
-        volume.set_editor_property("bUnbound", True)
-        volume.set_editor_property("BlendWeight", 1.0)
-        volume.set_editor_property("Priority", 0.0)
-    except Exception:  # noqa: BLE001
-        pass
-
-    try:
-        settings = volume.settings
-
-        # Exposure: manual range, so a dark plant room does not auto-brighten the
-        # whole floor and a bright one does not auto-dim it.
-        settings.set_editor_property("AutoExposureMethod", unreal.AutoExposureMethod.AEM_Manual)
-        settings.set_editor_property("AutoExposureMinBrightness", float(min_brightness))
-        settings.set_editor_property("AutoExposureMaxBrightness", float(max_brightness))
-
-        # Grade: restrained. One Braham is a corporate building, not a film.
-        settings.set_editor_property("BloomIntensity", float(bloom))
-        settings.set_editor_property("FilmGrainIntensity", float(grain))
-        settings.set_editor_property("VignetteIntensity", float(vignette))
-        settings.set_editor_property("MotionBlurAmount", 0.28)
-    except Exception:  # noqa: BLE001
-        pass
-
-    # The interaction outline. Six interactables in this game set custom-depth
-    # stencil 2 when the player looks at them (SetInteractionHighlight), and
-    # until now nothing on the receiving end read it: the highlight was written
-    # to the depth buffer and consumed by nobody. M_OB_Highlight is the material
-    # that reads it, and this is where it is applied - the material is
-    # build_materials.py's, the volume is this file's.
-    #
-    # Loaded by path and skipped with a warning rather than a failure: a floor
-    # without an outline is still a floor, and the build order already puts
-    # materials first for exactly the case where it is not.
-    try:
-        highlight = unreal.EditorAssetLibrary.load_asset(C.MATERIALS + "/M_OB_Highlight")
-
-        if highlight is None:
-            C.warn(u"  M_OB_Highlight not built yet - no interaction outline on "
-                   u"PostProcess_{0}_F{1:02d} (run build_materials.py first)".format(
-                       area_name, floor_index))
-        else:
-            blendables = unreal.WeightedBlendables()
-            blendables.set_editor_property("array", [unreal.WeightedBlendable(1.0, highlight)])
-            settings.set_editor_property("WeightedBlendables", blendables)
+        volume.set_editor_property("unbound", not bounded)
+        volume.set_editor_property("blend_weight", 1.0)
+        volume.set_editor_property("blend_radius", 150.0)
+        volume.set_editor_property("priority", 1.0)
     except Exception as exc:  # noqa: BLE001
-        C.warn(u"  outline blendable not attachable on PostProcess_{0}_F{1:02d}: {2}".format(
-            area_name, floor_index, exc))
+        report.failed(label, u"volume properties: {0}".format(exc))
+
+    values = {
+        # Histogram exposure clamped to the area's range, so a dark plant room
+        # does not brighten the whole floor and the glazing does not blind.
+        "auto_exposure_method": unreal.AutoExposureMethod.AEM_HISTOGRAM,
+        "auto_exposure_min_brightness": float(min_brightness),
+        "auto_exposure_max_brightness": float(max_brightness),
+        # Grade: restrained. One Braham is a corporate building, not a film.
+        "bloom_intensity": float(bloom),
+        "vignette_intensity": float(vignette),
+    }
+
+    # The interaction outline. Six interactables set custom-depth stencil 2 when
+    # the player looks at them; M_OB_Highlight (build_materials.py) is what reads
+    # it, so it rides on every floor's volume.
+    highlight = unreal.EditorAssetLibrary.load_asset(C.MATERIALS + "/M_OB_Highlight")
+    if highlight is None:
+        C.warn(u"  M_OB_Highlight not built yet - no interaction outline on {0} "
+               u"(run build_materials.py first)".format(label))
+    else:
+        blendables = unreal.WeightedBlendables()
+        blendables.set_editor_property("array", [unreal.WeightedBlendable(1.0, highlight)])
+        values["weighted_blendables"] = blendables
+
+    _apply_post_process(report, volume, label, values)
 
 
 def build_audio_zone(report, floor_index):
@@ -1747,14 +1794,16 @@ def build_audio_zone(report, floor_index):
 
     _label(volume, "AudioZone_{0}_F{1:02d}".format(area_name, floor_index))
 
+    label = "AudioZone_{0}_F{1:02d}".format(area_name, floor_index)
+    _fit_volume(report, volume, (origin_x, origin_y, z),
+                (size_x / 2.0, size_y / 2.0, C.CEILING_HEIGHT_CM / 2.0 - 5.0), label)
     try:
-        volume.set_actor_scale3d(unreal.Vector(size_x / 100.0, size_y / 100.0, C.CEILING_HEIGHT_CM / 100.0))
-        # The zone id maps to AMB_* in the audio bank (see OneBrahamAudioBankAsset).
-        settings = volume.settings
-        settings.set_editor_property("Enabled", True)
-        settings.set_editor_property("Priority", 1.0)
-    except Exception:  # noqa: BLE001
-        pass
+        # Enabled and priority are the volume's own properties; they used to be
+        # written to a copy of its reverb struct, which has neither.
+        volume.set_editor_property("enabled", True)
+        volume.set_editor_property("priority", 1.0)
+    except Exception as exc:  # noqa: BLE001
+        report.failed(label, u"volume properties: {0}".format(exc))
 
 
 def build_nav(report, floor_index):
@@ -1774,9 +1823,13 @@ def build_nav(report, floor_index):
         report.failed("NavMeshBoundsVolume F{0}".format(floor_index), "could not spawn")
         return
 
-    _label(volume, "NavBounds_F{0:02d}_{1}".format(floor_index, area_name))
-    volume.set_actor_scale3d(unreal.Vector((size_x - 200.0) / 100.0, (size_y - 200.0) / 100.0,
-                                           (C.CEILING_HEIGHT_CM - 80.0) / 100.0))
+    label = "NavBounds_F{0:02d}_{1}".format(floor_index, area_name)
+    _label(volume, label)
+    # The plate less a metre at each edge, and one storey: this was scaled as
+    # if the brush were 100 cm, which made every floor's bounds twice the plate
+    # and 640 cm tall, generating nav into the floors above and below.
+    _fit_volume(report, volume, (origin_x, origin_y, z + C.CEILING_HEIGHT_CM / 2.0),
+                (size_x / 2.0 - 100.0, size_y / 2.0 - 100.0, (C.CEILING_HEIGHT_CM - 80.0) / 2.0), label)
 
 
 def build_skydeck_climate(report):
@@ -1838,18 +1891,17 @@ def build_skydeck_climate(report):
     if ppv is not None:
         _label(ppv, "PPS_OneBraham_Global")
         try:
-            ppv.set_editor_property("Unbound", True)
-            settings = ppv.settings
-            settings.set_editor_property("OverrideFilmGrainIntensity", True)
-            settings.set_editor_property("FilmGrainIntensity", 0.18)
-            settings.set_editor_property("OverrideColorSaturation", True)
-            settings.set_editor_property("ColorSaturation", unreal.Vector4(0.94, 0.94, 0.94, 1.0))
-            settings.set_editor_property("OverrideAutoExposureMinBrightness", True)
-            settings.set_editor_property("AutoExposureMinBrightness", 0.65)
-            settings.set_editor_property("OverrideAutoExposureMaxBrightness", True)
-            settings.set_editor_property("AutoExposureMaxBrightness", 1.6)
+            # The baseline under every floor's own volume (priority 0 < 1).
+            ppv.set_editor_property("unbound", True)
+            ppv.set_editor_property("priority", 0.0)
         except Exception as exc:  # noqa: BLE001
-            report.failed("Post-process volume", str(exc))
+            report.failed("PPS_OneBraham_Global", str(exc))
+        # No grain here: the player's film-grain setting owns it.
+        _apply_post_process(report, ppv, "PPS_OneBraham_Global", {
+            "color_saturation": unreal.Vector4(0.94, 0.94, 0.94, 1.0),
+            "auto_exposure_min_brightness": 0.65,
+            "auto_exposure_max_brightness": 1.6,
+        })
 
 
 #: The Skydeck balustrade: frameless glass, 110 cm, the height a real roof
@@ -2219,7 +2271,11 @@ def build_fire_drill_arena(report, materials):
             except Exception:  # noqa: BLE001
                 pass
 
-    _spawn(unreal.NavMeshBoundsVolume, unreal.Vector(0.0, 0.0, 200.0))
+    # The whole arena: an unscaled bounds volume is a 2 m cube, and FIRE DRILL's
+    # bots had nowhere to walk.
+    nav = _spawn(unreal.NavMeshBoundsVolume, unreal.Vector(0.0, 0.0, 200.0))
+    if nav is not None:
+        _fit_volume(report, nav, (0.0, 0.0, 200.0), (2500.0, 3500.0, 230.0), "NavBounds_FireDrill")
     _spawn(unreal.SkyLight, unreal.Vector(0.0, 0.0, 600.0))
 
     if not _save_build_level(report, path):
