@@ -102,11 +102,20 @@ net.UseAdaptiveNetUpdateFrequency=1
 [/Script/OnlineSubsystemSteam.SteamNetDriver]
 NetConnectionClassName=OnlineSubsystemSteam.SteamNetConnection
 [/Script/Engine.GameEngine]
-+NetDriverDefinitions=(...OnlineSubsystemSteam.SteamNetDriver...)
+!NetDriverDefinitions=ClearArray
++NetDriverDefinitions=(DefName="GameNetDriver",DriverClassName="OnlineSubsystemSteam.SteamNetDriver",DriverClassNameFallback="OnlineSubsystemUtils.IpNetDriver")
++NetDriverDefinitions=(DefName="DemoNetDriver",DriverClassName="/Script/Engine.DemoNetDriver",DriverClassNameFallback="/Script/Engine.DemoNetDriver")
 [OnlineSubsystemSteam]
 bEnabled=True
 SteamDevAppId=480          ; replaced by the real AppID at release, see Scripts/steam_app_build.vdf
 ```
+
+The game driver is Steam's, falling back to IP when Steam is not running. A
+Steam lobby resolves to a `steam.<id>` P2P address that only the Steam driver can
+reach, so without these rows every lobby join fails. `ClearArray` comes first
+because the engine's own `GameNetDriver` row would otherwise be matched before
+this one. `validate_project.py` fails the build if any of this is missing.
+`Achievement_N_Id` lists every achievement; see `Docs/19`.
 
 `480` is Spacewar, the standard test AppID. It must be replaced before a public
 build, and the release checklist says so twice because a shipped build pointing

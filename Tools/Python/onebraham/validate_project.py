@@ -899,6 +899,23 @@ def check_config(v, _config_only):
         else:
             v.pass_("config", u"{0} settings present".format(mode))
 
+    # The game net driver. With no definition the engine's IpNetDriver carries
+    # every connection and a Steam lobby join, which resolves to a steam.<id>
+    # P2P address, cannot connect. The engine's own row must be cleared first or
+    # it is matched before ours.
+    game_driver = re.search(r'^\+NetDriverDefinitions=\(DefName="GameNetDriver",'
+                            r'DriverClassName="([^"]+)",DriverClassNameFallback="([^"]+)"\)',
+                            engine_ini, re.M)
+    if (game_driver is None or "SteamNetDriver" not in game_driver.group(1)
+            or "IpNetDriver" not in game_driver.group(2)):
+        v.fail("config", u"no GameNetDriver definition using SteamNetDriver with an IpNetDriver fallback",
+               u"Steam lobby joins will fail; see Docs/02, Steam")
+    elif "!NetDriverDefinitions=ClearArray" not in engine_ini:
+        v.fail("config", u"NetDriverDefinitions is not cleared before the game's rows",
+               u"the engine's IpNetDriver row is matched first and the Steam driver never loads")
+    else:
+        v.pass_("config", u"game net driver: Steam, falling back to IP")
+
     # Story-critical numbers, checked because they are quoted in the design and
     # in the store page.
     checks = [
