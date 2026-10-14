@@ -1,6 +1,8 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Weapons/OneBrahamProjectileBase.h"
+#include "Access/OneBrahamDestructibleProp.h"
+#include "EngineUtils.h"
 
 #include "OneBraham.h"
 #include "Core/OneBrahamGameState.h"
@@ -683,10 +685,10 @@ void AOneBrahamProjectileBase::ApplyBlastToGlass(const FVector& Origin, float Ra
 		return;
 	}
 
-	// There are eight panes in the building and no registry of them, so this
-	// walks the class list. That is the right cost: a detonation is once per
-	// grenade, the list is short, and an index would be one more thing to keep in
-	// step with the map builder.
+	// The panes (the Skydeck balustrade is most of them) and the destructible
+	// props have no registry, so this walks the class lists. That is the right
+	// cost: a detonation is once per grenade, the lists are a few hundred long,
+	// and an index would be one more thing to keep in step with the map builder.
 	TArray<AActor*> Panes;
 	UGameplayStatics::GetAllActorsOfClass(World, AOneBrahamBreakableGlass::StaticClass(), Panes);
 
@@ -722,6 +724,33 @@ void AOneBrahamProjectileBase::ApplyBlastToGlass(const FVector& Origin, float Ra
 		// the far corner of the floor does not.
 		const float Alpha = 1.f - FMath::Clamp(Distance / RadiusCm, 0.f, 1.f);
 		Pane->TakeDamage(RadiusCm * 1.2f * Alpha, FDamageEvent(), Thrower.IsValid() ? Thrower->GetController() : nullptr, this);
+	}
+
+	// Furniture in the blast: a grenade in the print room takes the printer with
+	// it. Same line-of-sight rule as the glass, and the prop's own health decides.
+	for (TActorIterator<AOneBrahamDestructibleProp> It(World); It; ++It)
+	{
+		AOneBrahamDestructibleProp* Prop = *It;
+		if (Prop == nullptr || Prop->IsDestroyed())
+		{
+			continue;
+		}
+
+		const float Distance = FVector::Dist(Prop->GetActorLocation(), Origin);
+		if (Distance > RadiusCm)
+		{
+			continue;
+		}
+
+		FHitResult Hit;
+		if (World->LineTraceSingleByChannel(Hit, Origin, Prop->GetActorLocation(), ECollisionChannel::ECC_Visibility, Params) &&
+			Hit.GetActor() != Prop)
+		{
+			continue;
+		}
+
+		const float Alpha = 1.f - FMath::Clamp(Distance / RadiusCm, 0.f, 1.f);
+		Prop->TakeDamage(RadiusCm * 0.6f * Alpha, FDamageEvent(), Thrower.IsValid() ? Thrower->GetController() : nullptr, this);
 	}
 }
 

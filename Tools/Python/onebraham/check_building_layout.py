@@ -331,6 +331,13 @@ def core_problems(E, areas):
         if _inside((x, y), band):
             found.append((u"{0} is inside the service core".format(ident), None))
 
+    for floor, (name, footprint) in sorted(floor_area.items()):
+        for label, _kind, x, y in E.destructible_props_for_floor(floor):
+            if not _inside((x, y), footprint):
+                found.append((u"{0} is outside the {1} footprint".format(label, name), None))
+            if _inside((x, y), band):
+                found.append((u"{0} is inside the service core".format(label), None))
+
     # The stairs climb a storey, flight by flight, with steps a person can use.
     rise = (C.FLOOR_HEIGHT_CM / 2.0) / C.STAIR_RISERS_PER_FLIGHT
     if not (15.0 <= rise <= 20.0 and 25.0 <= C.STAIR_TREAD_CM <= 32.0):

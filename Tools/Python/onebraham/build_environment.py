@@ -1054,6 +1054,83 @@ def build_loot_points(report):
     return placed
 
 
+#: Destructible props: (kind, hazard, size cm, health). Hazard names are
+#: EOneBrahamPropHazard values.
+DESTRUCTIBLE_KINDS = {
+    "Extinguisher": ("Extinguisher", (18.0, 18.0, 60.0), 25.0),
+    "Water_Cooler": ("Water", (32.0, 32.0, 108.0), 60.0),
+    "Printer": ("Electrical", (60.0, 60.0, 110.0), 140.0),
+    "Rack_Panel": ("Electrical", (60.0, 8.0, 200.0), 180.0),
+}
+
+#: Rooms that get a water cooler, and rooms that get a printer, at their centre.
+COOLER_ROOMS = {"Coffee_Point", "Vending_Alcove", "Break_Out_Kitchen", "NOC", "Servery", "Exec_PA_Desk"}
+PRINTER_ROOMS = {"Print_Alcove", "Exec_PA_Desk", "Security_Desk"}
+
+
+def destructible_props_for_floor(floor_index):
+    """(label, kind, x, y) for every destructible prop on a floor.
+
+    Pure, so the engine-free check can see that none of them stands in the
+    service core or outside the floor.
+    """
+    area = next((a for a in C.AREAS if a[1][0] <= floor_index <= a[1][1]), None)
+    if area is None:
+        return []
+    name, _floors, cx, cy, _sx, _sy = C.area_centre(area)
+    prefix = "F{0:02d}".format(floor_index)
+    props = []
+
+    # An extinguisher beside every stairwell door: the corridor's one piece of
+    # furniture, and a smoke screen for whoever shoots it.
+    for stair, sx in C.STAIRWELLS:
+        props.append(("{0}_Extinguisher_{1}".format(prefix, stair), "Extinguisher",
+                      sx + C.DOOR_WIDTH_CM / 2.0 + 100.0, C.STAIRWELL_DOOR_Y - 25.0))
+
+    for room, rx, ry, rsx, rsy in ROOM_PROGRAMMES.get(name, []):
+        x, y = cx + rx, cy + ry
+        if room in COOLER_ROOMS:
+            props.append(("{0}_{1}_Cooler".format(prefix, room), "Water_Cooler",
+                          x - rsx / 2.0 + 40.0, y + rsy / 2.0 - 40.0))
+        if room in PRINTER_ROOMS:
+            props.append(("{0}_{1}_Printer".format(prefix, room), "Printer",
+                          x + rsx / 2.0 - 50.0, y + rsy / 2.0 - 50.0))
+        if room.startswith("Server_Row"):
+            for index in range(4):
+                props.append(("{0}_{1}_Panel_{2}".format(prefix, room, index), "Rack_Panel",
+                              x, y - rsy / 2.0 + (index + 0.5) * rsy / 4.0))
+    return props
+
+
+def build_destructible_props(report, floor_index):
+    """Places this floor's AOneBrahamDestructibleProp actors."""
+    prop_class = getattr(unreal, "OneBrahamDestructibleProp", None)
+    if prop_class is None:
+        report.failed("OneBrahamDestructibleProp", "the C++ class is not available; compile the module first")
+        return []
+
+    hazard_enum = getattr(unreal, "OneBrahamPropHazard", None)
+    z = _floor_z(floor_index)
+    placed = []
+    for label, kind, x, y in destructible_props_for_floor(floor_index):
+        hazard, size, health = DESTRUCTIBLE_KINDS[kind]
+        actor = _spawn(prop_class, unreal.Vector(x, y, z + size[2] / 2.0))
+        if actor is None:
+            continue
+        _label(actor, label)
+        try:
+            actor.set_editor_property("PropId", unreal.Name(label))
+            actor.set_editor_property("SizeCm", unreal.Vector(*size))
+            actor.set_editor_property("MaxHealth", health)
+            if hazard_enum is not None:
+                actor.set_editor_property("Hazard", getattr(hazard_enum, hazard.upper()))
+        except Exception as exc:  # noqa: BLE001
+            report.failed(label, str(exc))
+            continue
+        placed.append(label)
+    return placed
+
+
 def build_spawn_points(report):
     """Places and configures every spawn anchor.
 
@@ -1415,8 +1492,13 @@ def build_extraction(report):
     _box((px + 130.0, py, deck_z + 2.0), (40.0, 300.0, 4.0), None, "Helipad_H_Right")
     _box((px, py, deck_z + 2.0), (300.0, 40.0, 4.0), None, "Helipad_H_Cross")
 
-    # Winch control room, from the room programme.
-    _box((-1500.0, 400.0, deck_z + 125.0), (600.0, 500.0, 250.0), None, "Winch_Control_Shell")
+    # The winch control room is built by the floor shell from the room
+    # programme. A second, solid "shell" box used to sit at its old position,
+    # which after the core went in was the head of stairwell A.
+    room = next(r for r in ROOM_PROGRAMMES["Skydeck"] if r[0] == "Winch_Control")
+    room_centre = C.area_centre(next(a for a in C.AREAS if a[0] == "Skydeck"))
+    room_x = room_centre[2] + room[1]
+    room_y = room_centre[3] + room[2]
 
     # Beacon mast: the thing the whole building can see. Four metres of mast with
     # a light on top, hot on the extraction channel.
@@ -1465,9 +1547,11 @@ def build_extraction(report):
     # The console stands against the pad-facing wall of the winch control shell,
     # facing the deck: calling the winch means turning your back on the pad, which
     # is the decision the mode is built around.
-    console_x = -1140.0
-    console_y = 400.0
+    # On the outside of the room's pad-facing (east) wall, facing the pad.
+    console_x = room_x + room[3] / 2.0 + 40.0
+    console_y = room_y
     console_z = deck_z + 20.0
+    console_yaw = math.degrees(math.atan2(py - console_y, px - console_x))
 
     if console_class is None:
         report.skipped_asset(
@@ -1478,7 +1562,7 @@ def build_extraction(report):
              "Winch_Console_Blockout", static=False)
     else:
         console = _spawn(console_class, unreal.Vector(console_x, console_y, console_z),
-                         unreal.Rotator(roll=0.0, pitch=0.0, yaw=-90.0))
+                         unreal.Rotator(roll=0.0, pitch=0.0, yaw=console_yaw))
         if console is not None:
             _label(console, "Winch_Control_Console")
             try:
@@ -1489,6 +1573,16 @@ def build_extraction(report):
                 console.set_editor_property("InteractionRangeCm", 220.0)
             except Exception as exc:  # noqa: BLE001
                 report.failed("winch console", str(exc))
+
+    # The helicopter: placed once, hidden until a squad calls it. It derives its
+    # whole flight from the extraction component's replicated state.
+    heli_class = getattr(unreal, "OneBrahamHelicopter", None)
+    if heli_class is None:
+        report.failed("OneBrahamHelicopter", "the C++ class is not available; compile the module first")
+    else:
+        heli = _spawn(heli_class, unreal.Vector(px, py, deck_z + 1800.0))
+        if heli is not None:
+            _label(heli, "Extraction_Helicopter")
 
     C.log(u"  extraction pad built at {0} (hold radius {1} cm)".format(
         C.EXTRACTION_PAD_LOCATION, C.EXTRACTION_HOLD_RADIUS_CM))
@@ -1852,6 +1946,7 @@ def build_floor_level(report, floor_index, materials):
         return None
 
     build_floor_shell(report, floor_index, materials)
+    build_destructible_props(report, floor_index)
     build_lighting(report, floor_index)
     build_post_process(report, floor_index)
     build_audio_zone(report, floor_index)

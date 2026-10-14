@@ -59,6 +59,29 @@ a car finishes its run, opens and stays open: the lifts are out of service. A
 car costs a Staff badge, chimes on arrival on the floor it stops at, and is a
 lit glass box: the fastest route up, and the most visible.
 
+**Destructible props.** These are `AOneBrahamDestructibleProp`, 78 in the
+building, from `destructible_props_for_floor()`:
+
+* an extinguisher beside every stairwell door;
+* a water cooler in each break-out room;
+* a printer in the print and PA rooms;
+* four panels along each server row.
+
+They are cover until they break. Then their collision goes and they make the
+noise that tells the floor where the fight is. A printer or a rack panel
+shorts, with sparks and a 12 damage burn within 140 cm, credited to
+`ElectricalShort`. A cooler sprays. An extinguisher discharges a small smoke
+cloud. Bullets break them, and so do grenades and breaching charges, with the
+same line-of-sight rule as the glass.
+
+**The helicopter.** `AOneBrahamHelicopter` is placed over the pad and hidden
+until a squad calls it. It has no state of its own: every machine flies it from
+the extraction component's replicated state and time remaining, so it is
+exactly as far out as the HUD timer says. During the approach it comes in over
+the City and settles into a hover 18 m above the pad. While a squad holds, its
+searchlight stays on the pad and the winch line is down. When the match ends
+either way, it climbs out the way it came.
+
 ### Routes up
 
 | Route | Cost | Cost in practice |
