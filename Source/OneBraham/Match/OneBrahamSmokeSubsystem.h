@@ -31,9 +31,6 @@ public:
 	/** True when the segment from Start to End passes through a live cloud. */
 	bool IsSightBlocked(const FVector& Start, const FVector& End) const;
 
-	/** Live clouds now (expired ones are dropped as a side effect of asking). */
-	int32 GetActiveCloudCount() const;
-
 	/**
 	 * The pure test: does the segment pass within Radius of Centre? Clouds are
 	 * spheres; a sight line that only grazes the edge (the outer tenth) still

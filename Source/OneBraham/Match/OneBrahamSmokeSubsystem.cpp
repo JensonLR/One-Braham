@@ -60,10 +60,3 @@ bool UOneBrahamSmokeSubsystem::IsSightBlocked(const FVector& Start, const FVecto
 	}
 	return false;
 }
-
-int32 UOneBrahamSmokeSubsystem::GetActiveCloudCount() const
-{
-	const double Time = Now();
-	Clouds.RemoveAll([Time](const FCloud& Cloud) { return Cloud.EndTime <= Time; });
-	return Clouds.Num();
-}

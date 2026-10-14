@@ -65,9 +65,9 @@ does.
 | `python3 Tools/Python/onebraham/run_all.py --text-only` | `BUILD OK: 18 step(s) succeeded` | every textual check in the project, in the order they must run |
 | `python3 Tools/Python/onebraham/validate_project.py` | `31 pass, 2 warn, 0 fail` | the two warnings are the fresh-clone manifest and surface coverage; anything else is a regression |
 | `python3 Tools/Python/onebraham/check_doc_numbers.py` | `89 numbers checked. agree. OK` | every count quoted in `Docs/17` and the README against the count the tooling produces |
-| `python3 Tools/Python/onebraham/check_interaction.py` | `checks: 222` | the interaction surface: classes, tables, tags, montage chain, interface conformance |
-| `python3 Tools/Python/onebraham/check_cpp_symbols.py` | `594 declarations`, `317 hygiene checks`, `OK` | declared-but-undefined members, scoped enums, shadowed engine properties, duplicate definitions |
-| `python3 Tools/Python/onebraham/report_uncalled.py` | `83 member(s) with no call site` | the triage list in §4.2. **This is a report, not a gate** |
+| `python3 Tools/Python/onebraham/check_interaction.py` | `checks: 281` | the interaction surface: classes, tables, tags, montage chain, interface conformance |
+| `python3 Tools/Python/onebraham/check_cpp_symbols.py` | `835 declarations`, `2096 hygiene checks`, `OK` | declared-but-undefined members, scoped enums, shadowed engine properties, duplicate definitions, float literals, unbudgeted Server RPCs |
+| `python3 Tools/Python/onebraham/report_uncalled.py` | `49 member(s) with no call site` | the triage list in §4.2. **This is a report, not a gate** |
 
 Each checker also runs standalone with the import root, which is the only thing
 that ever trips anyone up:
@@ -114,59 +114,26 @@ Every fix is a commit, and `check_cpp_symbols.py` plus `check_uht_contracts.py`
 run after each one. Expect the first pass to be large; expect the second to be
 small; expect the first *run* (not compile) to be a different list again.
 
-### 4.2 The uncalled-API triage — 83 members
+### 4.2 The uncalled-API triage — 49 members
 
-`Tools/Python/onebraham/report_uncalled.py` renders every member function that is
-declared, defined and never called anywhere in the module. 83 at handover. Two
-groups, and the group matters more than the count.
+`Tools/Python/onebraham/report_uncalled.py` lists every member function that is
+declared, defined and never called anywhere in the module. It was 83 at the
+first handover; it is 49 now, and the group still matters more than the count.
 
-**Group A — 22 members with no caller and no Blueprint pretending to be one.**
-Each of these is either a hole in the game or a method that should be deleted:
+**Not Blueprint: none that are real.** The audio cue wrappers, the gamepad look,
+the extraction abort and the rest of the old Group A have been wired or deleted.
+The report still shows `SOneBrahamLoadingScreen::Construct`, which Slate calls
+through `SNew` (a false positive of a text search).
 
-```
-OneBrahamAudioManagerComponent::FindBankEntry        OneBrahamAudioManagerComponent::PlayImpact
-OneBrahamAudioManagerComponent::PlayAnnouncementChime OneBrahamAudioManagerComponent::PlayReloadCue
-OneBrahamAudioManagerComponent::PlayDamageTakenCue   OneBrahamAudioManagerComponent::SetDeafened
-OneBrahamAudioManagerComponent::PlayExplosion        OneBrahamAudioManagerComponent::SetVoiceBusGain
-OneBrahamAudioManagerComponent::TickFootstepAudio    OneBrahamBotController::GetBotDebugString
-OneBrahamCameraShake::GetExtractionShakeClass        OneBrahamCameraShake::GetLandingShakeClass
-OneBrahamCharacterDataAsset::ClearCosmeticFromMesh   OneBrahamCharacterDataAsset::FindArchetypeByIndex
-OneBrahamCharacterDataAsset::IsValidCosmetic         OneBrahamExtractionComponent::IsClaimingSquadAlive
-OneBrahamPlayerController::Input_LookGamepad         OneBrahamPlayerState::MakeSummary
-OneBrahamProjectileBase::ClearTimers                 OneBrahamVFXStatics::PlayNearMiss
-OneBrahamVFXStatics::ReleaseCachedAssets            OneBrahamWeaponComponent::GetLocalAim
-```
-
-Read them as questions. Three worked examples of the answer being "a hole":
-`IsClaimingSquadAlive` exists to abort a winch hold when the squad claiming it is
-wiped, and nothing consults it, so ASCENT's win cannot be lost;
-`Input_LookGamepad` is the gamepad look handler and is not bound, so the
-controller support the brief mandates does not exist; the nine
-`OneBrahamAudioManagerComponent` entries are the cue wrappers the audio bank was
-built for — a reload, a footstep, a damage grunt and an explosion may be silent
-because nobody calls them, or they may be played by a different path that
-supersedes them (`PlayImpactSound` and `PlayCueAtLocation` are called; `PlayImpact`
-and `PlayReloadCue` are not). Read the audio batch before deleting anything.
-
-**Group B — 61 members tagged `[BP]`.** They are `BlueprintCallable` and nothing
-in C++ calls them, which is correct only if a Blueprint does, and this repository
-keeps Blueprints out of version control. The largest clusters:
-
-| Cluster | Members | Where the Blueprint is specified |
-| --- | --- | --- |
-| Main menu, matchmaking, server browser | `StartMatchmaking`, `CancelMatchmaking`, `RefreshServerBrowser`, `JoinServerByAddress`, `SetPendingMatchSettingsOverride` | `Docs/08` §6, `Docs/07` |
-| Settings | the 15 `UOneBrahamGameUserSettings` setters, including `ApplyHardwareDefaultPreset` | `Docs/08` §7, `Docs/18` |
-| HUD | `SetPauseMenuVisible`, `RefreshNow`, `DumpHUDState` | `Docs/08` §5 |
-| Weapons and attachments | `ServerAttachToCurrentWeapon`, `GetWeaponInSlot`, `HasWeapon`, `ConsumeRound`, `HasAttachmentInSlot`, `GetAttachmentInSlot`, `DetachAttachment`, `SetGroundReserveAmmo` | `Docs/05` |
-| Doors, shutters, lockdown | `ServerLock`, `ServerSlamClosed`, `CanUnlockWithTier`, `GetRefusalText` | `Docs/06` §2–3 |
-| Player and match | `AddArmour`, `SpectatePlayer`, `PopMappingContext`, `GetLastDamageInstigatorLocation` | `Docs/04`, `Docs/03` |
-| Style and widgets | `HeaderLabel`, `OutlineBrush`, `ProgressBarStyle`, `TeamColour`, `Invert`, `GetUtilityTagForIndex` | `Docs/08` §3 |
-| Voice and cosmetics | `SetVoiceChatEnabled`, `IsTransmitting`, `ValidateBank`, `ValidateRegistry`, `ValidateBank` | `Docs/07`, `Docs/13` |
-
-For each one, decide *once*, in the open: wire it in C++ (with a comment saying why
-C++ rather than Blueprint), or accept it as a Blueprint contract and record that
-in the doc the Blueprint is specified in. Deleting a member is a legitimate answer
-and better than a third state.
+**Blueprint (`[BP]`): 48.** They are `BlueprintCallable` and no C++ calls them,
+which is correct only if a Blueprint does. The front end no longer depends on
+any of them: the main menu, settings, rebinding, results and loading screens are
+C++ (`Docs/08` §4). What remains is mostly read-only queries a designer's
+Blueprint will want (`IsOnPad`, `GetPaneHealth01`, `IsCosmeticUnlocked`,
+`AreFriendly`) plus a few deliberate designer hooks (`ServerLock`,
+`ServerSlamClosed`, `AddArmour`, `SetPendingMatchSettingsOverride`). Treat the
+list as a contract. Delete a member a release proves nobody needed, rather than
+leaving a third state.
 
 ### 4.3 Build the content
 
