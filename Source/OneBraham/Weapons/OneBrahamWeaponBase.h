@@ -232,7 +232,10 @@ protected:
 	UPROPERTY(ReplicatedUsing = OnRep_Attachments, BlueprintReadOnly, Category = "One Braham|Weapon")
 	TMap<EOneBrahamAttachmentSlot, FName> Attachments;
 
-	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Weapon")
+	/** The cosmetic skin. Replicated with a rep notify so every machine paints
+	 *  the weapon it can see: a material instance is local to the machine that
+	 *  made it, so the value travelling only gets a skin as far as the server. */
+	UPROPERTY(ReplicatedUsing = OnRep_SkinId, BlueprintReadOnly, Category = "One Braham|Weapon")
 	FName SkinId = NAME_None;
 
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Weapon")
@@ -290,6 +293,7 @@ TObjectPtr<UNiagaraComponent> MuzzleFlashComponent = nullptr;
 
 protected:
 	UFUNCTION() void OnRep_State();
+	UFUNCTION() void OnRep_SkinId();
 	UFUNCTION() void OnRep_Ammo();
 	UFUNCTION() void OnRep_Attachments();
 

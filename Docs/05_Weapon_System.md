@@ -235,4 +235,36 @@ can be interrupted by sprinting.
 On death the inventory drops one loot card carrying **what the player actually
 had**: `AccessTier` (the highest tier keycard held), `bDroppedFromPlayer=true`,
 and a `PrintedName` naming the archetype — so a squad that kills the IT Operations
-player and reads "IT Operations — Staff" on the card learns something real.
+player and reads "IT Operations — Staff" on the card learns something real. The
+kit itself hits the floor as pickups, and the card goes with it
+(`UOneBrahamInventoryComponent::ServerDropKeycardOnDeath`, next to
+`DropAllOnDeath`): an escalation that survives its owner's death is not an
+escalation, so a squad that dies on twelve does not keep the building.
+
+### The spawn loadout
+
+Nothing in the game gives a player a weapon except
+`UOneBrahamWeaponComponent::ServerApplyLoadout`, and the only two callers are a
+spawn and the arrival of a loadout that missed the spawn:
+
+| Call | Called by | What it does |
+| --- | --- | --- |
+| `AOneBrahamPlayerController::ServerSetLoadout` | the client, once, when it joins | the locker's choice: a primary id, a sidearm id, up to four utility ids and a skin id. `AOneBrahamPlayerState::StoreLoadout` sanitises it (ids to 24 characters, four utility entries, nothing else) and keeps it. A second call during a life changes the *next* life and nothing else, so a client cannot swap weapons mid-fight. |
+| `UOneBrahamWeaponComponent::ResetOnRespawn` | `AOneBrahamCharacter::ServerOnRespawned` | destroys what the previous life ended with, clears the reserve pools and the reload flag, then re-arms. |
+| `ServerApplyLoadout` | the two above | registry-checked weapons (`ServerGiveWeapon` refuses an id it does not know), inventory-checked utility (`ServerAddUtility` has a whitelist), and the skin applied to both weapons. |
+| `ApplyLoadoutForCurrentLife` | inside the component | the player state's loadout, or the standard-issue kit (`DefaultPrimaryWeaponId`, `DefaultSidearmWeaponId`, `DefaultUtilityIds`) when there is none — which is every AI bot, for its whole life, and any client whose loadout is still in flight. A player is never standing at a spawn point with nothing to shoot with. |
+
+Three rules behind that table, each of which was wrong at some point:
+
+- A respawn **destroys** the old kit rather than dropping it, because the death
+  path has already dropped it as pickups. Dropping it twice would arm whoever is
+  standing at the spawn point — including the enemy who just killed you.
+- A reload belongs to the weapon, not to the player. Switching slots calls
+  `AOneBrahamWeaponBase::ServerCancelReload` on the weapon being put away; without
+  it, its timer kept running and the reload finished into a holstered weapon,
+  moving the ammo and playing half an animation off-screen.
+- Skins travel as an id and are painted locally. `SkinId` is
+  `ReplicatedUsing = OnRep_SkinId` and the rep notify rebuilds the material
+  instance, because a dynamic material instance only exists on the machine that
+  created it: setting the skin on the server alone paints nobody's weapon but the
+  server's own, which nobody can see.

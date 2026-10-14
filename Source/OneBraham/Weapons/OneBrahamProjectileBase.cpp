@@ -9,6 +9,7 @@
 #include "Characters/OneBrahamCharacter.h"
 #include "Characters/OneBrahamHealthComponent.h"
 #include "Access/OneBrahamBreachableInterface.h"
+#include "Access/OneBrahamBreakableGlass.h"
 #include "Audio/OneBrahamAudioManagerComponent.h"
 #include "Data/OneBrahamMatchSettingsAsset.h"
 
@@ -328,10 +329,41 @@ void AOneBrahamProjectileBase::MulticastDetonationFeedback_Implementation(FVecto
 	const float Magnitude = UtilityType == EOneBrahamUtilityType::BreachCharge ? 1.35f
 		: (UtilityType == EOneBrahamUtilityType::Frag ? 1.f : 0.45f);
 
-	// Camera shake for the local viewer, distance-scaled inside the controller.
-	if (AOneBrahamPlayerController* LocalPC = World->GetFirstPlayerController<AOneBrahamPlayerController>())
+	// Camera shake for everyone who can feel it, not just for whoever is hosting.
+	// This used to be `GetFirstPlayerController` -> `ApplyExplosionShakeLocally`,
+	// which meant a player who threw a grenade on a dedicated server felt it and
+	// nobody else did. A Client RPC on a locally controlled controller runs on
+	// that machine immediately, so the host is covered by the same loop.
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
-		LocalPC->ApplyExplosionShakeLocally(DetonationLocation, Magnitude);
+		if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(It->Get()))
+		{
+			PC->ClientApplyExplosionShake(DetonationLocation, Magnitude);
+		}
+	}
+
+	// The two vision-breaking utilities are spawned here, and not by the Niagara
+	// component hanging off the grenade, because this is the one function that
+	// runs on every machine *with the parameters*: a client that activates the
+	// smoke system by itself draws it at the system's default radius, which is a
+	// smoke grenade the size of a bin bag, and the flash is scaled by its own
+	// radius. See Docs/11 sections 3.9 and 3.10 - this is the spawner those rows
+	// name.
+	switch (UtilityType)
+	{
+	case EOneBrahamUtilityType::Flashbang:
+		UOneBrahamVFXStatics::SpawnFlashbang(this, DetonationLocation, FlashRadius);
+		break;
+
+	case EOneBrahamUtilityType::Smoke:
+		UOneBrahamVFXStatics::SpawnSmokeCloud(this, DetonationLocation, SmokeRadius, SmokeDuration);
+		break;
+
+	default:
+		// Frag and breach: the burst is the projectile's own detonation system,
+		// activated on every machine by `OnRep_Detonated` with the authored
+		// Blueprint able to override it (`Docs/11` section 6).
+		break;
 	}
 }
 
@@ -509,6 +541,7 @@ void AOneBrahamProjectileBase::ApplyFragDamage()
 		const float Force = FMath::Lerp(2800.f, 300.f, Distance / PushRadius);
 		Primitive->AddRadialImpulse(Origin, PushRadius, Force, ERadialImpulseFalloff::RIF_Linear, /*bVelChange*/ true);
 	}
+	ApplyBlastToGlass(GetActorLocation(), BlastRadius);
 }
 
 void AOneBrahamProjectileBase::ApplyFlashEffect()
@@ -590,20 +623,67 @@ void AOneBrahamProjectileBase::ApplyFlashEffect()
 
 void AOneBrahamProjectileBase::ApplySmokeEffect()
 {
-	// The smoke cloud is a Niagara effect that exists on every client; the server
-	// only tells everyone where and when. Smoke does NOT block bullets (a design
-	// decision: bullet-blocking smoke makes every fight a coin flip); it blocks
-	// vision, which is what a smoke grenade is actually for.
-	if (DetonationFX != nullptr)
+	// Server side of a smoke grenade, and deliberately almost empty. The cloud
+	// itself is spawned on every machine by `MulticastDetonationFeedback`, which
+	// is where the radius and the lifetime are known; the actor's own lifespan is
+	// set in `Detonate`. Smoke does NOT block bullets (a design decision:
+	// bullet-blocking smoke makes every fight a coin flip); it blocks vision,
+	// which is what a smoke grenade is actually for.
+	//
+	// Collision: players can walk through smoke and bullets pass through it, so
+	// the only physics work left is the haze volume that tints the Lumen scene so
+	// the smoke darkens the room it is in. That is a level-authoring job on the
+	// cloud's own system, not something the throw can do after the fact.
+}
+
+void AOneBrahamProjectileBase::ApplyBlastToGlass(const FVector& Origin, float RadiusCm)
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr || RadiusCm <= 0.f)
 	{
-		DetonationFX->SetNiagaraVariableFloat(TEXT("User.Radius"), SmokeRadius);
-		DetonationFX->SetNiagaraVariableFloat(TEXT("User.Lifetime"), SmokeDuration);
-		DetonationFX->Activate(true);
+		return;
 	}
 
-	// Collision: players can walk through smoke but bullets pass too; we add a
-	// "haze" volume that tints the Lumen scene so the smoke darkens the room,
-	// which is the detail that makes a smoke screen feel real.
+	// There are eight panes in the building and no registry of them, so this
+	// walks the class list. That is the right cost: a detonation is once per
+	// grenade, the list is short, and an index would be one more thing to keep in
+	// step with the map builder.
+	TArray<AActor*> Panes;
+	UGameplayStatics::GetAllActorsOfClass(World, AOneBrahamBreakableGlass::StaticClass(), Panes);
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(OBGlassBlast), false, this);
+
+	for (AActor* Actor : Panes)
+	{
+		AOneBrahamBreakableGlass* Pane = Cast<AOneBrahamBreakableGlass>(Actor);
+		if (Pane == nullptr || Pane->IsBroken())
+		{
+			continue;
+		}
+
+		const FVector Centre = Pane->GetPaneCentre();
+		const float Distance = FVector::Dist(Centre, Origin);
+		if (Distance > RadiusCm)
+		{
+			continue;
+		}
+
+		// Line of sight, so a charge in one room does not blow out the glazing of
+		// the room next to it. The trace is allowed to end on the pane itself -
+		// that is the hit this is looking for - and on nothing else.
+		FHitResult Hit;
+		if (World->LineTraceSingleByChannel(Hit, Origin, Centre, ECollisionChannel::ECC_Visibility, Params) &&
+			Hit.GetActor() != Pane)
+		{
+			continue;
+		}
+
+		// Falloff, then the pane's own threshold decides. A frag that lands on the
+		// carpet three metres away still takes the window out; one that goes off in
+		// the far corner of the floor does not.
+		const float Alpha = 1.f - FMath::Clamp(Distance / RadiusCm, 0.f, 1.f);
+		Pane->TakeDamage(RadiusCm * 1.2f * Alpha, FDamageEvent(), Thrower.IsValid() ? Thrower->GetController() : nullptr, this);
+	}
 }
 
 void AOneBrahamProjectileBase::ApplyBreachDamage()
@@ -683,11 +763,19 @@ void AOneBrahamProjectileBase::ApplyBreachDamage()
 
 		Health->ApplyDamage(Damage, Thrower.Get(), Report, Thrower.IsValid() ? Thrower->GetController() : nullptr);
 	}
+	ApplyBlastToGlass(GetActorLocation(), FMath::Max(BreachRadius, BlastRadius));
 }
 
 void AOneBrahamProjectileBase::OnRep_Detonated()
 {
-	if (bDetonated && DetonationFX != nullptr)
+	// The component owns the burst for the two explosives only. The flash and the
+	// smoke are spawned by `MulticastDetonationFeedback` instead: this component
+	// rides on the grenade, and the grenade is not always where the cloud should
+	// be - a smoke that lands on a desk would otherwise draw inside the desk.
+	const bool bComponentOwnsBurst = UtilityType == EOneBrahamUtilityType::Frag
+		|| UtilityType == EOneBrahamUtilityType::BreachCharge;
+
+	if (bDetonated && DetonationFX != nullptr && bComponentOwnsBurst)
 	{
 		DetonationFX->Activate(true);
 	}

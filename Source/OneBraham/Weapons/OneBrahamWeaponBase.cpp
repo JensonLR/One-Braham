@@ -1023,6 +1023,14 @@ void AOneBrahamWeaponBase::ApplySkin(FName InSkinId)
 	ForceNetUpdate();
 }
 
+void AOneBrahamWeaponBase::OnRep_SkinId()
+{
+	// The value arrived; the paint job did not, because a dynamic material
+	// instance lives on the machine that created it. Rebuild it locally from the
+	// replicated id - and from the skin table, which every machine has.
+	RefreshMaterialParameters();
+}
+
 void AOneBrahamWeaponBase::RefreshMaterialParameters()
 {
 	// M_WeaponMaster exposes: BaseTint (vector), Wear (scalar), Pattern (texture),

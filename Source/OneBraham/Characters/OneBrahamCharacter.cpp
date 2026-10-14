@@ -995,6 +995,14 @@ void AOneBrahamCharacter::ServerOnDied(AController* Killer, const FOneBrahamDama
 		WeaponComponent->DropAllOnDeath();
 	}
 
+	// The card that got this player up eleven floors drops with the rest. ASCENT
+	// is an escalation, and an escalation that survives its owner's death is not
+	// one: a squad that dies at the top must not keep the building.
+	if (InventoryComponent != nullptr)
+	{
+		InventoryComponent->ServerDropKeycardOnDeath();
+	}
+
 	if (InteractComponent != nullptr)
 	{
 		InteractComponent->EndInteraction();
@@ -1076,6 +1084,14 @@ void AOneBrahamCharacter::ServerOnRespawned()
 	if (HealthComponent != nullptr)
 	{
 		HealthComponent->ResetHealth();
+	}
+
+	// Order matters: the inventory goes back to the standard-issue kit first, so
+	// the loadout's utility is added on top of one of each rather than on top of
+	// what the last life left behind. Utility does not accumulate across lives.
+	if (InventoryComponent != nullptr)
+	{
+		InventoryComponent->ServerResetInventory(/*bKeepKeycards*/ false);
 	}
 
 	if (WeaponComponent != nullptr)

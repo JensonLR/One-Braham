@@ -86,10 +86,10 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
 | input_ini | OK | 0.0 | wrote 41 actions (40 with a default key) |
-| cpp_symbols | OK | 0.7 | 584 declarations, all defined; compile hygiene clean |
-| uht_contracts | OK | 1.5 | 798 UE reflection contracts, all satisfied |
+| cpp_symbols | OK | 0.7 | 594 declarations, all defined; compile hygiene clean |
+| uht_contracts | OK | 1.5 | 816 UE reflection contracts, all satisfied |
 | soft_paths | OK | 0.0 | 37 soft paths, all conventional |
-| calls | OK | 0.3 | 885 call sites, all arities plausible |
+| calls | OK | 0.3 | 903 call sites, all arities plausible |
 | tags | OK | 0.4 | 6 resolvable tag requests and 147 documented tags, all declared |
 | layout | OK | 0.0 | 16 floors, map and layout agree |
 | voice_lines | OK | 0.0 | 42 line references, all declared and documented |
@@ -98,7 +98,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | test_names | OK | 0.0 | 23 automation tests, every one documented and resolvable |
 | doc_files | OK | 0.1 | 72 documented paths, all on disk |
 | doc_types | OK | 0.1 | 61 documented type names, all declared |
-| weapon_ids | OK | 0.1 | 116 weapon-id checks, the armoury and the spawn table agree |
+| weapon_ids | OK | 0.1 | 118 weapon-id checks, the armoury and the spawn table agree |
 | cosmetic_ids | OK | 0.1 | 135 cosmetic checks, one wardrobe |
 | hud_strings | OK | 0.1 | 99 HUD-string checks, 31 rows and 11 widgets, every one shown |
 | audio_ids | OK | 0.2 | 305 audio-id checks, every cue audible or documented |

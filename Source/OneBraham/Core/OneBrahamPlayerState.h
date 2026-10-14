@@ -53,6 +53,52 @@ public:
 	FString ClanTag;
 
 	// ======================================================================
+	//  Loadout
+	// ======================================================================
+	/**
+	 * What the player chose in the locker: the two weapons they carry, their
+	 * utility, and the weapon skin.
+	 *
+	 * It lives on the player state rather than on the pawn because it has to
+	 * outlive the pawn. A player is re-armed on every spawn - once a match in
+	 * ASCENT, every forty seconds in FIRE DRILL - and the weapon component reads
+	 * this every time. It is also the only copy the server trusts: the client
+	 * sends it once, when it joins, and from then on the server is the authority
+	 * on what this player carries.
+	 *
+	 * Cosmetic in the sense that matters: every weapon and every utility listed
+	 * here is available to every player from their first match, so choosing one
+	 * over another is a preference, not an unlock.
+	 */
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Loadout")
+	FName LoadoutPrimaryWeaponId = NAME_None;
+
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Loadout")
+	FName LoadoutSidearmWeaponId = NAME_None;
+
+	/** Utility item ids the player asked for, e.g. Utility_Frag. Max four. */
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Loadout")
+	TArray<FName> LoadoutUtilityIds;
+
+	/** A cosmetic skin id. NAME_None is the issue finish the weapon ships in. */
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Loadout")
+	FName LoadoutWeaponSkinId = NAME_None;
+
+	/**
+	 * True once the server has received a loadout from this player.
+	 *
+	 * Until then a spawn gets the standard-issue kit, which is what an AI bot
+	 * gets for its whole life: a bot has no client to send anything, and a
+	 * player who has not sent theirs yet must still be able to shoot back.
+	 */
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Loadout")
+	bool bLoadoutReceived = false;
+
+	/** Server: stores a sanitised loadout. Returns false if one was already held. */
+	bool StoreLoadout(FName PrimaryWeaponId, FName SidearmWeaponId,
+		const TArray<FName>& UtilityIds, FName WeaponSkinId);
+
+	// ======================================================================
 	//  Life state
 	// ======================================================================
 	UPROPERTY(ReplicatedUsing = OnRep_LifeState, BlueprintReadOnly, Category = "One Braham|Player")

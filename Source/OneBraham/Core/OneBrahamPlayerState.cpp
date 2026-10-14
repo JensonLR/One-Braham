@@ -32,6 +32,11 @@ void AOneBrahamPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	DOREPLIFETIME(AOneBrahamPlayerState, ArchetypeTag);
 	DOREPLIFETIME(AOneBrahamPlayerState, SessionMode);
 	DOREPLIFETIME(AOneBrahamPlayerState, ClanTag);
+	DOREPLIFETIME(AOneBrahamPlayerState, LoadoutPrimaryWeaponId);
+	DOREPLIFETIME(AOneBrahamPlayerState, LoadoutSidearmWeaponId);
+	DOREPLIFETIME(AOneBrahamPlayerState, LoadoutUtilityIds);
+	DOREPLIFETIME(AOneBrahamPlayerState, LoadoutWeaponSkinId);
+	DOREPLIFETIME(AOneBrahamPlayerState, bLoadoutReceived);
 	DOREPLIFETIME(AOneBrahamPlayerState, LifeState);
 	DOREPLIFETIME(AOneBrahamPlayerState, Health);
 	DOREPLIFETIME(AOneBrahamPlayerState, MaxHealth);
@@ -317,6 +322,58 @@ void AOneBrahamPlayerState::OnRep_LifeState()
 void AOneBrahamPlayerState::OnRep_VoiceChannel()
 {
 	OB_VOICE_LOG("Voice channel is now %s", *UEnum::GetValueAsString(VoiceChannel));
+}
+
+bool AOneBrahamPlayerState::StoreLoadout(FName PrimaryWeaponId, FName SidearmWeaponId,
+	const TArray<FName>& UtilityIds, FName WeaponSkinId)
+{
+	if (!HasAuthority())
+	{
+		return false;
+	}
+
+	// The ids are names a client chose, so they are treated as input: length
+	// capped, count capped, and every one of them resolved by whoever grants it.
+	// Nothing here decides whether an id is *real* - the weapon registry does
+	// that when the weapon is spawned - but a client cannot use this to write an
+	// arbitrary string into replicated state.
+	auto SanitiseId = [](FName Id) -> FName
+	{
+		return Id.ToString().Len() <= 24 ? Id : NAME_None;
+	};
+
+	LoadoutPrimaryWeaponId = SanitiseId(PrimaryWeaponId);
+	LoadoutSidearmWeaponId = SanitiseId(SidearmWeaponId);
+	LoadoutWeaponSkinId = SanitiseId(WeaponSkinId);
+
+	LoadoutUtilityIds.Reset();
+	const int32 UtilityCap = 4;
+	for (const FName& UtilityId : UtilityIds)
+	{
+		if (LoadoutUtilityIds.Num() >= UtilityCap)
+		{
+			break;
+		}
+
+		if (!SanitiseId(UtilityId).IsNone())
+		{
+			LoadoutUtilityIds.Add(UtilityId);
+		}
+	}
+
+	const bool bFirstReceipt = !bLoadoutReceived;
+	bLoadoutReceived = true;
+	ForceNetUpdate();
+
+	OB_LOG("Loadout for '%s': %s / %s, %d utility items, skin '%s'%s.",
+		*GetPlayerName(),
+		LoadoutPrimaryWeaponId.IsNone() ? TEXT("none") : *LoadoutPrimaryWeaponId.ToString(),
+		LoadoutSidearmWeaponId.IsNone() ? TEXT("none") : *LoadoutSidearmWeaponId.ToString(),
+		LoadoutUtilityIds.Num(),
+		LoadoutWeaponSkinId.IsNone() ? TEXT("none") : *LoadoutWeaponSkinId.ToString(),
+		bFirstReceipt ? TEXT(" (first)") : TEXT(" (stored for the next life)"));
+
+	return bFirstReceipt;
 }
 
 void AOneBrahamPlayerState::OnRep_Cosmetics()

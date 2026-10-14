@@ -28,6 +28,7 @@ public:
 	 *  list. `ob.NetDebug` is not here: it is a console variable, handled by the
 	 *  engine's own console before anything reaches this class. */
 	void OBGiveWeapon(const FString& WeaponId);
+	void OBRemoveCurrentWeapon();
 	void OBSetLockdownStage(int32 Stage);
 	void OBEndMatch(int32 WinningTeamIndex);
 	void OBExtractionFast();

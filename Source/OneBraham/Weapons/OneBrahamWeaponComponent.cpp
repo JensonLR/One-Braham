@@ -32,6 +32,16 @@ UOneBrahamWeaponComponent::UOneBrahamWeaponComponent()
 	PrimaryComponentTick.bCanEverTick = true;
 	SetIsReplicatedByDefault(true);
 	SpreadStream.Initialize(FMath::Rand());
+
+	// The standard-issue kit: the same four utility types the default profile is
+	// created with, so a bot, a joining client and a fresh install all carry the
+	// same thing.
+	DefaultUtilityIds = {
+		TEXT("Utility_Frag"),
+		TEXT("Utility_Flashbang"),
+		TEXT("Utility_Smoke"),
+		TEXT("Utility_BreachCharge")
+	};
 }
 
 void UOneBrahamWeaponComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -322,6 +332,114 @@ void UOneBrahamWeaponComponent::ServerRemoveCurrentWeapon()
 	ForceNetUpdate();
 }
 
+void UOneBrahamWeaponComponent::ResetOnRespawn()
+{
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority())
+	{
+		return;
+	}
+
+	// Destroyed, not dropped. The death path has already put the previous kit on
+	// the floor as pickups; anything still owned here belongs to a life that is
+	// over, and dropping it would arm whoever is standing at the spawn.
+	for (const TPair<EOneBrahamWeaponSlot, TObjectPtr<AOneBrahamWeaponBase>>& Pair : OwnedWeapons)
+	{
+		if (AOneBrahamWeaponBase* Weapon = Pair.Value)
+		{
+			Weapon->SetOwningWeaponComponent(nullptr);
+			Weapon->Destroy();
+		}
+	}
+
+	OwnedWeapons.Reset();
+	ReserveAmmoByWeapon.Reset();
+	CurrentWeapon = nullptr;
+	CurrentSlot = EOneBrahamWeaponSlot::Melee;
+
+	// The reload's timer belongs to the weapon actor, which has just gone; only
+	// the component's own flag is left to clear.
+	bIsReloading = false;
+	OnRep_Reloading();
+
+	ApplyLoadoutForCurrentLife();
+
+	OnWeaponChanged.Broadcast(CurrentWeapon, nullptr);
+	ForceNetUpdate();
+}
+
+void UOneBrahamWeaponComponent::ApplyLoadoutForCurrentLife()
+{
+	const AOneBrahamCharacter* Character = GetCharacter();
+	const AOneBrahamPlayerState* State = Character != nullptr
+		? Character->GetPlayerState<AOneBrahamPlayerState>()
+		: nullptr;
+
+	// A bot has no player state and a joining client has one that has not heard
+	// from them yet. Both get the standard-issue kit: the alternative is a player
+	// standing at a spawn point with nothing to shoot with.
+	if (State == nullptr || !State->bLoadoutReceived)
+	{
+		ServerApplyLoadout(DefaultPrimaryWeaponId, DefaultSidearmWeaponId, DefaultUtilityIds, NAME_None);
+		return;
+	}
+
+	ServerApplyLoadout(State->LoadoutPrimaryWeaponId, State->LoadoutSidearmWeaponId,
+		State->LoadoutUtilityIds, State->LoadoutWeaponSkinId);
+}
+
+void UOneBrahamWeaponComponent::ServerApplyLoadout(FName PrimaryWeaponId, FName SidearmWeaponId,
+	const TArray<FName>& UtilityIds, FName WeaponSkinId)
+{
+	if (GetOwner() == nullptr || !GetOwner()->HasAuthority())
+	{
+		return;
+	}
+
+	AOneBrahamCharacter* Character = GetCharacter();
+	if (Character == nullptr)
+	{
+		return;
+	}
+
+	// ServerGiveWeapon owns the registry lookup, the slot rules and the reserve
+	// pool, so it is also the thing that refuses an id that does not exist. It
+	// equips the primary: a player spawns holding their rifle, not their pistol.
+	AOneBrahamWeaponBase* Primary = PrimaryWeaponId.IsNone()
+		? nullptr
+		: ServerGiveWeapon(PrimaryWeaponId, /*bEquip*/ true);
+	AOneBrahamWeaponBase* Sidearm = SidearmWeaponId.IsNone()
+		? nullptr
+		: ServerGiveWeapon(SidearmWeaponId, /*bEquip*/ false);
+
+	// One skin on everything this player carries. The table is per weapon type,
+	// so a skin that only exists for the carbine leaves the pistol in its issue
+	// finish rather than breaking it.
+	if (!WeaponSkinId.IsNone())
+	{
+		const TArray<AOneBrahamWeaponBase*> Armed = { Primary, Sidearm };
+		for (AOneBrahamWeaponBase* Weapon : Armed)
+		{
+			if (Weapon != nullptr)
+			{
+				Weapon->ApplySkin(WeaponSkinId);
+			}
+		}
+	}
+
+	// Utility lives on the inventory component, which owns the per-type caps and
+	// the whitelist of ids it knows. Added one at a time, on top of the kit the
+	// respawn already handed out, so the caps do the arithmetic.
+	if (UOneBrahamInventoryComponent* Inventory = Character->GetInventoryComponent())
+	{
+		for (const FName& UtilityId : UtilityIds)
+		{
+			Inventory->ServerAddUtility(UtilityId, 1);
+		}
+	}
+
+	ForceNetUpdate();
+}
+
 AOneBrahamWeaponBase* UOneBrahamWeaponComponent::DropCurrentWeapon()
 {
 	if (!GetOwner()->HasAuthority() || CurrentWeapon == nullptr)
@@ -533,17 +651,26 @@ void UOneBrahamWeaponComponent::EquipSlot(EOneBrahamWeaponSlot Slot)
 		Previous->OnUnequipped();
 	}
 
+	// A reload belongs to the weapon being put away. Its timer lives on that
+	// actor and would otherwise finish into a holstered weapon, transferring the
+	// ammo and playing the second half of the animation off-screen; and the flag
+	// is cleared outside the block below, because switching to an *empty* slot
+	// ends the reload just as surely as switching to a loaded one.
+	if (bIsReloading)
+	{
+		if (Previous != nullptr)
+		{
+			Previous->ServerCancelReload();
+		}
+
+		bIsReloading = false;
+		OnRep_Reloading();
+	}
+
 	if (CurrentWeapon != nullptr)
 	{
 		CurrentWeapon->SetOwningWeaponComponent(this);
 		CurrentWeapon->OnEquippedBy(GetCharacter());
-
-		// Cancel a reload we can no longer complete.
-		if (bIsReloading)
-		{
-			bIsReloading = false;
-			OnRep_Reloading();
-		}
 
 		SanitiseFireMode();
 	}

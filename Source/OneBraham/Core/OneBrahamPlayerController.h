@@ -297,6 +297,22 @@ protected:
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "One Braham|Controller|Voice")
 	void ServerRequestQuickLine(FName LineId);
 
+	/**
+	 * Client -> server: the loadout this player chose in the locker.
+	 *
+	 * Names only; every id is resolved against the weapon registry (and, for
+	 * utility, against the inventory's own whitelist) when it is granted, and an
+	 * id that does not resolve is refused there. The server keeps the result on
+	 * the player state and re-arms from it on every spawn.
+	 *
+	 * It is stored, not obeyed: a second call during a life changes what the
+	 * player will carry *next* life and nothing else, so a client cannot swap
+	 * weapons in the middle of a fight.
+	 */
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "One Braham|Controller|Loadout")
+	void ServerSetLoadout(FName PrimaryWeaponId, FName SidearmWeaponId,
+		const TArray<FName>& UtilityIds, FName WeaponSkinId);
+
 	/** True while the comms wheel is open on this client. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Controller|Voice")
 	bool IsQuickLineMenuOpen() const { return bQuickLineMenuOpen; }

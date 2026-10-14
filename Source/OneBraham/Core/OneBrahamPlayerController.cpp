@@ -174,6 +174,15 @@ void AOneBrahamPlayerController::InitPlayerState()
 					const FOneBrahamSavedLoadout& Loadout = Profile->Loadouts[Profile->SelectedLoadoutIndex];
 					OBState->EquippedCosmetics = Profile->EquippedCosmetics;
 					OBState->ClanTag = Profile->ClanTag;
+
+					// The weapons travel with it. The profile is local, so this
+					// machine is the only place the choice exists; everything
+					// after this point reads the player state.
+					if (HasAuthority())
+					{
+						ServerSetLoadout(Loadout.PrimaryWeaponId, Loadout.SidearmWeaponId,
+							Loadout.UtilityIds, Loadout.WeaponSkinId);
+					}
 				}
 			}
 		}
@@ -1040,6 +1049,37 @@ void AOneBrahamPlayerController::RequestQuickLine(FName LineId)
 	else
 	{
 		ServerRequestQuickLine(LineId);
+	}
+}
+
+void AOneBrahamPlayerController::ServerSetLoadout_Implementation(FName PrimaryWeaponId, FName SidearmWeaponId,
+	const TArray<FName>& UtilityIds, FName WeaponSkinId)
+{
+	AOneBrahamPlayerState* State = GetPlayerState<AOneBrahamPlayerState>();
+	if (State == nullptr)
+	{
+		// Called from InitPlayerState, where the state must already exist; if it
+		// somehow does not, the spawn path gives the standard-issue kit and the
+		// player is armed anyway.
+		return;
+	}
+
+	const bool bFirstReceipt = State->StoreLoadout(PrimaryWeaponId, SidearmWeaponId, UtilityIds, WeaponSkinId);
+	if (!bFirstReceipt)
+	{
+		return;
+	}
+
+	// The first receipt usually lands after PostLogin has already put this player
+	// on the floor - the client only knows its profile once it is in - so the kit
+	// it was given a moment ago is the standard issue one. Replace it now rather
+	// than making them play a life with the wrong rifle.
+	if (AOneBrahamCharacter* Character = GetOneBrahamCharacter())
+	{
+		if (UOneBrahamWeaponComponent* Weapons = Character->GetWeaponComponent())
+		{
+			Weapons->ResetOnRespawn();
+		}
 	}
 }
 

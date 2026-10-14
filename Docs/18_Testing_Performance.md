@@ -239,6 +239,7 @@ documented here rather than discovered in the source:
 | `ob.Bench.Skydeck.Stop` | ends a run early and writes the same report for the frames captured so far. |
 | `ob.netbudget` | the replication budget report: what the game state counts per second against `RpcBudgetPerSecond`. Server only. |
 | `ob.give <WeaponId>` | puts a weapon in the local player's hands. Cheat, development builds only. |
+| `ob.weapon.remove` | destroys the local player's held weapon without dropping it. For the unarmed cases: the first-person arms with nothing in them, the player who has just been relieved of a rifle, the locker preview. |
 | `ob.lockdown [stage]` | forces the lockdown to a stage, or with no argument advances it one. Server only. |
 | `ob.endmatch [team]` | ends the match with a result. Server only. |
 | `ob.extraction.fast` | calls the winch for the squad of whoever typed it (if nobody has called one yet) and jumps the sequence to the 30 s hold. Server only, ASCENT only. The winch is a 55 s sequence behind a console on the Skydeck; this is how a QA pass reaches the last 30 seconds of it. |

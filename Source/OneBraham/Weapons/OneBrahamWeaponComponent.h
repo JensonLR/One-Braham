@@ -127,6 +127,45 @@ public:
 	void ServerRemoveCurrentWeapon();
 
 	/**
+	 * Server: everything a respawn needs.
+	 *
+	 * The kit the player was carrying is destroyed rather than dropped - a
+	 * dropped weapon at a spawn point is loot for whoever is standing next to
+	 * them - and they are re-armed from the loadout on their player state. The
+	 * death path (DropAllOnDeath) already turned the previous kit into pickups,
+	 * so nothing that the player never stood to lose is being deleted here.
+	 *
+	 * Called by AOneBrahamCharacter::ServerOnRespawned, which is the one place a
+	 * life begins, and by AOneBrahamPlayerController when a client's loadout
+	 * arrives after their first spawn has already happened.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Weapons")
+	void ResetOnRespawn();
+
+	/**
+	 * Server: grants a primary, a sidearm, utility and a weapon skin.
+	 *
+	 * Every id is a name a client asked for. The registry refuses a weapon it
+	 * does not know, the inventory refuses a utility it does not know, and the
+	 * skin falls back to the issue finish if it does not resolve, so the worst a
+	 * lying client can do is fail to be given something.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Weapons")
+	void ServerApplyLoadout(FName PrimaryWeaponId, FName SidearmWeaponId,
+		const TArray<FName>& UtilityIds, FName WeaponSkinId);
+
+	/** The kit a spawn gets when no loadout has been received: an AI bot, or a
+	 *  client whose loadout is still in flight. Never leave a player unarmed. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Loadout")
+	FName DefaultPrimaryWeaponId = TEXT("W_Carbine556");
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Loadout")
+	FName DefaultSidearmWeaponId = TEXT("W_Pistol");
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Loadout")
+	TArray<FName> DefaultUtilityIds;
+
+	/**
 	 * Server: takes a weapon actor off the floor into this component, moving its
 	 * magazine, reserve pool and attachments with it. Displacing whatever was in
 	 * the slot (which is dropped, not deleted).
@@ -360,6 +399,10 @@ public:
 protected:
 	UFUNCTION() void OnRep_CurrentWeapon();
 	UFUNCTION() void OnRep_Reloading();
+
+	/** Server: hands this player what they carry this life, from the player state
+	 *  when it has a loadout and from the standard-issue kit when it does not. */
+	void ApplyLoadoutForCurrentLife();
 
 	/** Actual firing: called on the server (from the RPC) or locally (listen host). */
 	bool FireOnce(const FVector& AimOrigin, const FVector& AimDirection);

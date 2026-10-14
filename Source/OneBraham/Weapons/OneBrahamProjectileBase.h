@@ -173,6 +173,14 @@ protected:
 	void ApplySmokeEffect();
 	void ApplyBreachDamage();
 
+	/**
+	 * Server: every intact pane of glass inside `RadiusCm` with line of sight to
+	 * the blast comes out. Frags and breaching charges take the windows with them,
+	 * which is what makes a grenade in a server room change the shape of the room
+	 * rather than just killing whoever was standing in it.
+	 */
+	void ApplyBlastToGlass(const FVector& Origin, float RadiusCm);
+
 	/** Bounce handling: reports the surface for the impact sound + decal. */
 	UFUNCTION()
 	void OnProjectileBounce(const FHitResult& ImpactResult, const FVector& ImpactVelocity);

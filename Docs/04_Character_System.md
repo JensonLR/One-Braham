@@ -22,6 +22,15 @@ the movement system exists to keep those three things in charge.
 | `bIsDowned` / `bIsEliminated` | replicated | |
 | Components | `HealthComponent`, `DownedComponent`, `RagdollComponent`, `WeaponComponent`, `InventoryComponent`, `InteractComponent`, `ProximityVoiceComponent` | |
 
+Every life begins in `ServerOnRespawned`, and the order in it is the rule: the
+health is reset, the inventory goes back to the standard-issue kit
+(`ServerResetInventory`, which clears the keycards and the override tool with it),
+and only then is the weapon component told to re-arm. Utility therefore does not
+accumulate across lives — a player who respawns eight times does not eventually
+carry twenty-four flashbangs — and the loadout is applied on top of one of each
+rather than on top of whatever the last life left behind. The other end of a life
+is `ServerOnDied`, which drops the kit as pickups and the keycard with it.
+
 The character does not own game rules. It owns a body: a capsule, a camera, a
 mesh and a set of components. Everything that can be argued about — damage, downed
 state, extraction eligibility — lives in a component that can be tested on its

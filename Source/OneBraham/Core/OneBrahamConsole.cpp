@@ -44,15 +44,23 @@ void UOneBrahamConsole::PostRender_Console_GameViewport(UCanvas* Canvas)
 bool UOneBrahamConsole::ConsoleCommand(const FString& Command)
 {
 	// Route ONE BRAHAM QA commands, then fall through to the engine console.
+	//
+	// The verb is the first token whether or not there are arguments. An earlier
+	// version split on a space and only routed when the split succeeded, which
+	// meant every one-word command - ob.lockdown, ob.netbudget, ob.audio.dump,
+	// ob.extraction.fast, ob.bench.skydeck.stop - fell straight through to the
+	// engine console, where nothing answers them and nothing says so.
 	const FString Trimmed = Command.TrimStartAndEnd();
-	FString Verb;
-	FString Args;
-	if (Trimmed.Split(TEXT(" "), &Verb, &Args))
-	{
-		Verb = Verb.ToLower();
 
-		TArray<FString> ArgList;
-		Args.ParseIntoArrayWS(ArgList);
+	TArray<FString> Tokens;
+	Trimmed.ParseIntoArrayWS(Tokens);
+
+	if (Tokens.Num() > 0)
+	{
+		const FString Verb = Tokens[0].ToLower();
+
+		TArray<FString> ArgList = Tokens;
+		ArgList.RemoveAt(0);
 
 		if (Verb == TEXT("ob.give"))
 		{
@@ -98,6 +106,11 @@ bool UOneBrahamConsole::ConsoleCommand(const FString& Command)
 		if (Verb == TEXT("ob.bench.skydeck.stop"))
 		{
 			OBStopBench();
+			return true;
+		}
+		if (Verb == TEXT("ob.weapon.remove"))
+		{
+			OBRemoveCurrentWeapon();
 			return true;
 		}
 	}
@@ -192,6 +205,34 @@ void UOneBrahamConsole::OBGiveWeapon(const FString& WeaponId)
 
 	Character->GetWeaponComponent()->ServerGiveWeaponDebug(FName(*WeaponId));
 	OB_LOG("ob.give: requested '%s'.", *WeaponId);
+}
+
+void UOneBrahamConsole::OBRemoveCurrentWeapon()
+{
+	UWorld* World = GetWorld();
+	APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
+	AOneBrahamCharacter* Character = PC ? Cast<AOneBrahamCharacter>(PC->GetPawn()) : nullptr;
+	UOneBrahamWeaponComponent* Weapons = Character ? Character->GetWeaponComponent() : nullptr;
+
+	if (Weapons == nullptr)
+	{
+		OB_WARN("ob.weapon.remove: no local character with a weapon component.");
+		return;
+	}
+
+	// Destruction rather than a drop, which is the point: this is the verb for
+	// the unarmed cases - the player who has just been relieved of their rifle,
+	// the lobby wanderer, the bug where the first-person arms animate with
+	// nothing in them. A drop would put a perfectly good carbine on the floor and
+	// change the thing being tested.
+	const AOneBrahamWeaponBase* Held = Weapons->GetCurrentWeapon();
+	const FString HeldId = Held != nullptr && Held->Definition != nullptr
+		? Held->Definition->WeaponId.ToString()
+		: FString(TEXT("nothing"));
+
+	Weapons->ServerRemoveCurrentWeapon();
+
+	OB_LOG("ob.weapon.remove: destroyed '%s'.", *HeldId);
 }
 
 void UOneBrahamConsole::OBSetLockdownStage(int32 Stage)
