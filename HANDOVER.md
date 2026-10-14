@@ -43,7 +43,16 @@ otherwise.** They are the first three items of work for whoever picks this up.
 
 ## 2. Verify before you trust
 
-Every command below is engine-free. Run all of them from the repository root.
+Every command below is engine-free. Run all of them from the repository root, and
+set the import root once per shell - every checker is a module and imports the
+package the pipeline shares:
+
+```
+export PYTHONPATH=Tools/Python
+```
+
+`run_all.py` sets it for the steps it runs, so it works either way; nothing else
+does.
 
 | Command | Expected | What it proves |
 | --- | --- | --- |
