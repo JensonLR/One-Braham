@@ -1,0 +1,104 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.5",
+	"Category": "Shooter",
+	"Description": "ONE BRAHAM - vertical multiplayer extraction shooter set inside a London corporate skyscraper. Fight from the ground-floor entrance of One Braham to the 15th-floor Skydeck. Dry British corporate realism, serious tactical gunplay.",
+	"Modules": [
+		{
+			"Name": "OneBraham",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": [
+				"Engine",
+				"UMG",
+				"EnhancedInput"
+			]
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "EnhancedInput",
+			"Enabled": true
+		},
+		{
+			"Name": "CommonUI",
+			"Enabled": true
+		},
+		{
+			"Name": "Niagara",
+			"Enabled": true
+		},
+		{
+			"Name": "ChaosClothPlugin",
+			"Enabled": true
+		},
+		{
+			"Name": "HairStrands",
+			"Enabled": true
+		},
+		{
+			"Name": "SoundUtilities",
+			"Enabled": true
+		},
+		{
+			"Name": "Synthesis",
+			"Enabled": true
+		},
+		{
+			"Name": "Metasound",
+			"Enabled": true
+		},
+		{
+			"Name": "OnlineSubsystem",
+			"Enabled": true
+		},
+		{
+			"Name": "OnlineSubsystemUtils",
+			"Enabled": true
+		},
+		{
+			"Name": "OnlineSubsystemSteam",
+			"Enabled": true,
+			"SupportedTargetPlatforms": [
+				"Win64",
+				"Linux"
+			]
+		},
+		{
+			"Name": "ModelingToolsEditorMode",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
+			"Name": "EditorScriptingUtilities",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		}
+	],
+	"TargetPlatforms": [
+		"Windows",
+		"Linux"
+	],
+	"EpicSampleNameHash": "",
+	"OneBrahamProjectSettings": {
+		"GameTitle": "ONE BRAHAM",
+		"ShippingVersion": "1.0.0",
+		"SteamAppId": 480,
+		"SteamDedicatedServerAppId": 480,
+		"DefaultMap": "/Game/OneBraham/Maps/L_Persistent_OneBraham",
+		"DefaultGameMode": "/Script/OneBraham.OneBrahamGameMode",
+		"OptionalPluginsToEnableByHand": [
+			"MetaHuman",
+			"MetaHumanSDK",
+			"ChaosVehiclesPlugin",
+			"ElectraPlayer",
+			"GameplayInsights",
+			"AnimationBudgetAllocator",
+			"ReplicationGraph"
+		]
+	}
+}

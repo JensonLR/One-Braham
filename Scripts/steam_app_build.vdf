@@ -1,0 +1,56 @@
+// ===========================================================================
+//  ONE BRAHAM - Steam build script
+// ---------------------------------------------------------------------------
+//  Uploaded with steamcmd:
+//      steamcmd +login one_braham +run_app_build Scripts\steam_app_build.vdf +quit
+//
+//  REPLACE BEFORE THE FIRST UPLOAD:
+//    "appid"    your shipping AppId (480 is Spacewar, used for development)
+//    "setlive"  the branch to publish to. Use "beta" until the release is signed off.
+//    depot ids  from Steamworks > Technical Tools > SteamPipe > Depots
+//
+//  WHY TWO DEPOTS
+//    Depot 1 is the game: one 2 GB-ish pak, because a UE5 shipping build with
+//    IoStore is faster to update as one file than as many. Depot 2 is the
+//    dedicated server tools, which most players never download.
+// ===========================================================================
+"AppBuild"
+{
+    "AppID" "480"
+    "Desc" "ONE BRAHAM - build %BUILD_ID%"
+    "BuildOutput" "..\Build\Steam\Output\"
+    "ContentRoot" "..\Build\Steam\Content\"
+    "SetLive" "beta"
+
+    "Depots"
+    {
+        // The game itself.
+        "480001"
+        {
+            "File" "OneBraham\*"
+            "File" "Engine\*"
+            "File" "OneBraham.exe"
+            "File" "*.dll"
+
+            "FileProperties"
+            {
+                // The shipping exe is what Steam launches.
+                "OneBraham.exe" { "recursive" "0" }
+            }
+        }
+
+        // Dedicated server tools. Installed only when a host asks for them.
+        "480002"
+        {
+            "File" "OneBrahamServer\*"
+            "File" "Engine\Binaries\Win64\OneBrahamServer.exe"
+        }
+    }
+
+    "Local"
+    {
+        // Local staging, so an upload never reads from the build directory the
+        // packaging step is still writing to.
+        "..\Build\Steam\Output"
+    }
+}
