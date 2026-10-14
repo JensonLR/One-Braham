@@ -256,6 +256,4 @@ protected:
 
 	/** Parsed from the travel options. */
 	FString PendingModeString;
-	FString PendingPlayerName;
-	FString PendingArchetype;
 };

@@ -235,6 +235,14 @@ public:
 	/** Finds an archetype by index (0..5), for the deploy screen carousel. */
 	const FOneBrahamArchetypeDefinition* FindArchetypeByIndex(int32 Index) const;
 
+	/**
+	 * The registry the game runs on: the settings field, then the path the content
+	 * build writes. Null on a code-only checkout. One loader for the character,
+	 * the game mode and the controller, which each used to resolve it their own
+	 * way or not at all.
+	 */
+	static UOneBrahamCharacterDataAsset* LoadRegistry();
+
 	const FOneBrahamCosmeticSlot* FindCosmeticSlot(FName SlotName) const;
 
 	/** True when a cosmetic id exists in any slot. */

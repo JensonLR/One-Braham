@@ -66,6 +66,9 @@ completes with a `MatchResult` on both the winning and losing paths.
 - [ ] Listen server match with 8 players: host is flagged, match completes.
 - [ ] Steam session: invite, browse, join, and a full match over Steam networking.
 - [ ] Server list: the build appears, the mode filter works, ping is reported.
+- [ ] Listen server, four players with four different saved outfits and
+      loadouts: each is seen by all four in their own outfit, carrying their own
+      rifle (`Docs/13` section 3). The host's profile is on the host only.
 
 ## 7. Every system, played
 
@@ -122,6 +125,10 @@ completes with a `MatchResult` on both the winning and losing paths.
 - [ ] Achievements and stats upload cleanly.
 - [ ] Steam Input action manifest matches the four mapping contexts.
 - [ ] Cloud saves: settings and keybinds survive a second machine.
+- [ ] Purchasable cosmetics are Steam Inventory items, and `ServerSetAppearance`
+      keeps one only when the client's signed inventory result contains it
+      (`Docs/13` section 3). Test: a profile edited by hand to wear an unowned
+      item is shown in the default for that slot to everyone else.
 - [ ] Store page assets all uploaded and free of HUD, of placeholder art, and of
       the words "work in progress".
 

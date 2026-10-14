@@ -7,6 +7,7 @@
 #include "Engine/SkeletalMesh.h"
 #include "GameFramework/Actor.h"
 #include "OneBraham.h"
+#include "Core/OneBrahamGameSettings.h"
 
 // ===========================================================================
 //  Lookups
@@ -43,6 +44,17 @@ const FOneBrahamArchetypeDefinition* UOneBrahamCharacterDataAsset::FindArchetype
 const FOneBrahamArchetypeDefinition* UOneBrahamCharacterDataAsset::FindArchetypeByIndex(int32 Index) const
 {
 	return Archetypes.IsValidIndex(Index) ? &Archetypes[Index] : nullptr;
+}
+
+UOneBrahamCharacterDataAsset* UOneBrahamCharacterDataAsset::LoadRegistry()
+{
+	if (UOneBrahamCharacterDataAsset* Configured = UOneBrahamGameSettings::Get().CharacterRegistry.LoadSynchronous())
+	{
+		return Configured;
+	}
+
+	return LoadObject<UOneBrahamCharacterDataAsset>(
+		nullptr, TEXT("/Game/OneBraham/Characters/DA_CharacterRegistry.DA_CharacterRegistry"));
 }
 
 const FOneBrahamCosmeticSlot* UOneBrahamCharacterDataAsset::FindCosmeticSlot(FName SlotName) const

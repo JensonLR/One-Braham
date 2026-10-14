@@ -11,6 +11,7 @@
 #include "Core/OneBrahamGameUserSettings.h"
 #include "Core/OneBrahamPlayerState.h"
 #include "Core/OneBrahamSaveSettings.h"
+#include "Data/OneBrahamCharacterDataAsset.h"
 #include "Characters/OneBrahamCharacter.h"
 #include "Characters/OneBrahamHealthComponent.h"
 #include "Characters/OneBrahamDownedComponent.h"
@@ -168,37 +169,131 @@ void AOneBrahamPlayerController::InitPlayerState()
 {
 	Super::InitPlayerState();
 
+	// No profile here. InitPlayerState runs on the server only, for every player,
+	// and it read *the server's* profile: on a listen host every joining player
+	// was given the host's outfit, clan tag and loadout, and a remote player's
+	// own choices never left their machine. ReceivedPlayer sends them instead.
 	if (AOneBrahamPlayerState* OBState = GetPlayerState<AOneBrahamPlayerState>())
 	{
-		// Seed the archetype + cosmetics from the local profile so a listen host
-		// looks like what they chose in the locker. A dedicated server overwrites
-		// this in PostLogin from the travel options.
-		if (const UOneBrahamGameInstance* GameInstance = GetGameInstance<UOneBrahamGameInstance>())
-		{
-			if (const UOneBrahamSaveSettings* Profile = GameInstance->GetProfile())
-			{
-				if (Profile->Loadouts.IsValidIndex(Profile->SelectedLoadoutIndex))
-				{
-					const FOneBrahamSavedLoadout& Loadout = Profile->Loadouts[Profile->SelectedLoadoutIndex];
-					OBState->EquippedCosmetics = Profile->EquippedCosmetics;
-					OBState->ClanTag = Profile->ClanTag;
-
-					// The weapons travel with it. The profile is local, so this
-					// machine is the only place the choice exists; everything
-					// after this point reads the player state.
-					if (HasAuthority())
-					{
-						ServerSetLoadout(Loadout.PrimaryWeaponId, Loadout.SidearmWeaponId,
-							Loadout.UtilityIds, Loadout.WeaponSkinId);
-					}
-				}
-			}
-		}
-
 		OBState->SessionMode = GetWorld() && GetWorld()->GetGameState<AOneBrahamGameState>()
 			? GetWorld()->GetGameState<AOneBrahamGameState>()->MatchMode
 			: EOneBrahamMatchMode::Ascent;
 	}
+}
+
+void AOneBrahamPlayerController::ReceivedPlayer()
+{
+	Super::ReceivedPlayer();
+
+	if (IsLocalController())
+	{
+		SendProfileToServer();
+	}
+}
+
+void AOneBrahamPlayerController::SendProfileToServer()
+{
+	const UOneBrahamGameInstance* GameInstance = GetGameInstance<UOneBrahamGameInstance>();
+	const UOneBrahamSaveSettings* Profile = GameInstance != nullptr ? GameInstance->GetProfile() : nullptr;
+
+	if (!IsLocalController() || Profile == nullptr)
+	{
+		return;
+	}
+
+	// The engine's own name path (ServerChangeName), so a Steam name and a
+	// profile name go through the same validation.
+	if (!Profile->PlayerName.IsEmpty())
+	{
+		SetName(Profile->PlayerName);
+	}
+
+	FName ArchetypeId = NAME_None;
+
+	if (Profile->Loadouts.IsValidIndex(Profile->SelectedLoadoutIndex))
+	{
+		const FOneBrahamSavedLoadout& Loadout = Profile->Loadouts[Profile->SelectedLoadoutIndex];
+		ArchetypeId = Loadout.ArchetypeId;
+		ServerSetLoadout(Loadout.PrimaryWeaponId, Loadout.SidearmWeaponId, Loadout.UtilityIds, Loadout.WeaponSkinId);
+	}
+
+	TArray<FName> Slots;
+	TArray<FName> Options;
+	for (const TPair<FName, FName>& Pair : Profile->EquippedCosmetics)
+	{
+		Slots.Add(Pair.Key);
+		Options.Add(Pair.Value);
+	}
+
+	ServerSetAppearance(ArchetypeId, Slots, Options, Profile->ClanTag);
+}
+
+void AOneBrahamPlayerController::ServerSetAppearance_Implementation(FName ArchetypeId,
+	const TArray<FName>& CosmeticSlots, const TArray<FName>& CosmeticOptions, const FString& InClanTag)
+{
+	AOneBrahamPlayerState* State = GetPlayerState<AOneBrahamPlayerState>();
+	const UOneBrahamCharacterDataAsset* Registry = UOneBrahamCharacterDataAsset::LoadRegistry();
+
+	if (State == nullptr)
+	{
+		return;
+	}
+
+	// Four letters and digits, upper case: it is drawn next to a name on a
+	// scoreboard, and it is the only free text a player can put in front of
+	// eleven strangers.
+	FString Clan;
+	for (const TCHAR Character : InClanTag)
+	{
+		if (FChar::IsAlnum(Character) && Clan.Len() < 4)
+		{
+			Clan.AppendChar(FChar::ToUpper(Character));
+		}
+	}
+	State->ClanTag = Clan;
+
+	if (Registry != nullptr)
+	{
+		// The archetype, only if the registry has it: an unknown id keeps the
+		// default the game mode gave this player on login.
+		if (!ArchetypeId.IsNone())
+		{
+			const FGameplayTag Requested = FGameplayTag::RequestGameplayTag(
+				FName(*FString::Printf(TEXT("OB.Character.Archetype.%s"), *ArchetypeId.ToString())), false);
+			const FOneBrahamArchetypeDefinition* Definition = Requested.IsValid() ? Registry->FindArchetype(Requested) : nullptr;
+
+			if (Definition != nullptr && Definition->ArchetypeTag == Requested)
+			{
+				State->ArchetypeTag = Requested;
+			}
+		}
+
+		// The outfit: a real option of the slot it claims, never banned, one per
+		// slot, and never more entries than there are slots.
+		TMap<FName, FName> Outfit;
+		const int32 Count = FMath::Min3(CosmeticSlots.Num(), CosmeticOptions.Num(), Registry->CosmeticSlots.Num());
+
+		for (int32 Index = 0; Index < Count; ++Index)
+		{
+			const FName Slot = CosmeticSlots[Index];
+			const FName Option = CosmeticOptions[Index];
+
+			if (Registry->IsValidCosmetic(Option)
+				&& Registry->FindSlotForCosmetic(Option) == Slot
+				&& !Registry->CompetitiveBannedCosmeticIds.Contains(Option))
+			{
+				Outfit.Add(Slot, Option);
+			}
+		}
+
+		State->EquippedCosmetics = MoveTemp(Outfit);
+	}
+
+	State->ForceNetUpdate();
+
+	// The server's own copy of the pawn: RepNotifies do not run where the value
+	// was set, and a listen host has to see the outfit too.
+	State->ApplyAppearanceLocally();
 }
 
 void AOneBrahamPlayerController::OnPossess(APawn* InPawn)
@@ -1760,8 +1855,20 @@ void AOneBrahamPlayerController::ApplyExplosionShakeLocally(const FVector& Origi
 		return;
 	}
 
-	PlayerCameraManager->StartCameraShake(UOneBrahamCameraShake::GetExplosionShakeClass(),
-		Falloff * Magnitude * Settings->CameraShakeIntensity);
+	PlayCameraShakeLocally(UOneBrahamCameraShake::GetExplosionShakeClass(), Falloff * Magnitude);
+}
+
+UCameraShakeBase* AOneBrahamPlayerController::PlayCameraShakeLocally(TSubclassOf<UCameraShakeBase> ShakeClass, float Scale)
+{
+	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
+
+	if (!IsLocalController() || PlayerCameraManager == nullptr || ShakeClass == nullptr
+		|| Settings == nullptr || !Settings->bCameraShake || Scale <= 0.f)
+	{
+		return nullptr;
+	}
+
+	return PlayerCameraManager->StartCameraShake(ShakeClass, Scale * Settings->CameraShakeIntensity);
 }
 
 void AOneBrahamPlayerController::TickFlash(float DeltaTime)

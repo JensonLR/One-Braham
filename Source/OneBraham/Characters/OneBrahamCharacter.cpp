@@ -19,6 +19,7 @@
 #include "Weapons/OneBrahamWeaponComponent.h"
 #include "Voice/OneBrahamProximityVoiceComponent.h"
 #include "Audio/OneBrahamAudioManagerComponent.h"
+#include "VFX/OneBrahamCameraShake.h"
 
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -637,16 +638,8 @@ UOneBrahamCharacterDataAsset* AOneBrahamCharacter::ResolveCharacterData()
 		return CharacterData;
 	}
 
-	// The config-declared registry, so a project can move its content without a
-	// code change.
-	CharacterData = UOneBrahamGameSettings::Get().CharacterRegistry.LoadSynchronous();
-
-	if (CharacterData == nullptr)
-	{
-		// The last resort: the path the content build always writes.
-		CharacterData = LoadObject<UOneBrahamCharacterDataAsset>(
-			nullptr, TEXT("/Game/OneBraham/Characters/DA_CharacterRegistry.DA_CharacterRegistry"));
-	}
+	// The config-declared registry, then the path the content build writes.
+	CharacterData = UOneBrahamCharacterDataAsset::LoadRegistry();
 
 	if (CharacterData == nullptr && !bLoggedMissingCharacterData)
 	{
@@ -730,20 +723,28 @@ void AOneBrahamCharacter::ApplyCosmetics(const TMap<FName, FName>& InCosmetics)
 		return;
 	}
 
-	for (const TPair<FName, FName>& Pair : InCosmetics)
+	// Every slot, not every entry: a slot the new outfit leaves empty, or names an
+	// option with no mesh, is cleared. Applying only what was listed left the
+	// previous jacket on the body after it was taken off in the wardrobe.
+	for (const FOneBrahamCosmeticSlot& Slot : Registry->CosmeticSlots)
 	{
-		const FOneBrahamCosmeticSlot* Slot = Registry->FindCosmeticSlot(Pair.Key);
-		if (Slot == nullptr)
+		USkeletalMesh* CosmeticMesh = nullptr;
+
+		if (const FName* Option = InCosmetics.Find(Slot.SlotName))
 		{
-			continue;
+			if (const TSoftObjectPtr<USkeletalMesh>* MeshPtr = Slot.Options.Find(*Option))
+			{
+				CosmeticMesh = MeshPtr->LoadSynchronous();
+			}
 		}
 
-		if (const TSoftObjectPtr<USkeletalMesh>* MeshPtr = Slot->Options.Find(Pair.Value))
+		if (CosmeticMesh != nullptr)
 		{
-			if (USkeletalMesh* CosmeticMesh = MeshPtr->LoadSynchronous())
-			{
-				Registry->ApplyCosmeticToMesh(GetMesh(), Slot, CosmeticMesh);
-			}
+			Registry->ApplyCosmeticToMesh(GetMesh(), &Slot, CosmeticMesh);
+		}
+		else
+		{
+			Registry->ClearCosmeticFromMesh(GetMesh(), Slot.SlotName);
 		}
 	}
 }
@@ -1233,6 +1234,21 @@ void AOneBrahamCharacter::Landed(const FHitResult& Hit)
 
 	static constexpr float SafeFallSpeed = 1150.f;      // ~4 m fall: fine
 	static constexpr float LethalFallSpeed = 2100.f;    // ~12 m fall: fatal
+
+	// The camera feels a landing long before it hurts: from a desk-height drop
+	// (700 cm/s) a nudge, rising to the full shake at the speed that starts to
+	// do damage. Landed runs on the owning client as well as the server, and
+	// only the player whose legs these are feels it.
+	static constexpr float LandingShakeSpeed = 700.f;
+	if (IsLocallyControlled() && EffectiveFallSpeed > LandingShakeSpeed)
+	{
+		if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(GetController()))
+		{
+			PC->PlayCameraShakeLocally(UOneBrahamCameraShake::GetLandingShakeClass(),
+				FMath::GetMappedRangeValueClamped(FVector2D(LandingShakeSpeed, SafeFallSpeed),
+					FVector2D(0.25f, 1.f), EffectiveFallSpeed));
+		}
+	}
 
 	if (EffectiveFallSpeed <= SafeFallSpeed || HealthComponent == nullptr || !HealthComponent->IsAlive())
 	{

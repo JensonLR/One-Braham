@@ -73,6 +73,13 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void InitPlayerState() override;
 
+	/**
+	 * The local player is attached to this controller: on a client when it joins,
+	 * on a listen host for the host. This machine's profile is the only place a
+	 * player's choices exist, so this is where they leave for the server.
+	 */
+	virtual void ReceivedPlayer() override;
+
 	// ======================================================================
 	//  Components
 	// ======================================================================
@@ -229,6 +236,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Effects")
 	void ApplyExplosionShakeLocally(const FVector& Origin, float Magnitude);
 
+	/**
+	 * Local: one camera shake, through the player's screen-shake setting (off, or
+	 * an intensity). Every shake in the game goes through here so the
+	 * accessibility switch cannot be missed by the next one somebody adds.
+	 */
+	class UCameraShakeBase* PlayCameraShakeLocally(TSubclassOf<class UCameraShakeBase> ShakeClass, float Scale);
+
 	/** Remaining flash duration on this client (0 = not flashed). */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Effects")
 	float GetFlashRemaining() const { return FlashRemaining; }
@@ -344,6 +358,23 @@ protected:
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "One Braham|Controller|Loadout")
 	void ServerSetLoadout(FName PrimaryWeaponId, FName SidearmWeaponId,
 		const TArray<FName>& UtilityIds, FName WeaponSkinId);
+
+	/**
+	 * Client -> server: who this player is wearing. The archetype by id
+	 * ("BusinessAnalyst"), the outfit as parallel slot/option arrays (an RPC
+	 * cannot carry a TMap), and the clan tag. Every value is checked against the
+	 * character registry on the server: an unknown archetype is ignored, a
+	 * cosmetic is kept only if it is a real option of the slot it claims and is
+	 * not on the competitive ban list, and the clan tag is cut to four letters
+	 * and digits. The wardrobe and the deploy screen call it again on a change.
+	 */
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "One Braham|Controller|Loadout")
+	void ServerSetAppearance(FName ArchetypeId, const TArray<FName>& CosmeticSlots,
+		const TArray<FName>& CosmeticOptions, const FString& InClanTag);
+
+	/** Local: sends this machine's saved profile - name, loadout, appearance. */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Controller|Loadout")
+	void SendProfileToServer();
 
 	/** True while the comms wheel is open on this client. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Controller|Voice")

@@ -204,11 +204,13 @@ it is not optional.
 | Blueprint | Trigger | Amplitude | Duration | Notes |
 | --- | --- | --- | --- | --- |
 | `BP_OBCameraShake_Explosion` | any explosion within its radius | 0.55 | 0.42 s | Perlin 26 Hz, plus a 0.1 s rotational pop on the first frame |
-| `BP_OBCameraShake_Landing` | landing hard | 0.18 | 0.20 s | amplitude scaled by impact speed in the character's landing code |
-| `BP_OBCameraShake_Extraction` | while the rotor is at the pad | 0.90 | continuous | 11 Hz sine with a 0.35 s wobble every 2.2 s as the blades pass the deck edge |
+| `BP_OBCameraShake_Landing` | landing hard | 0.18 | 0.20 s | `AOneBrahamCharacter::Landed`, owning player only: scale 0.25 at 700 cm/s rising to 1.0 at 1150 cm/s, the speed fall damage starts |
+| `BP_OBCameraShake_Extraction` | while the rotor is at the pad | 0.90 | continuous | 11 Hz sine with a 0.35 s wobble every 2.2 s as the blades pass the deck edge. Started on each machine when the extraction enters HOLDING, scaled 1.0 at the pad to 0 at 30 m, stopped when it leaves HOLDING (`UOneBrahamExtractionComponent::ApplyLocalExtractionAudio`) |
 
 Parent class is `UOneBrahamCameraShake`, which is a `UCameraShakeBase` with the
 amplitude/scale parameters that `AOneBrahamCharacter` sets when it plays them.
+Every shake plays through `AOneBrahamPlayerController::PlayCameraShakeLocally`,
+which applies the player's screen-shake switch and intensity.
 The extraction shake is the reason a player physically wants to get on the
 helicopter rather than stand next to it.
 

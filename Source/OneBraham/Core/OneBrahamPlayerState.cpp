@@ -376,6 +376,12 @@ bool AOneBrahamPlayerState::StoreLoadout(FName PrimaryWeaponId, FName SidearmWea
 	return bFirstReceipt;
 }
 
+void AOneBrahamPlayerState::ApplyAppearanceLocally()
+{
+	OnRep_Archetype();
+	OnRep_Cosmetics();
+}
+
 void AOneBrahamPlayerState::OnRep_Cosmetics()
 {
 	if (AOneBrahamCharacter* Character = GetOneBrahamCharacter())

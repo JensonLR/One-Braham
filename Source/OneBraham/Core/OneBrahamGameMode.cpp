@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Core/OneBrahamGameMode.h"
+#include "Data/OneBrahamCharacterDataAsset.h"
 
 #include "OneBraham.h"
 #include "Core/OneBrahamGameInstance.h"
@@ -115,8 +116,6 @@ void AOneBrahamGameMode::InitGame(const FString& MapName, const FString& Options
 void AOneBrahamGameMode::ParseTravelOptions(const FString& Options)
 {
 	PendingModeString = UGameplayStatics::ParseOption(Options, TEXT("Mode"));
-	PendingPlayerName = UGameplayStatics::ParseOption(Options, TEXT("Name"));
-	PendingArchetype = UGameplayStatics::ParseOption(Options, TEXT("Archetype"));
 
 	if (PendingModeString.IsEmpty())
 	{
@@ -124,8 +123,9 @@ void AOneBrahamGameMode::ParseTravelOptions(const FString& Options)
 		FParse::Value(FCommandLine::Get(), TEXT("Mode="), PendingModeString);
 	}
 
-	OB_MATCH_LOG("Travel options: Mode='%s' Name='%s' Archetype='%s'",
-		*PendingModeString, *PendingPlayerName, *PendingArchetype);
+	// Only the mode is the server's to choose. A player's name and archetype are
+	// theirs, and come from their own machine.
+	OB_MATCH_LOG("Travel options: Mode='%s'", *PendingModeString);
 }
 
 void AOneBrahamGameMode::ConfigureClassesFromSettings()
@@ -1304,40 +1304,28 @@ void AOneBrahamGameMode::PostLogin(APlayerController* NewPlayer)
 		return;
 	}
 
-	// Apply the archetype + display name chosen in the lobby. On a listen server
-	// the local profile is authoritative; on dedicated the travel option is.
-	if (UOneBrahamGameInstance* GameInstance = GetGameInstance<UOneBrahamGameInstance>())
-	{
-		if (const UOneBrahamSaveSettings* Profile = GameInstance->GetProfile())
-		{
-			if (State->GetPlayerName().IsEmpty() && !Profile->PlayerName.IsEmpty())
-			{
-				State->SetPlayerName(Profile->PlayerName);
-			}
-			State->EquippedCosmetics = Profile->EquippedCosmetics;
-			State->ClanTag = Profile->ClanTag;
-		}
-	}
-
-	State->SetPlayerName(State->GetPlayerName().IsEmpty() && !PendingPlayerName.IsEmpty() ? PendingPlayerName : State->GetPlayerName());
+	// Name, archetype, outfit and clan tag are the joining player's own, and they
+	// arrive from their machine (AOneBrahamPlayerController::SendProfileToServer,
+	// validated in ServerSetAppearance). This used to copy *this* machine's
+	// profile onto every player who joined, and the map URL's Name= and
+	// Archetype= onto all of them too: on a listen host, twelve copies of the
+	// host. What is set here is only the default until their choice lands.
 	State->SessionMode = MatchSettings ? MatchSettings->Mode : EOneBrahamMatchMode::Ascent;
 
-	// Archetype: prefer the travel option, then the GameInstance profile, then a
-	// stable per-player default so two players never look identical by accident.
-	if (!PendingArchetype.IsEmpty())
-	{
-		State->ArchetypeTag = FGameplayTag::RequestGameplayTag(FName(*FString::Printf(TEXT("OB.Character.Archetype.%s"), *PendingArchetype)), false);
-	}
+	// A stable per-player default from the registry's own cast, so two players
+	// never look identical by accident before their own choice arrives. The cast
+	// used to be a second, hand-typed list of six names here.
 	if (!State->ArchetypeTag.IsValid())
 	{
-		static const TCHAR* DefaultArchetypes[] =
+		const UOneBrahamCharacterDataAsset* Registry = UOneBrahamCharacterDataAsset::LoadRegistry();
+		const int32 CastSize = Registry != nullptr ? Registry->Archetypes.Num() : 0;
+
+		if (const FOneBrahamArchetypeDefinition* Default = CastSize > 0
+			? Registry->FindArchetypeByIndex(FMath::Abs(State->GetPlayerId()) % CastSize)
+			: nullptr)
 		{
-			TEXT("BusinessAnalyst"), TEXT("Graduate"), TEXT("FinanceBroker"),
-			TEXT("ITOperations"), TEXT("FacilitiesSecurity"), TEXT("Consultant")
-		};
-		const int32 Index = FMath::Abs(State->GetPlayerId()) % UE_ARRAY_COUNT(DefaultArchetypes);
-		State->ArchetypeTag = FGameplayTag::RequestGameplayTag(
-			FName(*FString::Printf(TEXT("OB.Character.Archetype.%s"), DefaultArchetypes[Index])), false);
+			State->ArchetypeTag = Default->ArchetypeTag;
+		}
 	}
 
 	State->RemainingRevives = MatchSettings ? MatchSettings->MaxRevivesPerPlayerPerRound : 2;

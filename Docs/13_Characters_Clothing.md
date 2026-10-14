@@ -103,6 +103,31 @@ says so on screen:
 
 > *Cosmetics are cosmetic. Nothing here changes how you play.*
 
+**How an outfit reaches the match.** A player's archetype, outfit, clan tag and
+loadout live in their own saved profile, on their own machine. When the local
+player attaches to its controller (`AOneBrahamPlayerController::ReceivedPlayer`,
+on a client and on a listen host alike) the controller sends them:
+`ServerSetLoadout`, and `ServerSetAppearance` with the archetype id and the outfit
+as parallel slot/option arrays. The server keeps an archetype only if the registry
+has it, a cosmetic only if it is a real option of the slot it names and not in
+`CompetitiveBannedCosmeticIds`, and cuts the clan tag to four upper-case letters
+and digits. Until it arrives, the game mode gives the player a default from the
+registry's own cast (`FindArchetypeByIndex`, by player id). `ApplyCosmetics`
+walks every slot, so a slot the outfit leaves empty is cleared.
+
+This replaced a path that copied *the server's* profile onto every player who
+joined: on a listen host, twelve copies of the host.
+
+**What the server cannot check yet: ownership.** Unlocks are recorded in the
+local profile, so a modified client can wear a cosmetic it has not earned. It
+changes nothing about play (that is the point of section 4), but cosmetics are
+the monetisation. The fix belongs to the Steam integration, not to this table:
+each purchasable option gets a Steam Inventory item definition, the client sends
+its inventory result with `ServerSetAppearance`, and the server keeps an option
+only if the signed result contains it (`ISteamInventory::CheckResultSteamID` on
+the result handle). Earnable options stay profile-checked; nothing earnable is
+worth forging. `Docs/20` carries this as a release item.
+
 ---
 
 ## 4. Competitive integrity

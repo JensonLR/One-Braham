@@ -3,6 +3,10 @@
 #include "Extraction/OneBrahamExtractionComponent.h"
 
 #include "Audio/OneBrahamAudioManagerComponent.h"
+#include "VFX/OneBrahamCameraShake.h"
+#include "Engine/Engine.h"
+#include "Camera/PlayerCameraManager.h"
+#include "Camera/CameraShakeBase.h"
 #include "Characters/OneBrahamCharacter.h"
 #include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamPlayerController.h"
@@ -579,6 +583,37 @@ void UOneBrahamExtractionComponent::ApplyLocalExtractionAudio()
 		return;
 	}
 
+	// The rotor wash. When the helicopter arrives over the deck (HOLDING), anyone
+	// standing within 30 m of the pad feels it, more the closer they are - once
+	// per hold, on their own machine, through their screen-shake setting.
+	AOneBrahamPlayerController* LocalPC = GEngine != nullptr
+		? Cast<AOneBrahamPlayerController>(GEngine->GetFirstLocalPlayerController(World))
+		: nullptr;
+
+	if (ExtractionState != EOneBrahamExtractionState::Holding)
+	{
+		bShookForHold = false;
+
+		// The authored shake is continuous (Docs/11 section 4): it ends when the
+		// rotor leaves the pad, not when its own clock does.
+		if (UCameraShakeBase* Shake = HoldShake.Get())
+		{
+			if (LocalPC != nullptr && LocalPC->PlayerCameraManager != nullptr)
+			{
+				LocalPC->PlayerCameraManager->StopCameraShake(Shake, /*bImmediately*/ false);
+			}
+		}
+		HoldShake.Reset();
+	}
+	else if (!bShookForHold && LocalPC != nullptr && LocalPC->GetPawn() != nullptr)
+	{
+		bShookForHold = true;
+
+		const float Distance = FVector::Dist(LocalPC->GetPawn()->GetActorLocation(), HelipadLocation);
+		const float Scale = FMath::Clamp(1.f - Distance / 3000.f, 0.f, 1.f);
+		HoldShake = LocalPC->PlayCameraShakeLocally(UOneBrahamCameraShake::GetExtractionShakeClass(), Scale);
+	}
+
 	// Active means the helicopter is on its way or on the wire. COMPLETE drops the
 	// rotor (it is climbing out, and `SFX_Helicopter_Leave` covers it); FAILED and
 	// INACTIVE drop it too, because an aborted run has to sound like a lift home.
@@ -592,8 +627,7 @@ void UOneBrahamExtractionComponent::ApplyLocalExtractionAudio()
 		return;
 	}
 
-	AOneBrahamPlayerController* PC = World->GetFirstPlayerController<AOneBrahamPlayerController>();
-	UOneBrahamAudioManagerComponent* Audio = PC ? PC->GetAudioManager() : nullptr;
+	UOneBrahamAudioManagerComponent* Audio = LocalPC ? LocalPC->GetAudioManager() : nullptr;
 	if (Audio == nullptr)
 	{
 		return;
