@@ -1382,6 +1382,11 @@ void AOneBrahamCharacter::ServerSetCrouch_Implementation(bool bCrouch)
 
 void AOneBrahamCharacter::ServerSetLean_Implementation(float Lean)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerSetLean")))
+	{
+		return;
+	}
+
 	if (!HasAuthority())
 	{
 		return;
@@ -1446,6 +1451,11 @@ void AOneBrahamCharacter::ServerRequestSlide_Implementation()
 
 void AOneBrahamCharacter::ServerReportFloor_Implementation(int32 FloorIndex)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerReportFloor")))
+	{
+		return;
+	}
+
 	if (!HasAuthority())
 	{
 		return;
@@ -1480,9 +1490,18 @@ void AOneBrahamCharacter::ServerReportSpeed_Implementation(float ClientSpeed)
 	// silence check on the server's tick watches: a pawn whose owner stopped
 	// sending these is flagged on the server's own clock rather than on anything
 	// the client says.
+	//
+	// RPC budget: own limit (one report per MinSpeedReportGapSeconds). The
+	// reports are a heartbeat at four a second; anything faster is dropped
+	// before it costs the shared budget.
 	if (const UWorld* World = GetWorld())
 	{
-		LastClientSpeedReportTime = World->GetTimeSeconds();
+		const float ReportTime = World->GetTimeSeconds();
+		if (LastClientSpeedReportTime >= 0.f && ReportTime - LastClientSpeedReportTime < MinSpeedReportGapSeconds)
+		{
+			return;
+		}
+		LastClientSpeedReportTime = ReportTime;
 	}
 
 	if (OBCharacterMovement == nullptr)

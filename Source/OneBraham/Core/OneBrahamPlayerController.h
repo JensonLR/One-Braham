@@ -328,6 +328,14 @@ protected:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Security")
 	bool CheckRPCBudget(const TCHAR* RPCLabel);
 
+	/**
+	 * The budget check from anywhere a Server RPC lands: a controller, a pawn,
+	 * a player state or a component on any of them. Resolves the owning player's
+	 * controller and spends from its budget; true (allowed) when there is no
+	 * player behind the call - a bot, or the server calling its own handler.
+	 */
+	static bool CheckRPCBudgetFor(const UObject* Context, const TCHAR* RPCLabel);
+
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Security")
 	void ReportViolation(const FString& Reason, float Severity = 1.f);
 

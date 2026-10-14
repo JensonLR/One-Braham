@@ -451,6 +451,30 @@ void UOneBrahamProximityVoiceComponent::ServerPushVoiceFrame_Implementation(cons
 		return;
 	}
 
+	// RPC budget: own limit (MaxVoiceFramesPerSecond per speaker). Voice runs at
+	// fifty frames a second, far above the shared per-controller budget, so it
+	// has its own: a client that sends faster is dropped, and every listener is
+	// spared the flood.
+	{
+		const double FrameTime = World->GetTimeSeconds();
+		if (FrameTime - VoiceWindowStart >= 1.0)
+		{
+			VoiceWindowStart = FrameTime;
+			VoiceFramesInWindow = 0;
+		}
+		if (++VoiceFramesInWindow > MaxVoiceFramesPerSecond)
+		{
+			if (VoiceFramesInWindow == MaxVoiceFramesPerSecond + 1)
+			{
+				if (AOneBrahamPlayerController* Flooder = Cast<AOneBrahamPlayerController>(SpeakerState->GetOwningController()))
+				{
+					Flooder->ReportViolation(TEXT("Voice frame flood"), 1.f);
+				}
+			}
+			return;
+		}
+	}
+
 	// 2. Size sanity, before anything touches the buffer.
 	if (Frame.Num() == 0 || Frame.Num() > MAX_VOICE_FRAME_BYTES)
 	{

@@ -269,6 +269,11 @@ void UOneBrahamInteractComponent::ServerBeginInteraction_Implementation(AActor* 
 
 void UOneBrahamInteractComponent::ServerEndInteraction_Implementation(bool bCompleted)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerEndInteraction")))
+	{
+		return;
+	}
+
 	AOneBrahamCharacter* Character = CachedCharacter.Get();
 	if (Character == nullptr || !Character->HasAuthority())
 	{

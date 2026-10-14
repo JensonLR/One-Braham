@@ -2,6 +2,7 @@
 
 #include "Core/OneBrahamPlayerState.h"
 
+#include "Core/OneBrahamPlayerController.h"
 #include "OneBraham.h"
 #include "Core/OneBrahamGameplayTags.h"
 #include "Core/OneBrahamGameState.h"
@@ -215,6 +216,11 @@ FOneBrahamPlayerSummary AOneBrahamPlayerState::MakeSummary() const
 // ==========================================================================
 void AOneBrahamPlayerState::ServerSetVoiceChannel_Implementation(EOneBrahamVoiceChannel NewChannel)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerSetVoiceChannel")))
+	{
+		return;
+	}
+
 	if (!HasAuthority())
 	{
 		return;
@@ -234,6 +240,11 @@ void AOneBrahamPlayerState::ServerSetVoiceChannel_Implementation(EOneBrahamVoice
 
 void AOneBrahamPlayerState::ServerSetSelfMuted_Implementation(bool bMuted)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerSetSelfMuted")))
+	{
+		return;
+	}
+
 	if (!HasAuthority())
 	{
 		return;
@@ -249,6 +260,11 @@ void AOneBrahamPlayerState::ServerSetSelfMuted_Implementation(bool bMuted)
 
 void AOneBrahamPlayerState::ServerSetPlayerMuted_Implementation(int32 TargetPlayerId, bool bMuted)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerSetPlayerMuted")))
+	{
+		return;
+	}
+
 	if (!HasAuthority())
 	{
 		return;

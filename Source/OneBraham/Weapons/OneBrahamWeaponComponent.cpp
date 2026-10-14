@@ -800,6 +800,11 @@ bool UOneBrahamWeaponComponent::HasWeapon(FName WeaponId) const
 
 void UOneBrahamWeaponComponent::ServerGiveWeaponDebug_Implementation(FName WeaponId)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerGiveWeaponDebug")))
+	{
+		return;
+	}
+
 	ServerGiveWeapon(WeaponId, true);
 }
 
@@ -881,6 +886,9 @@ void UOneBrahamWeaponComponent::SetTriggerHeld(bool bHeld)
 // ==========================================================================
 void UOneBrahamWeaponComponent::ServerRequestFire_Implementation(FVector_NetQuantize AimOrigin, FVector_NetQuantizeNormal AimDirection, int32 InClientShotIndex)
 {
+	// RPC budget: own limit (the weapon's rate of fire, validation 2 below).
+	// A full-auto SMG is fifteen shots a second, which would spend the shared
+	// budget on its own; a shot faster than the weapon allows is refused there.
 	AOneBrahamCharacter* Character = GetCharacter();
 	if (Character == nullptr || !GetOwner()->HasAuthority() || CurrentWeapon == nullptr)
 	{
@@ -1310,6 +1318,11 @@ void UOneBrahamWeaponComponent::RequestReload()
 
 void UOneBrahamWeaponComponent::ServerInterruptReload_Implementation()
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerInterruptReload")))
+	{
+		return;
+	}
+
 	if (!bIsReloading || CurrentWeapon == nullptr || CurrentWeapon->Definition == nullptr)
 	{
 		return;
@@ -1860,48 +1873,93 @@ bool UOneBrahamWeaponComponent::IsSuppressorAttachment(FName AttachmentId) const
 // ==========================================================================
 void UOneBrahamWeaponComponent::ServerRequestReload_Implementation()
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestReload")))
+	{
+		return;
+	}
+
 	RequestReload();
 }
 
 void UOneBrahamWeaponComponent::ServerRequestEquipSlot_Implementation(EOneBrahamWeaponSlot Slot)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestEquipSlot")))
+	{
+		return;
+	}
+
 	EquipSlot(Slot);
 }
 
 void UOneBrahamWeaponComponent::ServerRequestCycleWeapon_Implementation(int32 Direction)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestCycleWeapon")))
+	{
+		return;
+	}
+
 	CycleWeapon(Direction);
 }
 
 void UOneBrahamWeaponComponent::ServerRequestFireMode_Implementation()
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestFireMode")))
+	{
+		return;
+	}
+
 	CycleFireMode();
 }
 
 void UOneBrahamWeaponComponent::ServerRequestMelee_Implementation()
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestMelee")))
+	{
+		return;
+	}
+
 	MeleeAttack();
 }
 
 void UOneBrahamWeaponComponent::ServerRequestThrowUtility_Implementation(int32 UtilityIndex, FVector_NetQuantize AimOrigin, FVector_NetQuantizeNormal AimDirection)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestThrowUtility")))
+	{
+		return;
+	}
+
 	SelectUtilityIndex(UtilityIndex);
 	ThrowUtility();
 }
 
 void UOneBrahamWeaponComponent::ServerRequestUseUtility_Implementation(int32 UtilityIndex, FVector_NetQuantize TargetLocation)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestUseUtility")))
+	{
+		return;
+	}
+
 	SelectUtilityIndex(UtilityIndex);
 	UseUtilityItem();
 }
 
 void UOneBrahamWeaponComponent::ServerRequestMedkit_Implementation()
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestMedkit")))
+	{
+		return;
+	}
+
 	UseMedkit();
 }
 
 void UOneBrahamWeaponComponent::ServerRequestToggleAttachment_Implementation(bool bFlashlight, bool bEnabled)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestToggleAttachment")))
+	{
+		return;
+	}
+
 	if (CurrentWeapon == nullptr)
 	{
 		return;

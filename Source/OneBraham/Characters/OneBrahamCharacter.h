@@ -468,4 +468,7 @@ private:
 	 * stale.
 	 */
 	float LastClientSpeedReportTime = -1.f;
+
+	/** Speed reports closer together than this are dropped (they are sent every 0.25 s). */
+	static constexpr float MinSpeedReportGapSeconds = 0.1f;
 };

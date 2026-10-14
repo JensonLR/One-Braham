@@ -571,6 +571,10 @@ def data_members(body):
 INTEGER_FLOAT_SUFFIX = re.compile(r'(?<![\w.])([0-9]+f)\b')
 
 
+#: A UFUNCTION declaration and the function it declares.
+SERVER_RPC = re.compile(r'UFUNCTION\(([^)]*)\)\s*(?:virtual\s+)?void\s+(\w+)\s*\(')
+
+
 def run_hygiene():
     """(checks, problems) for the rules that are not about linking.
 
@@ -616,6 +620,44 @@ def run_hygiene():
                 rel, line,
                 u"'{0}' is not a C++ literal: a float suffix needs a decimal point - write '{1}.f'"
                 .format(match.group(1), match.group(1)[:-1])))
+
+    # --- every Server RPC is budgeted ------------------------------------
+    # A Server RPC is a door the client opens as often as it likes. Each one
+    # either spends from the per-controller budget (CheckRPCBudget /
+    # CheckRPCBudgetFor) or says in a comment, "RPC budget: own limit (...)",
+    # what bounds it instead - voice frames and fire run far above the shared
+    # budget and are limited by their own rules.
+    all_text = {}
+    for rel, path in files:
+        all_text[rel] = io.open(path, encoding="utf-8", errors="ignore").read()
+    implementations = u"\n".join(text for rel, text in all_text.items() if rel.endswith(".cpp"))
+    for rel, text in sorted(all_text.items()):
+        if not rel.endswith(".h"):
+            continue
+        for match in SERVER_RPC.finditer(text):
+            if not re.search(r'\bServer\b', match.group(1)):
+                continue
+            name = match.group(2)
+            checks += 1
+            impl = re.search(r'::' + re.escape(name) + r'_Implementation\s*\([^)]*\)[^{;]*\{', implementations)
+            if impl is None:
+                continue
+            depth = 1
+            index = impl.end()
+            while depth and index < len(implementations):
+                if implementations[index] == "{":
+                    depth += 1
+                elif implementations[index] == "}":
+                    depth -= 1
+                index += 1
+            body = implementations[impl.end():index]
+            if "CheckRPCBudget" not in body and "RPC budget: own limit" not in body:
+                line = text[:match.start()].count("\n") + 1
+                problems.append((
+                    rel, line,
+                    u"{0} is a Server RPC with no budget: call CheckRPCBudgetFor at the top of "
+                    u"{0}_Implementation, or say what limits it with an "
+                    u"'RPC budget: own limit (...)' comment".format(name)))
 
     # --- a member that shadows an engine property -------------------------
     for class_name in sorted(classes):
@@ -879,7 +921,7 @@ def main():
     if not hygiene and not missing:
         C.log(u"  hygiene: scoped enums, shadowed engine properties, engine-private "
               u"members, shadowed members, per-controller audio, soft-pointer IsValid, "
-              u"duplicate definitions, integer float literals. OK")
+              u"duplicate definitions, integer float literals, unbudgeted Server RPCs. OK")
         return 0
 
     for rel, line, message in hygiene:

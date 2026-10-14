@@ -258,6 +258,11 @@ void AOneBrahamPlayerController::SendProfileToServer()
 void AOneBrahamPlayerController::ServerSetAppearance_Implementation(FName ArchetypeId,
 	const TArray<FName>& CosmeticSlots, const TArray<FName>& CosmeticOptions, const FString& InClanTag)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerSetAppearance")))
+	{
+		return;
+	}
+
 	AOneBrahamPlayerState* State = GetPlayerState<AOneBrahamPlayerState>();
 	const UOneBrahamCharacterDataAsset* Registry = UOneBrahamCharacterDataAsset::LoadRegistry();
 
@@ -1426,6 +1431,11 @@ void AOneBrahamPlayerController::RequestQuickLine(FName LineId)
 void AOneBrahamPlayerController::ServerSetLoadout_Implementation(FName PrimaryWeaponId, FName SidearmWeaponId,
 	const TArray<FName>& UtilityIds, FName WeaponSkinId)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerSetLoadout")))
+	{
+		return;
+	}
+
 	AOneBrahamPlayerState* State = GetPlayerState<AOneBrahamPlayerState>();
 	if (State == nullptr)
 	{
@@ -1456,6 +1466,11 @@ void AOneBrahamPlayerController::ServerSetLoadout_Implementation(FName PrimaryWe
 
 void AOneBrahamPlayerController::ServerRequestQuickLine_Implementation(FName LineId)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerRequestQuickLine")))
+	{
+		return;
+	}
+
 	if (LineId.IsNone())
 	{
 		return;
@@ -2071,6 +2086,11 @@ void AOneBrahamPlayerController::ToggleFreeCamera()
 
 void AOneBrahamPlayerController::ServerBeginSpectating_Implementation(int32 PreferredTargetPlayerId)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerBeginSpectating")))
+	{
+		return;
+	}
+
 	AOneBrahamGameState* GS = GetWorld() ? GetWorld()->GetGameState<AOneBrahamGameState>() : nullptr;
 	if (GS == nullptr)
 	{
@@ -2156,6 +2176,11 @@ void AOneBrahamPlayerController::PingLookDirection()
 
 void AOneBrahamPlayerController::ServerPingLocation_Implementation(FVector_NetQuantize Location)
 {
+	if (!AOneBrahamPlayerController::CheckRPCBudgetFor(this, TEXT("ServerPingLocation")))
+	{
+		return;
+	}
+
 	// Sanity: a ping must be within the tower envelope (roughly 120 m around the
 	// building origin, 0-100 m up). Anything else is a forged ping and is dropped.
 	const FVector Ping = Location;
@@ -2250,6 +2275,35 @@ void AOneBrahamPlayerController::MarkClipMoment(const FString& Label)
 // ==========================================================================
 //  Anti-cheat: RPC budget
 // ==========================================================================
+bool AOneBrahamPlayerController::CheckRPCBudgetFor(const UObject* Context, const TCHAR* RPCLabel)
+{
+	const AActor* Actor = Cast<AActor>(Context);
+	if (Actor == nullptr)
+	{
+		if (const UActorComponent* Component = Cast<UActorComponent>(Context))
+		{
+			Actor = Component->GetOwner();
+		}
+	}
+
+	AController* Controller = nullptr;
+	if (const APawn* Pawn = Cast<APawn>(Actor))
+	{
+		Controller = Pawn->GetController();
+	}
+	else if (const APlayerState* State = Cast<APlayerState>(Actor))
+	{
+		Controller = State->GetOwningController();
+	}
+	else
+	{
+		Controller = Cast<AController>(const_cast<AActor*>(Actor));
+	}
+
+	AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(Controller);
+	return PC == nullptr || PC->CheckRPCBudget(RPCLabel);
+}
+
 bool AOneBrahamPlayerController::CheckRPCBudget(const TCHAR* RPCLabel)
 {
 	const UWorld* World = GetWorld();

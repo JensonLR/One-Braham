@@ -75,6 +75,23 @@ Anti-cheat basics (thresholds in `Config/DefaultGame.ini` `[OneBrahamAntiCheat]`
 * Reported and kicked, not silently tolerated. The reason is written to the
   player's session so a support ticket can be answered.
 
+### The RPC budget
+
+Every Server RPC is a door the client can open as often as it likes, so every
+one is bounded. Most spend from a per-controller budget
+(`RpcBudgetPerSecond`, 90 by default, through `CheckRPCBudgetFor` at the top of
+the handler); a client over it has the call dropped and a violation recorded.
+Three run far above that rate and carry their own limit instead, named in a
+comment in the handler:
+
+| RPC | Its own limit |
+| --- | --- |
+| `ServerPushVoiceFrame` | 64 frames a second per speaker (20 ms frames are 50). A flood is dropped before any listener hears it |
+| `ServerRequestFire` | the weapon's rate of fire, already validated per shot |
+| `ServerReportSpeed` | one report per 0.1 s (they are sent every 0.25 s) |
+
+`check_cpp_symbols.py` fails the build on a Server RPC that does neither.
+
 ### Hit rewind
 
 A shot is scored against the world the shooter was looking at.
