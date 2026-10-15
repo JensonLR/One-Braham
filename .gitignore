@@ -71,3 +71,4 @@ SourceArt/
 
 # Epic's UE5 mannequins: copied from the engine by fetch_open_assets.py.
 Content/Characters/Mannequins/
+Content/Variant_Shooter/

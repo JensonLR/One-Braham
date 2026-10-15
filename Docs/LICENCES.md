@@ -160,8 +160,10 @@ Poly Haven's [rubber_tiles](https://polyhaven.com/a/rubber_tiles) (CC0) is the c
 
 ## Epic Games (UE5 mannequins)
 
-Manny and Quinn, their materials, the locomotion animation blueprint and the
-rifle, pistol, hit-react and death animations - Epic's own template content
+Manny and Quinn, their materials, the locomotion animation blueprint, the
+rifle, pistol, hit-react and death animations, and the first-person
+template's third-person rifle and pistol animation blueprints (copied to
+`Content/Variant_Shooter/Anims`) - Epic's own template content
 from the engine install, copied to `Content/Characters/Mannequins` by
 `fetch_open_assets.py` (not committed). Free for use in Unreal Engine projects
 under the Unreal Engine EULA. They stand in for the cast's bodies until those

@@ -293,8 +293,9 @@ was told to use is a conversation, not a commit.
 ## Stand-in bodies
 
 Until the cast's own bodies are authored, every archetype uses one of Epic's
-UE5 mannequins - Manny and Quinn alternate down the cast - with the mannequin
-locomotion animation blueprint (`ABP_Unarmed`). `fetch_open_assets.py` copies
+UE5 mannequins - Manny and Quinn alternate down the cast - with the engine
+template's third-person rifle animation blueprint (`ABP_TP_Rifle`: rifle aim
+offset, ADS idle, locomotion and jumps; `ABP_TP_Pistol` is copied alongside). `fetch_open_assets.py` copies
 them from the engine install into `/Game/Characters/Mannequins`;
 `build_characters.py` writes the paths into the cast payload and
 `apply_cast_payload.py` sets them on the registry. The hit-zone mapping is

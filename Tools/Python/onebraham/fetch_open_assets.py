@@ -230,6 +230,19 @@ def copy_engine_mannequins():
         print("copied the UE5 mannequins to {0}".format(target))
     else:
         print("ok  UE5 mannequins already in the project")
+
+    # The rifle and pistol third-person animation blueprints from the engine's
+    # first-person template. Both depend only on the engine and the mannequin
+    # animations above (checked: no template classes), so they work as-is.
+    anims_source = os.path.join(root, "Templates", "TP_FirstPerson", "Content", "Variant_Shooter", "Anims")
+    anims_target = os.path.join(ROOT, "Content", "Variant_Shooter", "Anims")
+    if os.path.isdir(anims_source):
+        if not os.path.isdir(anims_target):
+            os.makedirs(anims_target)
+        for name in ("ABP_TP_Rifle.uasset", "ABP_TP_Pistol.uasset"):
+            if not os.path.exists(os.path.join(anims_target, name)):
+                shutil.copy2(os.path.join(anims_source, name), os.path.join(anims_target, name))
+        print("ok  rifle and pistol animation blueprints")
     return True
 
 

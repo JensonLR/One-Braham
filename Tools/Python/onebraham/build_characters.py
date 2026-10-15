@@ -39,7 +39,9 @@ MANNEQUIN_BODIES = (
     "/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple.SKM_Manny_Simple",
     "/Game/Characters/Mannequins/Meshes/SKM_Quinn_Simple.SKM_Quinn_Simple",
 )
-MANNEQUIN_ANIM_BLUEPRINT = "/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed"
+# The rifle pose: everyone in ASCENT is carrying something. The pistol variant
+# (/Game/Variant_Shooter/Anims/ABP_TP_Pistol) is copied alongside.
+MANNEQUIN_ANIM_BLUEPRINT = "/Game/Variant_Shooter/Anims/ABP_TP_Rifle"
 
 # ---------------------------------------------------------------------------
 #  The cast
