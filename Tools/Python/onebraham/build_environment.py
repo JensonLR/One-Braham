@@ -1257,7 +1257,8 @@ def build_lift_lobby(cx, cy, z, materials, prefix):
         if white is not None:
             _box((cx + (hx - 14.0) * side, cy + (y0 + y1) / 2.0, z + 298.0), (3.0, y1 - y0 - 20.0, 2.0), white,
                  "{0}_LiftHall_Cove{1}".format(prefix, tag))
-    _box((cx, cy + (y0 + y1) / 2.0, z + 305.0), (2.0 * hx - 30.0, y1 - y0, 6.0), cream, prefix + "_LiftHall_Ceiling")
+    _box((cx, cy + (y0 + y1) / 2.0, z + 305.0), (2.0 * hx - 30.0, y1 - y0, 6.0),
+         _fitout("CeilingWhite", cream), prefix + "_LiftHall_Ceiling")
     for i in range(4):
         y = y0 + (i + 0.5) * (y1 - y0) / 4.0
         lamp = _spawn(unreal.PointLight, unreal.Vector(cx, cy + y, z + 290.0))
@@ -1389,6 +1390,49 @@ def _cubby(cx, cy, z, x, y, prefix, label, along_x=True):
         off = -40.0 + k * 80.0
         pos = (cx + x + off, cy + y, z + h + 18.0) if along_x else (cx + x, cy + y + off, z + h + 18.0)
         _box(pos, (36.0, 30.0, 36.0), green, "{0}_Plant{1}".format(label, k), mesh_path=SPHERE_MESH)
+
+
+GLAZED_ROOMS = ("Meeting_Room", "Meeting_Pod_1", "Meeting_Pod_2", "Boardroom", "Corner_Office_West",
+                "Corner_Office_East", "Exec_Suite", "Management_Suite")
+
+
+def _glazed_frame(cx, cy, z, x0, x1, y0, y1, height, label):
+    """Black head rail, base rail and mullions every 120 cm round a glass room."""
+    black = _fitout("BlackCladding")
+    for side, (ax, ay, bx, by) in enumerate(((x0, y0, x1, y0), (x0, y1, x1, y1), (x0, y0, x0, y1), (x1, y0, x1, y1))):
+        length = math.hypot(bx - ax, by - ay)
+        along_x = abs(bx - ax) > abs(by - ay)
+        for rail_z, rail_h in ((height - 3.0, 6.0), (3.0, 6.0)):
+            size = (length + 6.0, 6.0, rail_h) if along_x else (6.0, length + 6.0, rail_h)
+            _box((cx + (ax + bx) / 2.0, cy + (ay + by) / 2.0, z + rail_z), size, black,
+                 "{0}_Frame{1}_{2}".format(label, side, int(rail_z)))
+        count = max(1, int(length // 120.0))
+        for i in range(1, count):
+            t = i / float(count)
+            px, py = ax + (bx - ax) * t, ay + (by - ay) * t
+            _box((cx + px, cy + py, z + height / 2.0), (5.0, 5.0, height), black,
+                 "{0}_Mullion{1}_{2}".format(label, side, i))
+
+
+def _meeting_table(cx, cy, z, rx, ry, rsx, rsy, materials, label):
+    """A long pale-oak table on black legs, chairs down both sides."""
+    timber = _fitout("TimberLight", materials.get("Wood"))
+    black = _fitout("BlackCladding")
+    along_x = rsx >= rsy
+    length = (rsx if along_x else rsy) * 0.6
+    width = min(110.0, (rsy if along_x else rsx) * 0.4)
+    size = (length, width, 4.0) if along_x else (width, length, 4.0)
+    _box((cx + rx, cy + ry, z + 73.0), size, timber, label + "_Table")
+    for e in (-1.0, 1.0):
+        leg = (cx + rx + (e * length * 0.4 if along_x else 0.0), cy + ry + (0.0 if along_x else e * length * 0.4), z + 36.0)
+        _box(leg, (6.0, width * 0.8, 70.0) if along_x else (width * 0.8, 6.0, 70.0), black, "{0}_TableLeg{1}".format(label, int(e)))
+    seats = max(2, int(length // 90.0))
+    for i in range(seats):
+        t = -length / 2.0 + (i + 0.5) * length / seats
+        for side in (-1.0, 1.0):
+            off = side * (width / 2.0 + 35.0)
+            x, y = (rx + t, ry + off) if along_x else (rx + off, ry + t)
+            _task_chair(cx, cy, z, x, y, side if along_x else 0.0, materials, "{0}_Chair{1}{2}".format(label, i, int(side)))
 
 
 def _fig_tree(cx, cy, z, x, y, label, height=300.0):
@@ -2059,7 +2103,11 @@ def build_floor_shell(report, floor_index, materials):
 
         # Four walls with one doorway, on the side that faces the core: every
         # room opens onto the floor's loop, never onto the curtain wall.
-        wall_h = C.CEILING_HEIGHT_CM if "Server" in room_name or "Power" in room_name else 250.0
+        # Meeting rooms, the boardroom and the offices are glass boxes in black
+        # frames, as on the real floors: you can see who is in them.
+        glazed = room_name in GLAZED_ROOMS
+        wall_mat = (materials.get("Glass") or plaster) if glazed else plaster
+        wall_h = C.CEILING_HEIGHT_CM if "Server" in room_name or "Power" in room_name else (270.0 if glazed else 250.0)
         label = prefix + "_" + room_name
         x0, x1 = rx - rsx / 2.0, rx + rsx / 2.0
         y0, y1 = ry - rsy / 2.0, ry + rsy / 2.0
@@ -2068,17 +2116,20 @@ def build_floor_shell(report, floor_index, materials):
         if faces_core_in_x:
             door_x = x1 if rx < 0 else x0
             far_x = x0 if rx < 0 else x1
-            _wall(origin_x, origin_y, z, far_x, y0, far_x, y1, plaster, label + "_Back", wall_h, 15.0)
-            _wall_with_door(origin_x, origin_y, z, door_x, y0, door_x, y1, ry, door, plaster, label + "_Door", wall_h)
-            _wall(origin_x, origin_y, z, x0, y0, x1, y0, plaster, label + "_S", wall_h, 15.0)
-            _wall(origin_x, origin_y, z, x0, y1, x1, y1, plaster, label + "_N", wall_h, 15.0)
+            _wall(origin_x, origin_y, z, far_x, y0, far_x, y1, wall_mat, label + "_Back", wall_h, 15.0)
+            _wall_with_door(origin_x, origin_y, z, door_x, y0, door_x, y1, ry, door, wall_mat, label + "_Door", wall_h)
+            _wall(origin_x, origin_y, z, x0, y0, x1, y0, wall_mat, label + "_S", wall_h, 15.0)
+            _wall(origin_x, origin_y, z, x0, y1, x1, y1, wall_mat, label + "_N", wall_h, 15.0)
         else:
             door_y = y1 if ry < 0 else y0
             far_y = y0 if ry < 0 else y1
-            _wall(origin_x, origin_y, z, x0, far_y, x1, far_y, plaster, label + "_Back", wall_h, 15.0)
-            _wall_with_door(origin_x, origin_y, z, x0, door_y, x1, door_y, rx, door, plaster, label + "_Door", wall_h)
-            _wall(origin_x, origin_y, z, x0, y0, x0, y1, plaster, label + "_W", wall_h, 15.0)
-            _wall(origin_x, origin_y, z, x1, y0, x1, y1, plaster, label + "_E", wall_h, 15.0)
+            _wall(origin_x, origin_y, z, x0, far_y, x1, far_y, wall_mat, label + "_Back", wall_h, 15.0)
+            _wall_with_door(origin_x, origin_y, z, x0, door_y, x1, door_y, rx, door, wall_mat, label + "_Door", wall_h)
+            _wall(origin_x, origin_y, z, x0, y0, x0, y1, wall_mat, label + "_W", wall_h, 15.0)
+            _wall(origin_x, origin_y, z, x1, y0, x1, y1, wall_mat, label + "_E", wall_h, 15.0)
+        if glazed:
+            _glazed_frame(origin_x, origin_y, z, x0, x1, y0, y1, wall_h, prefix + "_" + room_name)
+            _meeting_table(origin_x, origin_y, z, rx, ry, rsx, rsy, materials, prefix + "_" + room_name)
 
     # --- Fit-out: cover that comes from what the room is for ------------------
     for room_name, rx, ry, rsx, rsy in rooms:

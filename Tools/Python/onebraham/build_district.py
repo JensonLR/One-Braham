@@ -96,6 +96,8 @@ SURFACES = {
     "FeltWhite":   ((0.80, 0.80, 0.80), 0.95, {"EmissiveColour": (1.0, 0.97, 0.92), "EmissiveStrength": 0.6}),    # acoustic discs, edge-lit
     "Porcelain":   ((0.66, 0.66, 0.64), 0.95, {}),    # lift lobby and floor-1 tiles: matt
     "Herringbone": ((0.62, 0.50, 0.36), 0.50, {}),    # reception lounge floor: pale oak
+    # The lift lobby's dropped ceiling: matt white with the coves' glow on it.
+    "CeilingWhite": ((0.85, 0.84, 0.80), 0.9, {"EmissiveColour": (1.0, 0.95, 0.86), "EmissiveStrength": 14.0}),
 }
 
 # Traffic stands on the main roads only; side streets stay clear to walk.

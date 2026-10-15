@@ -78,8 +78,9 @@ Replace flat colours with physically based textures, and boxes with props.
       linear LEDs, the cream-panelled lift lobby on pale porcelain, the
       reception lounge (oak herringbone, curved sofa, figs in black pots),
       server racks with LEDs and cable trays, WC fittings, wayfinding signs
-      and terrace picnic benches. *Next:* the lift lobby's lit ceiling,
-      kitchen appliances, meeting-room glazing.
+      and terrace picnic benches. Meeting rooms, the boardroom and
+      offices as glass boxes in black frames with oak tables; the lift lobby's
+      lit ceiling. *Next:* kitchen appliances, canteen servery detail.
 - [ ] Decals: wear, floor signage, wet-floor, blood (already authored as
       materials; needs textures).
 - [ ] District facades: real window textures per family, roofscape plant,
