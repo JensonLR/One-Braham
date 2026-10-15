@@ -138,6 +138,9 @@ protected:
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_MicDevice = nullptr;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_MicActivity = nullptr;
 	UPROPERTY(Transient) TObjectPtr<UImage> MicLamp = nullptr;
+	UPROPERTY(Transient) TObjectPtr<class USizeBox> MicMeterFill = nullptr;
+	UPROPERTY(Transient) TObjectPtr<class USpacer> MicGateOffset = nullptr;
+	UPROPERTY(Transient) TObjectPtr<UImage> MicMeterBar = nullptr;
 
 	int32 ActiveTab = 0;
 	int32 VoiceTabIndex = INDEX_NONE;

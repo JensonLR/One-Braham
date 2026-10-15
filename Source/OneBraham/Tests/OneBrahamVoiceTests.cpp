@@ -298,6 +298,16 @@ bool FOneBrahamVoiceActivityDetectorTest::RunTest(const FString& Parameters)
 {
 	constexpr float Frame = 0.02f;
 
+	// The Settings meter reads in decibels: silence at the left, full scale at
+	// the right, -20 dB two-thirds along, and never past either end.
+	TestNearlyEqual(TEXT("the meter is empty for silence"), FOneBrahamVoiceActivityDetector::MeterFraction(0.f), 0.f, 0.001f);
+	TestNearlyEqual(TEXT("and full at full scale"), FOneBrahamVoiceActivityDetector::MeterFraction(1.f), 1.f, 0.001f);
+	TestNearlyEqual(TEXT("-20 dB sits two-thirds along"), FOneBrahamVoiceActivityDetector::MeterFraction(0.1f), 2.f / 3.f, 0.001f);
+	TestNearlyEqual(TEXT("below -60 dB is the bottom"), FOneBrahamVoiceActivityDetector::MeterFraction(0.0001f), 0.f, 0.001f);
+	TestTrue(TEXT("the default gate sits in the speech range of the meter"),
+		FOneBrahamVoiceActivityDetector::MeterFraction(FOneBrahamVoiceActivityDetector().OpenThreshold) > 0.2f
+		&& FOneBrahamVoiceActivityDetector::MeterFraction(FOneBrahamVoiceActivityDetector().OpenThreshold) < 0.8f);
+
 	// RMS is a fraction of full scale: silence is zero, a full-scale square wave
 	// is one, and a null buffer is silence rather than a crash.
 	{

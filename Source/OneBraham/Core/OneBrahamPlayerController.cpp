@@ -1367,6 +1367,7 @@ void AOneBrahamPlayerController::ClientShowDeathScreen_Implementation(bool bShow
 			}
 		}
 		DeathCamCharacter = nullptr;
+		PendingDeathRecap.Reset();
 
 		if (HUDComponent != nullptr)
 		{
@@ -1383,7 +1384,7 @@ void AOneBrahamPlayerController::ClientShowDeathScreen_Implementation(bool bShow
 
 	if (bDeathCamRunning && World != nullptr && DeathScreenDelaySeconds > 0.f)
 	{
-		PendingDeathCauseText = CauseText;
+		PendingDeathCauseText = ComposeDeathText(CauseText);
 		World->GetTimerManager().SetTimer(DeathScreenDelayTimer, this,
 			&AOneBrahamPlayerController::ShowPendingDeathScreen, DeathScreenDelaySeconds, false);
 		return;
@@ -1391,8 +1392,22 @@ void AOneBrahamPlayerController::ClientShowDeathScreen_Implementation(bool bShow
 
 	if (HUDComponent != nullptr)
 	{
-		HUDComponent->SetDeathScreenVisible(true, CauseText);
+		HUDComponent->SetDeathScreenVisible(true, ComposeDeathText(CauseText));
 	}
+}
+
+void AOneBrahamPlayerController::ClientSetDeathRecap_Implementation(const FString& RecapLines)
+{
+	PendingDeathRecap = RecapLines;
+}
+
+FText AOneBrahamPlayerController::ComposeDeathText(const FText& CauseText) const
+{
+	if (PendingDeathRecap.IsEmpty())
+	{
+		return CauseText;
+	}
+	return FText::FromString(CauseText.ToString() + TEXT("\n\n") + PendingDeathRecap);
 }
 
 void AOneBrahamPlayerController::ShowPendingDeathScreen()

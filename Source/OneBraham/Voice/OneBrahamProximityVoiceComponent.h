@@ -95,6 +95,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "One Braham|Voice")
 	bool IsLocalTransmitting() const;
 
+	/** The microphone's input level, 0..1 on a dBFS meter scale, with a short
+	 *  peak hold so the Settings meter reads like a real one. */
+	float GetInputMeter() const { return InputMeter; }
+
+	/** Where the voice-activation gate opens, on the same meter scale. */
+	float GetGateMeter() const { return FOneBrahamVoiceActivityDetector::MeterFraction(Gate.GetEffectiveOpenThreshold()); }
+
 	/** False when the microphone cannot be used: no device, the Voice module is
 	 *  off, or the OS refused permission. The HUD shows "mic unavailable". */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Voice")
@@ -270,6 +277,9 @@ protected:
 	/** Voice activation / open-mic gate. */
 	FOneBrahamVoiceActivityDetector Gate;
 	bool bGateWasOpen = false;
+
+	/** Meter level with peak hold and a 1.5 s/full-scale fall. */
+	float InputMeter = 0.f;
 
 	/** The frame before the gate opened, sent first so the opening consonant
 	 *  is not clipped. */

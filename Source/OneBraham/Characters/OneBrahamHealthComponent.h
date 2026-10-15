@@ -21,6 +21,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Core/OneBrahamTypes.h"
+#include "Core/OneBrahamDeathRecap.h"
 #include "OneBrahamHealthComponent.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOneBrahamHealthUpdated, float, NewHealth, float, MaxHealth, float, Delta);
@@ -197,6 +198,15 @@ protected:
 
 	/** Accumulated damage from each attacker in the last 5 s, for assists. */
 	TMap<TWeakObjectPtr<AActor>, float> RecentAttackers;
+
+public:
+	/** Every hit of this life, for the death recap (server only). */
+	const TArray<FOneBrahamHitRecord>& GetRecentHits() const { return RecentHits; }
+
+private:
+	TArray<FOneBrahamHitRecord> RecentHits;
+
+protected:
 
 	/** Time of the last attacker-map prune. */
 	float LastAttackerPruneTime = 0.f;

@@ -80,7 +80,9 @@ Replace flat colours with physically based textures, and boxes with props.
       server racks with LEDs and cable trays, WC fittings, wayfinding signs
       and terrace picnic benches. Meeting rooms, the boardroom and
       offices as glass boxes in black frames with oak tables; the lift lobby's
-      lit ceiling. *Next:* kitchen appliances, canteen servery detail.
+      lit ceiling. The canteen servery: steel wells under a sneeze-guard, heat
+      lamps, menu screens, coffee machine, lit chiller, extract canopy; oak
+      tables with black chairs.
 - [ ] Decals: wear, floor signage, wet-floor, blood (already authored as
       materials; needs textures).
 - [ ] District facades: real window textures per family, roofscape plant,
@@ -104,10 +106,10 @@ The known gaps, from the end of Docs/18 and the session log:
 
 - [x] Lifts pick up calls they pass in the travel direction (and the lockdown
       closes the Skydeck and the crown to them).
-- [ ] Microphone level meter in Settings (needs a getter on the voice component).
-- [ ] Death recap in place of a replay killcam (a replay driver is a large,
-      risky dependency; a recap of who, with what, from where, at what range
-      gives players the same answer).
+- [x] Microphone level meter in Settings: dBFS bar with peak hold and a tick
+      where the voice-activation gate opens.
+- [x] Death recap in place of a replay killcam: under the cause line, each
+      attacker's hits, damage, zones and range, and what the killer had left.
 - [ ] First-time player path: a 3-minute guided run of the ground floor.
 - [ ] Bots tuned against human play data from M5.
 

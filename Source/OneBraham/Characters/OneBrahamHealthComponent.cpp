@@ -1,6 +1,8 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Characters/OneBrahamHealthComponent.h"
+#include "Core/OneBrahamDeathRecap.h"
+#include "GameFramework/PlayerState.h"
 
 #include "OneBraham.h"
 #include "Core/OneBrahamGameSettings.h"
@@ -128,6 +130,7 @@ void UOneBrahamHealthComponent::ResetHealth()
 	bDead = false;
 	LastDamageTime = -1000.f;
 	RecentAttackers.Reset();
+	RecentHits.Reset();
 
 	OnHealthChanged.Broadcast(Health, MaxHealth, 0.f);
 	OnArmourChanged.Broadcast(Armour, MaxArmour);
@@ -233,9 +236,11 @@ float UOneBrahamHealthComponent::ApplyDamage(float RawDamage, AActor* DamageInst
 	}
 
 	// --- Armour -----------------------------------------------------------
+	float ArmourTaken = 0.f;
 	if (Armour > 0.f)
 	{
 		const float Absorbed = FMath::Min(Armour, Damage * ArmourAbsorption);
+		ArmourTaken = Absorbed;
 		Armour -= Absorbed;
 		Damage -= Absorbed;
 		OnArmourChanged.Broadcast(Armour, MaxArmour);
@@ -280,6 +285,22 @@ float UOneBrahamHealthComponent::ApplyDamage(float RawDamage, AActor* DamageInst
 		{
 			OwnerPC->ClientDamageTaken(ActualDamage, InstigatorLocation);
 		}
+	}
+
+	// --- The death recap's record of the fight ---------------------------
+	if (ActualDamage > 0.f || ArmourTaken > 0.f)
+	{
+		FOneBrahamHitRecord Hit;
+		if (const APlayerState* AttackerState = InstigatorController != nullptr ? InstigatorController->PlayerState : nullptr)
+		{
+			Hit.AttackerName = AttackerState->GetPlayerName();
+		}
+		Hit.HealthDamage = ActualDamage;
+		Hit.ArmourDamage = ArmourTaken;
+		Hit.Zone = Report.HitZone;
+		Hit.DistanceCm = Report.Distance;
+		Hit.Time = World != nullptr ? World->GetTimeSeconds() : 0.0;
+		OneBrahamDeathRecap::Record(RecentHits, Hit);
 	}
 
 	// --- Attacker tracking (for assists) ---------------------------------

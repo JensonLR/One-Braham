@@ -1669,18 +1669,34 @@ def build_canteen_fixtures(origin_x, origin_y, z, materials, prefix):
     _box(at(-1150.0 - door / 2.0, -1500.0, C.CEILING_HEIGHT_CM), (1500.0 - door, 15.0, C.CEILING_HEIGHT_CM),
          plaster, prefix + "_Kitchen_Wall")
     _box(at(-1150.0, -1300.0, counter_h), (1400.0, 90.0, counter_h), wood, prefix + "_Hot_Food_Counter")
+    build_servery_detail(origin_x, origin_y, z, materials, prefix)
 
     # Three servery islands in a row, clear of the lift banks at x > -445.
     for index, x in enumerate((-1500.0, -1050.0, -600.0)):
         _box(at(x, -1030.0, counter_h), (360.0, 120.0, counter_h), wood,
              "{0}_Servery_Island_{1}".format(prefix, index + 1))
 
-    # Eighteen six-seat tables in three rows, widening east across the hall.
+    # Eighteen six-seat tables in three rows, widening east across the hall:
+    # pale oak tops on black frames, three chairs a side, pushed in unevenly.
+    black = _district_material("BlackCladding") or metal
+    oak = _district_material("TimberLight") or wood
     for row, y in enumerate((-1650.0, -1300.0, -950.0)):
         for col in range(6):
             x = 600.0 + col * 300.0
-            _box(at(x, y, 74.0), (180.0, 75.0, 74.0), wood,
-                 "{0}_Canteen_Table_{1}_{2}".format(prefix, row + 1, col + 1))
+            tag = "{0}_Canteen_Table_{1}_{2}".format(prefix, row + 1, col + 1)
+            _box((origin_x + x, origin_y + y, z + 74.0), (180.0, 75.0, 4.0), oak, tag)
+            for e in (-1.0, 1.0):
+                _box((origin_x + x + e * 80.0, origin_y + y, z + 36.0), (5.0, 65.0, 72.0), black, "{0}_Frame{1}".format(tag, int(e)))
+            for seat in range(3):
+                sx = x - 60.0 + seat * 60.0
+                for side in (-1.0, 1.0):
+                    push = 48.0 + ((row * 5 + col * 3 + seat) % 4) * 6.0
+                    _box((origin_x + sx, origin_y + y + side * push, z + 45.0), (40.0, 40.0, 5.0), black,
+                         "{0}_Chair{1}{2}_Seat".format(tag, seat, int(side)))
+                    _box((origin_x + sx, origin_y + y + side * (push + 18.0), z + 70.0), (38.0, 4.0, 45.0), black,
+                         "{0}_Chair{1}{2}_Back".format(tag, seat, int(side)))
+                    _box((origin_x + sx, origin_y + y + side * push, z + 22.0), (4.0, 4.0, 44.0), black,
+                         "{0}_Chair{1}{2}_Leg".format(tag, seat, int(side)))
 
     # The balcony's north edge: a glass balustrade, waist high.
     glass = materials.get("Glass") or materials.get("BallisticGlass")
@@ -1688,6 +1704,49 @@ def build_canteen_fixtures(origin_x, origin_y, z, materials, prefix):
 
     _note_surface("Wood", prefix + "_Canteen_Counters")
     _note_surface("Metal", prefix + "_Coffee_Backwall")
+
+
+def build_servery_detail(cx, cy, z, materials, prefix):
+    """The hot-food line and coffee bar as the photograph shows them: steel
+    service wells under a sneeze-guard and a warm heat-lamp gantry, menu screens
+    over the line, a coffee machine and grinder on the till, a lit glass-door
+    chiller, and an extract canopy over the kitchen pass."""
+    steel = _district_material("Aluminium") or materials.get("Metal")
+    black = _district_material("BlackCladding") or materials.get("Metal")
+    glass = materials.get("Glass") or materials.get("BallisticGlass")
+    warm = _district_material("LightRibbon")
+    for i in range(7):
+        wx = -1750.0 + i * 200.0
+        _box((cx + wx, cy - 1300.0, z + 96.0), (170.0, 60.0, 3.0), steel, "{0}_Hot_Food_Well{1}".format(prefix, i + 1))
+    _box((cx - 1150.0, cy - 1335.0, z + 130.0), (1400.0, 2.0, 60.0), glass, prefix + "_Sneeze_Guard")
+    _box((cx - 1150.0, cy - 1300.0, z + 175.0), (1400.0, 40.0, 6.0), black, prefix + "_Heat_Gantry")
+    if warm is not None:
+        _box((cx - 1150.0, cy - 1300.0, z + 171.0), (1380.0, 6.0, 2.0), warm, prefix + "_Heat_Lamps")
+    lamp = _spawn(unreal.RectLight, unreal.Vector(cx - 1150.0, cy - 1300.0, z + 168.0),
+                  unreal.Rotator(roll=0.0, pitch=-90.0, yaw=0.0))
+    if lamp is not None:
+        component = lamp.rect_light_component
+        component.set_editor_property("IntensityUnits", unreal.LightUnits.LUMENS)
+        component.set_editor_property("Intensity", 6000.0)
+        component.set_editor_property("SourceWidth", 1300.0)
+        component.set_editor_property("SourceHeight", 30.0)
+        component.set_editor_property("AttenuationRadius", 400.0)
+        component.set_editor_property("LightColor", unreal.Color(255, 190, 120, 255))
+        component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
+        _label(lamp, prefix + "_Heat_Lamp_Light")
+    # Menu screens over the line.
+    for i, mx in enumerate((-1550.0, -1150.0, -750.0)):
+        _display(cx, cy, (mx, -1492.0, z + 238.0), unreal.Rotator(roll=0.0, pitch=0.0, yaw=90.0), 340.0, 150.0,
+                 "CanteenMenu", "{0}_Display_Menu{1}".format(prefix, i + 1), phase=i * 7.0, brightness=45.0)
+    # Coffee bar.
+    _box((cx - 1880.0, cy - 1400.0, z + 128.0), (60.0, 70.0, 45.0), steel, prefix + "_Coffee_Machine")
+    _box((cx - 1880.0, cy - 1320.0, z + 125.0), (25.0, 25.0, 40.0), black, prefix + "_Coffee_Grinder")
+    _box((cx - 2140.0, cy - 900.0, z + 100.0), (70.0, 180.0, 200.0), black, prefix + "_Chiller")
+    _box((cx - 2104.0, cy - 900.0, z + 100.0), (2.0, 170.0, 185.0), glass, prefix + "_Chiller_Door")
+    if warm is not None:
+        _box((cx - 2125.0, cy - 900.0, z + 100.0), (2.0, 160.0, 175.0), warm, prefix + "_Chiller_Light")
+    # Extract canopy over the kitchen pass.
+    _box((cx - 1150.0, cy - 1640.0, z + 300.0), (1450.0, 220.0, 60.0), steel, prefix + "_Extract_Canopy")
 
 
 def _planter(cx, cy, z, x0, x1, y0, y1, prefix, label, trees=0, height=90.0):
@@ -1746,6 +1805,11 @@ DISPLAY_SLIDES = {
     "EscalatorTop": [
         ("LEVEL 1", "Welcome up.", "Lifts ahead on the left  ·  Showcase  ·  Lab", BLUE, VIOLET),
         ("TODAY ON 17", "Sunset sessions.", "The Winter Garden bar opens at five", AMBER, ROSE),
+    ],
+    "CanteenMenu": [
+        ("TODAY'S HOT FOOD", "Chicken katsu", "Sticky rice  ·  pickled slaw  ·  £6.40", AMBER, ROSE),
+        ("PLANT KITCHEN", "Squash & lentil dal", "Basmati  ·  coconut raita  ·  £5.20", LIME, TEAL),
+        ("GRILL", "Smash burger", "Fries  ·  house pickles  ·  £7.10", RED, ORANGE),
     ],
     "EscalatorCeiling": [
         ("", "", "", VIOLET, BLUE),

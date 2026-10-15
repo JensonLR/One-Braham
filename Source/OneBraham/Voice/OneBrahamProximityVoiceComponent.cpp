@@ -787,6 +787,10 @@ void UOneBrahamProximityVoiceComponent::TickLocalCapture(float DeltaTime)
 		const float Rms = FOneBrahamVoiceActivityDetector::ComputeRms(
 			reinterpret_cast<const int16*>(RawFrame.GetData()), RawFrame.Num() / static_cast<int32>(sizeof(int16)));
 
+		// The Settings meter: rise instantly, fall at a steady rate.
+		InputMeter = FMath::Max(FOneBrahamVoiceActivityDetector::MeterFraction(Rms),
+			InputMeter - VoiceFrameSeconds / 1.5f);
+
 		// The gate always runs, so its noise floor keeps learning the room while
 		// push-to-talk is in use.
 		const bool bGateOpen = Gate.ProcessFrame(Rms, VoiceFrameSeconds);

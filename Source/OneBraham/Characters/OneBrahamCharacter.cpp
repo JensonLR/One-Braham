@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Characters/OneBrahamCharacter.h"
+#include "Core/OneBrahamDeathRecap.h"
 
 #include "OneBraham.h"
 #include "Core/OneBrahamGameMode.h"
@@ -1193,6 +1194,23 @@ void AOneBrahamCharacter::ServerOnDied(AController* Killer, const FOneBrahamDama
 		}
 
 		PC->ClientBeginDeathCam(this, KillerPawn, Focus, bHasFocus);
+
+		// The recap goes first, so the death screen can set it under the cause.
+		if (HealthComponent != nullptr)
+		{
+			float KillerHealth = -1.f;
+			float KillerArmour = 0.f;
+			if (const AOneBrahamCharacter* KillerCharacter = Cast<AOneBrahamCharacter>(KillerPawn))
+			{
+				if (const UOneBrahamHealthComponent* KillerHealthComp = KillerCharacter->GetHealthComponent())
+				{
+					KillerHealth = KillerHealthComp->GetHealth();
+					KillerArmour = KillerHealthComp->GetArmour();
+				}
+			}
+			PC->ClientSetDeathRecap(OneBrahamDeathRecap::Summarise(HealthComponent->GetRecentHits(),
+				GetWorld()->GetTimeSeconds(), KillEntry.KillerName, KillerHealth, KillerArmour));
+		}
 		PC->ClientShowDeathScreen(true, BuildDeathCauseText(KillEntry));
 		PC->ScheduleSpectatingAfterDeathCam();
 	}

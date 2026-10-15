@@ -7,6 +7,8 @@
 #include "Components/Border.h"
 #include "Components/Button.h"
 #include "Components/CheckBox.h"
+#include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/Image.h"
@@ -21,6 +23,12 @@
 #include "Core/OneBrahamGameSettings.h"
 #include "Core/OneBrahamGameUserSettings.h"
 #include "Core/OneBrahamPlayerState.h"
+
+namespace
+{
+	/** The Settings microphone meter's width, px. */
+	constexpr float MicMeterWidth = 320.f;
+}
 #include "HAL/PlatformTime.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
@@ -479,10 +487,35 @@ void UOneBrahamSettingsWidget::BuildVoicePage()
 	Text_MicDevice = MakeLabel(FText::GetEmpty(), EOneBrahamTextSize::Small, InkMuted());
 	Page->AddChildToVerticalBox(Text_MicDevice)->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
 
-	// The activity lamp. There is no input level exposed by the voice component
-	// yet, so this shows what can be known: whether voice is leaving this machine
-	// right now. In voice activation that is the gate, which is the thing a
-	// player tuning the threshold above actually needs to see.
+	// The input meter: the microphone's level on a -60..0 dB scale, a short peak
+	// hold, and a tick where the voice-activation gate opens - so tuning the
+	// threshold above is a matter of watching the bar cross the tick.
+	{
+		UOverlay* Meter = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass());
+		UImage* Track = MakeSwatch(FLinearColor(Ink().R, Ink().G, Ink().B, 0.10f), FVector2D(MicMeterWidth, 8.f));
+		Meter->AddChildToOverlay(MakeCell(Track, MicMeterWidth, 8.f));
+		MicMeterFill = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		MicMeterFill->SetHeightOverride(8.f);
+		MicMeterFill->SetWidthOverride(0.f);
+		MicMeterBar = MakeSwatch(Accent(), FVector2D(MicMeterWidth, 8.f));
+		MicMeterFill->AddChild(MicMeterBar);
+		if (UOverlaySlot* FillSlot = Meter->AddChildToOverlay(MicMeterFill))
+		{
+			FillSlot->SetHorizontalAlignment(HAlign_Left);
+		}
+		UHorizontalBox* TickRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+		MicGateOffset = WidgetTree->ConstructWidget<USpacer>(USpacer::StaticClass());
+		MicGateOffset->SetSize(FVector2D(0.f, 14.f));
+		TickRow->AddChildToHorizontalBox(MicGateOffset);
+		TickRow->AddChildToHorizontalBox(MakeCell(MakeSwatch(Ink(), FVector2D(2.f, 14.f)), 2.f, 14.f));
+		if (UOverlaySlot* TickSlot = Meter->AddChildToOverlay(TickRow))
+		{
+			TickSlot->SetVerticalAlignment(VAlign_Center);
+		}
+		Page->AddChildToVerticalBox(Meter)->SetPadding(FMargin(0.f, 4.f, 0.f, 10.f));
+	}
+
+	// The activity lamp: whether voice is leaving this machine right now.
 	UHorizontalBox* Activity = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
 	MicLamp = MakeSwatch(FLinearColor(Ink().R, Ink().G, Ink().B, 0.12f), FVector2D(12.f, 12.f));
 	Activity->AddChildToHorizontalBox(MakeCell(MicLamp, 12.f, 12.f))->SetVerticalAlignment(VAlign_Center);
@@ -885,6 +918,17 @@ void UOneBrahamSettingsWidget::RefreshVoiceStatus() const
 	const FString Device = Voice != nullptr ? Voice->GetCaptureDeviceName() : FString();
 	Text_MicDevice->SetText(FText::Format(NSLOCTEXT("OneBraham", "Settings_MicDevice", "Input device: {0}"),
 		Device.IsEmpty() ? NSLOCTEXT("OneBraham", "Settings_MicDeviceDefault", "system default") : FText::FromString(Device)));
+
+	// --- level -----------------------------------------------------------------
+	if (MicMeterFill != nullptr && MicGateOffset != nullptr && MicMeterBar != nullptr)
+	{
+		const float Level = Voice != nullptr ? Voice->GetInputMeter() : 0.f;
+		const float Gate = Voice != nullptr ? Voice->GetGateMeter() : 0.f;
+		MicMeterFill->SetWidthOverride(MicMeterWidth * Level);
+		MicGateOffset->SetSize(FVector2D(FMath::Max(0.f, MicMeterWidth * Gate - 1.f), 14.f));
+		// Below the gate the bar is muted; across it, it takes the accent.
+		MicMeterBar->SetColorAndOpacity(Level >= Gate ? Accent() : FLinearColor(Ink().R, Ink().G, Ink().B, 0.45f));
+	}
 
 	// --- activity --------------------------------------------------------------
 	const bool bTransmitting = Voice != nullptr && Voice->IsLocalTransmitting();

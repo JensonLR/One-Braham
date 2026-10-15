@@ -184,6 +184,14 @@ public:
 	void ClientShowDeathScreen(bool bShow, const FText& CauseText);
 
 	/**
+	 * The death recap: who hit you, how often, where, from how far, and what the
+	 * person who finished you had left. Sent just before the death screen, and
+	 * set beneath its cause line.
+	 */
+	UFUNCTION(Client, Reliable)
+	void ClientSetDeathRecap(const FString& RecapLines);
+
+	/**
 	 * Starts the death camera on the machine of the player who died: the view
 	 * leaves the body, sags, and turns to the killer with a slow push-in and a
 	 * draining grade, for DeathCamSeconds, before the spectate view takes over.
@@ -521,6 +529,10 @@ protected:
 	/** Client: the death screen waiting for the death camera's opening beat. */
 	FTimerHandle DeathScreenDelayTimer;
 	FText PendingDeathCauseText;
+	FString PendingDeathRecap;
+
+	/** The cause line with the recap beneath it. */
+	FText ComposeDeathText(const FText& CauseText) const;
 
 	/** Client: the body whose camera the death camera borrowed. */
 	TWeakObjectPtr<AOneBrahamCharacter> DeathCamCharacter;

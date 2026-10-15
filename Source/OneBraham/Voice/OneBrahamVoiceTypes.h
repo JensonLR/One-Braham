@@ -206,6 +206,20 @@ struct ONEBRAHAM_API FOneBrahamVoiceActivityDetector
 	/** The level the gate needs right now, noise floor included. */
 	float GetEffectiveOpenThreshold() const;
 
+	/**
+	 * A linear RMS as a 0..1 meter position on a -60..0 dBFS scale: how loud a
+	 * level reads to a person, not to the gate. 0 is -60 dB or quieter.
+	 */
+	static float MeterFraction(float LinearRms)
+	{
+		if (LinearRms <= 0.f)
+		{
+			return 0.f;
+		}
+		const float Db = 20.f * FMath::LogX(10.f, LinearRms);
+		return FMath::Clamp((Db + 60.f) / 60.f, 0.f, 1.f);
+	}
+
 	void Reset();
 };
 
