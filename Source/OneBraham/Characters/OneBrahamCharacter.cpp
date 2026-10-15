@@ -20,6 +20,8 @@
 #include "Interaction/OneBrahamInteractionInterface.h"
 #include "Weapons/OneBrahamInventoryComponent.h"
 #include "Weapons/OneBrahamWeaponComponent.h"
+#include "Weapons/OneBrahamWeaponBase.h"
+#include "Data/OneBrahamWeaponDataAsset.h"
 #include "Voice/OneBrahamProximityVoiceComponent.h"
 #include "Audio/OneBrahamAudioManagerComponent.h"
 
@@ -138,6 +140,11 @@ void AOneBrahamCharacter::BeginPlay()
 	{
 		HealthComponent->OnHealthChanged.AddDynamic(this, &AOneBrahamCharacter::HandleHealthChanged);
 		HealthComponent->OnDeath.AddDynamic(this, &AOneBrahamCharacter::HandleDeath);
+	}
+
+	if (WeaponComponent != nullptr)
+	{
+		WeaponComponent->OnWeaponChanged.AddDynamic(this, &AOneBrahamCharacter::HandleWeaponChanged);
 	}
 
 	// Resolve the registry on the server once, at spawn, so the archetype is
@@ -693,6 +700,29 @@ UOneBrahamCharacterDataAsset* AOneBrahamCharacter::ResolveCharacterData()
 	return CharacterData;
 }
 
+TSubclassOf<UAnimInstance> AOneBrahamCharacter::ChooseCarryAnimClass(EOneBrahamWeaponSlot Slot,
+	TSubclassOf<UAnimInstance> Primary, TSubclassOf<UAnimInstance> Sidearm)
+{
+	return (Slot == EOneBrahamWeaponSlot::Sidearm && Sidearm != nullptr) ? Sidearm : Primary;
+}
+
+void AOneBrahamCharacter::HandleWeaponChanged(AOneBrahamWeaponBase* NewWeapon, AOneBrahamWeaponBase* OldWeapon)
+{
+	USkeletalMeshComponent* Body = GetMesh();
+	if (Body == nullptr || PrimaryAnimClass == nullptr)
+	{
+		return;
+	}
+	const EOneBrahamWeaponSlot Slot = (NewWeapon != nullptr && NewWeapon->Definition != nullptr)
+		? NewWeapon->Definition->DefaultSlot : EOneBrahamWeaponSlot::Primary;
+	const TSubclassOf<UAnimInstance> Wanted = ChooseCarryAnimClass(Slot, PrimaryAnimClass, SidearmAnimClass);
+	// Re-setting the class rebuilds the anim instance; only do it on a real change.
+	if (Body->GetAnimClass() != Wanted)
+	{
+		Body->SetAnimInstanceClass(Wanted);
+	}
+}
+
 void AOneBrahamCharacter::ApplyArchetype(FGameplayTag ArchetypeTag)
 {
 	if (!ArchetypeTag.IsValid())
@@ -730,9 +760,13 @@ void AOneBrahamCharacter::ApplyArchetype(FGameplayTag ArchetypeTag)
 		}
 	}
 
+	PrimaryAnimClass = Definition->AnimInstanceClass;
+	SidearmAnimClass = Definition->SidearmAnimInstanceClass;
 	if (Definition->AnimInstanceClass != nullptr && GetMesh() != nullptr)
 	{
-		GetMesh()->SetAnimInstanceClass(Definition->AnimInstanceClass);
+		const AOneBrahamWeaponBase* Held = WeaponComponent != nullptr ? WeaponComponent->GetCurrentWeapon() : nullptr;
+		const EOneBrahamWeaponSlot Slot = (Held != nullptr && Held->Definition != nullptr) ? Held->Definition->DefaultSlot : EOneBrahamWeaponSlot::Primary;
+		GetMesh()->SetAnimInstanceClass(ChooseCarryAnimClass(Slot, PrimaryAnimClass, SidearmAnimClass));
 	}
 
 	if (!Definition->FirstPersonMesh.IsNull() && FirstPersonMesh != nullptr)

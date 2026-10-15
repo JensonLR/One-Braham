@@ -33,6 +33,8 @@ class UOneBrahamCharacterMovementComponent;
 class UOneBrahamHealthComponent;
 class UOneBrahamDownedComponent;
 class UOneBrahamWeaponComponent;
+class AOneBrahamWeaponBase;
+class UAnimInstance;
 class UOneBrahamInventoryComponent;
 class UOneBrahamInteractComponent;
 class UOneBrahamRagdollComponent;
@@ -336,6 +338,13 @@ public:
 	 */
 	virtual bool IsBotControlled() const override { return bBotControlled; }
 
+	/**
+	 * The animation set for a weapon slot: the sidearm set for a sidearm when
+	 * there is one, otherwise the primary set. Pure, for tests.
+	 */
+	static TSubclassOf<UAnimInstance> ChooseCarryAnimClass(EOneBrahamWeaponSlot Slot,
+		TSubclassOf<UAnimInstance> Primary, TSubclassOf<UAnimInstance> Sidearm);
+
 	/** Server: set by AOneBrahamBotController when it possesses/unpossesses. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Character")
 	void SetBotControlled(bool bInBotControlled);
@@ -349,6 +358,17 @@ protected:
 
 	UFUNCTION()
 	void HandleDeath(AActor* Killer, const FOneBrahamDamageReport& Report);
+
+	/** Swaps the body's animation set to suit the weapon in hand. */
+	UFUNCTION()
+	void HandleWeaponChanged(AOneBrahamWeaponBase* NewWeapon, AOneBrahamWeaponBase* OldWeapon);
+
+	/** The archetype's two animation sets, kept from ApplyArchetype for HandleWeaponChanged. */
+	UPROPERTY(Transient)
+	TSubclassOf<UAnimInstance> PrimaryAnimClass;
+
+	UPROPERTY(Transient)
+	TSubclassOf<UAnimInstance> SidearmAnimClass;
 
 	/** Updates the lean camera offset + shoulder exposure. */
 	void UpdateLean(float DeltaSeconds);

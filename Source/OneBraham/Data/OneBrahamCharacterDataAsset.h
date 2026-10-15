@@ -109,6 +109,10 @@ struct ONEBRAHAM_API FOneBrahamArchetypeDefinition
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Body")
 	TSubclassOf<UAnimInstance> AnimInstanceClass;
 
+	/** Swapped in while a sidearm is drawn: a pistol is held, aimed and run with differently. Empty keeps AnimInstanceClass. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Body")
+	TSubclassOf<UAnimInstance> SidearmAnimInstanceClass;
+
 	/** Body-shape variant index, fed to the body master material ("BodyVariant"). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Body", meta = (ClampMin = "0", ClampMax = "7"))
 	int32 BodyVariant = 0;

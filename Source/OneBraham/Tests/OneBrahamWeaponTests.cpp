@@ -15,6 +15,9 @@
 
 #include "Core/OneBrahamTypes.h"
 #include "Data/OneBrahamWeaponDataAsset.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimSingleNodeInstance.h"
+#include "Characters/OneBrahamCharacter.h"
 #include "OneBraham.h"
 
 #if WITH_AUTOMATION_TESTS
@@ -275,6 +278,31 @@ bool FOneBrahamWeaponLootTest::RunTest(const FString& Parameters)
 	// silently passing.
 	TestTrue(TEXT("the validator reports unassigned content"), Problems.Num() > 0);
 
+	return true;
+}
+
+/**
+ * The body's animation set follows the weapon in hand: the sidearm set for a
+ * pistol, the primary set for everything else, and the primary set when an
+ * archetype has no sidearm set (a missing set must never leave a T-pose).
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamWeaponCarryPoseTest, "OneBraham.Weapons.CarryPose",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamWeaponCarryPoseTest::RunTest(const FString& Parameters)
+{
+	// Two distinct stand-in classes: the engine's own anim instance and a subclass of it.
+	const TSubclassOf<UAnimInstance> Primary = UAnimInstance::StaticClass();
+	const TSubclassOf<UAnimInstance> Sidearm = UAnimSingleNodeInstance::StaticClass();
+
+	TestTrue(TEXT("a sidearm takes the sidearm set"),
+		AOneBrahamCharacter::ChooseCarryAnimClass(EOneBrahamWeaponSlot::Sidearm, Primary, Sidearm) == Sidearm);
+	TestTrue(TEXT("a primary takes the primary set"),
+		AOneBrahamCharacter::ChooseCarryAnimClass(EOneBrahamWeaponSlot::Primary, Primary, Sidearm) == Primary);
+	TestTrue(TEXT("a utility item keeps the primary set"),
+		AOneBrahamCharacter::ChooseCarryAnimClass(EOneBrahamWeaponSlot::Utility, Primary, Sidearm) == Primary);
+	TestTrue(TEXT("no sidearm set falls back to the primary set"),
+		AOneBrahamCharacter::ChooseCarryAnimClass(EOneBrahamWeaponSlot::Sidearm, Primary, nullptr) == Primary);
 	return true;
 }
 

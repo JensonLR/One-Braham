@@ -12,7 +12,7 @@ Docs/20.
 
 | Area | State | Evidence |
 | --- | --- | --- |
-| Code | Compiles on macOS (UE 5.8, Apple Silicon). Every system in Docs/03–08 implemented. | 38 automation tests, 43 validation checks, all engine-free checks passing |
+| Code | Compiles on macOS (UE 5.8, Apple Silicon). Every system in Docs/03–08 implemented. | 39 automation tests, 43 validation checks, all engine-free checks passing |
 | The tower | All 18 storeys to the brief and the references: revolving doors, double-height reception, gates with glass wings, escalators, coffee shop, 9 lifts (glass lift in steel), two stairs, 48 rooms, canteen, Skydeck balcony, Management Suite and atrium (16), Winter Garden and roof terrace (17) | Docs/09; rendered review captures |
 | Lighting | Physically based: lumens and lux, EV100 exposure per floor, sun and sky, fill, stair bulkheads | Docs/09 §5.3 |
 | Surroundings | Aldgate East from OpenStreetMap at 1:1: ~8,800 buildings, streets, traffic, parks, trees, the City skyline | Docs/09 §2.9 |
@@ -97,8 +97,8 @@ Replace flat colours with physically based textures, and boxes with props.
       *Done:* the cast stands on Epic's Manny and Quinn (alternating) with
       the engine template's third-person rifle animation blueprint (aim
       offset, ADS idle, locomotion, jumps; the pistol one is copied too), hit
-      zones tested against the mannequin skeleton. *Next:* switching to the
-      pistol blueprint when a sidearm is drawn, the archetypes' clothing, the Game Animation Sample
+      zones tested against the mannequin skeleton. The body swaps to the pistol
+      blueprint while a sidearm is drawn, and back. *Next:* the archetypes' clothing, the Game Animation Sample
       (a Fab download - needs the account holder).
 - [ ] Ten weapons with proper meshes, sounds and first-person animation.
       *Done:* every weapon carries a real model - Epic's template rifle, or

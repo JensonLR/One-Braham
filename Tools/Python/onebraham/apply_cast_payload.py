@@ -212,16 +212,19 @@ def build_archetype_struct(report, registry, entry):
             except Exception as exc:  # noqa: BLE001
                 report.failed(entry.get("id", "?"), u"{0}: {1}".format(prop, exc))
 
-    anim_path = entry.get("anim_class_path")
-    if anim_path:
+    for key, prop in (("anim_class_path", "anim_instance_class"),
+                      ("sidearm_anim_class_path", "sidearm_anim_instance_class")):
+        anim_path = entry.get(key)
+        if not anim_path:
+            continue
         anim_class = unreal.EditorAssetLibrary.load_blueprint_class(anim_path)
         if anim_class is None:
             report.skipped_asset(anim_path, "animation blueprint not in the project yet")
-        else:
-            try:
-                archetype.set_editor_property("anim_instance_class", anim_class)
-            except Exception as exc:  # noqa: BLE001
-                report.failed(entry.get("id", "?"), u"anim_instance_class: {0}".format(exc))
+            continue
+        try:
+            archetype.set_editor_property(prop, anim_class)
+        except Exception as exc:  # noqa: BLE001
+            report.failed(entry.get("id", "?"), u"{0}: {1}".format(prop, exc))
 
     return archetype
 

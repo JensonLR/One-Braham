@@ -42,6 +42,8 @@ MANNEQUIN_BODIES = (
 # The rifle pose: everyone in ASCENT is carrying something. The pistol variant
 # (/Game/Variant_Shooter/Anims/ABP_TP_Pistol) is copied alongside.
 MANNEQUIN_ANIM_BLUEPRINT = "/Game/Variant_Shooter/Anims/ABP_TP_Rifle"
+# The same template's pistol set, swapped in while a sidearm is drawn.
+MANNEQUIN_SIDEARM_ANIM_BLUEPRINT = "/Game/Variant_Shooter/Anims/ABP_TP_Pistol"
 
 # ---------------------------------------------------------------------------
 #  The cast
@@ -264,6 +266,7 @@ def build_registry(report):
             # installed engine; the paths are the ones that content expects.
             "body_mesh_path": MANNEQUIN_BODIES[index % 2],
             "anim_class_path": MANNEQUIN_ANIM_BLUEPRINT,
+            "sidearm_anim_class_path": MANNEQUIN_SIDEARM_ANIM_BLUEPRINT,
             "personality": {
                 "walk_rate_scale": entry["personality"]["walk"],
                 "arm_swing_scale": entry["personality"]["arms"],
