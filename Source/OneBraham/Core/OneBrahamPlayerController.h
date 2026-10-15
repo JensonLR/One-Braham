@@ -92,7 +92,12 @@ public:
 	// ======================================================================
 	//  Input configuration
 	// ======================================================================
-	/** Assigned in BP_OneBrahamPlayerController; see Tools/Python/onebraham/build_input.py. */
+	/**
+	 * Every action the controller binds. Defaults to /Game/OneBraham/Data/DA_InputConfig
+	 * (written by Tools/Python/onebraham/build_input.py): the game mode spawns
+	 * this native class, so the default has to be compiled in. A Blueprint
+	 * subclass may still override it.
+	 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Input")
 	TObjectPtr<UOneBrahamInputConfig> InputConfig;
 
@@ -114,6 +119,14 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Input")
 	void PopMappingContext(UInputMappingContext* Context);
+
+	/**
+	 * Builds a transient mapping context from the [OneBraham.Input] key bindings
+	 * in DefaultInput.ini (a player's rebinds in GameUserSettings.ini win per
+	 * action), resolved against InputConfig. The fallback when no authored
+	 * IMC_OneBraham_* context has keys. Null without an InputConfig.
+	 */
+	UInputMappingContext* BuildMappingContextFromIni(UObject* Outer) const;
 
 	// ======================================================================
 	//  Interaction
@@ -459,6 +472,14 @@ protected:
 
 	/** Binds every action in InputConfig to the handlers above. */
 	void BindInputActions();
+
+	/**
+	 * Resolves the mapping contexts (Blueprint, then Project Settings, then the
+	 * conventional IMC_OneBraham_* path, then the ini-built context; an empty
+	 * context counts as unset) and adds them to the local player's Enhanced Input
+	 * subsystem. Safe to call repeatedly; does nothing without a local player.
+	 */
+	void InstallMappingContexts();
 
 	UFUNCTION()
 	void OnRep_Spectating();

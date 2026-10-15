@@ -4,6 +4,8 @@
 # ---------------------------------------------------------------------------
 #      ./BuildContent.sh                  everything
 #      ./BuildContent.sh --only weapons   just the weapons
+#      ./BuildContent.sh --only match_settings
+#                                         just the three DA_MatchSettings_<Mode>
 #
 #  UE_EDITOR overrides the editor search with an explicit UnrealEditor-Cmd.
 # ===========================================================================

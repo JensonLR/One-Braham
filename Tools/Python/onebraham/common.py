@@ -188,7 +188,7 @@ CANTEEN_SKYDECK_STAIR_XY = (900.0, -700.0)
 # ---------------------------------------------------------------------------
 # Telecom-inspired: blue, white, deep navy, light grey, signal blue, safety
 # yellow for warnings, emergency red for alarms. Mirrored in
-# Config/DefaultGame.ini [OneBrahamGameSettings] so the C++ and the content
+# Config/DefaultEngine.ini [OneBrahamGameSettings] so the C++ and the content
 # agree on the same seven colours.
 PALETTE = {
     "Primary":       (0.000, 0.439, 0.753),

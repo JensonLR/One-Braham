@@ -431,8 +431,10 @@ ANCHORS = {
     "OpenPlan": [
         ("Office_Spawn_A", -1800, -1450),
         ("Office_Spawn_B", 1850, -1450),
-        ("Office_Spawn_C", -1250, 1450),
-        ("Office_Spawn_D", 1250, 1450),
+        # In front of the meeting pods, not in them: the pods fill y 1400-1750,
+        # and an anchor at 1450 stood among a pod's chairs, against its door.
+        ("Office_Spawn_C", -1250, 1250),
+        ("Office_Spawn_D", 1250, 1250),
     ],
     "ServerComms": [
         ("Server_Spawn_A", -1225, -1000),
@@ -455,6 +457,24 @@ ANCHORS = {
         ("Deck_Spawn_South", 200, -1700),
     ],
 }
+
+# Spawn clearance: the same capsule AOneBrahamSpawnPoint::ValidateClearance
+# sweeps at BeginPlay (40 cm radius, 92 cm half height, standing 4 cm above the
+# anchor), so a spawn the build passes is a spawn the game passes. The anchor is
+# also where the pawn's own capsule centre lands, SPAWN_CENTRE_CM above the floor,
+# so the pawn's body is tested too, from just off the floor up.
+SPAWN_CENTRE_CM = 90.0
+SPAWN_TEST_RADIUS_CM = 40.0
+SPAWN_TEST_HALF_HEIGHT_CM = 92.0
+SPAWN_TEST_LIFT_CM = 4.0
+SPAWN_PAWN_HALF_HEIGHT_CM = 84.0      # bottom 6 cm off the slab, clear of rugs and mats
+
+# Where an obstructed anchor looks for clear floor: rings round its authored
+# spot, nearest first, with a wider radius than the test so the anchor that is
+# chosen is off the walls and out of doorways, not merely not inside them.
+SPAWN_SEARCH_RINGS_CM = (75.0, 150.0, 225.0, 300.0, 400.0, 500.0, 650.0, 800.0)
+SPAWN_SEARCH_STEPS = 16
+SPAWN_SEARCH_RADIUS_CM = 70.0
 
 # Access zones: the locked doors that define ASCENT's progression. Each entry is
 # (zone_id, floor, tier, x, y, paired_zone_id, breachable, escalation_opens).
@@ -2817,7 +2837,7 @@ def build_spawn_points(report):
             # them all on the middle one: two anchors on the same floor 3000 cm
             # apart are one spawn, not two.
             floor_index = floors[0] + (index % floor_span)
-            z = _floor_z(floor_index) + 90.0
+            z = _floor_z(floor_index) + SPAWN_CENTRE_CM
 
             actor = _spawn(spawn_class, unreal.Vector(ax, ay, z))
             if actor is None:
@@ -2871,24 +2891,7 @@ def build_spawn_points(report):
     # worse to play in order to satisfy a number. Same storey, then, and the
     # vertical case is covered by the deploy timer and the spawn-heat scan in
     # AOneBrahamGameMode.
-    import math
-    problems = []
-
-    for i, a in enumerate(placed):
-        for b in placed[i + 1:]:
-            if abs(a["location"][2] - b["location"][2]) >= C.FLOOR_HEIGHT_CM:
-                continue
-
-            distance = math.hypot(a["location"][0] - b["location"][0],
-                                  a["location"][1] - b["location"][1])
-
-            if a["squad_cluster"] != b["squad_cluster"] and distance < C.SPAWN_MIN_ENEMY_DISTANCE_CM:
-                problems.append(u"{0} (F{1:02d}) is {2:.0f} cm from {3} (F{4:02d}), enemy rule is {5:.0f} cm".format(
-                    a["name"], a["floor"], distance, b["name"], b["floor"],
-                    C.SPAWN_MIN_ENEMY_DISTANCE_CM))
-            elif a["squad_cluster"] == b["squad_cluster"] and distance < C.SPAWN_MIN_SAME_TEAM_DISTANCE_CM:
-                problems.append(u"{0} (F{1:02d}) is {2:.0f} cm from squadmate {3} (F{4:02d})".format(
-                    a["name"], a["floor"], distance, b["name"], b["floor"]))
+    problems = _spawn_safety_problems(placed)
 
     if problems:
         # A spawn-safety failure is a design failure, not a script failure, so it
@@ -2903,6 +2906,171 @@ def build_spawn_points(report):
 
     C.log(u"  spawn anchors placed: {0} across {1} areas".format(len(placed), len(ANCHORS)))
     return placed
+
+
+def _spawn_safety_problems(placed, only=None):
+    """The two spawn distance rules, as readable lines (empty when the map is safe).
+
+    Measured on the same storey (see build_spawn_points). With `only`, just the
+    pairs that involve that anchor name - what a candidate move is checked against.
+    """
+    problems = []
+
+    for i, a in enumerate(placed):
+        for b in placed[i + 1:]:
+            if only is not None and only not in (a["name"], b["name"]):
+                continue
+            if abs(a["location"][2] - b["location"][2]) >= C.FLOOR_HEIGHT_CM:
+                continue
+
+            distance = math.hypot(a["location"][0] - b["location"][0],
+                                  a["location"][1] - b["location"][1])
+
+            if a["squad_cluster"] != b["squad_cluster"] and distance < C.SPAWN_MIN_ENEMY_DISTANCE_CM:
+                problems.append(u"{0} (F{1:02d}) is {2:.0f} cm from {3} (F{4:02d}), enemy rule is {5:.0f} cm".format(
+                    a["name"], a["floor"], distance, b["name"], b["floor"],
+                    C.SPAWN_MIN_ENEMY_DISTANCE_CM))
+            elif a["squad_cluster"] == b["squad_cluster"] and distance < C.SPAWN_MIN_SAME_TEAM_DISTANCE_CM:
+                problems.append(u"{0} (F{1:02d}) is {2:.0f} cm from squadmate {3} (F{4:02d})".format(
+                    a["name"], a["floor"], distance, b["name"], b["floor"]))
+
+    return problems
+
+
+def _spawn_blockers(world, x, y, z, radius=SPAWN_TEST_RADIUS_CM):
+    """Labels of whatever blocks a pawn at a spawn anchor, the C++ way.
+
+    Two capsules: the one ValidateClearance sweeps (lifted off the anchor by its
+    half height), and the pawn's own body centred on the anchor, which is where
+    the game mode puts it. A component counts when it blocks the Pawn channel -
+    the test OverlapBlockingTestByChannel(ECC_Pawn) makes - so overlap-only
+    triggers, volumes and the nav bounds never move a spawn.
+    """
+    # Every object type, not just the engine's six: the project's own object
+    # channels (Glass, Penetrable, HelicopterBlocker, ProjectileBlocker) block the
+    # Pawn channel too, and the C++ test sees them. Python names only the first
+    # six members (the rest go by their channel names), so they are cast by value.
+    object_types = []
+    for value in range(32):
+        try:
+            object_types.append(unreal.ObjectTypeQuery.cast(value))
+        except Exception:  # noqa: BLE001 - past the last object type
+            break
+    tests = (
+        (z + SPAWN_TEST_LIFT_CM + SPAWN_TEST_HALF_HEIGHT_CM, SPAWN_TEST_HALF_HEIGHT_CM),
+        (z, SPAWN_PAWN_HALF_HEIGHT_CM),
+    )
+    blockers = set()
+    for centre_z, half_height in tests:
+        found = unreal.SystemLibrary.capsule_overlap_components(
+            world, unreal.Vector(x, y, centre_z), radius, max(half_height, radius),
+            object_types, None, []) or []
+        for component in found:
+            try:
+                if component.get_collision_enabled() in (unreal.CollisionEnabled.NO_COLLISION,
+                                                         unreal.CollisionEnabled.PHYSICS_ONLY):
+                    continue
+                if component.get_collision_response_to_channel(unreal.CollisionChannel.ECC_PAWN) \
+                        != unreal.CollisionResponseType.ECR_BLOCK:
+                    continue
+            except Exception:  # noqa: BLE001 - an unreadable component is assumed to block
+                pass
+            owner = component.get_owner()
+            blockers.add(owner.get_actor_label() if owner is not None else component.get_name())
+    return sorted(blockers)
+
+
+def _spawn_has_floor(world, x, y, floor_z):
+    """True when there is walkable floor under (x, y) at this storey.
+
+    A clear capsule over the reception void or outside the curtain wall is
+    clear because there is nothing there at all; the pawn would fall a floor.
+    """
+    hit = unreal.SystemLibrary.line_trace_single(
+        world, unreal.Vector(x, y, floor_z + SPAWN_CENTRE_CM), unreal.Vector(x, y, floor_z - 40.0),
+        unreal.TraceTypeQuery.TRACE_TYPE_QUERY1, False, [], unreal.DrawDebugTrace.NONE, True)
+    if hit is None:
+        return False
+    fields = hit.to_tuple()
+    blocking, impact = fields[0], fields[5]
+    return bool(blocking) and impact.z >= floor_z - 40.0
+
+
+def settle_spawn_points(report, placed):
+    """Moves any spawn anchor the clearance test would fail onto clear floor.
+
+    Runs once every floor is built and attached, because the obstructions are
+    floor content - kitchens, booths, desks, meeting pods - that the anchors in
+    ANCHORS were placed before. An anchor that passes stays where it was
+    authored; one that fails walks out round rings from its spot, nearest
+    first, to the first point that is clear (with room to spare), has a floor
+    under it and keeps both spawn distance rules. The manifest entry moves with
+    the actor. An anchor with nowhere to go is reported by name - a packaged
+    build would otherwise log it as obstructed at every BeginPlay.
+    """
+    if not placed:
+        return 0
+
+    world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
+    actors = {}
+    for actor in _actor_subsystem().get_all_level_actors():
+        if actor.get_class().get_name() == "OneBrahamSpawnPoint":
+            actors[actor.get_actor_label()] = actor
+
+    moved = 0
+    for entry in placed:
+        actor = actors.get(entry["name"])
+        if actor is None:
+            report.failed("spawn clearance " + entry["name"], "the actor is not in the persistent level")
+            continue
+
+        x, y, z = entry["location"]
+        floor_z = z - SPAWN_CENTRE_CM
+        blockers = _spawn_blockers(world, x, y, z)
+        if not blockers and _spawn_has_floor(world, x, y, floor_z):
+            continue
+
+        found = None
+        for ring in SPAWN_SEARCH_RINGS_CM:
+            for step in range(SPAWN_SEARCH_STEPS):
+                angle = 2.0 * math.pi * step / SPAWN_SEARCH_STEPS
+                cx, cy = x + ring * math.cos(angle), y + ring * math.sin(angle)
+                if _spawn_blockers(world, cx, cy, z, SPAWN_SEARCH_RADIUS_CM):
+                    continue
+                if not _spawn_has_floor(world, cx, cy, floor_z):
+                    continue
+                entry["location"] = [cx, cy, z]
+                if _spawn_safety_problems(placed, only=entry["name"]):
+                    entry["location"] = [x, y, z]
+                    continue
+                found = (cx, cy)
+                break
+            if found:
+                break
+
+        if found is None:
+            report.failed("spawn clearance " + entry["name"],
+                          u"obstructed by {0} and no clear floor within {1:.0f} cm".format(
+                              ", ".join(blockers) or "nothing (no floor)", SPAWN_SEARCH_RINGS_CM[-1]))
+            continue
+
+        # Modify() first: a plain location set does not dirty the level, and a
+        # move the save never sees is a move the packaged map never gets.
+        actor.modify()
+        actor.set_actor_location(unreal.Vector(found[0], found[1], z), False, False)
+        moved += 1
+        C.log(u"    {0} (F{1:02d}) moved {2:.0f} cm to clear floor, off {3}".format(
+            entry["name"], entry["floor"], math.hypot(found[0] - x, found[1] - y),
+            ", ".join(blockers) or "a missing floor"))
+
+    if moved:
+        try:
+            if not _level_subsystem().save_all_dirty_levels():
+                report.failed("spawn clearance", u"could not save the persistent level")
+        except Exception as exc:  # noqa: BLE001
+            report.failed("spawn clearance", u"could not save the persistent level: {0}".format(exc))
+    C.log(u"  spawn clearance: {0} of {1} anchors moved to clear floor".format(moved, len(placed)))
+    return moved
 
 
 def build_access_zones(report):
@@ -2941,6 +3109,23 @@ def build_access_zones(report):
                     zone.set_editor_property("bBreachable", breachable)
                     zone.set_editor_property("bEscalationOpens", escalation)
                     zone.set_editor_property("PairedZoneId", unreal.Name(paired or ""))
+
+                    # The same placement on the door's zone component. The actor
+                    # copies its values across in its own BeginPlay, but the
+                    # component's BeginPlay runs first and checks its id then: a
+                    # door stamped only on the actor logged "has no ZoneId" in
+                    # every packaged boot. Stamped here, the id is in the map.
+                    component = zone.get_editor_property("Zone")
+                    if component is None:
+                        report.failed("access zone " + zone_id, "the door has no zone component")
+                    else:
+                        component.set_editor_property("ZoneId", unreal.Name(zone_id))
+                        component.set_editor_property("RequiredTier",
+                                                      getattr(unreal.OneBrahamAccessTier, tier.upper()))
+                        component.set_editor_property("FloorIndex", floor)
+                        component.set_editor_property("bBreachable", breachable)
+                        component.set_editor_property("bEscalationOpens", escalation)
+                        component.set_editor_property("PairedZoneId", unreal.Name(paired or ""))
                 except Exception as exc:  # noqa: BLE001
                     report.failed("access zone " + zone_id, str(exc))
 
@@ -3519,6 +3704,17 @@ def build_skydeck_climate(report):
     from onebraham import build_district
     sky = C.guard(report, "sky", build_district.build_sky, report)
 
+    # The dome is a 10 km sphere round the whole map, so any collision on it
+    # encloses every player: each spawn's clearance test hit it. Turning
+    # collision off is not enough - a BlockAll profile reapplies itself when the
+    # map loads - so the profile itself is NoCollision.
+    dome = sky.get("dome") if sky else None
+    if dome is not None:
+        try:
+            dome.static_mesh_component.set_collision_profile_name("NoCollision")
+        except Exception as exc:  # noqa: BLE001
+            report.failed("Sky_Dome collision", str(exc))
+
     # The procedural atmosphere only stands in when there is no photograph: under
     # the photographed dome its aerial perspective darkened the horizon into a
     # navy band. The height fog carries the haze either way.
@@ -4006,6 +4202,10 @@ def build_all(write_manifest=True):
         report.failed("floor levels", u"only {0} of {1} floors built".format(
             len(floors), C.FLOOR_COUNT + 1))
     C.guard(report, "floor streaming", link_floor_levels, report, [f["level"] for f in floors])
+
+    # With every floor attached, the spawn anchors can be tested against what
+    # the floors actually put round them.
+    C.guard(report, "spawn clearance", settle_spawn_points, report, manifest["spawn_anchors"])
 
     C.step(5, 6, "fire drill arena")
     C.guard(report, "fire drill arena", build_fire_drill_arena, report, materials)

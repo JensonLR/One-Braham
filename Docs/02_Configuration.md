@@ -109,9 +109,13 @@ worse as a partitioned level than as a plain one).
 ## 1b. Project Settings -> One Braham
 
 `UOneBrahamGameSettings` is a `UDeveloperSettings` class, so everything in it is
-editable in Project Settings and stored in `DefaultGame.ini` under
-`[/Script/OneBraham.OneBrahamGameSettings]`. It carries the brand colours, the
-match and security tuning, and the content registries.
+editable in Project Settings and stored in **`DefaultEngine.ini`** under
+`[/Script/OneBraham.OneBrahamGameSettings]` - the class is `config = Engine`, so
+the same section in `DefaultGame.ini` is silently ignored (the anti-cheat
+thresholds sat there unread until 2026-10-15). It carries the brand colours,
+the match and security tuning, the content registries, and the two input
+mapping contexts the controller installs (`DefaultMappingContext`,
+`CommonMappingContext`; build_input.py authors their keys).
 
 **The content registries resolve in three steps.** Every one of them, in this
 order:
@@ -141,7 +145,6 @@ setting that does nothing looks exactly like a setting that works.
 | `[OneBraham.Modes]` | ASCENT / FIRE DRILL / NIGHT SHIFT defaults |
 | `[OneBrahamAntiCheat]` | speed 1.15× / 0.4 s, fire-rate 1.20×, tolerance 12 cm, report-and-kick |
 | `[/Script/GameplayTags.GameplayTagsSettings]` | ~105 `+GameplayTagList=(Tag="OB...` entries |
-| `[/Script/OneBraham.OneBrahamGameSettings]` | the seven UI colours, interaction distance, default mode |
 
 The gameplay tags in this file are **declarative and required**: a tag used in
 C++ that is not declared here fails at cook time on a shipping build and works

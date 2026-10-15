@@ -907,7 +907,10 @@ def check_config(v, _config_only):
 
     required_sections = [
         ("[/Script/OneBraham.OneBrahamMatchSettings]", game_ini, "match tuning"),
-        ("[/Script/OneBraham.OneBrahamGameSettings]", game_ini, "palette and gameplay"),
+        # UOneBrahamGameSettings is config=Engine: in DefaultGame.ini the
+        # section is silently ignored (it was, until the input contexts in it
+        # were found never to load).
+        ("[/Script/OneBraham.OneBrahamGameSettings]", engine_ini, "palette and gameplay"),
         ("[/Script/Engine.Engine]", engine_ini, "engine classes"),
     ]
 

@@ -127,7 +127,7 @@ Three layers, each with one job:
 
 | Class | Stores | Persisted by |
 | --- | --- | --- |
-| `UOneBrahamGameSettings` | developer-tunable defaults: the seven UI colours, the interaction-distance tolerance, the voice occlusion, the default mode and tick rates | read from `DefaultGame.ini` `[OneBrahamGameSettings]` at startup |
+| `UOneBrahamGameSettings` | developer-tunable defaults: the seven UI colours, the interaction-distance tolerance, the voice occlusion, the default mode and tick rates | read from `DefaultEngine.ini` `[/Script/OneBraham.OneBrahamGameSettings]` at startup (the class is `config = Engine`) |
 | `UOneBrahamGameUserSettings` | player video/audio/gameplay/accessibility settings | `GameUserSettings.ini` (engine) |
 | `UOneBrahamSaveSettings` | keybinds (per device), sensitivity, HUD scale, last-used loadout | `Saved/SaveGames/OneBrahamSettings.sav` |
 

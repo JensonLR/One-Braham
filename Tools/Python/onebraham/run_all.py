@@ -12,13 +12,14 @@ ORDER MATTERS, AND THIS IS WHY
     3. environment          the map: floors, rooms, doors, shutters, the pad
     4. props                blueprints + the dressing manifest
     5. weapons              data assets, blueprints, the registry
-    6. characters           the cast payload
-    7. cast payload         applies that payload to the registry data asset
-    8. audio                sound classes, submixes, attenuations, the bank
-    9. input                IA_* assets and DA_InputConfig
-    10. ui                  widgets, the HUD string table, the font slot
-    11. vfx                 Niagara systems, camera shakes, decals
-    12. validate            the health check, last, on everything above
+    6. match_settings       DA_MatchSettings_<Mode>; loot tables come from EnsureDefaults()
+    7. characters           the cast payload
+    8. cast payload         applies that payload to the registry data asset
+    9. audio                sound classes, submixes, attenuations, the bank
+    10. input               IA_* assets and DA_InputConfig
+    11. ui                  widgets, the HUD string table, the font slot
+    12. vfx                 Niagara systems, camera shakes, decals
+    13. validate            the health check, last, on everything above
 
 USAGE
     Inside the editor (normal):
@@ -131,6 +132,8 @@ STEPS = [
      "gameplay blueprints and the prop dressing manifest"),
     ("weapons", "onebraham.build_weapons", True,
      "ten weapon definitions, blueprints and the registry"),
+    ("match_settings", "onebraham.build_match_settings", True,
+     "one DA_MatchSettings_<Mode> per mode: ASCENT, FIRE DRILL, NIGHT SHIFT"),
     ("characters", "onebraham.build_characters", True,
      "the six-archetype cast and the cosmetic slots"),
     ("cast_payload", "onebraham.apply_cast_payload", True,

@@ -48,6 +48,40 @@
 #include "Misc/Paths.h"
 #include "HAL/PlatformFileManager.h"
 #include "TimerManager.h"
+#include "InputModifiers.h"
+#include "Misc/ConfigCacheIni.h"
+#include "UObject/ConstructorHelpers.h"
+#include "UObject/Package.h"
+
+namespace OneBrahamInput
+{
+	/** The input config the native controller ships with. */
+	static const TCHAR* const DefaultInputConfigPath = TEXT("/Game/OneBraham/Data/DA_InputConfig.DA_InputConfig");
+
+	/** The generated key bindings section (generate_input_ini.py). */
+	static const TCHAR* const BindingsSection = TEXT("OneBraham.Input");
+
+	/** The conventional contexts build_input.py authors the keys into. */
+	static const TCHAR* const DefaultContextPath = TEXT("/Game/OneBraham/Input/IMC_OneBraham_Default.IMC_OneBraham_Default");
+	static const TCHAR* const CommonContextPath = TEXT("/Game/OneBraham/Input/IMC_OneBraham_UI.IMC_OneBraham_UI");
+
+	/** A context with no keys in it is the same as no context. */
+	static bool HasKeys(const UInputMappingContext* Context)
+	{
+		return Context != nullptr && Context->GetMappings().Num() > 0;
+	}
+
+	/** Settings field, then the conventional path (Docs/02 section 1b). */
+	static UInputMappingContext* Resolve(const TSoftObjectPtr<UInputMappingContext>& Setting, const TCHAR* ConventionalPath)
+	{
+		UInputMappingContext* Context = Setting.LoadSynchronous();
+		if (!HasKeys(Context))
+		{
+			Context = Cast<UInputMappingContext>(FSoftObjectPath(ConventionalPath).TryLoad());
+		}
+		return HasKeys(Context) ? Context : nullptr;
+	}
+}
 
 AOneBrahamPlayerController::AOneBrahamPlayerController()
 {
@@ -66,6 +100,17 @@ AOneBrahamPlayerController::AOneBrahamPlayerController()
 
 	// A 90 degree default FOV matches the weapon art and the HUD safe area.
 	PlayerCameraManagerClass = APlayerCameraManager::StaticClass();
+
+	// The game mode spawns this native class - there is no Blueprint subclass to
+	// carry the asset - so without a compiled-in default a packaged build binds
+	// no keys at all. /Game/OneBraham/Data is in DirectoriesToAlwaysCook. A
+	// missing asset leaves the field null and BeginPlay says so in the log.
+	static ConstructorHelpers::FObjectFinderOptional<UOneBrahamInputConfig> DefaultInputConfig(
+		OneBrahamInput::DefaultInputConfigPath);
+	if (DefaultInputConfig.Succeeded())
+	{
+		InputConfig = DefaultInputConfig.Get();
+	}
 }
 
 void AOneBrahamPlayerController::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -115,33 +160,11 @@ void AOneBrahamPlayerController::BeginPlay()
 	else if (!IsRunningDedicatedServer())
 	{
 		OB_WARN("AOneBrahamPlayerController has no InputConfig assigned - no input will be bound. "
-			"Open BP_OneBrahamPlayerController and set InputConfig = DA_OneBrahamInputConfig.");
+			"The native default is %s: run Tools/Python/onebraham/build_input.py and check the "
+			"asset was cooked, or set InputConfig on a Blueprint subclass.", OneBrahamInput::DefaultInputConfigPath);
 	}
 
-	// The mapping contexts may be set on the Blueprint, or named in Project
-	// Settings. Blueprint first: it is the more specific statement of intent.
-	if (CommonMappingContext == nullptr)
-	{
-		CommonMappingContext = UOneBrahamGameSettings::Get().CommonMappingContext.LoadSynchronous();
-	}
-
-	if (GameplayMappingContext == nullptr)
-	{
-		GameplayMappingContext = UOneBrahamGameSettings::Get().DefaultMappingContext.LoadSynchronous();
-	}
-
-	// Install the local mapping contexts.
-	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
-	{
-		if (CommonMappingContext)
-		{
-			Subsystem->AddMappingContext(CommonMappingContext, 0);
-		}
-		if (GameplayMappingContext)
-		{
-			Subsystem->AddMappingContext(GameplayMappingContext, 1);
-		}
-	}
+	InstallMappingContexts();
 
 	// Create the HUD once we have a viewport.
 	if (IsLocalController() && HUDComponent != nullptr)
@@ -166,6 +189,14 @@ void AOneBrahamPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReaso
 	if (HUDComponent != nullptr)
 	{
 		HUDComponent->DestroyHUD();
+	}
+
+	// The subsystem outlives this controller (it lives on the local player), so
+	// a context this controller built is taken back out before travel hands the
+	// player to the next controller, which builds its own.
+	if (GameplayMappingContext != nullptr && GameplayMappingContext->GetOuter() == this)
+	{
+		PopMappingContext(GameplayMappingContext);
 	}
 
 	Super::EndPlay(EndPlayReason);
@@ -200,6 +231,9 @@ void AOneBrahamPlayerController::ReceivedPlayer()
 	// A controller spawned into a running world (seamless travel) begins play
 	// before it is given its local player, so BeginPlay saw a non-local controller.
 	SendLocalProfileToServer();
+
+	// Same reason: BeginPlay had no local player to give the contexts to.
+	InstallMappingContexts();
 }
 
 void AOneBrahamPlayerController::SendLocalProfileToServer()
@@ -250,6 +284,13 @@ void AOneBrahamPlayerController::OnPossess(APawn* InPawn)
 void AOneBrahamPlayerController::AcknowledgePossession(APawn* P)
 {
 	Super::AcknowledgePossession(P);
+
+	// The owning machine (listen host or remote client) re-asserts its contexts
+	// on every possession, so a respawn never comes back to a deaf pawn.
+	if (IsLocalController())
+	{
+		InstallMappingContexts();
+	}
 
 	if (IsLocalController() && HUDComponent != nullptr)
 	{
@@ -404,6 +445,208 @@ void AOneBrahamPlayerController::BindInputActions()
 		EIC->BindAction(InputConfig->VoiceLineMenu, ETriggerEvent::Started, this, &AOneBrahamPlayerController::Input_VoiceLineMenuStarted);
 		EIC->BindAction(InputConfig->VoiceLineMenu, ETriggerEvent::Completed, this, &AOneBrahamPlayerController::Input_VoiceLineMenuCompleted);
 	}
+}
+
+void AOneBrahamPlayerController::InstallMappingContexts()
+{
+	UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer());
+	if (Subsystem == nullptr)
+	{
+		return;
+	}
+
+	// The mapping contexts may be set on a Blueprint, named in Project Settings,
+	// or found at the path build_input.py writes (both always cooked). Blueprint
+	// first: it is the more specific statement of intent. An empty context counts
+	// as unset, so a stale asset falls through rather than binding nothing.
+	if (!OneBrahamInput::HasKeys(CommonMappingContext))
+	{
+		CommonMappingContext = OneBrahamInput::Resolve(
+			UOneBrahamGameSettings::Get().CommonMappingContext, OneBrahamInput::CommonContextPath);
+	}
+
+	if (!OneBrahamInput::HasKeys(GameplayMappingContext))
+	{
+		GameplayMappingContext = OneBrahamInput::Resolve(
+			UOneBrahamGameSettings::Get().DefaultMappingContext, OneBrahamInput::DefaultContextPath);
+	}
+
+	// Last resort: build the whole layout, menus included, from the
+	// [OneBraham.Input] table the same script generates.
+	if (GameplayMappingContext == nullptr)
+	{
+		if (UInputMappingContext* Built = BuildMappingContextFromIni(this))
+		{
+			GameplayMappingContext = Built;
+			OB_WARN("No authored gameplay mapping context has keys - built one from [%s]: %d key mapping(s).",
+				OneBrahamInput::BindingsSection, Built->GetMappings().Num());
+		}
+	}
+	else if (CommonMappingContext == nullptr && GameplayMappingContext->GetOuter() != this)
+	{
+		OB_WARN("No common mapping context has keys - the scoreboard, pause menu and map have no key.");
+	}
+
+	if (CommonMappingContext)
+	{
+		Subsystem->AddMappingContext(CommonMappingContext, 0);
+	}
+	if (GameplayMappingContext)
+	{
+		Subsystem->AddMappingContext(GameplayMappingContext, 1);
+	}
+	else
+	{
+		OB_ERROR("No gameplay mapping context could be resolved - no key will reach any action.");
+	}
+}
+
+UInputMappingContext* AOneBrahamPlayerController::BuildMappingContextFromIni(UObject* Outer) const
+{
+	if (InputConfig == nullptr || GConfig == nullptr)
+	{
+		return nullptr;
+	}
+
+	// Action asset name -> its keys, in ini order. The order is meaningful for
+	// digital keys on an axis action: Move lists forward, back, left, right and
+	// Lean lists left, right, exactly as build_input.py's ACTIONS table does.
+	TMap<FString, TArray<FString>> Bindings;
+	TArray<FString> Order;
+
+	auto ReadBindings = [&Order](const FString& IniFile, TMap<FString, TArray<FString>>& Out)
+	{
+		for (const TCHAR* Kind : { TEXT("KeyboardBinding"), TEXT("GamepadBinding") })
+		{
+			TArray<FString> Lines;
+			GConfig->GetArray(OneBrahamInput::BindingsSection, Kind, Lines, IniFile);
+
+			for (const FString& Line : Lines)
+			{
+				FString ActionName, KeyName;
+				if (!Line.Split(TEXT(","), &ActionName, &KeyName))
+				{
+					continue;
+				}
+
+				ActionName.TrimStartAndEndInline();
+				KeyName.TrimStartAndEndInline();
+				if (ActionName.IsEmpty() || KeyName.IsEmpty())
+				{
+					continue;
+				}
+
+				Out.FindOrAdd(ActionName).Add(KeyName);
+				Order.AddUnique(ActionName);
+			}
+		}
+	};
+
+	ReadBindings(GInputIni, Bindings);
+
+	// A player's rebinds replace the defaults action by action.
+	TMap<FString, TArray<FString>> Rebinds;
+	ReadBindings(GGameUserSettingsIni, Rebinds);
+	for (TPair<FString, TArray<FString>>& Rebind : Rebinds)
+	{
+		Bindings.Add(Rebind.Key, MoveTemp(Rebind.Value));
+	}
+
+	UObject* ContextOuter = Outer != nullptr ? Outer : GetTransientPackage();
+	UInputMappingContext* Context = NewObject<UInputMappingContext>(ContextOuter,
+		MakeUniqueObjectName(ContextOuter, UInputMappingContext::StaticClass(), TEXT("IMC_OneBraham_Runtime")), RF_Transient);
+
+	auto Negate = [Context](FEnhancedActionKeyMapping& Mapping)
+	{
+		Mapping.Modifiers.Add(NewObject<UInputModifierNegate>(Context));
+	};
+	auto Swizzle = [Context](FEnhancedActionKeyMapping& Mapping)
+	{
+		Mapping.Modifiers.Add(NewObject<UInputModifierSwizzleAxis>(Context));
+	};
+
+	bool bLookHasPointer = false;
+
+	for (const FString& ActionName : Order)
+	{
+		const TArray<FString>* Keys = Bindings.Find(ActionName);
+		if (Keys == nullptr)
+		{
+			continue;
+		}
+
+		// IA_Move -> InputConfig->Move, by reflection, so a new field and a new
+		// ini row are all it takes to bind a new action.
+		const FString FieldName = ActionName.StartsWith(TEXT("IA_")) ? ActionName.RightChop(3) : ActionName;
+		const FObjectProperty* Property = FindFProperty<FObjectProperty>(UOneBrahamInputConfig::StaticClass(), *FieldName);
+		const UInputAction* Action = Property != nullptr
+			? Cast<UInputAction>(Property->GetObjectPropertyValue_InContainer(InputConfig))
+			: nullptr;
+
+		if (Action == nullptr)
+		{
+			OB_WARN("[%s] binds %s, which is not an action on %s - skipped.",
+				OneBrahamInput::BindingsSection, *ActionName, *InputConfig->GetName());
+			continue;
+		}
+
+		int32 DigitalIndex = 0;
+		for (const FString& KeyName : *Keys)
+		{
+			const FKey Key(*KeyName);
+			if (!Key.IsValid())
+			{
+				OB_WARN("[%s] %s: unknown key '%s' - skipped.", OneBrahamInput::BindingsSection, *ActionName, *KeyName);
+				continue;
+			}
+
+			FEnhancedActionKeyMapping& Mapping = Context->MapKey(Action, Key);
+
+			if (Action == InputConfig->Look && !Key.IsGamepadKey())
+			{
+				bLookHasPointer = true;
+			}
+
+			if (Key.IsAnalog())
+			{
+				// The sticks get a dead zone, as the authored contexts do.
+				if (Key.IsGamepadKey() && Action->ValueType == EInputActionValueType::Axis2D)
+				{
+					Mapping.Modifiers.Add(NewObject<UInputModifierDeadZone>(Context));
+				}
+				continue;
+			}
+
+			// A button on an axis action needs a direction. Input_Move reads
+			// X = right and Y = forward.
+			if (Action->ValueType == EInputActionValueType::Axis2D)
+			{
+				switch (DigitalIndex)
+				{
+				case 0: Swizzle(Mapping); break;					// forward: +Y
+				case 1: Swizzle(Mapping); Negate(Mapping); break;	// back: -Y
+				case 2: Negate(Mapping); break;						// left: -X
+				default: break;										// right: +X
+				}
+			}
+			else if (Action->ValueType == EInputActionValueType::Axis1D && DigitalIndex == 0)
+			{
+				// Lean: the first key is left (-1), the second right (+1).
+				Negate(Mapping);
+			}
+
+			++DigitalIndex;
+		}
+	}
+
+	// Mouse look is not a key a player rebinds, so the generator writes none.
+	// Input_Look takes the raw mouse delta and flips Y itself.
+	if (!bLookHasPointer && InputConfig->Look != nullptr)
+	{
+		Context->MapKey(InputConfig->Look, EKeys::Mouse2D);
+	}
+
+	return Context;
 }
 
 void AOneBrahamPlayerController::PushMappingContext(UInputMappingContext* Context, int32 Priority)

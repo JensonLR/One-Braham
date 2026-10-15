@@ -23,6 +23,7 @@
 #include "UObject/UnrealType.h"
 
 #include "Core/OneBrahamGameSettings.h"
+#include "Core/OneBrahamPlayerController.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "OneBraham.h"
@@ -222,6 +223,123 @@ bool FOneBrahamInputContextsTest::RunTest(const FString& Parameters)
 	const FObjectProperty* ClipMarker = FindFProperty<FObjectProperty>(
 		UOneBrahamInputConfig::StaticClass(), TEXT("ClipMarker"));
 	TestNotNull(TEXT("ClipMarker exists"), ClipMarker);
+
+	return true;
+}
+
+// ===========================================================================
+//  The native controller ships with input
+// ===========================================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamInputControllerDefaultsTest, "OneBraham.Input.ControllerDefaults",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamInputControllerDefaultsTest::RunTest(const FString& Parameters)
+{
+	// The game mode spawns AOneBrahamPlayerController itself - there is no
+	// Blueprint subclass - so whatever the class default carries is what a
+	// packaged client binds. The first packaged build carried nothing, and the
+	// editor never said so because nobody plays the CDO.
+	const AOneBrahamPlayerController* Controller = GetDefault<AOneBrahamPlayerController>();
+
+	if (!TestNotNull(TEXT("the controller has a class default"), Controller))
+	{
+		return false;
+	}
+
+	const UOneBrahamInputConfig* Config = Controller->InputConfig;
+
+	if (!TestNotNull(TEXT("the native controller has a default InputConfig"), Config))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("and it is the cooked DA_InputConfig"),
+		Config->GetPathName(), FString(TEXT("/Game/OneBraham/Data/DA_InputConfig.DA_InputConfig")));
+
+	{
+		TArray<FName> Missing;
+		const bool bValid = Config->ValidateAllActionsSet(Missing);
+
+		for (const FName& Name : Missing)
+		{
+			AddError(FString::Printf(TEXT("DA_InputConfig has no action for %s"), *Name.ToString()));
+		}
+
+		TestTrue(TEXT("every action on the default config is set"), bValid);
+	}
+
+	// An action with nothing pressing it is as dead as an unset field. Both the
+	// authored contexts the controller installs (Default + UI) and the ini-built
+	// fallback have to reach every action - all of them except the clip marker,
+	// which is unbound by design (see MappingContexts above).
+	TArray<FObjectProperty*> Properties;
+	GatherActionProperties(Properties);
+
+	auto TestEveryActionMapped = [this, Config, &Properties](const TCHAR* Source, TArray<const UInputMappingContext*> Contexts)
+	{
+		TSet<const UInputAction*> Mapped;
+		for (const UInputMappingContext* Each : Contexts)
+		{
+			for (const FEnhancedActionKeyMapping& Mapping : Each->GetMappings())
+			{
+				TestTrue(*FString::Printf(TEXT("%s: every mapping has a valid key"), Source), Mapping.Key.IsValid());
+				Mapped.Add(Mapping.Action);
+			}
+		}
+
+		for (const FObjectProperty* Property : Properties)
+		{
+			const UInputAction* Action = Cast<UInputAction>(Property->GetObjectPropertyValue_InContainer(Config));
+
+			if (Property->GetFName() == TEXT("ClipMarker"))
+			{
+				continue;
+			}
+
+			TestTrue(*FString::Printf(TEXT("%s: %s has a key"), Source, *Property->GetName()),
+				Action != nullptr && Mapped.Contains(Action));
+		}
+	};
+
+	{
+		const UInputMappingContext* Authored = LoadObject<UInputMappingContext>(nullptr,
+			TEXT("/Game/OneBraham/Input/IMC_OneBraham_Default.IMC_OneBraham_Default"));
+		const UInputMappingContext* AuthoredUI = LoadObject<UInputMappingContext>(nullptr,
+			TEXT("/Game/OneBraham/Input/IMC_OneBraham_UI.IMC_OneBraham_UI"));
+
+		if (TestNotNull(TEXT("IMC_OneBraham_Default exists"), Authored)
+			&& TestNotNull(TEXT("IMC_OneBraham_UI exists"), AuthoredUI))
+		{
+			TestEveryActionMapped(TEXT("authored contexts"), { Authored, AuthoredUI });
+		}
+	}
+
+	UInputMappingContext* Context = Controller->BuildMappingContextFromIni(GetTransientPackage());
+
+	if (!TestNotNull(TEXT("a mapping context builds from [OneBraham.Input]"), Context))
+	{
+		return false;
+	}
+
+	TestEveryActionMapped(TEXT("[OneBraham.Input]"), { Context });
+
+	// The two axis actions have to work on a keyboard and a mouse, not just a pad.
+	int32 MoveKeys = 0;
+	bool bMouseLook = false;
+	for (const FEnhancedActionKeyMapping& Mapping : Context->GetMappings())
+	{
+		if (Mapping.Action == Config->Move && !Mapping.Key.IsGamepadKey())
+		{
+			++MoveKeys;
+			TestTrue(TEXT("W, A and S carry a direction modifier"),
+				Mapping.Key == EKeys::D || Mapping.Modifiers.Num() > 0);
+		}
+
+		bMouseLook |= Mapping.Action == Config->Look && Mapping.Key == EKeys::Mouse2D;
+	}
+
+	TestEqual(TEXT("Move has four keyboard keys"), MoveKeys, 4);
+	TestTrue(TEXT("Look is on the mouse"), bMouseLook);
 
 	return true;
 }

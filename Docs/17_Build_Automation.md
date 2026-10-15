@@ -24,6 +24,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `district_data.py` | engine-free: turns OpenStreetMap extracts into `data/aldgate_district.json` in the game's frame, and decides each building's facade variant, roof plant and shopfronts | no | no |
 | `build_props.py` | 12 gameplay blueprints, 4 loot cards, the prop manifest, the dressing pass | yes | yes |
 | `build_weapons.py` | 10 weapon definitions, 10 blueprints, `DA_WeaponRegistry` | yes | yes |
+| `build_match_settings.py` | 3 match settings assets, one per mode: `DA_MatchSettings_Ascent`, `DA_MatchSettings_FireDrill`, `DA_MatchSettings_NightShift` (loot, spawn and control-point tables left to `EnsureDefaults()`) | yes | yes |
 | `build_characters.py` | the cast payload + `ABP_OneBrahamCharacter` when the skeleton exists | yes | yes |
 | `apply_cast_payload.py` | writes the payload onto `DA_CharacterRegistry`, verifies 6 archetypes | yes | yes |
 | `build_audio.py` | 12 sound classes, 3 submixes, 4 mixes, 13 attenuations, 11 ambience, 8 music, `DA_AudioBank` | yes | yes |
@@ -85,19 +86,19 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 
 ```
 # ONE BRAHAM - content build report
-**29 steps succeeded, 0 failed.**
+**30 steps succeeded, 0 failed.**
 
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
 | input_ini | OK | 0.0 | wrote 41 actions (40 with a default key) |
-| cpp_symbols | OK | 0.7 | 902 declarations, all defined; compile hygiene clean |
+| cpp_symbols | OK | 0.7 | 904 declarations, all defined; compile hygiene clean |
 | uht_contracts | OK | 1.5 | 926 UE reflection contracts, all satisfied |
-| soft_paths | OK | 0.0 | 42 soft paths, all conventional |
-| calls | OK | 0.3 | 1570 call sites, all arities plausible |
+| soft_paths | OK | 0.0 | 48 soft paths, all conventional |
+| calls | OK | 0.3 | 1575 call sites, all arities plausible |
 | tags | OK | 0.4 | 6 resolvable tag requests and 147 documented tags, all declared |
 | layout | OK | 0.0 | 18 floors, map and layout agree |
 | voice_lines | OK | 0.0 | 42 line references, all declared and documented |
-| input_actions | OK | 0.0 | 41 actions, 41 fields, 92 reads |
+| input_actions | OK | 0.0 | 41 actions, 41 fields, 95 reads |
 | doc_numbers | OK | 2.2 | 84 documented numbers, all current |
 | test_names | OK | 0.0 | 23 automation tests, every one documented and resolvable |
 | doc_files | OK | 0.1 | 72 documented paths, all on disk |
@@ -119,8 +120,8 @@ builders raise `"... must run inside the Unreal Editor."`, which is a fact about
 the machine rather than about the project, and a CI box with no engine install
 should not report a broken build - it should report that it did not run the
 content steps, with their names. On a fresh clone the full run is therefore
-"19 steps succeeded, 0 failed, 10 skipped" and the same run with an editor
-installed is "29 steps succeeded, 0 failed".
+"19 steps succeeded, 0 failed, 11 skipped" and the same run with an editor
+installed is "30 steps succeeded, 0 failed".
 
 ---
 
