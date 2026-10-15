@@ -12,11 +12,11 @@ Docs/20.
 
 | Area | State | Evidence |
 | --- | --- | --- |
-| Code | Compiles on macOS (UE 5.8, Apple Silicon). Every system in Docs/03–08 implemented. | 37 automation tests, 43 validation checks, all engine-free checks passing |
+| Code | Compiles on macOS (UE 5.8, Apple Silicon). Every system in Docs/03–08 implemented. | 38 automation tests, 43 validation checks, all engine-free checks passing |
 | The tower | All 18 storeys to the brief and the references: revolving doors, double-height reception, gates with glass wings, escalators, coffee shop, 9 lifts (glass lift in steel), two stairs, 48 rooms, canteen, Skydeck balcony, Management Suite and atrium (16), Winter Garden and roof terrace (17) | Docs/09; rendered review captures |
 | Lighting | Physically based: lumens and lux, EV100 exposure per floor, sun and sky, fill, stair bulkheads | Docs/09 §5.3 |
 | Surroundings | Aldgate East from OpenStreetMap at 1:1: ~8,800 buildings, streets, traffic, parks, trees, the City skyline | Docs/09 §2.9 |
-| Art | **Blockout.** Every surface is a flat material instance on engine cubes; no textures, no authored meshes, characters and weapons are placeholders | Docs/15, 16 |
+| Art | **Blockout.** Every surface is a flat material instance on engine cubes; no textures, no authored meshes, characters and weapons stand on Epic's template mannequins and guns | Docs/15, 16 |
 | Audio | Procedural placeholders; the recording brief is written | Docs/12, 14 |
 | Played | **Not yet by people.** Automation and captures only | Docs/18 §3 |
 
@@ -101,6 +101,12 @@ Replace flat colours with physically based textures, and boxes with props.
       pistol blueprint when a sidearm is drawn, the archetypes' clothing, the Game Animation Sample
       (a Fab download - needs the account holder).
 - [ ] Ten weapons with proper meshes, sounds and first-person animation.
+      *Done:* every weapon carries a real model - Epic's template rifle, or
+      its pistol for the three sidearms - in the hand, in first person and as
+      the floor pickup, filled into existing definitions by the build. Soft
+      references to models, effects and sounds are now tested for being set,
+      not for being loaded, so nothing assigned is silently skipped. *Next:*
+      a model per weapon family (shotgun, SMG, marksman), weapon sounds.
 - [ ] Recorded or licensed audio replacing the procedural placeholders:
       weapons, footsteps per surface, ambience per floor, the voice script.
 

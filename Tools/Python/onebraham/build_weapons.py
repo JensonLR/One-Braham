@@ -328,7 +328,12 @@ def build_weapon_definitions(report, blueprints):
         path = u"{0}/{1}".format(WEAPONS_ROOT, asset_name)
 
         if unreal.EditorAssetLibrary.does_asset_exist(path):
-            definitions[weapon["id"]] = unreal.EditorAssetLibrary.load_asset(path)
+            existing = unreal.EditorAssetLibrary.load_asset(path)
+            # Tuning is not re-applied over an existing definition, but models
+            # added since it was made are: an empty slot is never a choice.
+            if _apply_stand_in_models(report, existing, weapon, asset_name):
+                unreal.EditorAssetLibrary.save_asset(path, only_if_is_dirty=False)
+            definitions[weapon["id"]] = existing
             report.updated_asset(path)
             continue
 
@@ -349,6 +354,31 @@ def build_weapon_definitions(report, blueprints):
             weapon["mag"], weapon["pen"][0]))
 
     return definitions
+
+
+def _apply_stand_in_models(report, asset, weapon, context):
+    """Epic's template rifle and pistol, until the armoury's own models exist.
+
+    Copied from the engine install by fetch_open_assets.py: sidearms get the
+    pistol, everything else the rifle. Only slots that read back empty are
+    filled. Python reads a soft reference as None until its target is loaded,
+    so the models are loaded first; a hand-assigned model elsewhere in the
+    project can still read as empty and be replaced - replace the stand-ins in
+    this table, not by hand. Returns True if anything changed.
+    """
+    family = "Pistol" if weapon.get("slot") == "Sidearm" else "Rifle"
+    changed = False
+    for prop, path in (("third_person_mesh", "/Game/Weapons/{0}/Meshes/SKM_{0}".format(family)),
+                       ("first_person_mesh", "/Game/Weapons/{0}/Meshes/SKM_{0}".format(family)),
+                       ("world_pickup_mesh", "/Game/Weapons/{0}/Meshes/SM_{0}".format(family))):
+        model = unreal.load_asset(path)
+        if model is None:
+            report.skipped_asset(path, "stand-in weapon model not in the project yet")
+            continue
+        if asset.get_editor_property(prop) is not None:
+            continue
+        changed = _set(asset, prop, model, report, context) or changed
+    return changed
 
 
 def _apply_definition(report, asset, weapon, blueprints):
@@ -520,6 +550,8 @@ def _apply_definition(report, asset, weapon, blueprints):
     _set(asset, "loot_weight", weapon["weight"], report, context)
     _set(asset, "min_floor", min_floor, report, context)
     _set(asset, "max_floor", max_floor, report, context)
+
+    _apply_stand_in_models(report, asset, weapon, context)
 
     # --- classes ---------------------------------------------------------
     blueprint = blueprints.get(weapon_id)

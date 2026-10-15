@@ -181,12 +181,12 @@ void AOneBrahamWeaponBase::ResolveFxFallbacks()
 
 	// Shell ejection and tracer are spawned ad hoc rather than from a component,
 	// so they are cached and read directly at fire time.
-	if (Definition == nullptr || !Definition->ShellEject.IsValid())
+	if (Definition == nullptr || Definition->ShellEject.IsNull())
 	{
 		CachedShellEject = UOneBrahamVFXStatics::LoadEffectSystem(EOneBrahamVFXEffect::ShellEject);
 	}
 
-	if (Definition == nullptr || !Definition->Tracer.IsValid())
+	if (Definition == nullptr || Definition->Tracer.IsNull())
 	{
 		CachedTracer = UOneBrahamVFXStatics::LoadEffectSystem(EOneBrahamVFXEffect::Tracer);
 	}
@@ -207,7 +207,8 @@ void AOneBrahamWeaponBase::InitialiseFromDefinition(UOneBrahamWeaponDefinition* 
 
 	// Meshes: the 3P mesh is on the actor root, the 1P mesh is swapped in by the
 	// weapon component when the local owner equips it.
-	if (InDefinition->ThirdPersonMesh.IsValid() && WeaponMesh != nullptr)
+	// IsNull, not IsValid: a model nothing had loaded yet was never applied.
+	if (!InDefinition->ThirdPersonMesh.IsNull() && WeaponMesh != nullptr)
 	{
 		if (USkeletalMesh* Mesh = InDefinition->ThirdPersonMesh.LoadSynchronous())
 		{
@@ -215,7 +216,7 @@ void AOneBrahamWeaponBase::InitialiseFromDefinition(UOneBrahamWeaponDefinition* 
 		}
 	}
 
-	if (InDefinition->WorldPickupMesh.IsValid() && PickupMesh != nullptr)
+	if (!InDefinition->WorldPickupMesh.IsNull() && PickupMesh != nullptr)
 	{
 		if (UStaticMesh* Mesh = InDefinition->WorldPickupMesh.LoadSynchronous())
 		{
@@ -229,7 +230,7 @@ void AOneBrahamWeaponBase::InitialiseFromDefinition(UOneBrahamWeaponDefinition* 
 	}
 
 	// Muzzle flash system on the muzzle socket.
-	if (MuzzleFlashComponent != nullptr && InDefinition->MuzzleFlash.IsValid())
+	if (MuzzleFlashComponent != nullptr && !InDefinition->MuzzleFlash.IsNull())
 	{
 		if (UNiagaraSystem* System = InDefinition->MuzzleFlash.LoadSynchronous())
 		{
@@ -353,7 +354,7 @@ void AOneBrahamWeaponBase::OnEquippedBy(AOneBrahamCharacter* NewOwnerCharacter)
 	}
 
 	// Draw sound + animation.
-	if (Definition != nullptr && Definition->DrawSound.IsValid())
+	if (Definition != nullptr && !Definition->DrawSound.IsNull())
 	{
 		if (USoundBase* Sound = Definition->DrawSound.LoadSynchronous())
 		{
@@ -1215,7 +1216,7 @@ void AOneBrahamWeaponBase::RebuildAttachmentMeshes()
 		for (const TPair<EOneBrahamAttachmentSlot, FName>& Pair : Attachments)
 		{
 			const FOneBrahamAttachmentDefinition* Attachment = Component->GetAttachmentDefinition(Pair.Value);
-			if (Attachment == nullptr || !Attachment->Mesh.IsValid())
+			if (Attachment == nullptr || Attachment->Mesh.IsNull())
 			{
 				continue;
 			}
@@ -1307,7 +1308,7 @@ void AOneBrahamWeaponBase::RefreshMaterialParameters()
 			MID->SetVectorParameterValue(TEXT("BaseTint"), Skin->Tint);
 			MID->SetScalarParameterValue(TEXT("Wear"), Skin->WearAmount);
 
-			if (Skin->PatternTexture.IsValid())
+			if (!Skin->PatternTexture.IsNull())
 			{
 				if (UTexture2D* Texture = Skin->PatternTexture.LoadSynchronous())
 				{
@@ -1449,7 +1450,7 @@ void AOneBrahamWeaponBase::MulticastPlayFireFX_Implementation(const FVector_NetQ
 	// Authored system first, generated fallback second. A suppressed weapon still
 	// ejects brass; it just does not throw a flash.
 	{
-		UNiagaraSystem* System = (Definition != nullptr && Definition->ShellEject.IsValid())
+		UNiagaraSystem* System = (Definition != nullptr && !Definition->ShellEject.IsNull())
 			? Definition->ShellEject.LoadSynchronous()
 			: CachedShellEject.Get();
 
@@ -1479,11 +1480,11 @@ void AOneBrahamWeaponBase::MulticastPlayFireFX_Implementation(const FVector_NetQ
 	}
 	else if (Definition != nullptr && FireAudioComponent != nullptr)
 	{
-		const TSoftObjectPtr<USoundBase>& SoundPtr = bSuppressed && Definition->SuppressedFireSound.IsValid()
+		const TSoftObjectPtr<USoundBase>& SoundPtr = bSuppressed && !Definition->SuppressedFireSound.IsNull()
 			? Definition->SuppressedFireSound
 			: Definition->FireSoundClose;
 
-		if (SoundPtr.IsValid())
+		if (!SoundPtr.IsNull())
 		{
 			if (USoundBase* Sound = SoundPtr.LoadSynchronous())
 			{
@@ -1561,7 +1562,7 @@ void AOneBrahamWeaponBase::MulticastPlayReloadFX_Implementation(bool bStarted)
 	{
 		if (UAnimInstance* AnimInstance = Mesh->GetAnimInstance())
 		{
-			if (Definition->ReloadMontage.IsValid())
+			if (!Definition->ReloadMontage.IsNull())
 			{
 				if (UAnimMontage* Montage = Definition->ReloadMontage.LoadSynchronous())
 				{
@@ -1580,7 +1581,7 @@ void AOneBrahamWeaponBase::MulticastPlayReloadFX_Implementation(bool bStarted)
 
 	// Reload sounds: magazine out, magazine in, bolt release. The audio manager
 	// handles the three-stage sequence with correct timing.
-	if (bStarted && Definition->ReloadSound.IsValid())
+	if (bStarted && !Definition->ReloadSound.IsNull())
 	{
 		if (USoundBase* Sound = Definition->ReloadSound.LoadSynchronous())
 		{
@@ -1591,7 +1592,7 @@ void AOneBrahamWeaponBase::MulticastPlayReloadFX_Implementation(bool bStarted)
 
 void AOneBrahamWeaponBase::MulticastPlayDryFire_Implementation()
 {
-	if (Definition == nullptr || !Definition->DryFireSound.IsValid())
+	if (Definition == nullptr || Definition->DryFireSound.IsNull())
 	{
 		return;
 	}
@@ -1610,7 +1611,7 @@ void AOneBrahamWeaponBase::PlayTracerLocal(const FVector& Start, const FVector& 
 	}
 
 	// Authored tracer, else the generated one. Suppressed weapons returned above.
-	UNiagaraSystem* System = Definition->Tracer.IsValid()
+	UNiagaraSystem* System = !Definition->Tracer.IsNull()
 		? Definition->Tracer.LoadSynchronous()
 		: CachedTracer.Get();
 

@@ -158,7 +158,7 @@ DirectX normal and roughness maps are extracted). All CC0.
 
 Poly Haven's [rubber_tiles](https://polyhaven.com/a/rubber_tiles) (CC0) is the canteen floor.
 
-## Epic Games (UE5 mannequins)
+## Epic Games (UE5 mannequins and template weapons)
 
 Manny and Quinn, their materials, the locomotion animation blueprint, the
 rifle, pistol, hit-react and death animations, and the first-person
@@ -168,3 +168,9 @@ from the engine install, copied to `Content/Characters/Mannequins` by
 `fetch_open_assets.py` (not committed). Free for use in Unreal Engine projects
 under the Unreal Engine EULA. They stand in for the cast's bodies until those
 are made (Docs/13).
+
+The template rifle and pistol (`SKM_`/`SM_Rifle`, `SKM_`/`SM_Pistol`, their
+materials and textures), from the engine's standard template resources, are
+copied to `Content/Weapons` the same way and on the same terms. They stand in
+for the armoury's models (Docs/16): sidearms carry the pistol, everything else
+the rifle.

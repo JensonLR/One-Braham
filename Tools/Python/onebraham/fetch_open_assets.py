@@ -243,6 +243,16 @@ def copy_engine_mannequins():
             if not os.path.exists(os.path.join(anims_target, name)):
                 shutil.copy2(os.path.join(anims_source, name), os.path.join(anims_target, name))
         print("ok  rifle and pistol animation blueprints")
+
+    # The template rifle and pistol models, where their references point.
+    weapons_source = os.path.join(root, "Templates", "TemplateResources", "Standard", "Weapons", "Content")
+    weapons_target = os.path.join(ROOT, "Content", "Weapons")
+    if os.path.isdir(weapons_source):
+        for family in ("Rifle", "Pistol"):
+            target_dir = os.path.join(weapons_target, family)
+            if not os.path.isdir(target_dir):
+                shutil.copytree(os.path.join(weapons_source, family), target_dir)
+        print("ok  rifle and pistol models")
     return True
 
 
