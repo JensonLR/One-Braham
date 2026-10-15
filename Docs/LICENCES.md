@@ -144,3 +144,16 @@ imported to `/Game/OneBraham/Materials/Textures`. All CC0.
 | [white_plaster_02](https://polyhaven.com/a/white_plaster_02) | partitions |
 | [concrete_pavement](https://polyhaven.com/a/concrete_pavement) | street paving |
 | [asphalt_02](https://polyhaven.com/a/asphalt_02) | carriageway |
+
+## ambientCG (textures)
+
+PBR sets (2K-JPG zips, MD5-pinned in `fetch_open_assets.py`; only the colour,
+DirectX normal and roughness maps are extracted). All CC0.
+
+| Set | Surface |
+| --- | --- |
+| [Carpet001](https://ambientcg.com/view?id=Carpet001) | office carpet tile (tinted charcoal) |
+| [Metal011](https://ambientcg.com/view?id=Metal011) | brushed steel |
+| [Planks037A](https://ambientcg.com/view?id=Planks037A) | terrace decking |
+
+Poly Haven's [rubber_tiles](https://polyhaven.com/a/rubber_tiles) (CC0) is the canteen floor.

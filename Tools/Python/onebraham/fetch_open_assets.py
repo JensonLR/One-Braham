@@ -121,7 +121,34 @@ ASSETS = [
      "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/asphalt_02/asphalt_02_rough_2k.jpg",
      "6fe669ab38640ef2009d6a28d1ad5ee9", "CC0 (Poly Haven)",
      "https://polyhaven.com/a/asphalt_02"),
+    ("rubber_tiles:albedo", "texture",
+     "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rubber_tiles/rubber_tiles_diff_2k.jpg",
+     "5bfab6657e8b95310d22cb40b81fe42e", "CC0 (Poly Haven)",
+     "https://polyhaven.com/a/rubber_tiles"),
+    ("rubber_tiles:normal", "texture",
+     "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rubber_tiles/rubber_tiles_nor_dx_2k.jpg",
+     "e4820f11a04b34d528a00f0185ec39d2", "CC0 (Poly Haven)",
+     "https://polyhaven.com/a/rubber_tiles"),
+    ("rubber_tiles:roughness", "texture",
+     "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/rubber_tiles/rubber_tiles_rough_2k.jpg",
+     "46aff3216fd140ced87cd1eaf366410e", "CC0 (Poly Haven)",
+     "https://polyhaven.com/a/rubber_tiles"),
 ]
+
+
+# ambientCG sets come as zips: the archive is pinned by MD5, and only the three
+# maps are extracted - by exact member name, never by path the archive chooses.
+# id, url, md5, page
+ZIP_SETS = [
+    ("Carpet001", "https://ambientcg.com/get?file=Carpet001_2K-JPG.zip",
+     "80c1ffbc1490cdfd580b0b630d624416", "https://ambientcg.com/view?id=Carpet001"),
+    ("Metal011", "https://ambientcg.com/get?file=Metal011_2K-JPG.zip",
+     "7978d4875ef52d47acf5d2403bede19a", "https://ambientcg.com/view?id=Metal011"),
+    ("Planks037A", "https://ambientcg.com/get?file=Planks037A_2K-JPG.zip",
+     "725f9334e65d54db35b522344b0c948f", "https://ambientcg.com/view?id=Planks037A"),
+]
+ZIP_MEMBERS = {"albedo": "_2K-JPG_Color.jpg", "normal": "_2K-JPG_NormalDX.jpg",
+               "roughness": "_2K-JPG_Roughness.jpg"}
 
 
 def _md5(path):
@@ -195,6 +222,33 @@ def fetch():
             entry.update({"sun_azimuth_deg": azimuth, "sun_elevation_deg": elevation, "sun_peak": peak})
         manifest[asset_id] = entry
         print("ok  {0}  {1}".format(asset_id, entry.get("sun_elevation_deg", "")))
+    import zipfile
+    folder = os.path.join(SOURCE_ART, "Textures")
+    archives = os.path.join(SOURCE_ART, "Archives")
+    for path_dir in (folder, archives):
+        if not os.path.isdir(path_dir):
+            os.makedirs(path_dir)
+    for set_id, url, md5, page in ZIP_SETS:
+        archive = os.path.join(archives, set_id + "_2K-JPG.zip")
+        if not os.path.exists(archive) or _md5(archive) != md5:
+            print("fetching {0}".format(url))
+            request = Request(url, headers={"User-Agent": "OneBrahamBuild/1.0"})
+            with open(archive, "wb") as handle:
+                handle.write(urlopen(request).read())
+        if _md5(archive) != md5:
+            print("CHECKSUM MISMATCH: {0}".format(archive))
+            return 1
+        with zipfile.ZipFile(archive) as bundle:
+            for role, suffix in ZIP_MEMBERS.items():
+                member = set_id + suffix
+                target = os.path.join(folder, member)
+                if not os.path.exists(target):
+                    with bundle.open(member) as source, open(target, "wb") as handle:
+                        handle.write(source.read())
+                manifest["{0}:{1}".format(set_id, role)] = {
+                    "kind": "texture", "path": os.path.relpath(target, ROOT),
+                    "licence": "CC0 (ambientCG)", "page": page}
+        print("ok  {0}".format(set_id))
     with open(MANIFEST, "w") as handle:
         json.dump(manifest, handle, indent=2, sort_keys=True)
     print("wrote {0}".format(MANIFEST))

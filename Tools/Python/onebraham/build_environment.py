@@ -1153,10 +1153,31 @@ def build_escalator_balustrade(cx, cy, z, materials, prefix):
     _wall(cx, cy, z, x1, y0, x1, y1, screen, prefix + "_Escalator_Rail_E", height=110.0, thickness=8.0)
 
 
+def _task_chair(cx, cy, z, x, y, facing, materials, label):
+    """A task chair: star base, gas column, seat, backrest - pushed in, a
+    little askew, the way a real office leaves them."""
+    black = _district_material("BlackCladding") or materials.get("Metal")
+    fabric = materials.get("Fabric") or materials.get("Carpet")
+    _box((cx + x, cy + y, z + 4.0), (58.0, 58.0, 6.0), black, label + "_Base")
+    _box((cx + x, cy + y, z + 24.0), (6.0, 6.0, 36.0), black, label + "_Column")
+    _box((cx + x, cy + y, z + 46.0), (50.0, 48.0, 8.0), fabric, label + "_Seat")
+    back = _box((cx + x, cy + y + facing * 24.0, z + 78.0), (46.0, 6.0, 52.0), fabric, label + "_Back")
+    if back is not None:
+        back.set_actor_rotation(unreal.Rotator(roll=facing * 6.0, pitch=0.0, yaw=0.0), False)
+
+
 def build_open_plan_desks(cx, cy, z, x0, x1, y0, y1, materials, prefix, label):
-    """Benching: back-to-back desk pairs with a low screen, in rows with aisles."""
+    """Benching as the real floors have it: back-to-back pairs of 180 cm
+    workstations on a central spine - thin oak tops on steel legs, a fabric
+    screen, dual monitors lit, task chairs, a pedestal under each desk, and a
+    planter closing each row. The tops are cover only at crouch; the screen
+    and monitors hide a head, not a body."""
     wood = materials.get("Wood")
     fabric = materials.get("Fabric") or wood
+    steel = _district_material("Aluminium") or materials.get("Metal")
+    black = _district_material("BlackCladding") or materials.get("Metal")
+    glow = unreal.EditorAssetLibrary.load_asset(C.MATERIALS_INSTANCES + "/MI_OB_Signage_SignalBlue")
+    pedestal_mat = materials.get("Metal")
     row = 0
     y = y0 + 160.0
     while y + 160.0 <= y1:
@@ -1165,11 +1186,37 @@ def build_open_plan_desks(cx, cy, z, x0, x1, y0, y1, materials, prefix, label):
         col = 0
         while x + 360.0 <= x1:
             col += 1
-            _box((cx + x + 180.0, cy + y, z + 37.0), (360.0, 160.0, 74.0), wood,
-                 "{0}_{1}_Bench_{2}_{3}".format(prefix, label, row, col))
-            _box((cx + x + 180.0, cy + y, z + 74.0 + 22.0), (360.0, 6.0, 44.0), fabric,
-                 "{0}_{1}_Screen_{2}_{3}".format(prefix, label, row, col))
+            tag = "{0}_{1}_Bench_{2}_{3}".format(prefix, label, row, col)
+            bx = x + 180.0
+            # Top and legs.
+            _box((cx + bx, cy + y, z + 72.5), (360.0, 160.0, 3.0), wood, tag + "_Top")
+            for lx in (-170.0, 0.0, 170.0):
+                _box((cx + bx + lx, cy + y, z + 35.5), (6.0, 150.0, 71.0), steel,
+                     "{0}_Leg_{1}".format(tag, int(lx)))
+            # Spine screen down the middle.
+            _box((cx + bx, cy + y, z + 74.0 + 20.0), (356.0, 3.0, 40.0), fabric, tag + "_Screen")
+            # Each side: two desks, each with two monitors, a pedestal, a chair.
+            for side in (-1.0, 1.0):
+                for seat, sx in enumerate((-90.0, 90.0)):
+                    stag = "{0}_{1}{2}".format(tag, "S" if side < 0 else "N", seat + 1)
+                    for m, mx in enumerate((-26.0, 26.0)):
+                        mon = (cx + bx + sx + mx, cy + y + side * 22.0, z + 74.0 + 30.0)
+                        _box(mon, (50.0, 3.0, 30.0), black, "{0}_Monitor{1}".format(stag, m + 1))
+                        if glow is not None:
+                            _box((mon[0], mon[1] + side * 1.7, mon[2] + 1.0), (47.0, 0.4, 26.0), glow,
+                                 "{0}_Monitor{1}_Screen".format(stag, m + 1))
+                        _box((mon[0], mon[1] - side * 2.0, z + 74.0 + 7.0), (6.0, 6.0, 14.0), black,
+                             "{0}_Monitor{1}_Stand".format(stag, m + 1))
+                    _box((cx + bx + sx + 55.0, cy + y + side * 45.0, z + 30.0), (40.0, 55.0, 60.0),
+                         pedestal_mat, stag + "_Pedestal")
+                    # Chairs pushed in, each one a little turned.
+                    jitter = ((row * 7 + col * 3 + seat) % 5 - 2) * 6.0
+                    _task_chair(cx, cy, z, bx + sx + jitter, y + side * 115.0, side, materials, stag + "_Chair")
             x += 480.0
+        # A planter closes the row on the aisle.
+        if col:
+            _planter(cx, cy, z, x0 + 30.0, x0 + 100.0, y - 60.0, y + 60.0, prefix,
+                     "{0}_Row{1}".format(label, row), trees=0, height=80.0)
         y += 420.0
     _note_surface("Wood", prefix + "_" + label)
 

@@ -805,6 +805,10 @@ TEXTURE_SETS = {
     "Concrete":     ("concrete_floor_02", 220.0, 0.7, 1.6),
     "Wood":         ("oak_wood_planks",   180.0, 0.0, 1.0),
     "Plasterboard": ("white_plaster_02",  200.0, 1.0, 1.25),
+    "Carpet":       ("Carpet001",         180.0, 1.0, 2.2),   # loop-pile office tile (ambientCG)
+    "Metal":        ("Metal011",          140.0, 1.0, 1.9),   # brushed steel (ambientCG)
+    "Decking":      ("Planks037A",        240.0, 0.4, 2.4),   # terrace planks (ambientCG)
+    "Lino":         ("rubber_tiles",      120.0, 0.7, 1.8),   # canteen floor
 }
 # District surfaces (build_district) that take a set too.
 DISTRICT_TEXTURE_SETS = {

@@ -66,10 +66,14 @@ Replace flat colours with physically based textures, and boxes with props.
 
 - [ ] Texture sets for the 15 surfaces (Docs/10 §2) from the sources in §4.
       *Done:* terrazzo, concrete, timber, plaster, street paving, asphalt -
-      CC0 sets on a world-aligned master, coloured by the measured albedo.
-      *Next:* carpet tile, lino, metal, decking.
+      CC0 sets on a world-aligned master, coloured by the measured albedo;
+      carpet tile, brushed metal, terrace decking and the canteen's rubber
+      tile (ambientCG / Poly Haven). *Next:* fabric, glass grime, signage.
 - [ ] Office dressing: desks, chairs, monitors, planters, signage, kitchen kit,
-      server racks, toilets - from §4, scaled to real dimensions.
+      server racks, toilets - from §4, scaled to real dimensions. *Done:*
+      open-plan benching with oak tops, spine screens, lit dual monitors,
+      pedestals, task chairs and row-end planters. *Next:* kitchen kit,
+      server rack detail, WC fittings, wayfinding signage.
 - [ ] Decals: wear, floor signage, wet-floor, blood (already authored as
       materials; needs textures).
 - [ ] District facades: real window textures per family, roofscape plant,
