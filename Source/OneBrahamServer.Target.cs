@@ -19,7 +19,7 @@ public class OneBrahamServerTarget : TargetRules
 	public OneBrahamServerTarget(TargetInfo Target) : base(Target)
 	{
 		Type = TargetType.Server;
-		DefaultBuildSettings = BuildSettingsVersion.V5;
+		DefaultBuildSettings = BuildSettingsVersion.Latest;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Latest;
 		ExtraModuleNames.AddRange(new string[] { "OneBraham" });
 

@@ -22,7 +22,7 @@ public class OneBraham : ModuleRules
 		CppStandard = CppStandardVersion.Cpp20;
 		bEnableExceptions = false;
 		bUseUnity = true;
-		DefaultBuildSettings = BuildSettingsVersion.V5;
+		DefaultBuildSettings = BuildSettingsVersion.Latest;
 
 		PublicDependencyModuleNames.AddRange(new string[]
 		{

@@ -11,6 +11,12 @@ DerivedDataCache/
 Intermediate/
 Saved/
 Build/StagedBuilds/
+Build/Mac/
+Build/Windows/
+Build/LinuxServer/
+Build/Mac/
+Build/Windows/
+Build/LinuxServer/
 Build/*.log
 Build/PackageLogs/
 .vs/
