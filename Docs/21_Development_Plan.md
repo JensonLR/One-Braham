@@ -72,8 +72,14 @@ Replace flat colours with physically based textures, and boxes with props.
 - [ ] Office dressing: desks, chairs, monitors, planters, signage, kitchen kit,
       server racks, toilets - from §4, scaled to real dimensions. *Done:*
       open-plan benching with oak tops, spine screens, lit dual monitors,
-      pedestals, task chairs and row-end planters. *Next:* kitchen kit,
-      server rack detail, WC fittings, wayfinding signage.
+      pedestals, task chairs and row-end planters; then, from the interior
+      photographs: white benching and mesh chairs, cubby shelving, purple
+      high-back booths and breakout kitchens, felt acoustic discs, suspended
+      linear LEDs, the cream-panelled lift lobby on pale porcelain, the
+      reception lounge (oak herringbone, curved sofa, figs in black pots),
+      server racks with LEDs and cable trays, WC fittings, wayfinding signs
+      and terrace picnic benches. *Next:* the lift lobby's lit ceiling,
+      kitchen appliances, meeting-room glazing.
 - [ ] Decals: wear, floor signage, wet-floor, blood (already authored as
       materials; needs textures).
 - [ ] District facades: real window textures per family, roofscape plant,

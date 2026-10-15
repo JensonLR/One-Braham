@@ -137,7 +137,7 @@ ROOM_FLOOR_FINISH = {
     ("OpenPlan", "Desk_Farm_South"):   "Carpet",
     ("OpenPlan", "Meeting_Pod_1"):     "Fabric",
     ("OpenPlan", "Meeting_Pod_2"):     "Fabric",
-    ("OpenPlan", "Break_Out_Kitchen"): "Lino",
+    ("OpenPlan", "Break_Out_Kitchen"): "Wood",
     ("OpenPlan", "Print_Alcove"):      "Lino",
 
     # Server and comms: a raised perforated rack floor, not carpet. This is the
@@ -894,6 +894,80 @@ def build_spiral_stair(cx, cy, z, materials, label):
              (4.0, 4.0, 100.0), steel, "{0}_Baluster_{1:02d}".format(label, i))
 
 
+def _sign(cx, cy, x, y, zc, yaw, text, size, colour, label, align="center"):
+    """Wayfinding copy: unlit text that glows like an illuminated sign."""
+    actor = _spawn(unreal.TextRenderActor, unreal.Vector(cx + x, cy + y, zc),
+                   unreal.Rotator(roll=0.0, pitch=0.0, yaw=yaw))
+    if actor is None:
+        return None
+    component = actor.text_render
+    component.set_editor_property("text", text)
+    component.set_editor_property("world_size", size)
+    component.set_editor_property("horizontal_alignment", {
+        "center": unreal.HorizTextAligment.EHTA_CENTER, "left": unreal.HorizTextAligment.EHTA_LEFT,
+        "right": unreal.HorizTextAligment.EHTA_RIGHT}[align])
+    component.set_editor_property("vertical_alignment", unreal.VerticalTextAligment.EVRTA_TEXT_CENTER)
+    component.set_editor_property("text_render_color", unreal.Color(colour[0], colour[1], colour[2], 255))
+    glow = unreal.load_asset("/Engine/EngineMaterials/DefaultTextMaterialTranslucent.DefaultTextMaterialTranslucent")
+    if glow is not None:
+        component.set_material(0, glow)
+    _label(actor, label)
+    return actor
+
+
+def _wc_fittings(cx, cy, z, side, tag, materials, prefix):
+    """Inside each WC: cubicle doors, pans, basins set in the vanity, a long
+    mirror, a dryer; outside, the door sign."""
+    white = unreal.EditorAssetLibrary.load_asset(C.MATERIALS_INSTANCES + "/MI_OB_Brand_White") or materials.get("Plasterboard")
+    steel = materials.get("Metal")
+    mirror = materials.get("Glass") or steel
+    label = "{0}_WC_{1}".format(prefix, tag)
+    for i, (a, b) in enumerate(((704.0, 760.0), (760.0, 873.0), (873.0, 986.0))):
+        mid = (a + b) / 2.0 if i else 730.0
+        if i:
+            # Cubicle door, ajar: a panel turned 30 degrees into the cubicle.
+            panel = _box((cx + mid * side, cy + 980.0, z + 105.0), (b - a - 12.0, 4.0, 190.0), materials.get("Plasterboard"),
+                         "{0}_CubicleDoor_{1}".format(label, i))
+            if panel is not None:
+                panel.set_actor_rotation(unreal.Rotator(roll=0.0, pitch=0.0, yaw=side * 30.0), False)
+            _box((cx + mid * side, cy + 1180.0, z + 20.0), (40.0, 55.0, 40.0), white, "{0}_Pan_{1}".format(label, i))
+            _box((cx + mid * side, cy + 1222.0, z + 75.0), (38.0, 16.0, 30.0), white, "{0}_Cistern_{1}".format(label, i))
+    for b in range(3):
+        bx = (790.0 + b * 110.0) * side
+        _box((cx + bx, cy + 640.0, z + 88.0), (44.0, 34.0, 6.0), white, "{0}_Basin_{1}".format(label, b + 1))
+        _box((cx + bx, cy + 615.0, z + 110.0), (4.0, 4.0, 26.0), steel, "{0}_Tap_{1}".format(label, b + 1))
+    _box((cx + 900.0 * side, cy + 606.0, z + 160.0), (340.0, 1.0, 90.0), mirror, label + "_Mirror")
+    _box((cx + 1060.0 * side, cy + 700.0, z + 120.0), (24.0, 14.0, 30.0), white, label + "_Dryer")
+    # Door sign on the hallway face.
+    word = "MEN" if tag == "Mens" else "WOMEN"
+    _sign(cx, cy, (900.0 + 85.0) * side, CORE_CORRIDOR_Y[1] - 12.0, z + 190.0, -90.0, word, 14.0,
+          (235, 238, 245), label + "_Sign")
+
+
+def build_wayfinding(floor_index, area_name, cx, cy, z, prefix):
+    """The building's signage, on every floor: the floor number large over the
+    glass lift at the end of the lift hall, a lifts sign at the hall's mouth,
+    STAIRS over both stair doors, and green FIRE EXIT signs on the stair doors."""
+    names = {0: "G", 15: "15"}
+    number = names.get(floor_index, "{0:d}".format(floor_index))
+    light = (240, 242, 248)
+    _sign(cx, cy, 0.0, GLASS_LIFT_Y[0] - 14.0, z + 330.0, -90.0, number, 70.0, light, prefix + "_Sign_FloorNumber")
+    area = {"Ground_Plaza": "RECEPTION", "Lobby": "CLIENT SHOWCASE  ·  LAB", "Mezzanine": "MEETING ROOMS",
+            "OpenPlan": "OPEN PLAN", "ServerComms": "TECHNOLOGY", "Executive": "EXECUTIVE",
+            "Skydeck": "CANTEEN  ·  SKYDECK", "Summit": "MANAGEMENT SUITE",
+            "WinterGarden": "WINTER GARDEN  ·  ROOF TERRACE"}.get(area_name, "")
+    _sign(cx, cy, 0.0, GLASS_LIFT_Y[0] - 14.0, z + 282.0, -90.0, area, 11.0, (190, 200, 220),
+          prefix + "_Sign_FloorName")
+    _sign(cx, cy, 0.0, CORE_HALL_Y[0] - 14.0, z + 300.0, -90.0, "LIFTS  1–8   ·   GLASS LIFT", 13.0, light,
+          prefix + "_Sign_Lifts")
+    for s_side, s_tag in ((-1.0, "A"), (1.0, "B")):
+        door_x = STAIR_DOOR_X * s_side
+        _sign(cx, cy, door_x, STAIR_LOBBY_Y[0] - 14.0, z + 245.0, -90.0,
+              "STAIRS" if s_side < 0 else "SPIRAL STAIR", 13.0, light, "{0}_Sign_Stair{1}".format(prefix, s_tag))
+        _sign(cx, cy, door_x, STAIR_LOBBY_Y[0] - 14.0, z + 222.0, -90.0, "FIRE EXIT", 10.0, (40, 220, 90),
+              "{0}_Sign_FireExit{1}".format(prefix, s_tag))
+
+
 def build_core(floor_index, area_name, cx, cy, z, materials, prefix):
     """The lift banks, glass lift, cross-hallway, toilets and both stairs on one floor."""
     concrete = materials.get("Concrete")
@@ -990,6 +1064,7 @@ def build_core(floor_index, area_name, cx, cy, z, materials, prefix):
             _wall(cx, cy, z, cub_x * side, 980.0, cub_x * side, CORE_NORTH_Y, plaster,
                   "{0}_WC_{1}_Cubicle_{2}".format(prefix, tag, i + 1), height=200.0, thickness=8.0)
         _box((cx + 900.0 * side, cy + 640.0, z + 45.0), (360.0, 55.0, 90.0), metal, "{0}_WC_{1}_Vanity".format(prefix, tag))
+        _wc_fittings(cx, cy, z, side, tag, materials, prefix)
 
     _note_surface("Concrete", prefix + "_Core")
     _note_surface("Metal", prefix + "_Lift_Doors")
@@ -1139,6 +1214,7 @@ def build_ground_floor(cx, cy, z, half_x, half_y, materials, prefix):
             _box((cx + tx, cy + ty, z + 37.0), (80.0, 80.0, 74.0), wood,
                  "{0}_Coffee_Table_{1}_{2}".format(prefix, row + 1, col + 1))
 
+    build_reception_lounge(cx, cy, z, materials, prefix)
     _note_surface("Marble", prefix + "_Reception")
     _note_surface("Wood", prefix + "_Coffee")
 
@@ -1153,11 +1229,226 @@ def build_escalator_balustrade(cx, cy, z, materials, prefix):
     _wall(cx, cy, z, x1, y0, x1, y1, screen, prefix + "_Escalator_Rail_E", height=110.0, thickness=8.0)
 
 
+def _fitout(name, fallback=None):
+    return _district_material(name) or fallback
+
+
+def build_lift_lobby(cx, cy, z, materials, prefix):
+    """The lift hall as the photographs show it: pale large-format porcelain
+    underfoot, cream panelled walls with brushed-steel frames at every landing
+    door, a dropped ceiling with warm coves and downlights, and a plant in a
+    tall black pot by the glass lift."""
+    cream = _fitout("PanelCream", materials.get("Plasterboard"))
+    porcelain = _fitout("Porcelain", materials.get("Concrete"))
+    steel = materials.get("Metal")
+    white = _fitout("LightRibbon")
+    hx = CORE_HALL_X
+    y0, y1 = CORE_HALL_Y
+    _box((cx, cy + (y0 + y1) / 2.0, z + 0.4), (2.0 * hx - 4.0, y1 - y0, 0.8), porcelain, prefix + "_LiftHall_Porcelain")
+    for side, tag in ((-1.0, "W"), (1.0, "E")):
+        face = (hx - 6.0) * side
+        for index, y in enumerate(CORE_SHAFT_YS):
+            _wall_with_door(cx, cy, z, face, y - 150.0, face, y + 150.0, y, C.DOOR_WIDTH_CM + 10.0, cream,
+                            "{0}_LiftHall_Panel{1}_{2}".format(prefix, tag, index + 1), height=300.0)
+            for jamb in (-1.0, 1.0):
+                _box((cx + face - side * 2.0, cy + y + jamb * (C.DOOR_WIDTH_CM / 2.0 + 6.0), z + 115.0),
+                     (8.0, 8.0, 230.0), steel, "{0}_LiftHall_Jamb{1}_{2}_{3}".format(prefix, tag, index + 1, int(jamb)))
+        # Warm cove along the top of each wall.
+        if white is not None:
+            _box((cx + (hx - 14.0) * side, cy + (y0 + y1) / 2.0, z + 298.0), (3.0, y1 - y0 - 20.0, 2.0), white,
+                 "{0}_LiftHall_Cove{1}".format(prefix, tag))
+    _box((cx, cy + (y0 + y1) / 2.0, z + 305.0), (2.0 * hx - 30.0, y1 - y0, 6.0), cream, prefix + "_LiftHall_Ceiling")
+    for i in range(4):
+        y = y0 + (i + 0.5) * (y1 - y0) / 4.0
+        lamp = _spawn(unreal.PointLight, unreal.Vector(cx, cy + y, z + 290.0))
+        if lamp is not None:
+            component = lamp.point_light_component
+            component.set_editor_property("IntensityUnits", unreal.LightUnits.LUMENS)
+            component.set_editor_property("Intensity", 1600.0)
+            component.set_editor_property("AttenuationRadius", 520.0)
+            component.set_editor_property("LightColor", unreal.Color(255, 236, 210, 255))
+            component.set_editor_property("CastShadows", i % 2 == 0)
+            component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
+            _label(lamp, "{0}_LiftHall_Downlight_{1}".format(prefix, i + 1))
+    _fig_tree(cx, cy, z, 140.0, y1 - 40.0, prefix + "_LiftHall_Plant", height=170.0)
+    # Soft fill from the pale floor up to the ceiling and walls, as the coves do.
+    for i in range(2):
+        fill = _spawn(unreal.PointLight, unreal.Vector(cx, cy + y0 + (i + 0.5) * (y1 - y0) / 2.0, z + 40.0))
+        if fill is not None:
+            component = fill.point_light_component
+            component.set_editor_property("IntensityUnits", unreal.LightUnits.LUMENS)
+            component.set_editor_property("Intensity", 2200.0)
+            component.set_editor_property("AttenuationRadius", 700.0)
+            component.set_editor_property("SourceRadius", 150.0)
+            component.set_editor_property("CastShadows", False)
+            component.set_editor_property("SpecularScale", 0.0)
+            component.set_editor_property("LightColor", unreal.Color(255, 240, 222, 255))
+            component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
+            _label(fill, "{0}_LiftHall_Fill_{1}".format(prefix, i + 1))
+
+
+def build_linear_lights(area_name, cx, cy, z, size_x, size_y, prefix):
+    """The offices' suspended linear LEDs: long thin lines under the exposed
+    services, in runs across the floor plate, kept off the core."""
+    white = _fitout("LightRibbon")
+    if white is None:
+        return
+    half_x, half_y = size_x / 2.0, size_y / 2.0
+    drop = z + C.CEILING_HEIGHT_CM - 62.0
+    x = -half_x + 250.0
+    col = 0
+    while x < half_x - 200.0:
+        col += 1
+        y = -half_y + 200.0
+        seg = 0
+        while y + 450.0 < half_y - 150.0:
+            mid = y + 225.0
+            if not (abs(x) < 1200.0 and -1000.0 < mid < 1300.0):
+                if area_name != "WinterGarden" and not (area_name == "Skydeck" and mid > SKYDECK_SCREEN_Y) \
+                        and not (area_name == "Summit" and mid > SKYDECK_SCREEN_Y):
+                    seg += 1
+                    _box((cx + x, cy + mid, drop), (4.0, 440.0, 3.0), white,
+                         "{0}_LinearLED_{1}_{2}".format(prefix, col, seg))
+            y += 520.0
+        x += 330.0
+
+
+def _felt_discs(cx, cy, z, x0, x1, y0, y1, prefix, label):
+    felt = _fitout("FeltWhite")
+    for i, (fx, fy, d) in enumerate(((0.25, 0.3, 120.0), (0.55, 0.5, 150.0), (0.8, 0.25, 110.0), (0.4, 0.75, 130.0))):
+        _box((cx + x0 + (x1 - x0) * fx, cy + y0 + (y1 - y0) * fy, z + C.CEILING_HEIGHT_CM - 75.0 - i * 6.0),
+             (d, d, 5.0), felt, "{0}_{1}_FeltDisc_{2}".format(prefix, label, i + 1),
+             mesh_path="/Engine/BasicShapes/Cylinder.Cylinder")
+
+
+def _booth(cx, cy, z, x, y, facing, prefix, label):
+    """A high-back two-seat booth: the purple acoustic kind, back to the room."""
+    purple = _fitout("BoothPurple")
+    black = _fitout("BlackCladding")
+    _box((cx + x, cy + y, z + 22.0), (150.0, 60.0, 44.0), purple, label + "_Seat")
+    _box((cx + x, cy + y - facing * 28.0, z + 70.0), (150.0, 12.0, 140.0), purple, label + "_Back")
+    for e in (-1.0, 1.0):
+        _box((cx + x + e * 75.0, cy + y, z + 55.0), (8.0, 60.0, 110.0), purple, "{0}_Arm{1}".format(label, int(e)))
+    for e in (-1.0, 1.0):
+        _box((cx + x + e * 65.0, cy + y - facing * 25.0, z + 4.0), (3.0, 3.0, 8.0), black, "{0}_Foot{1}".format(label, int(e)))
+
+
+def build_breakout(cx, cy, z, x0, x1, y0, y1, materials, prefix, label, kitchen=False):
+    """Breakout space: purple high-back booths face to face round timber
+    tables, loose armchairs, felt discs overhead - and, in a kitchen, a grey
+    island with stools."""
+    timber = _fitout("TimberLight", materials.get("Wood"))
+    grey = _fitout("PanelCream", materials.get("Plasterboard"))
+    black = _fitout("BlackCladding")
+    mesh = _fitout("MeshWhite")
+    w, d = x1 - x0, y1 - y0
+    long_x = w >= d
+    pairs = max(1, int((w if long_x else d) // 330.0))
+    for p_ in range(pairs):
+        t = (p_ + 0.5) / pairs
+        if long_x:
+            bx, by = x0 + w * t, y0 + d * 0.3
+            _booth(cx, cy, z, bx, by - 70.0, 1.0, prefix, "{0}_{1}_Booth{2}A".format(prefix, label, p_ + 1))
+            _booth(cx, cy, z, bx, by + 70.0, -1.0, prefix, "{0}_{1}_Booth{2}B".format(prefix, label, p_ + 1))
+            _box((cx + bx, cy + by, z + 37.0), (120.0, 60.0, 4.0), timber, "{0}_{1}_BoothTable{2}".format(prefix, label, p_ + 1))
+            _box((cx + bx, cy + by, z + 18.0), (6.0, 6.0, 36.0), black, "{0}_{1}_BoothTableLeg{2}".format(prefix, label, p_ + 1))
+        else:
+            bx, by = x0 + w * 0.5, y0 + d * t
+            for e, tag in ((-1.0, "A"), (1.0, "B")):
+                seat = _box((cx + bx + e * 70.0, cy + by, z + 22.0), (60.0, 150.0, 44.0), _fitout("BoothPurple"),
+                            "{0}_{1}_Booth{2}{3}_Seat".format(prefix, label, p_ + 1, tag))
+                _box((cx + bx + e * 98.0, cy + by, z + 70.0), (12.0, 150.0, 140.0), _fitout("BoothPurple"),
+                     "{0}_{1}_Booth{2}{3}_Back".format(prefix, label, p_ + 1, tag))
+            _box((cx + bx, cy + by, z + 37.0), (60.0, 120.0, 4.0), timber, "{0}_{1}_BoothTable{2}".format(prefix, label, p_ + 1))
+    if kitchen:
+        ix, iy = x0 + w * 0.5, y1 - 120.0 if long_x else y0 + d * 0.8
+        _box((cx + ix, cy + iy, z + 46.0), (min(360.0, w - 80.0), 90.0, 92.0), grey, "{0}_{1}_Island".format(prefix, label))
+        _box((cx + ix, cy + iy, z + 93.0), (min(370.0, w - 70.0), 100.0, 4.0), timber, "{0}_{1}_IslandTop".format(prefix, label))
+        for st in range(3):
+            sx = ix + (st - 1) * 90.0
+            _box((cx + sx, cy + iy - 85.0, z + 34.0), (36.0, 36.0, 4.0), black, "{0}_{1}_Stool{2}_Seat".format(prefix, label, st + 1))
+            _box((cx + sx, cy + iy - 85.0, z + 16.0), (4.0, 4.0, 32.0), black, "{0}_{1}_Stool{2}_Leg".format(prefix, label, st + 1))
+    _felt_discs(cx, cy, z, x0, x1, y0, y1, prefix, label)
+
+
+def _cubby(cx, cy, z, x, y, prefix, label, along_x=True):
+    """Light-timber cubby shelving: the room dividers of the real floors."""
+    timber = _fitout("TimberLight")
+    w, h, d = 160.0, 180.0, 36.0
+    for i in range(4):
+        zz = z + i * h / 3.0
+        size = (w, d, 3.0) if along_x else (d, w, 3.0)
+        _box((cx + x, cy + y, zz + 1.5), size, timber, "{0}_Shelf{1}".format(label, i))
+    for j in range(4):
+        off = -w / 2.0 + j * w / 3.0
+        pos = (cx + x + off, cy + y, z + h / 2.0) if along_x else (cx + x, cy + y + off, z + h / 2.0)
+        size = (3.0, d, h) if along_x else (d, 3.0, h)
+        _box(pos, size, timber, "{0}_Upright{1}".format(label, j))
+    green = _fitout("Leaves")
+    for k in range(2):
+        off = -40.0 + k * 80.0
+        pos = (cx + x + off, cy + y, z + h + 18.0) if along_x else (cx + x, cy + y + off, z + h + 18.0)
+        _box(pos, (36.0, 30.0, 36.0), green, "{0}_Plant{1}".format(label, k), mesh_path=SPHERE_MESH)
+
+
+def _fig_tree(cx, cy, z, x, y, label, height=300.0):
+    """A fiddle-leaf fig in a tall black pot: a stem and a loose, leafy crown."""
+    pot = _fitout("BlackCladding")
+    bark = _fitout("Bark")
+    leaves = _fitout("Leaves")
+    _box((cx + x, cy + y, z + 32.0), (55.0, 55.0, 64.0), pot, label + "_Pot", mesh_path="/Engine/BasicShapes/Cylinder.Cylinder")
+    _box((cx + x, cy + y, z + 64.0 + height * 0.3), (5.0, 5.0, height * 0.6), bark, label + "_Stem")
+    for i, (ox, oy, oz, sz) in enumerate(((0, 0, 0.75, 120.0), (35, -20, 0.6, 90.0), (-30, 25, 0.88, 85.0),
+                                          (20, 30, 0.95, 70.0))):
+        _box((cx + x + ox, cy + y + oy, z + 64.0 + height * oz), (sz, sz * 0.9, sz * 0.8), leaves,
+             "{0}_Leaves{1}".format(label, i + 1), mesh_path=SPHERE_MESH)
+
+
+def build_reception_lounge(cx, cy, z, materials, prefix):
+    """The lounge by the glazing, as photographed: an oak herringbone floor set
+    into the terrazzo, a dark curved sofa, two timber-framed armchairs, a round
+    glass table, and fiddle-leaf figs in tall black pots against the glass."""
+    x0, x1, y0, y1 = -1350.0, -250.0, -1760.0, -1290.0
+    _box((cx + (x0 + x1) / 2.0, cy + (y0 + y1) / 2.0, z + 0.5), (x1 - x0, y1 - y0, 1.0),
+         _fitout("Herringbone", materials.get("Wood")), prefix + "_Lounge_Herringbone")
+    sofa = _fitout("SofaDark")
+    # The curved sofa: an arc of segments round the table.
+    ccx, ccy, radius = -800.0, -1540.0, 190.0
+    for i in range(7):
+        a = math.radians(200.0 + i * 20.0)
+        seg = _box((cx + ccx + radius * math.cos(a), cy + ccy + radius * math.sin(a), z + 22.0), (62.0, 80.0, 44.0), sofa,
+                   "{0}_Lounge_Sofa_{1}".format(prefix, i + 1))
+        back = _box((cx + ccx + (radius + 38.0) * math.cos(a), cy + ccy + (radius + 38.0) * math.sin(a), z + 52.0),
+                    (64.0, 14.0, 60.0), sofa, "{0}_Lounge_SofaBack_{1}".format(prefix, i + 1))
+        for piece in (seg, back):
+            if piece is not None:
+                piece.set_actor_rotation(unreal.Rotator(roll=0.0, pitch=0.0, yaw=math.degrees(a) + 90.0), False)
+    _box((cx + ccx, cy + ccy, z + 40.0), (90.0, 90.0, 3.0), materials.get("Glass"), prefix + "_Lounge_Table",
+         mesh_path="/Engine/BasicShapes/Cylinder.Cylinder")
+    _box((cx + ccx, cy + ccy, z + 19.0), (8.0, 8.0, 38.0), _fitout("BlackCladding"), prefix + "_Lounge_TableLeg")
+    timber = _fitout("Timber", materials.get("Wood"))
+    for i, (ax, ay) in enumerate(((-1150.0, -1450.0), (-450.0, -1450.0))):
+        _box((cx + ax, cy + ay, z + 38.0), (60.0, 60.0, 8.0), _fitout("PanelCream"), "{0}_Lounge_Armchair{1}_Seat".format(prefix, i + 1))
+        _box((cx + ax, cy + ay + 28.0, z + 70.0), (60.0, 8.0, 70.0), timber, "{0}_Lounge_Armchair{1}_Back".format(prefix, i + 1))
+        for lx in (-26.0, 26.0):
+            _box((cx + ax + lx, cy + ay, z + 18.0), (4.0, 50.0, 36.0), timber, "{0}_Lounge_Armchair{1}_Leg{2}".format(prefix, i + 1, int(lx)))
+    for i, fx in enumerate((-1290.0, -980.0, -560.0, -320.0)):
+        _fig_tree(cx, cy, z, fx, -1730.0, "{0}_Lounge_Fig{1}".format(prefix, i + 1), height=260.0 + (i % 2) * 60.0)
+
+
+def _picnic_bench(cx, cy, z, x, y, label):
+    black = _fitout("BlackCladding")
+    _box((cx + x, cy + y, z + 74.0), (220.0, 75.0, 5.0), black, label + "_Top")
+    for e in (-1.0, 1.0):
+        _box((cx + x, cy + y + e * 65.0, z + 45.0), (220.0, 28.0, 4.0), black, "{0}_Seat{1}".format(label, int(e)))
+        _box((cx + x + e * 95.0, cy + y, z + 36.0), (6.0, 150.0, 72.0), black, "{0}_Frame{1}".format(label, int(e)))
+
+
 def _task_chair(cx, cy, z, x, y, facing, materials, label):
     """A task chair: star base, gas column, seat, backrest - pushed in, a
     little askew, the way a real office leaves them."""
     black = _district_material("BlackCladding") or materials.get("Metal")
-    fabric = materials.get("Fabric") or materials.get("Carpet")
+    fabric = _district_material("MeshWhite") or materials.get("Fabric") or materials.get("Carpet")
     _box((cx + x, cy + y, z + 4.0), (58.0, 58.0, 6.0), black, label + "_Base")
     _box((cx + x, cy + y, z + 24.0), (6.0, 6.0, 36.0), black, label + "_Column")
     _box((cx + x, cy + y, z + 46.0), (50.0, 48.0, 8.0), fabric, label + "_Seat")
@@ -1172,7 +1463,7 @@ def build_open_plan_desks(cx, cy, z, x0, x1, y0, y1, materials, prefix, label):
     screen, dual monitors lit, task chairs, a pedestal under each desk, and a
     planter closing each row. The tops are cover only at crouch; the screen
     and monitors hide a head, not a body."""
-    wood = materials.get("Wood")
+    wood = _district_material("DeskWhite") or materials.get("Wood")
     fabric = materials.get("Fabric") or wood
     steel = _district_material("Aluminium") or materials.get("Metal")
     black = _district_material("BlackCladding") or materials.get("Metal")
@@ -1213,23 +1504,50 @@ def build_open_plan_desks(cx, cy, z, x0, x1, y0, y1, materials, prefix, label):
                     jitter = ((row * 7 + col * 3 + seat) % 5 - 2) * 6.0
                     _task_chair(cx, cy, z, bx + sx + jitter, y + side * 115.0, side, materials, stag + "_Chair")
             x += 480.0
-        # A planter closes the row on the aisle.
+        # A tall planter or a cubby unit closes each row on the aisle.
         if col:
-            _planter(cx, cy, z, x0 + 30.0, x0 + 100.0, y - 60.0, y + 60.0, prefix,
-                     "{0}_Row{1}".format(label, row), trees=0, height=80.0)
+            if row % 2:
+                _planter(cx, cy, z, x0 + 30.0, x0 + 100.0, y - 60.0, y + 60.0, prefix,
+                         "{0}_Row{1}".format(label, row), trees=0, height=110.0)
+            else:
+                _cubby(cx, cy, z, x0 + 55.0, y, prefix, "{0}_{1}_Row{2}_Cubby".format(prefix, label, row), along_x=False)
         y += 420.0
     _note_surface("Wood", prefix + "_" + label)
 
 
 def build_server_racks(cx, cy, z, x0, x1, y0, y1, materials, prefix, label):
-    """Server rows: 2 m racks in lines with cold aisles - hard cover with sparks."""
-    metal = materials.get("Metal")
+    """Server rows: individual 60 cm racks, 2 m tall, black bodies behind
+    perforated steel doors, status LEDs on both faces, a yellow cable tray over
+    each row. The aisles are long and straight: hard cover, sparks, and the
+    one room in the building lit mostly by its machines."""
+    black = _district_material("BlackCladding") or materials.get("Metal")
+    door = materials.get("Grating") or materials.get("Metal")
+    tray = unreal.EditorAssetLibrary.load_asset(C.MATERIALS_INSTANCES + "/MI_OB_Warning_Yellow") or materials.get("Metal")
+    blue = unreal.EditorAssetLibrary.load_asset(C.MATERIALS_INSTANCES + "/MI_OB_Signage_SignalBlue")
+    white = unreal.EditorAssetLibrary.load_asset(C.MATERIALS_INSTANCES + "/MI_OB_Signage_White")
     row = 0
     x = x0 + 120.0
     while x + 60.0 <= x1 - 60.0:
         row += 1
-        _box((cx + x, cy + (y0 + y1) / 2.0, z + 100.0), (60.0, (y1 - y0) - 260.0, 200.0), metal,
-             "{0}_{1}_Rack_{2}".format(prefix, label, row))
+        ry0, ry1 = y0 + 130.0, y1 - 130.0
+        y = ry0
+        rack = 0
+        while y + 60.0 <= ry1:
+            rack += 1
+            tag = "{0}_{1}_Rack_{2}_{3:02d}".format(prefix, label, row, rack)
+            _box((cx + x, cy + y + 30.0, z + 100.0), (56.0, 58.0, 200.0), black, tag)
+            for face in (-1.0, 1.0):
+                _box((cx + x + face * 29.0, cy + y + 30.0, z + 100.0), (2.0, 54.0, 194.0), door,
+                     "{0}_Door{1}".format(tag, "W" if face < 0 else "E"))
+                for led in range(4):
+                    mat = blue if (rack + led + row) % 3 else white
+                    if mat is None:
+                        continue
+                    _box((cx + x + face * 30.5, cy + y + 12.0 + led * 9.0, z + 150.0 - ((rack * 7 + led) % 5) * 22.0),
+                         (1.0, 3.0, 2.0), mat, "{0}_LED{1}{2}".format(tag, "W" if face < 0 else "E", led))
+            y += 60.0
+        _box((cx + x, cy + (ry0 + ry1) / 2.0, z + 250.0), (40.0, ry1 - ry0, 8.0), tray,
+             "{0}_{1}_CableTray_{2}".format(prefix, label, row))
         x += 220.0
     _note_surface("Metal", prefix + "_" + label)
 
@@ -1589,6 +1907,8 @@ def build_winter_garden(cx, cy, z, materials, prefix):
     _planter(cx, cy, z, 1000.0, 2100.0, -1760.0, -1640.0, prefix, "Terrace_S", trees=2)
     _planter(cx, cy, z, 2060.0, 2160.0, -1500.0, -800.0, prefix, "Terrace_E", trees=1)
     _planter(cx, cy, z, 1200.0, 1700.0, -1200.0, -1100.0, prefix, "Terrace_Mid", trees=0, height=60.0)
+    _picnic_bench(cx, cy, z, 1450.0, -900.0, prefix + "_Terrace_Bench1")
+    _picnic_bench(cx, cy, z, 1850.0, -1400.0, prefix + "_Terrace_Bench2")
     _balustrade(cx, cy, z, CROWN_STALK_X, SKYDECK_SCREEN_Y, 2200.0, SKYDECK_SCREEN_Y, materials,
                 prefix + "_Terrace_Edge_N")
 
@@ -1712,6 +2032,10 @@ def build_floor_shell(report, floor_index, materials):
 
     # --- The core, and the floors that are different ------------------------
     build_core(floor_index, area_name, origin_x, origin_y, z, materials, prefix)
+    build_lift_lobby(origin_x, origin_y, z, materials, prefix)
+    build_wayfinding(floor_index, area_name, origin_x, origin_y, z, prefix)
+    if area_name in ("Lobby", "Mezzanine", "OpenPlan", "Executive", "Summit", "Skydeck"):
+        build_linear_lights(area_name, origin_x, origin_y, z, size_x, size_y, prefix)
     if area_name == "Ground_Plaza":
         build_ground_floor(origin_x, origin_y, z, half_x, half_y, materials, prefix)
     if floor_index == 1:
@@ -1764,6 +2088,9 @@ def build_floor_shell(report, floor_index, materials):
             build_open_plan_desks(origin_x, origin_y, z, x0, x1, y0, y1, materials, prefix, room_name)
         elif room_name.startswith("Server_Hall"):
             build_server_racks(origin_x, origin_y, z, x0, x1, y0, y1, materials, prefix, room_name)
+        elif room_name in ("Break_Out_Kitchen", "Breakout_Area", "Exec_Lounge"):
+            build_breakout(origin_x, origin_y, z, x0, x1, y0, y1, materials, prefix, room_name,
+                           kitchen=room_name == "Break_Out_Kitchen")
 
     if area_name == "Skydeck":
         build_canteen_fixtures(origin_x, origin_y, z, materials, prefix)

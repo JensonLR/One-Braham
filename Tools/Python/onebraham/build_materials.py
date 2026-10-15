@@ -67,7 +67,7 @@ SURFACE_ALBEDO = {
     "Carpet":       (0.11, 0.12, 0.14),   # charcoal office carpet tile
     "Concrete":     (0.50, 0.49, 0.47),   # exposed soffits and cores
     "Metal":        (0.45, 0.46, 0.48),   # galvanised ductwork, steel
-    "Wood":         (0.40, 0.28, 0.17),   # oak-toned timber
+    "Wood":         (0.52, 0.42, 0.30),   # pale oak, as photographed
     "Grating":      (0.30, 0.31, 0.32),
     "Fabric":       (0.22, 0.24, 0.28),   # grey-blue upholstery
     "ServerRack":   (0.035, 0.035, 0.04),
@@ -803,7 +803,7 @@ def build_master_highlight(report):
 TEXTURE_SETS = {
     "Marble":       ("terrazzo_tiles",    120.0, 1.0, 2.2),
     "Concrete":     ("concrete_floor_02", 220.0, 0.7, 1.6),
-    "Wood":         ("oak_wood_planks",   180.0, 0.0, 1.0),
+    "Wood":         ("oak_wood_planks",   180.0, 0.6, 1.5),
     "Plasterboard": ("white_plaster_02",  200.0, 1.0, 1.25),
     "Carpet":       ("Carpet001",         180.0, 1.0, 2.2),   # loop-pile office tile (ambientCG)
     "Metal":        ("Metal011",          140.0, 1.0, 1.9),   # brushed steel (ambientCG)
@@ -814,6 +814,9 @@ TEXTURE_SETS = {
 DISTRICT_TEXTURE_SETS = {
     "Paving":  ("concrete_pavement", 260.0, 0.6, 1.4),
     "Asphalt": ("asphalt_02",        320.0, 0.4, 1.8),
+    "TerracePaving": ("concrete_pavement", 240.0, 1.0, 1.6),
+    "Herringbone": ("oak_wood_planks", 90.0, 0.6, 1.9),
+    "TimberLight": ("oak_wood_planks", 160.0, 0.6, 2.0),
 }
 TEXTURE_FOLDER = C.MATERIALS + "/Textures"
 WORLD_ALIGNED_TEXTURE = "/Engine/Functions/Engine_MaterialFunctions01/Texturing/WorldAlignedTexture.WorldAlignedTexture"

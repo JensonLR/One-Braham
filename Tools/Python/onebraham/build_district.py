@@ -80,11 +80,22 @@ SURFACES = {
     "BlackCladding": ((0.018, 0.018, 0.02), 0.35, {}),              # reception feature volume
     "Terrazzo": ((0.74, 0.73, 0.70), 0.22, {"ColourVariation": 0.30}),
     "Planter": ((0.10, 0.10, 0.11), 0.60, {"Metallic": 0.6}),       # powder-coated steel
-    "TerracePaving": ((0.62, 0.62, 0.60), 0.70, {}),
+    "TerracePaving": ((0.66, 0.66, 0.64), 0.22, {}),   # wet-look pale porcelain, as photographed
     "Baffle": ((0.025, 0.025, 0.028), 0.55, {}),
     "LightRibbon": ((1.0, 1.0, 1.0), 0.40, {"EmissiveColour": (1.0, 0.97, 0.92), "EmissiveStrength": 120.0}),
     "LightRibbonViolet": ((0.5, 0.2, 1.0), 0.40, {"EmissiveColour": (0.45, 0.15, 1.0), "EmissiveStrength": 160.0}),
     "Timber": ((0.42, 0.29, 0.18), 0.55, {}),
+
+    # The fit-out, from the interior photographs (Docs/10 §7).
+    "PanelCream":  ((0.74, 0.71, 0.64), 0.55, {}),    # lift lobby wall panels
+    "DeskWhite":   ((0.80, 0.80, 0.78), 0.40, {}),    # benching worktops
+    "MeshWhite":   ((0.66, 0.66, 0.66), 0.70, {}),    # task chair mesh
+    "BoothPurple": ((0.22, 0.12, 0.42), 0.85, {}),    # high-back booths
+    "SofaDark":    ((0.05, 0.06, 0.10), 0.80, {}),    # reception lounge sofa
+    "TimberLight": ((0.66, 0.54, 0.40), 0.55, {}),    # cubby shelving, kitchen
+    "FeltWhite":   ((0.80, 0.80, 0.80), 0.95, {"EmissiveColour": (1.0, 0.97, 0.92), "EmissiveStrength": 0.6}),    # acoustic discs, edge-lit
+    "Porcelain":   ((0.66, 0.66, 0.64), 0.95, {}),    # lift lobby and floor-1 tiles: matt
+    "Herringbone": ((0.62, 0.50, 0.36), 0.50, {}),    # reception lounge floor: pale oak
 }
 
 # Traffic stands on the main roads only; side streets stay clear to walk.
