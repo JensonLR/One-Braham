@@ -137,6 +137,14 @@ struct ONEBRAHAM_API FOneBrahamArchetypeDefinition
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Clothing")
 	TMap<FName, FName> DefaultCosmetics;
 
+	/**
+	 * Body clothing: BodyMesh material slot name -> material (the MI_OB_Cast_*
+	 * instances). Keyed by slot name, not index, because Manny and Quinn do not
+	 * share slot order. Slots the body does not have are ignored.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Clothing")
+	TMap<FName, TSoftObjectPtr<UMaterialInterface>> BodyMaterials;
+
 	// --- Performance ------------------------------------------------------
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Performance")
 	FOneBrahamAnimationPersonality Personality;

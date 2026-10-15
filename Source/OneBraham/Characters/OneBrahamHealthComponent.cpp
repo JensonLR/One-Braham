@@ -64,8 +64,13 @@ void UOneBrahamHealthComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 
 	// --- Health regeneration ---------------------------------------------
 	// Regeneration only restores up to the ceiling: the building does not heal
-	// you, it just stops the bleeding.
-	if (HealthRegenPerSecond > 0.f && (Now - LastDamageTime) >= HealthRegenDelay && Health < FMath::Min(MaxHealth, HealthRegenCeiling))
+	// you, it just stops the bleeding. Never while downed: a body on the carpet
+	// sits at 1 HP until it is revived, executed or bleeds out.
+	const AOneBrahamCharacter* OwnerCharacter = Cast<AOneBrahamCharacter>(GetOwner());
+	const bool bOwnerDowned = OwnerCharacter != nullptr && OwnerCharacter->GetDownedComponent() != nullptr &&
+		OwnerCharacter->GetDownedComponent()->IsDowned();
+
+	if (!bOwnerDowned && HealthRegenPerSecond > 0.f && (Now - LastDamageTime) >= HealthRegenDelay && Health < FMath::Min(MaxHealth, HealthRegenCeiling))
 	{
 		const float Before = Health;
 		Health = FMath::Min(Health + HealthRegenPerSecond * (HealthRegenCeiling >= MaxHealth ? DeltaTime : DeltaTime * 1.5f), FMath::Min(HealthRegenCeiling, MaxHealth));
@@ -134,6 +139,37 @@ void UOneBrahamHealthComponent::ResetHealth()
 
 	OnHealthChanged.Broadcast(Health, MaxHealth, 0.f);
 	OnArmourChanged.Broadcast(Armour, MaxArmour);
+}
+
+void UOneBrahamHealthComponent::ReviveToHealth(float NewHealth)
+{
+	AActor* Owner = GetOwner();
+	if (Owner != nullptr && !Owner->HasAuthority())
+	{
+		return;
+	}
+
+	const float Before = Health;
+	Health = FMath::Clamp(NewHealth, 1.f, MaxHealth);
+	bDead = false;
+
+	// Whoever put us down does not keep assist credit into the next fight.
+	LastDamageInstigator.Reset();
+	RecentAttackers.Reset();
+	RecentHits.Reset();
+
+	const APawn* OwnerPawn = Cast<APawn>(Owner);
+	if (AOneBrahamPlayerState* OwnerState = OwnerPawn ? OwnerPawn->GetPlayerState<AOneBrahamPlayerState>() : nullptr)
+	{
+		OwnerState->Health = Health;
+	}
+
+	OnHealthChanged.Broadcast(Health, MaxHealth, Health - Before);
+
+	if (Owner != nullptr)
+	{
+		Owner->ForceNetUpdate();
+	}
 }
 
 float UOneBrahamHealthComponent::GetZoneMultiplier(EOneBrahamHitZone Zone) const
@@ -354,6 +390,16 @@ float UOneBrahamHealthComponent::ApplyDamage(float RawDamage, AActor* DamageInst
 		}
 
 		OnDeath.Broadcast(DamageInstigator, Report);
+
+		// After the broadcast, so the kill feed still reads "was downed" for a
+		// body finished by gunfire; then the corpse stops being revivable.
+		if (AOneBrahamCharacter* Character = Cast<AOneBrahamCharacter>(Owner))
+		{
+			if (UOneBrahamDownedComponent* Downed = Character->GetDownedComponent())
+			{
+				Downed->ClearDownedOnDeath();
+			}
+		}
 	}
 
 	return ActualDamage;
@@ -417,15 +463,42 @@ void UOneBrahamHealthComponent::Kill(AActor* Killer, FName CauseId)
 		return;
 	}
 
+	AActor* Owner = GetOwner();
+
 	FOneBrahamDamageReport Report;
 	Report.BaseDamage = Health;
 	Report.FinalDamage = Health;
 	Report.HitZone = EOneBrahamHitZone::Torso;
-	Report.HitLocation = GetOwner()->GetActorLocation();
+	Report.HitLocation = Owner->GetActorLocation();
 	Report.ShotDirection = FVector::DownVector;
 	Report.bLethal = true;
 
-	ApplyDamage(FMath::Max(1.f, Health), Killer, Report, Killer ? Killer->GetInstigatorController() : nullptr);
+	// Not routed through ApplyDamage: armour soaked part of the 1 HP a bleed-out
+	// "killed", and a lethal hit there could put the player straight back down.
+	const float Before = Health;
+	Health = 0.f;
+	bDead = true;
+
+	const UWorld* World = GetWorld();
+	LastDamageTime = World ? World->GetTimeSeconds() : 0.f;
+	LastDamageInstigator = Killer;
+	LastDamageReport = Report;
+
+	AOneBrahamCharacter* Character = Cast<AOneBrahamCharacter>(Owner);
+	if (AOneBrahamPlayerState* OwnerState = Character ? Character->GetPlayerState<AOneBrahamPlayerState>() : nullptr)
+	{
+		OwnerState->Health = Health;
+	}
+
+	OnHealthChanged.Broadcast(Health, MaxHealth, -Before);
+	Owner->ForceNetUpdate();
+
+	OnDeath.Broadcast(Killer, Report);
+
+	if (UOneBrahamDownedComponent* Downed = Character ? Character->GetDownedComponent() : nullptr)
+	{
+		Downed->ClearDownedOnDeath();
+	}
 }
 
 void UOneBrahamHealthComponent::GetRecentAttackers(TArray<AActor*>& OutAttackers) const

@@ -20,7 +20,8 @@ WHY THIS EXISTS AS A SEPARATE STEP
     on it by hand in a field this script does not own survives.
 
 WHAT IT WRITES
-    DA_CharacterRegistry.Archetypes          6 entries
+    DA_CharacterRegistry.Archetypes          6 entries, with each archetype's
+                                             clothing on its body's material slots
     DA_CharacterRegistry.CosmeticSlots       12 slots
     DA_CharacterRegistry.CompetitiveBannedCosmeticIds
         Every cosmetic that is not purely cosmetic. Should always be empty; the
@@ -137,12 +138,14 @@ def build_archetype_struct(report, registry, entry):
         struct_info = None
 
     archetype = type(struct_info)() if struct_info is not None else None
+    # The payload has no "id": the tag is what names an archetype in a report.
+    label = entry.get("archetype_tag", entry.get("display_name", "?"))
 
     if archetype is None:
         # No existing entry to clone from: ask Python for the struct type by name.
         struct_class = getattr(unreal, "OneBrahamArchetypeDefinition", None)
         if struct_class is None:
-            report.failed(entry.get("id", "?"), "archetype struct is not reflected")
+            report.failed(label, "archetype struct is not reflected")
             return None
         archetype = struct_class()
 
@@ -151,23 +154,31 @@ def build_archetype_struct(report, registry, entry):
             archetype.set_editor_property(prop, value)
             return True
         except Exception as exc:  # noqa: BLE001
-            report.failed(entry.get("id", "?"), u"{0}: {1}".format(prop, exc))
+            report.failed(label, u"{0}: {1}".format(prop, exc))
             return False
 
-    tag_string = entry.get("tag", "")
+    def _field(*keys, **kwargs):
+        # build_characters.py writes the C++ field names (hair_preset_id,
+        # voice_set_id); the short names are accepted for older payloads.
+        for key in keys:
+            if key in entry:
+                return entry[key]
+        return kwargs.get("default")
+
+    tag_string = _field("archetype_tag", "tag", default="")
     tag = _make_tag(tag_string)
     if tag is not None:
         _set("archetype_tag", tag)
 
-    _set("display_name", unreal.Text(entry.get("display_name", entry.get("id", ""))))
-    _set("biography", unreal.Text(entry.get("biography", "")))
-    _set("home_floor", int(entry.get("home_floor", 4)))
-    _set("body_variant", int(entry.get("body_variant", 0)))
-    _set("height_offset_cm", float(entry.get("height_offset_cm", 0.0)))
-    _set("hair_preset_id", unreal.Name(entry.get("hair_preset", "")))
-    _set("voice_set_id", unreal.Name(entry.get("voice_set", "")))
-    _set("unlock_rule_id", unreal.Name(entry.get("unlock_rule", "Default")))
-    _set("required_level", int(entry.get("required_level", 0)))
+    _set("display_name", unreal.Text(_field("display_name", default=label)))
+    _set("biography", unreal.Text(_field("biography", default="")))
+    _set("home_floor", int(_field("home_floor", default=4)))
+    _set("body_variant", int(_field("body_variant", default=0)))
+    _set("height_offset_cm", float(_field("height_offset_cm", default=0.0)))
+    _set("hair_preset_id", unreal.Name(_field("hair_preset_id", "hair_preset", default="")))
+    _set("voice_set_id", unreal.Name(_field("voice_set_id", "voice_set", default="")))
+    _set("unlock_rule_id", unreal.Name(_field("unlock_rule_id", "unlock_rule", default="Default")))
+    _set("required_level", int(_field("required_level", default=0)))
 
     # Animation personality: the whole reason two Business Analysts do not move
     # like the same person in a corridor.
@@ -182,7 +193,7 @@ def build_archetype_struct(report, registry, entry):
                     pass
             archetype.set_editor_property("personality", existing)
     except Exception as exc:  # noqa: BLE001
-        report.failed(entry.get("id", "?"), u"personality: {0}".format(exc))
+        report.failed(label, u"personality: {0}".format(exc))
 
     # Default cosmetics: one id per slot, applied on first deploy.
     try:
@@ -191,7 +202,7 @@ def build_archetype_struct(report, registry, entry):
             defaults[unreal.Name(slot)] = unreal.Name(cosmetic_id)
         archetype.set_editor_property("default_cosmetics", defaults)
     except Exception as exc:  # noqa: BLE001
-        report.failed(entry.get("id", "?"), u"default cosmetics: {0}".format(exc))
+        report.failed(label, u"default cosmetics: {0}".format(exc))
 
     # Meshes and animation class are soft references to content the art pass
     # delivers; the conventional paths are recorded so the import lands in place.
@@ -210,7 +221,7 @@ def build_archetype_struct(report, registry, entry):
             try:
                 archetype.set_editor_property(prop, asset)
             except Exception as exc:  # noqa: BLE001
-                report.failed(entry.get("id", "?"), u"{0}: {1}".format(prop, exc))
+                report.failed(label, u"{0}: {1}".format(prop, exc))
 
     for key, prop in (("anim_class_path", "anim_instance_class"),
                       ("sidearm_anim_class_path", "sidearm_anim_instance_class")):
@@ -224,15 +235,82 @@ def build_archetype_struct(report, registry, entry):
         try:
             archetype.set_editor_property(prop, anim_class)
         except Exception as exc:  # noqa: BLE001
-            report.failed(entry.get("id", "?"), u"{0}: {1}".format(prop, exc))
+            report.failed(label, u"{0}: {1}".format(prop, exc))
+
+    _apply_body_materials(report, archetype, entry, label)
 
     return archetype
 
 
+def _apply_body_materials(report, archetype, entry, label):
+    """Dresses the archetype: body material slot name -> clothing instance.
+
+    build_characters.py makes one material instance per section of the stand-in
+    body (top and bottom) and records them by the mesh's material slot names, so
+    Manny's M_Torso and Quinn's Quinn_02 both get the archetype's top. Keyed by
+    name rather than index because the two bodies do not share slot names, and
+    a real body set will not share them either.
+
+    Written to FOneBrahamArchetypeDefinition::BodyMaterials. Until the C++ has
+    that field this reports the archetype as skipped rather than storing the
+    colours anywhere the character does not read.
+    """
+    paths = entry.get("body_material_paths") or {}
+    if not paths:
+        return
+
+    try:
+        materials = archetype.get_editor_property("body_materials")
+    except Exception:  # noqa: BLE001
+        report.skipped_asset(label, u"clothing: FOneBrahamArchetypeDefinition has no BodyMaterials "
+                                    u"field yet (TMap<FName, TSoftObjectPtr<UMaterialInterface>>); "
+                                    u"{0} instances not assigned".format(len(paths)))
+        return
+
+    assigned = 0
+    for slot_name, path in sorted(paths.items()):
+        material = (unreal.load_asset(path)
+                    if unreal.EditorAssetLibrary.does_asset_exist(path) else None)
+        if material is None:
+            report.skipped_asset(path, "clothing instance not built yet - run the characters step")
+            continue
+        materials[unreal.Name(slot_name)] = material
+        assigned += 1
+
+    try:
+        archetype.set_editor_property("body_materials", materials)
+    except Exception as exc:  # noqa: BLE001
+        report.failed(label, u"body_materials: {0}".format(exc))
+        return
+
+    C.log(u"  {0}: clothing on {1} of {2} body material slots".format(label, assigned, len(paths)))
+
+
+def _existing_slot_options(registry, slot_id):
+    """Option id -> mesh already on the registry's slot of that name, if any."""
+    found = {}
+    try:
+        for slot in registry.get_editor_property("cosmetic_slots") or []:
+            if str(slot.get_editor_property("slot_name")) != slot_id:
+                continue
+            for option_id, mesh in slot.get_editor_property("options").items():
+                if mesh is not None:
+                    found[str(option_id)] = mesh
+    except Exception:  # noqa: BLE001
+        pass
+    return found
+
+
 def build_cosmetic_slot_struct(report, registry, entry):
+    # build_characters.py writes slot_name, relative_offset and options; "id" and
+    # "socket" are accepted for older payloads. Reading only "id" once wrote all
+    # twelve slots with no name, so FindCosmeticSlot found none of them.
+    slot_id = entry.get("slot_name", entry.get("id", ""))
+    label = slot_id or "?"
+
     struct_class = getattr(unreal, "OneBrahamCosmeticSlot", None)
     if struct_class is None:
-        report.failed(entry.get("id", "?"), "cosmetic slot struct is not reflected")
+        report.failed(label, "cosmetic slot struct is not reflected")
         return None
 
     slot = struct_class()
@@ -242,14 +320,32 @@ def build_cosmetic_slot_struct(report, registry, entry):
             slot.set_editor_property(prop, value)
             return True
         except Exception as exc:  # noqa: BLE001
-            report.failed(entry.get("id", "?"), u"{0}: {1}".format(prop, exc))
+            report.failed(label, u"{0}: {1}".format(prop, exc))
             return False
 
-    _set("slot_name", unreal.Name(entry.get("id", "")))
-    _set("display_name", unreal.Text(entry.get("display_name", entry.get("id", ""))))
+    _set("slot_name", unreal.Name(slot_id))
+    _set("display_name", unreal.Text(entry.get("display_name", slot_id)))
     _set("parent_bone", unreal.Name(entry.get("parent_bone", "spine_03")))
-    _set("attach_socket", unreal.Name(entry.get("socket", "")))
+    _set("attach_socket", unreal.Name(entry.get("attach_socket", entry.get("socket", ""))))
     _set("bHiddenWhenArmed", bool(entry.get("hidden_when_armed", False)))
+
+    offset = entry.get("relative_offset")
+    if offset and len(offset) == 3:
+        _set("relative_offset", unreal.Vector(x=float(offset[0]), y=float(offset[1]),
+                                              z=float(offset[2])))
+
+    # The wardrobe's ids. The meshes are the art pass's; an option with no mesh yet
+    # is listed (the wardrobe and the starter outfit resolve against these keys)
+    # and ApplyCosmetics skips it until the mesh lands. A mesh an artist already
+    # assigned on the asset is not this script's to clear, so it is kept.
+    try:
+        existing = _existing_slot_options(registry, slot_id)
+        options = slot.get_editor_property("options")
+        for option_id in entry.get("options") or []:
+            options[unreal.Name(option_id)] = existing.get(str(option_id))
+        slot.set_editor_property("options", options)
+    except Exception as exc:  # noqa: BLE001
+        report.failed(label, u"options: {0}".format(exc))
 
     return slot
 

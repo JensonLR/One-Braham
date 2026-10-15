@@ -26,6 +26,27 @@ touches. `validate_project.py` asserts it on every build, and the assertion is
 the whole competitive argument for shipping cosmetic variety in a 12-player
 extraction shooter.
 
+### Clothing on the stand-in bodies
+
+Until the cast's own bodies exist, each archetype dresses Manny or Quinn with
+material instances of `M_Mannequin`, one per mesh section. The instance is
+keyed by the body's material slot name (Manny: `M_Torso` / `M_HeadLegs`; Quinn:
+`Quinn_02` / `Quinn_01`) in `FOneBrahamArchetypeDefinition::BodyMaterials`.
+Paint `Tint` = cloth albedo / 0.69 (the panels' own linear albedo).
+`MetalPaintRoughness` is the cloth's roughness, and metallic and logo emissive
+are 0. Cloth albedo is held between 0.03 and 0.80 linear (the black-on-black
+rule in section 4). The head shares the trouser section, so trousers are cloth
+mid-to-dark tones. Table: `CLOTHING` in `build_characters.py`.
+
+| Archetype | Top | Bottom | sRGB (top / bottom) | Roughness (top / bottom) |
+| --- | --- | --- | --- | --- |
+| Business Analyst | pale blue Oxford shirt | navy chinos | `#A6B8CC` / `#33405A` | 0.78 / 0.82 |
+| Graduate / Intern | olive puffer | indigo jeans | `#565C42` / `#34425E` | 0.55 / 0.86 |
+| Finance | charcoal overcoat | suit trousers | `#3E3F43` / `#38393D` | 0.90 / 0.88 |
+| IT / Operations | navy fleece | grey cargos | `#2F3C57` / `#6A695F` | 0.95 / 0.85 |
+| Facilities / Security | fluorescent hi-vis | navy work trousers | `#D4DE2A` / `#2E374A` | 0.60 / 0.84 |
+| Consultant | camel blazer | grey wool trousers | `#9C7E5A` / `#55565B` | 0.86 / 0.88 |
+
 ---
 
 ## 2. The animation personality system

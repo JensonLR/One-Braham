@@ -71,7 +71,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Interaction")
 	bool ServerPerformInstantInteraction(AActor* Target);
 
-	/** Revalidates that the interaction is still legal (distance, facing, LOS). */
+	/**
+	 * Server rule for completing a hold on release: true once the server-measured
+	 * hold time is within HoldCompletionToleranceSeconds of the requirement.
+	 */
+	static bool HasHeldLongEnough(float HeldSeconds, float RequiredSeconds);
+
+	/** Release slack for a hold: covers the 10 Hz tick and send-time jitter, not latency itself. */
+	static constexpr float HoldCompletionToleranceSeconds = 0.15f;
+
+	/** Revalidates that the interaction is still legal (alive and not downed, distance, facing). */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Interaction")
 	bool ValidateInteractionStillLegal() const;
 

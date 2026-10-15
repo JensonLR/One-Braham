@@ -360,6 +360,25 @@ public:
 	UFUNCTION(Server, Reliable, Category = "One Braham|Weapons")
 	void ServerRequestToggleAttachment(bool bFlashlight, bool bEnabled);
 
+	/** Reliable: the server's spread cone reads the ADS flag, so a lost toggle
+	 *  would leave every later shot validated against the wrong stance. */
+	UFUNCTION(Server, Reliable, Category = "One Braham|Weapons")
+	void ServerSetAimingDownSights(bool bAiming);
+
+	// ======================================================================
+	//  Pure rules (no actor state; exercised by OneBraham.Weapons.*)
+	// ======================================================================
+	/**
+	 * One tick of burst fire. Returns true when a round should go. A burst is
+	 * armed once per trigger press: when it runs out the latch holds it shut
+	 * until the trigger is released (which clears both counters).
+	 */
+	static bool AdvanceBurst(int32& InOutBurstRemaining, bool& bInOutBurstLatched, int32 BurstSize = 3);
+
+	/** Reserve after picking up a weapon: what was carried plus what lay with
+	 *  the weapon, never negative and never above the weapon's cap. */
+	static int32 MergeReserveAmmo(int32 ExistingReserve, int32 IncomingReserve, int32 MaxReserve);
+
 	// ======================================================================
 	//  Delegates
 	// ======================================================================
@@ -445,6 +464,14 @@ protected:
 	/** Server: ensures the current fire mode is legal for the weapon. */
 	void SanitiseFireMode();
 
+	/**
+	 * Server: a weapon is leaving this player's hands for the floor. Moves its
+	 * reserve pool onto the pickup (unless KeepPoolForId says the player is about
+	 * to carry the same weapon type again) and, when it is the one being held,
+	 * cancels any reload and clears CurrentWeapon so nothing points at a pickup.
+	 */
+	void ReleaseDroppedWeapon(AOneBrahamWeaponBase* Dropped, FName KeepPoolForId = NAME_None);
+
 	/** Character/controller shortcuts. */
 	AOneBrahamCharacter* GetCharacter() const;
 
@@ -461,6 +488,8 @@ protected:
 	float LastServerFireTime = -1000.f;
 	int32 ServerShotIndex = 0;
 	int32 ServerBurstRemaining = 0;
+	/** Set when a burst has been armed for the current press; cleared on release. */
+	bool bBurstLatched = false;
 	int32 ClientShotIndex = 0;
 
 	/** --- Recoil / spread state --- */

@@ -164,7 +164,8 @@ DECAL_MATERIALS = [
     ("M_OB_Decal_GlassCrack", "Glass", 0.15, 24.0,
      "Radial crack sheet with a 0.4 s crack-through animation. T_OB_VFX_GlassCrack."),
     ("M_OB_Decal_Scuff", "Concrete", 0.80, 30.0,
-     "Dragged rubber scuff, used where a body slid. T_OB_VFX_Scuff."),
+     "Dragged rubber scuff, used where a body slid. ambientCG Smear001 (CC0), "
+     "applied by build_materials.apply_decal_texture_sets."),
 ]
 
 DECAL_ROOT = C.VFX + "/Decals"
@@ -311,6 +312,11 @@ def build_decal_materials(report):
         report.created_asset(path)
         created.append(name)
         C.log(u"  {0}: {1} cm, roughness {2} - {3}".format(name, size, roughness, note))
+
+    # The materials step runs before this one, when the instances did not exist
+    # yet: texture them now so a clean build needs no second materials pass.
+    from onebraham import build_materials
+    C.guard(report, "decal texture sets", build_materials.apply_decal_texture_sets, report)
 
     return created
 

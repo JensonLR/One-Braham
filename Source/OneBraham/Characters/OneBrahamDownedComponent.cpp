@@ -67,8 +67,13 @@ bool UOneBrahamDownedComponent::ShouldEnterDownedState(AActor* Killer, const FOn
 		}
 	}
 
+	return IsDownableHit(Killer != nullptr, Report, State->RemainingRevives);
+}
+
+bool UOneBrahamDownedComponent::IsDownableHit(bool bHasKiller, const FOneBrahamDamageReport& Report, int32 RemainingRevives) const
+{
 	// Out of revives: you die properly.
-	if (State->RemainingRevives <= 0)
+	if (RemainingRevives <= 0)
 	{
 		return false;
 	}
@@ -86,7 +91,7 @@ bool UOneBrahamDownedComponent::ShouldEnterDownedState(AActor* Killer, const FOn
 	}
 
 	// The building (falls, purge) never leaves you downed.
-	if (Killer == nullptr)
+	if (!bHasKiller)
 	{
 		return false;
 	}
@@ -149,15 +154,7 @@ void UOneBrahamDownedComponent::EnterDownedState(AActor* Killer, const FOneBraha
 	// --- Feedback ---------------------------------------------------------
 	OnDownedStateChanged.Broadcast(true, BleedOutRemaining);
 	TriggerDownVoiceLine();
-
-	if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(Character->GetController()))
-	{
-		if (UOneBrahamAudioManagerComponent* Audio = PC->GetAudioManager())
-		{
-			// The "downed" audio state: heartbeat, muffled weapon fire, tinnitus.
-			Audio->SetDownedAudioState(true);
-		}
-	}
+	UpdateLocalDownedAudio();
 
 	OB_MATCH_LOG("'%s' is down (killer '%s', %.1fs bleed-out, %d revives left).",
 		Character->GetPlayerState() ? *Character->GetPlayerState()->GetPlayerName() : *Character->GetName(),
@@ -234,6 +231,27 @@ void UOneBrahamDownedComponent::BleedOut()
 	}
 
 	OnDownedStateChanged.Broadcast(false, 0.f);
+	UpdateLocalDownedAudio();
+	Character->ForceNetUpdate();
+}
+
+void UOneBrahamDownedComponent::ClearDownedOnDeath()
+{
+	AOneBrahamCharacter* Character = CachedCharacter.Get();
+	if (Character == nullptr || !Character->HasAuthority() || !bDowned)
+	{
+		return;
+	}
+
+	bDowned = false;
+	BleedOutRemaining = 0.f;
+	ReviveProgress = 0.f;
+	DownedBy.Reset();
+
+	// No life-state visuals here: the character's death handler has already set
+	// Dead, and Alive would stand the corpse back up.
+	OnDownedStateChanged.Broadcast(false, 0.f);
+	UpdateLocalDownedAudio();
 	Character->ForceNetUpdate();
 }
 
@@ -248,6 +266,14 @@ EOneBrahamDownedInteraction UOneBrahamDownedComponent::GetInteractionFor(const A
 	}
 
 	const AOneBrahamCharacter* Character = CachedCharacter.Get();
+
+	// A body that has died is scenery, whatever bDowned last replicated as.
+	const UOneBrahamHealthComponent* MyHealth = Character != nullptr ? Character->GetHealthComponent() : nullptr;
+	if (MyHealth == nullptr || !MyHealth->IsAlive())
+	{
+		return EOneBrahamDownedInteraction::None;
+	}
+
 	const AOneBrahamPlayerState* Mine = Character != nullptr ? Character->GetPlayerState<AOneBrahamPlayerState>() : nullptr;
 	const AOneBrahamPlayerState* Theirs = Interactor->GetPlayerState<AOneBrahamPlayerState>();
 
@@ -346,6 +372,13 @@ void UOneBrahamDownedComponent::ServerRevive(AController* ReviverController)
 		return;
 	}
 
+	// GetInteractionFor already refuses a corpse; this is the server's own word.
+	UOneBrahamHealthComponent* Health = Character->GetHealthComponent();
+	if (Health == nullptr || !Health->IsAlive())
+	{
+		return;
+	}
+
 	bDowned = false;
 	ReviveProgress = 0.f;
 	++ReviveCount;
@@ -357,12 +390,10 @@ void UOneBrahamDownedComponent::ServerRevive(AController* ReviverController)
 		State->RemainingRevives = FMath::Max(0, State->RemainingRevives - 1);
 	}
 
-	if (UOneBrahamHealthComponent* Health = Character->GetHealthComponent())
-	{
-		Health->ResetHealth();
-		Health->Heal(ReviveHealth);
-		Health->GrantInvulnerability(ReviveInvulnerabilitySeconds); // not a free kill
-	}
+	// Up at ReviveHealth with whatever armour survived the fight: ResetHealth
+	// here used to refill both, which made the 40 HP meaningless.
+	Health->ReviveToHealth(ReviveHealth);
+	Health->GrantInvulnerability(ReviveInvulnerabilitySeconds); // not a free kill
 
 	Character->ApplyLifeStateVisuals(EOneBrahamLifeState::Alive);
 
@@ -376,13 +407,7 @@ void UOneBrahamDownedComponent::ServerRevive(AController* ReviverController)
 		Ragdoll->ExitRagdoll();
 	}
 
-	if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(Character->GetController()))
-	{
-		if (UOneBrahamAudioManagerComponent* Audio = PC->GetAudioManager())
-		{
-			Audio->SetDownedAudioState(false);
-		}
-	}
+	UpdateLocalDownedAudio();
 
 	// Credit the reviver: this is worth more score than a kill, and the
 	// end-of-match screen says so.
@@ -426,8 +451,6 @@ void UOneBrahamDownedComponent::ServerExecute(AController* ExecutorController)
 		return;
 	}
 
-	bDowned = false;
-
 	FOneBrahamDamageReport Report = DownedReport;
 	Report.FinalDamage = 100.f;
 	Report.bLethal = true;
@@ -436,16 +459,25 @@ void UOneBrahamDownedComponent::ServerExecute(AController* ExecutorController)
 	// An execution is attributed to the executor, not to whoever downed them.
 	AActor* Executor = ExecutorController ? ExecutorController->GetPawn() : nullptr;
 
-	OnExecuted.Broadcast(Executor);
-
-	if (UOneBrahamHealthComponent* Health = Character->GetHealthComponent())
+	// Still downed while the blow lands: the kill feed reads that as "finished
+	// you off" (cleared first, the Head zone made it a headshot), a downed body
+	// cannot be downed again, and ClearDownedOnDeath tidies up after OnDeath.
+	UOneBrahamHealthComponent* Health = Character->GetHealthComponent();
+	if (Health == nullptr)
 	{
-		Health->Health = 1.f;
-		Health->ApplyDamage(1000.f, Executor, Report, ExecutorController);
+		return;
 	}
 
-	OnDownedStateChanged.Broadcast(false, 0.f);
-	Character->ForceNetUpdate();
+	Health->Health = 1.f;
+	Health->ApplyDamage(1000.f, Executor, Report, ExecutorController);
+
+	if (Health->IsAlive())
+	{
+		// Refused (invulnerable): still on the carpet, nothing was executed.
+		return;
+	}
+
+	OnExecuted.Broadcast(Executor);
 
 	OB_MATCH_LOG("'%s' was executed by '%s'.",
 		Character->GetPlayerState() ? *Character->GetPlayerState()->GetPlayerName() : *Character->GetName(),
@@ -469,8 +501,38 @@ void UOneBrahamDownedComponent::OnRep_Downed()
 {
 	OnDownedStateChanged.Broadcast(bDowned, BleedOutRemaining);
 
-	if (AOneBrahamCharacter* Character = CachedCharacter.Get())
+	// Initial replication can arrive before BeginPlay has cached the owner.
+	AOneBrahamCharacter* Character = CachedCharacter.IsValid() ? CachedCharacter.Get() : Cast<AOneBrahamCharacter>(GetOwner());
+	if (Character != nullptr)
 	{
-		Character->ApplyLifeStateVisuals(bDowned ? EOneBrahamLifeState::Downed : EOneBrahamLifeState::Alive);
+		// Leaving downed by dying is the PlayerState's Dead, not a stand-up. Health
+		// arrives in the same bunch, so a corpse reads 0 here.
+		const UOneBrahamHealthComponent* Health = Character->GetHealthComponent();
+		if (bDowned || Health == nullptr || Health->IsAlive())
+		{
+			Character->ApplyLifeStateVisuals(bDowned ? EOneBrahamLifeState::Downed : EOneBrahamLifeState::Alive);
+		}
+	}
+
+	UpdateLocalDownedAudio();
+}
+
+void UOneBrahamDownedComponent::UpdateLocalDownedAudio() const
+{
+	// Locally controlled only: the server holds every player's controller, and a
+	// listen host must not hear somebody else's heartbeat as its own.
+	const AOneBrahamCharacter* Character = CachedCharacter.IsValid() ? CachedCharacter.Get() : Cast<AOneBrahamCharacter>(GetOwner());
+	if (Character == nullptr || !Character->IsLocallyControlled())
+	{
+		return;
+	}
+
+	if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(Character->GetController()))
+	{
+		if (UOneBrahamAudioManagerComponent* Audio = PC->GetAudioManager())
+		{
+			// The "downed" audio state: heartbeat, muffled weapon fire, tinnitus.
+			Audio->SetDownedAudioState(bDowned);
+		}
 	}
 }

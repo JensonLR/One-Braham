@@ -149,6 +149,10 @@ void AOneBrahamPlayerController::BeginPlay()
 		HUDComponent->CreateHUD(this);
 	}
 
+	// The listen host has its player state already; a remote client usually
+	// does not yet and sends from OnRep_PlayerState instead.
+	SendLocalProfileToServer();
+
 	OB_LOG("PlayerController ready (local=%s authority=%s)", IsLocalController() ? TEXT("yes") : TEXT("no"), HasAuthority() ? TEXT("yes") : TEXT("no"));
 }
 
@@ -171,36 +175,66 @@ void AOneBrahamPlayerController::InitPlayerState()
 {
 	Super::InitPlayerState();
 
+	// Server only. The profile is not read here: this runs on the server's copy
+	// of every controller, and the GameInstance profile on this machine belongs
+	// to the host (or to nobody, on a dedicated server). Each owning client sends
+	// its own, from SendLocalProfileToServer.
 	if (AOneBrahamPlayerState* OBState = GetPlayerState<AOneBrahamPlayerState>())
 	{
-		// Seed the archetype + cosmetics from the local profile so a listen host
-		// looks like what they chose in the locker. A dedicated server overwrites
-		// this in PostLogin from the travel options.
-		if (const UOneBrahamGameInstance* GameInstance = GetGameInstance<UOneBrahamGameInstance>())
-		{
-			if (const UOneBrahamSaveSettings* Profile = GameInstance->GetProfile())
-			{
-				if (Profile->Loadouts.IsValidIndex(Profile->SelectedLoadoutIndex))
-				{
-					const FOneBrahamSavedLoadout& Loadout = Profile->Loadouts[Profile->SelectedLoadoutIndex];
-					OBState->EquippedCosmetics = Profile->EquippedCosmetics;
-					OBState->ClanTag = Profile->ClanTag;
-
-					// The weapons travel with it. The profile is local, so this
-					// machine is the only place the choice exists; everything
-					// after this point reads the player state.
-					if (HasAuthority())
-					{
-						ServerSetLoadout(Loadout.PrimaryWeaponId, Loadout.SidearmWeaponId,
-							Loadout.UtilityIds, Loadout.WeaponSkinId);
-					}
-				}
-			}
-		}
-
 		OBState->SessionMode = GetWorld() && GetWorld()->GetGameState<AOneBrahamGameState>()
 			? GetWorld()->GetGameState<AOneBrahamGameState>()->MatchMode
 			: EOneBrahamMatchMode::Ascent;
+	}
+}
+
+void AOneBrahamPlayerController::OnRep_PlayerState()
+{
+	Super::OnRep_PlayerState();
+	SendLocalProfileToServer();
+}
+
+void AOneBrahamPlayerController::ReceivedPlayer()
+{
+	Super::ReceivedPlayer();
+
+	// A controller spawned into a running world (seamless travel) begins play
+	// before it is given its local player, so BeginPlay saw a non-local controller.
+	SendLocalProfileToServer();
+}
+
+void AOneBrahamPlayerController::SendLocalProfileToServer()
+{
+	AOneBrahamPlayerState* OBState = GetPlayerState<AOneBrahamPlayerState>();
+	if (!IsLocalController() || OBState == nullptr || ProfileSentForState.Get() == OBState)
+	{
+		return;
+	}
+
+	const UOneBrahamGameInstance* GameInstance = GetGameInstance<UOneBrahamGameInstance>();
+	const UOneBrahamSaveSettings* Profile = GameInstance != nullptr ? GameInstance->GetProfile() : nullptr;
+	if (Profile == nullptr)
+	{
+		return;
+	}
+
+	ProfileSentForState = OBState;
+
+	TArray<FOneBrahamNamePairEntry> Cosmetics;
+	Cosmetics.Reserve(Profile->EquippedCosmetics.Num());
+	for (const TPair<FName, FName>& Pair : Profile->EquippedCosmetics)
+	{
+		Cosmetics.Add({ Pair.Key, Pair.Value });
+	}
+	ServerSetProfileCosmetics(Cosmetics, Profile->ClanTag);
+
+	// The weapons travel with it. The profile is local, so this machine is the
+	// only place the choice exists; everything after this point reads the player
+	// state. On the listen host these calls simply run in place.
+	if (Profile->Loadouts.IsValidIndex(Profile->SelectedLoadoutIndex))
+	{
+		const FOneBrahamSavedLoadout& Loadout = Profile->Loadouts[Profile->SelectedLoadoutIndex];
+		ServerSetLoadout(Loadout.PrimaryWeaponId, Loadout.SidearmWeaponId,
+			Loadout.UtilityIds, Loadout.WeaponSkinId);
 	}
 }
 
@@ -208,12 +242,26 @@ void AOneBrahamPlayerController::OnPossess(APawn* InPawn)
 {
 	Super::OnPossess(InPawn);
 
+	// The HUD binds in AcknowledgePossession, which the owning machine runs for
+	// both the listen host and a remote client; OnPossess is server-only.
+	PushMappingContext(GameplayMappingContext, 1);
+}
+
+void AOneBrahamPlayerController::AcknowledgePossession(APawn* P)
+{
+	Super::AcknowledgePossession(P);
+
 	if (IsLocalController() && HUDComponent != nullptr)
 	{
-		HUDComponent->BindToPawn(InPawn);
+		if (P != nullptr)
+		{
+			HUDComponent->BindToPawn(P);
+		}
+		else
+		{
+			HUDComponent->UnbindFromPawn();
+		}
 	}
-
-	PushMappingContext(GameplayMappingContext, 1);
 }
 
 void AOneBrahamPlayerController::OnUnPossess()
@@ -1066,12 +1114,18 @@ void AOneBrahamPlayerController::RequestQuickLine(FName LineId)
 void AOneBrahamPlayerController::ServerSetLoadout_Implementation(FName PrimaryWeaponId, FName SidearmWeaponId,
 	const TArray<FName>& UtilityIds, FName WeaponSkinId)
 {
+	// No WithValidation in this project (a failed _Validate kicks the client):
+	// a call far past the locker's four utility slots is dropped, not punished.
+	if (!CheckRPCBudget(TEXT("ServerSetLoadout")) || UtilityIds.Num() > 16)
+	{
+		return;
+	}
+
 	AOneBrahamPlayerState* State = GetPlayerState<AOneBrahamPlayerState>();
 	if (State == nullptr)
 	{
-		// Called from InitPlayerState, where the state must already exist; if it
-		// somehow does not, the spawn path gives the standard-issue kit and the
-		// player is armed anyway.
+		// The client sends only once it has a player state, so this is a forged
+		// or very stale call; the spawn path gives the standard-issue kit.
 		return;
 	}
 
@@ -1084,13 +1138,67 @@ void AOneBrahamPlayerController::ServerSetLoadout_Implementation(FName PrimaryWe
 	// The first receipt usually lands after PostLogin has already put this player
 	// on the floor - the client only knows its profile once it is in - so the kit
 	// it was given a moment ago is the standard issue one. Replace it now rather
-	// than making them play a life with the wrong rifle.
-	if (AOneBrahamCharacter* Character = GetOneBrahamCharacter())
+	// than making them play a life with the wrong rifle. Only for a pawn that
+	// has just spawned and is alive: a client holding the RPC back would
+	// otherwise get a full re-arm mid-fight, or arm its own corpse.
+	constexpr float FirstReceiptRearmWindowSeconds = 10.f;
+	AOneBrahamCharacter* Character = GetOneBrahamCharacter();
+	const UOneBrahamHealthComponent* Health = Character != nullptr ? Character->GetHealthComponent() : nullptr;
+	const bool bJustSpawned = GetWorld() != nullptr
+		&& GetWorld()->GetTimeSeconds() - State->LastSpawnServerTime <= FirstReceiptRearmWindowSeconds;
+	if (Character != nullptr && Health != nullptr && Health->IsAlive() && bJustSpawned)
 	{
 		if (UOneBrahamWeaponComponent* Weapons = Character->GetWeaponComponent())
 		{
 			Weapons->ResetOnRespawn();
 		}
+	}
+}
+
+void AOneBrahamPlayerController::ServerSetProfileCosmetics_Implementation(const TArray<FOneBrahamNamePairEntry>& Cosmetics, const FString& InClanTag)
+{
+	// Generous bounds, dropped rather than kicked: an honest client sends a
+	// handful of slots and a short tag.
+	if (!CheckRPCBudget(TEXT("ServerSetProfileCosmetics")) || Cosmetics.Num() > 32 || InClanTag.Len() > 64)
+	{
+		return;
+	}
+
+	AOneBrahamPlayerState* State = GetPlayerState<AOneBrahamPlayerState>();
+	if (State == nullptr)
+	{
+		return;
+	}
+
+	// Client strings going into replicated state: lengths and counts capped.
+	// Whether an id names a real cosmetic is the character's call when it looks
+	// the slot up, exactly as for weapon ids.
+	constexpr int32 MaxCosmeticSlots = 16;
+	constexpr int32 MaxCosmeticIdLen = 48;
+	constexpr int32 MaxClanTagLen = 8;
+
+	State->EquippedCosmetics.Reset();
+	for (const FOneBrahamNamePairEntry& Entry : Cosmetics)
+	{
+		if (State->EquippedCosmetics.Num() >= MaxCosmeticSlots)
+		{
+			break;
+		}
+		if (Entry.Key.IsNone() || Entry.Key.ToString().Len() > MaxCosmeticIdLen || Entry.Value.ToString().Len() > MaxCosmeticIdLen)
+		{
+			continue;
+		}
+		State->EquippedCosmetics.Add(Entry.Key, Entry.Value);
+	}
+
+	State->ClanTag = InClanTag.Left(MaxClanTagLen).TrimStartAndEnd();
+	State->ForceNetUpdate();
+
+	// The player may already be on the floor in the outfit they had before this
+	// arrived; dress them now. The character replicates its own appearance.
+	if (AOneBrahamCharacter* Character = GetOneBrahamCharacter())
+	{
+		Character->ApplyCosmetics(State->EquippedCosmetics);
 	}
 }
 

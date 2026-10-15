@@ -11,6 +11,7 @@
 #include "Characters/OneBrahamCharacter.h"
 #include "Characters/OneBrahamHealthComponent.h"
 #include "Characters/OneBrahamCharacterMovementComponent.h"
+#include "Characters/OneBrahamDownedComponent.h"
 #include "UI/OneBrahamHUDComponent.h"
 #include "Weapons/OneBrahamInventoryComponent.h"
 #include "Weapons/OneBrahamPickupBase.h"
@@ -198,10 +199,39 @@ void UOneBrahamWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		}
 	}
 
-	// --- Bloom decay ------------------------------------------------------
-	if (CurrentWeapon != nullptr && CurrentWeapon->Definition != nullptr && !bTriggerHeld)
+	// An ADS raised in the instant before the downed flag arrived was refused by
+	// the server; drop it here so the owner's view matches the server's spread.
+	if (bLocallyControlled && bAimingDownSights && Character->GetDownedComponent() != nullptr &&
+		Character->GetDownedComponent()->IsDowned())
 	{
-		CurrentBloom = FMath::Max(0.f, CurrentBloom - CurrentWeapon->Definition->Spread.BloomDecayPerSecond * DeltaTime);
+		SetAimingDownSights(false);
+	}
+
+	// --- Bloom decay ------------------------------------------------------
+	if (CurrentWeapon != nullptr && CurrentWeapon->Definition != nullptr)
+	{
+		// The server never sees a remote player's trigger, so for them "held" is
+		// "fired within the last two shot intervals": without it the server's bloom
+		// would bleed away between every pair of automatic shots.
+		const bool bRemoteOnServer = bAuthority && !bLocallyControlled;
+		const bool bHeldForBloom = bRemoteOnServer
+			? (GetWorld()->GetTimeSeconds() - LastServerFireTime) < CurrentWeapon->Definition->GetSecondsBetweenShots() * 2.f
+			: bTriggerHeld;
+
+		if (!bHeldForBloom)
+		{
+			CurrentBloom = FMath::Max(0.f, CurrentBloom - CurrentWeapon->Definition->Spread.BloomDecayPerSecond * DeltaTime);
+		}
+	}
+
+	// --- Weapon attachment (every machine with a screen) -----------------
+	// Which mesh the gun hangs off is a per-machine answer: the owner's 1P arms
+	// here if this machine controls the pawn, its 3P body everywhere else. It is
+	// re-checked every frame because possession can resolve after the weapon
+	// arrives (late join, respawn); the call is a no-op once it is right.
+	if (CurrentWeapon != nullptr && !CurrentWeapon->IsGroundPickup() && GetNetMode() != NM_DedicatedServer)
+	{
+		CurrentWeapon->AttachToOwnerMesh(GetCharacter());
 	}
 
 	// --- Recoil recovery --------------------------------------------------
@@ -226,15 +256,10 @@ void UOneBrahamWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 				// Burst mode fires three rounds then requires a re-press.
 				if (bBurst)
 				{
-					if (ServerBurstRemaining <= 0)
-					{
-						ServerBurstRemaining = 3;
-					}
-					if (ServerBurstRemaining > 0)
+					if (AdvanceBurst(ServerBurstRemaining, bBurstLatched))
 					{
 						++ClientShotIndex;
 						LastLocalFireTime = Now;
-						--ServerBurstRemaining;
 						PredictLocalShot();
 						ServerRequestFire(Character->GetEyeLocation(), Character->GetEyeRotation().Vector(), ClientShotIndex);
 					}
@@ -316,18 +341,11 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerGiveWeapon(FName WeaponId
 		NewWeapon->SetAmmoInMagazine(AmmoInMag);
 	}
 
-	// Reserve pool: created on first pick-up of that weapon type.
-	if (ReserveAmmo >= 0)
-	{
-		ReserveAmmoByWeapon.Add(WeaponId, FMath::Clamp(ReserveAmmo, 0, Definition->MaxReserve));
-	}
-	else if (!ReserveAmmoByWeapon.Contains(WeaponId))
-	{
-		ReserveAmmoByWeapon.Add(WeaponId, Definition->StartingReserve);
-	}
-
-	// Slot management: the new weapon replaces whatever was in its slot.
+	// Slot management: the new weapon replaces whatever was in its slot. This
+	// runs before the reserve below, because the displaced weapon takes its own
+	// pool to the floor and must not take the new weapon's with it.
 	const EOneBrahamWeaponSlot Slot = Definition->DefaultSlot;
+	bool bDisplacedHeldWeapon = false;
 	if (TObjectPtr<AOneBrahamWeaponBase>* Existing = OwnedWeapons.Find(Slot))
 	{
 		if (*Existing != nullptr && *Existing != NewWeapon)
@@ -336,6 +354,8 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerGiveWeapon(FName WeaponId
 			// intact: you can always pick up what you left behind.
 			if (AOneBrahamWeaponBase* OldWeapon = *Existing)
 			{
+				bDisplacedHeldWeapon = OldWeapon == CurrentWeapon;
+				ReleaseDroppedWeapon(OldWeapon, WeaponId);
 				OldWeapon->SetOwningWeaponComponent(nullptr);
 				OldWeapon->OnUnequipped();
 
@@ -347,9 +367,21 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerGiveWeapon(FName WeaponId
 		}
 	}
 
+	// Reserve pool: created on first pick-up of that weapon type.
+	if (ReserveAmmo >= 0)
+	{
+		ReserveAmmoByWeapon.Add(WeaponId, FMath::Clamp(ReserveAmmo, 0, Definition->MaxReserve));
+	}
+	else if (!ReserveAmmoByWeapon.Contains(WeaponId))
+	{
+		ReserveAmmoByWeapon.Add(WeaponId, Definition->StartingReserve);
+	}
+
 	OwnedWeapons.Add(Slot, NewWeapon);
 
-	if (bEquip)
+	// The weapon in the player's hands was just dropped, so something has to go
+	// back into them even when the caller asked for no equip.
+	if (bEquip || bDisplacedHeldWeapon)
 	{
 		EquipSlot(Slot);
 	}
@@ -407,6 +439,7 @@ void UOneBrahamWeaponComponent::ResetOnRespawn()
 	ReserveAmmoByWeapon.Reset();
 	CurrentWeapon = nullptr;
 	CurrentSlot = EOneBrahamWeaponSlot::Melee;
+	bAimingDownSights = false;
 
 	// The reload's timer belongs to the weapon actor, which has just gone; only
 	// the component's own flag is left to clear.
@@ -507,6 +540,7 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::DropCurrentWeapon()
 
 	AOneBrahamWeaponBase* Dropped = CurrentWeapon;
 	OwnedWeapons.Remove(CurrentSlot);
+	ReleaseDroppedWeapon(Dropped);
 	Dropped->SetOwningWeaponComponent(nullptr);
 	Dropped->OnUnequipped();
 
@@ -577,6 +611,9 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerPickupFromWorld(AOneBraha
 		{
 			if (Old != WorldWeapon)
 			{
+				// Swapping for the same weapon type keeps the pool in the player's
+				// pockets; the incoming pickup's rounds are added to it below.
+				ReleaseDroppedWeapon(Old, WorldWeapon->Definition->WeaponId);
 				Old->SetOwningWeaponComponent(nullptr);
 				Old->OnUnequipped();
 
@@ -593,11 +630,14 @@ AOneBrahamWeaponBase* UOneBrahamWeaponComponent::ServerPickupFromWorld(AOneBraha
 	}
 
 	// Reserve ammo travels with the weapon: a dropped rifle is worth exactly what
-	// is left in it, which is what makes looting a body a real decision.
-	if (const AOneBrahamPickupBase* Pickup = Cast<AOneBrahamPickupBase>(WorldWeapon))
+	// is left in it, which is what makes looting a body a real decision. It is
+	// added to what the player already carries for that type, never overwrites it.
+	if (AOneBrahamPickupBase* Pickup = Cast<AOneBrahamPickupBase>(WorldWeapon))
 	{
-		const int32 Carried = FMath::Clamp(Pickup->GetGroundReserveAmmo(), 0, WorldWeapon->Definition->MaxReserve);
-		ReserveAmmoByWeapon.Add(WorldWeapon->Definition->WeaponId, Carried);
+		const FName WeaponId = WorldWeapon->Definition->WeaponId;
+		ReserveAmmoByWeapon.Add(WeaponId, MergeReserveAmmo(ReserveAmmoByWeapon.FindRef(WeaponId),
+			Pickup->GetGroundReserveAmmo(), WorldWeapon->Definition->MaxReserve));
+		Pickup->SetGroundReserveAmmo(0);
 	}
 	else if (!ReserveAmmoByWeapon.Contains(WorldWeapon->Definition->WeaponId))
 	{
@@ -650,6 +690,7 @@ void UOneBrahamWeaponComponent::DropAllOnDeath()
 			continue;
 		}
 
+		ReleaseDroppedWeapon(Pair.Value);
 		Pair.Value->SetOwningWeaponComponent(nullptr);
 		Pair.Value->OnUnequipped();
 
@@ -665,11 +706,48 @@ void UOneBrahamWeaponComponent::DropAllOnDeath()
 	}
 
 	OwnedWeapons.Reset();
+	ReserveAmmoByWeapon.Reset();
 	CurrentWeapon = nullptr;
 	CurrentSlot = EOneBrahamWeaponSlot::Melee;
+	// The server's ADS flag now follows the owner's; a corpse keeps no sight up.
+	bAimingDownSights = false;
 	if (AActor* Owner = GetOwner())
 	{
 		Owner->ForceNetUpdate();
+	}
+}
+
+void UOneBrahamWeaponComponent::ReleaseDroppedWeapon(AOneBrahamWeaponBase* Dropped, FName KeepPoolForId)
+{
+	if (Dropped == nullptr || !GetOwner()->HasAuthority())
+	{
+		return;
+	}
+
+	// The pool is per weapon type and a player carries one weapon per type, so
+	// the pool leaves with the weapon - unless the same type is coming straight
+	// back into the slot, in which case the player keeps their rounds.
+	if (Dropped->Definition != nullptr && Dropped->Definition->WeaponId != KeepPoolForId)
+	{
+		const FName WeaponId = Dropped->Definition->WeaponId;
+		if (AOneBrahamPickupBase* Pickup = Cast<AOneBrahamPickupBase>(Dropped))
+		{
+			Pickup->SetGroundReserveAmmo(Pickup->GetGroundReserveAmmo() + ReserveAmmoByWeapon.FindRef(WeaponId));
+		}
+		ReserveAmmoByWeapon.Remove(WeaponId);
+	}
+
+	if (Dropped == CurrentWeapon)
+	{
+		// The reload timer lives on the weapon that is leaving; finishing it would
+		// fill a magazine lying on the floor.
+		if (bIsReloading)
+		{
+			Dropped->ServerCancelReload();
+			bIsReloading = false;
+			OnRep_Reloading();
+		}
+		CurrentWeapon = nullptr;
 	}
 }
 
@@ -695,21 +773,16 @@ void UOneBrahamWeaponComponent::EquipSlot(EOneBrahamWeaponSlot Slot)
 		return;
 	}
 
-	if (CurrentWeapon != nullptr && CurrentSlot == Slot)
+	// Compare the actor, not just the slot: a pickup into the held slot puts a
+	// different weapon behind the same slot number.
+	AOneBrahamWeaponBase* Target = OwnedWeapons.FindRef(Slot);
+	if (CurrentWeapon != nullptr && CurrentSlot == Slot && CurrentWeapon == Target)
 	{
 		return;
 	}
 
 	AOneBrahamWeaponBase* Previous = CurrentWeapon;
-
-	if (TObjectPtr<AOneBrahamWeaponBase>* Found = OwnedWeapons.Find(Slot))
-	{
-		CurrentWeapon = *Found;
-	}
-	else
-	{
-		CurrentWeapon = nullptr;
-	}
+	CurrentWeapon = Target;
 
 	CurrentSlot = Slot;
 
@@ -812,6 +885,16 @@ void UOneBrahamWeaponComponent::ServerGiveWeaponDebug_Implementation(FName Weapo
 // ==========================================================================
 void UOneBrahamWeaponComponent::SetTriggerHeld(bool bHeld)
 {
+	// A release always ends the press, even with no weapon in hand: otherwise a
+	// burst latch set by one weapon would hold the next one's trigger shut.
+	if (!bHeld)
+	{
+		bTriggerHeld = false;
+		ServerBurstRemaining = 0;
+		bBurstLatched = false;
+		return;
+	}
+
 	const AOneBrahamCharacter* Character = GetCharacter();
 	if (Character == nullptr || CurrentWeapon == nullptr)
 	{
@@ -829,12 +912,6 @@ void UOneBrahamWeaponComponent::SetTriggerHeld(bool bHeld)
 	}
 
 	bTriggerHeld = bHeld;
-
-	if (!bHeld)
-	{
-		ServerBurstRemaining = 0;
-		return;
-	}
 
 	// --- Semi-auto / pump / bolt: one shot per press ----------------------
 	const bool bSingleShot = CurrentFireMode == EOneBrahamFireMode::Single ||
@@ -1068,8 +1145,13 @@ void UOneBrahamWeaponComponent::PredictLocalShot()
 
 	ApplyRecoilKick(CurrentWeapon->GetShotCounter());
 
-	CurrentBloom = FMath::Min(CurrentBloom + (CurrentWeapon->Definition != nullptr ? CurrentWeapon->Definition->Spread.BloomPerShot : 0.f),
-		CurrentWeapon->Definition != nullptr ? CurrentWeapon->Definition->Spread.MaxBloom : 3.f);
+	// The authority grows bloom in OnServerShotFired; growing it here as well
+	// would give a listen-server host twice the bloom of everyone else.
+	if (!GetOwner()->HasAuthority())
+	{
+		CurrentBloom = FMath::Min(CurrentBloom + (CurrentWeapon->Definition != nullptr ? CurrentWeapon->Definition->Spread.BloomPerShot : 0.f),
+			CurrentWeapon->Definition != nullptr ? CurrentWeapon->Definition->Spread.MaxBloom : 3.f);
+	}
 
 	// Muzzle flash + shell + tracer are all multicast by the server, so the local
 	// prediction only handles the *pose* change (kick) - which is what the player
@@ -1984,6 +2066,13 @@ void UOneBrahamWeaponComponent::OnRep_CurrentWeapon()
 	{
 		CurrentWeapon->SetOwningWeaponComponent(this);
 		SanitiseFireMode();
+
+		// The server's attachment is its own answer (see AttachToOwnerMesh); every
+		// client re-attaches by whether it controls this pawn itself.
+		if (!CurrentWeapon->IsGroundPickup())
+		{
+			CurrentWeapon->AttachToOwnerMesh(GetCharacter());
+		}
 	}
 
 	OnWeaponChanged.Broadcast(CurrentWeapon, nullptr);
@@ -1997,18 +2086,76 @@ void UOneBrahamWeaponComponent::OnRep_Reloading()
 void UOneBrahamWeaponComponent::SetAimingDownSights(bool bAiming)
 {
 	// ADS is a pure presentation + spread change; the spread change is applied
-	// server-side from the replicated flag, so a modified client cannot get the
-	// ADS accuracy benefit without the movement penalty.
+	// server-side from the server's copy of the flag, so a modified client cannot
+	// get the ADS accuracy benefit without the movement penalty.
+	AOneBrahamCharacter* Character = GetCharacter();
+
+	// Nobody aims a sight from the floor. Checked on both sides so the client's
+	// prediction and the server's answer agree - which is why it reads the
+	// replicated downed flag: the DownedCrawl movement mode is set on the server
+	// only, and a refusal the client never learns of is never corrected (the
+	// server's flag does not change, so nothing replicates).
+	if (bAiming && Character != nullptr &&
+		((Character->GetDownedComponent() != nullptr && Character->GetDownedComponent()->IsDowned()) ||
+		 (Character->GetOBCharacterMovement() != nullptr &&
+		  Character->GetOBCharacterMovement()->GetOBMovementMode() == EOneBrahamMovementMode::DownedCrawl)))
+	{
+		bAiming = false;
+	}
+
 	bAimingDownSights = bAiming;
 
-	// Sprinting overrides ADS: you drop the sight to run.
-	if (bAiming && GetCharacter() != nullptr && GetCharacter()->IsSprintRequested())
+	// Sprinting and ADS are exclusive: raising the sight ends the sprint. This
+	// runs on the client (prediction) and again on the server (from the RPC).
+	if (bAiming && Character != nullptr && Character->IsSprintRequested())
 	{
-		GetCharacter()->SetSprintRequested(false);
+		Character->SetSprintRequested(false);
+	}
+
+	if (GetOwner() != nullptr && !GetOwner()->HasAuthority())
+	{
+		// Only the owning connection can call a Server RPC; a simulated proxy
+		// changing its own copy (it never should) has no one to tell.
+		if (Character != nullptr && Character->IsLocallyControlled())
+		{
+			ServerSetAimingDownSights(bAiming);
+		}
+		return;
 	}
 
 	if (AActor* Owner = GetOwner())
 	{
 		Owner->ForceNetUpdate();
 	}
+}
+
+void UOneBrahamWeaponComponent::ServerSetAimingDownSights_Implementation(bool bAiming)
+{
+	SetAimingDownSights(bAiming);
+}
+
+// ==========================================================================
+//  Pure rules
+// ==========================================================================
+bool UOneBrahamWeaponComponent::AdvanceBurst(int32& InOutBurstRemaining, bool& bInOutBurstLatched, int32 BurstSize)
+{
+	if (InOutBurstRemaining <= 0)
+	{
+		// This press has already had its burst.
+		if (bInOutBurstLatched)
+		{
+			return false;
+		}
+
+		InOutBurstRemaining = FMath::Max(1, BurstSize);
+		bInOutBurstLatched = true;
+	}
+
+	--InOutBurstRemaining;
+	return true;
+}
+
+int32 UOneBrahamWeaponComponent::MergeReserveAmmo(int32 ExistingReserve, int32 IncomingReserve, int32 MaxReserve)
+{
+	return FMath::Clamp(FMath::Max(0, ExistingReserve) + FMath::Max(0, IncomingReserve), 0, FMath::Max(0, MaxReserve));
 }

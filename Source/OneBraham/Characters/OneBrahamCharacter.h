@@ -78,6 +78,7 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void PossessedBy(AController* NewController) override;
+	virtual void PawnClientRestart() override;
 	virtual void OnRep_PlayerState() override;
 	virtual void Landed(const FHitResult& Hit) override;
 	virtual void FellOutOfWorld(const UDamageType& DamageType) override;
@@ -488,6 +489,17 @@ protected:
 	float FootstepCullDistanceCm = 5000.f;
 
 private:
+	/**
+	 * Arms for the human driving this pawn on this machine, body for everyone
+	 * else. Re-run whenever control can have changed (spawn, possess, client
+	 * restart), because BeginPlay alone runs before possession on the server and
+	 * before the controller replicates on a remote client.
+	 */
+	void UpdateFirstPersonVisibility();
+
+	/** SetVisibility on Root and this pawn's own mesh children (the cosmetics), never attached actors or lights. */
+	void SetOwnMeshVisibility(USceneComponent* Root, bool bVisible);
+
 	/** Accumulators for the 2 Hz/10 Hz subsystems. */
 	float FloorCheckAccumulator = 0.f;
 

@@ -12,7 +12,7 @@ Docs/20.
 
 | Area | State | Evidence |
 | --- | --- | --- |
-| Code | Compiles on macOS (UE 5.8, Apple Silicon). Every system in Docs/03–08 implemented. | 39 automation tests, 43 validation checks, all engine-free checks passing |
+| Code | Compiles on macOS (UE 5.8, Apple Silicon). Every system in Docs/03–08 implemented. | 47 automation tests, 43 validation checks, all engine-free checks passing |
 | The tower | All 18 storeys to the brief and the references: revolving doors, double-height reception, gates with glass wings, escalators, coffee shop, 9 lifts (glass lift in steel), two stairs, 48 rooms, canteen, Skydeck balcony, Management Suite and atrium (16), Winter Garden and roof terrace (17) | Docs/09; rendered review captures |
 | Lighting | Physically based: lumens and lux, EV100 exposure per floor, sun and sky, fill, stair bulkheads | Docs/09 §5.3 |
 | Surroundings | Aldgate East from OpenStreetMap at 1:1: ~8,800 buildings, streets, traffic, parks, trees, the City skyline | Docs/09 §2.9 |
@@ -54,8 +54,14 @@ The real One Braham, inside and out, from the research in Docs/09 and Docs/10 §
       grasses and multi-stem trees, frameless glass balustrades (17, and the
       atrium garden on 16).
 - [x] **Sky**: a photographed CC0 sky on a dome, the sun aimed at the sun in
-      it, horizon haze matched to the fog. *Still to do:* switch to the dusk
-      preset for the Skydeck finale (built; needs a lockdown-stage hook).
+      it, horizon haze matched to the fog. When the lockdown reaches the
+      Purge, AOneBrahamSkyDirector turns the day to dusk over 20 s: the sun
+      sinks to the Belfast photograph's sun (2.1 degrees up) and warms to
+      255/196/140, the light falls evenly in stops from 8,000 to 2,500 lux,
+      the dome crossfades to the sunset photograph and the haze and fog go
+      amber at the dusk luminance. It reads the replicated lockdown stage, so
+      every client sees the same sunset with no new replication, and a player
+      joining mid-Purge arrives at dusk. (placed by the environment build; not yet seen in play)
 
 **Done when** each reference photograph has a matching in-game capture a
 stranger would recognise as the same building.
@@ -64,12 +70,17 @@ stranger would recognise as the same building.
 
 Replace flat colours with physically based textures, and boxes with props.
 
-- [ ] Texture sets for the 15 surfaces (Docs/10 §2) from the sources in §4.
+- [x] Texture sets for the 15 surfaces (Docs/10 §2) from the sources in §4.
       *Done:* terrazzo, concrete, timber, plaster, street paving, asphalt -
       CC0 sets on a world-aligned master, coloured by the measured albedo;
       carpet tile, brushed metal, terrace decking and the canteen's rubber
-      tile (ambientCG / Poly Haven). *Next:* fabric, glass grime, signage.
-- [ ] Office dressing: desks, chairs, monitors, planters, signage, kitchen kit,
+      tile (ambientCG / Poly Haven); fabric (woven upholstery on the spine
+      screens, booths and lounge sofa; a fine knit on the task chairs) and
+      glass grime (a world-aligned fingerprint mask on partitions, gate wings
+      and security screens; a dust film on the balustrades; per-pixel-lit so
+      it shows in reflections) - ambientCG CC0. Signage stays as lit
+      lettering: there is no substrate a texture set would fit.
+- [ ] Office dressing: desks, chairs, monitors, planters, signage,
       server racks, toilets - from §4, scaled to real dimensions. *Done:*
       open-plan benching with oak tops, spine screens, lit dual monitors,
       pedestals, task chairs and row-end planters; then, from the interior
@@ -82,11 +93,45 @@ Replace flat colours with physically based textures, and boxes with props.
       offices as glass boxes in black frames with oak tables; the lift lobby's
       lit ceiling. The canteen servery: steel wells under a sneeze-guard, heat
       lamps, menu screens, coffee machine, lit chiller, extract canopy; oak
-      tables with black chairs.
-- [ ] Decals: wear, floor signage, wet-floor, blood (already authored as
-      materials; needs textures).
-- [ ] District facades: real window textures per family, roofscape plant,
-      shopfronts at street level on the near streets.
+      tables with black chairs. Kitchen kit at real sizes: the office floors'
+      breakout kitchens have a 4.3 m run against a back panel stood off the
+      glass. The run has a tall integrated fridge-freezer, a pull-out
+      recycling front, a sink with mixer tap and boiling-water tap, an
+      integrated dishwasher, drawers and a bean-to-cup coffee machine on an
+      oak worktop with upstand (top at 910). Wall units sit above with an LED
+      strip under them. Across the aisle is a long oak-topped island with bar
+      stools and pendants, and by the glass a booth pair and three-stream
+      bins. The canteen's back-of-house kitchen on 15 has a cooking line
+      under one extract canopy (upright fridge, combination oven, six-burner
+      range, solid top, fryer, chargrill, bratt pan), then a prep bench, pot
+      wash with pre-rinse spray, pass-through dishwasher and hand-wash basin
+      by the door, and stainless prep benches with undercounter fridges along
+      the glass. The servery has a tray slide, a tray stack where the queue
+      starts and a cutlery station at the till. Every small light casts no
+      shadows.
+- [ ] Decals: wear, floor signage, wet-floor, blood. *Done:* the scuff (wear)
+      decal on a CC0 smear (ambientCG Smear001) through a textured decal
+      master. *Not from open sources:* blood stays procedural
+      (M_OB_Decal_Blood). Wet-floor and floor-signage decals, the bullet holes
+      and the glass crack have no CC0 set that fits; brief them in Docs/15 or
+      source them from Fab.
+- [x] District facades: window grids per building family, roofscape plant,
+      shopfronts at street level on the near streets. *Done:* M_OB_Facade
+      draws a ground storey (plinth with wide openings), windows on a sill
+      with frames and glazing bars, floor-line bands (string courses, slab
+      edges, flashings), roofs in roof colour, blinds and lit rooms per window
+      cell, all from world position with no textures. The OSM families split
+      into eight variants by height and OSM-id hash: curtain wall, ribbon
+      glazing, Portland stone with sashes, stone-clad office, stock-brick
+      terrace, red-brick warehouse with steel windows, post-war yellow-brick
+      flats, dark rainscreen. Larger roofs carry lift overruns, air-handling
+      units, condensers and tower plant screens (about 7,000 units). 777 shop
+      units line the facades facing Leman Street, Alie Street, Commercial
+      Road, Whitechapel High Street and Road, Aldgate High Street, Commercial
+      Street, Goulston Street, Old Castle Street, Osborn Street, Mansell Street
+      and Braham Street: stall riser, pilasters, lit glazing with a door,
+      painted or lit fascia, cornice. Batched into about 21 district meshes,
+      so about 13 more draw calls than before.
 
 **Done when** no surface within 50 m of a player reads as a flat colour.
 
@@ -98,8 +143,18 @@ Replace flat colours with physically based textures, and boxes with props.
       the engine template's third-person rifle animation blueprint (aim
       offset, ADS idle, locomotion, jumps; the pistol one is copied too), hit
       zones tested against the mannequin skeleton. The body swaps to the pistol
-      blueprint while a sidearm is drawn, and back. *Next:* the archetypes' clothing, the Game Animation Sample
-      (a Fab download - needs the account holder).
+      blueprint while a sidearm is drawn, and back. Each archetype wears its
+      own clothes on the mannequin: a material instance of the mannequin's
+      own material per body section (top: torso, arms and hands; bottom: head
+      and legs), tinted to measured cloth albedo with cloth roughness and no
+      metal. Business Analyst: pale blue Oxford shirt and navy chinos.
+      Graduate: olive puffer and indigo jeans. Finance: charcoal overcoat and
+      suit trousers. IT: navy fleece and grey cargos. Facilities: fluorescent
+      hi-vis and navy work trousers. Consultant: camel blazer and grey wool
+      trousers. These are MI_OB_Cast_* in Characters/Materials, assigned
+      through BodyMaterials on the registry. *Next:* the Game Animation Sample
+      (a Fab download, which needs the account holder) and the garment meshes
+      for the cosmetic slots.
 - [ ] Ten weapons with proper meshes, sounds and first-person animation.
       *Done:* every weapon carries a real model - Epic's template rifle, or
       its pistol for the three sidearms - in the hand, in first person and as
@@ -125,6 +180,14 @@ The known gaps, from the end of Docs/18 and the session log:
 - [x] First-time player path: a guided induction on the ground floor (move,
       look, sprint, crouch, keycard, gates, escalators, fire, reload), once
       per profile, never able to trap a player.
+- [x] Multiplayer correctness pass: a bug hunt across the code, each finding
+      tried by an adversarial verifier, 14 confirmed and fixed - the HUD on
+      remote clients, FIRE DRILL respawns, server-authoritative hold
+      interactions, revive health, burst fire, reserve ammo changing hands,
+      downed regen and revive-from-dead, the purge killing rather than
+      downing, ADS and bloom reaching the server, loadouts from each player's
+      own profile, and the gun on the right body on every machine. Reasoned
+      and unit-tested; needs the M5 LAN session to confirm.
 - [ ] Bots tuned against human play data from M5.
 
 ### M5 — Play it

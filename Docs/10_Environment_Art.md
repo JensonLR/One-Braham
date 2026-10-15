@@ -30,7 +30,7 @@ happening in it, the art direction is working.
 
 ## 2. Master materials
 
-Six masters, authored at `/Game/OneBraham/Materials/`. Every instance in the
+Nine masters, authored at `/Game/OneBraham/Materials/`. Every instance in the
 game is one of these with parameters, because fifteen masters is how a project
 loses its shader cache and its frame time at the same time. Five of the six are
 surface masters; the sixth (2.7, `M_OB_Highlight`) is a post-process material,
@@ -106,7 +106,14 @@ and during the purge the screens are the first thing to go.
 
 Deferred decal. `DecalTexture × BaseColour → BaseColor`, `Opacity`, and a normal
 parameter for the plaster craters. Six instances; see
-`Docs/11_Niagara_VFX.md` section 5.
+`Docs/11_Niagara_VFX.md` section 5. The Scuff decal (`M_OB_Decal_Scuff`) now
+sits on `M_OB_DecalTextured` (2.5a).
+
+### 2.5a `M_OB_DecalTextured`
+
+Deferred decal for decals with a real texture. `DecalTexture × TextureGain ×
+BaseColour → BaseColor`, `DecalMask.r × Opacity → Opacity`, plus `Roughness`
+and a `DecalNormal` lerped by `NormalStrength`.
 
 ### 2.6 The instance set
 
@@ -160,6 +167,13 @@ where the prompt already tells you the verb, the highlight's job is to say "that
 one", and a tinted edge does that without drawing a shape that has to be art
 directed per object type.
 
+### 2.8 `M_OB_GlassGrimed`
+
+`M_OB_Glass`'s parameters plus `GrimeTex`, `GrimeSizeCm`, `GrimeAmount`,
+`GrimeColour`, `GrimeOpacity` and `GrimeRoughness`.
+`g = saturate(WorldAligned(GrimeTex).r × GrimeAmount)`, which lerps the tint,
+opacity and roughness. Translucency lighting is surface per-pixel.
+
 ---
 
 ## 3. Lighting per area
@@ -173,7 +187,7 @@ directed per object type.
 | Server 9–11 | No daylight at all | 4000 K strips | Rack LEDs (blue and green) | The only area with no exterior light, which is why it feels wrong |
 | Executive 12 | Golden-hour directional through glazing | Low warm fill | Boardroom pendant | The one area where the light is *good* |
 | Canteen 13–14 | Directional, two elevations of glazing | SkyLight | Servery 4000 K | Brightest room in the building; the hardest place to hide |
-| Skydeck 15 | Dusk directional, low | SkyLight | 4 floodlight masts, 6000 K pools | Pools of light with hard shadows; the pad is half-lit by design |
+| Skydeck 15 | Dusk directional, low | SkyLight | 4 floodlight masts, 6000 K pools | Pools of light with hard shadows; the pad is half-lit by design; the dusk arrives with the Purge (`AOneBrahamSkyDirector`) |
 
 Rules:
 
@@ -187,7 +201,7 @@ Rules:
    the building, and they are the player's wayfinding when the lights fail.
 4. **The Skydeck at dusk is the lighting showcase.** It is the only place the
    player is outside, it is the end of the match, and it is the frame that goes on
-   the store page.
+   the store page. The dusk arrives with the Purge (`AOneBrahamSkyDirector`).
 
 ---
 

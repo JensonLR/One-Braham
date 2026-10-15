@@ -160,6 +160,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Spawn")
 	void QueueRespawn(AController* Controller, float DelaySeconds);
 
+	/** True for a null pawn or a corpse: one the respawn queue should replace. */
+	static bool IsPawnDeadForRespawn(const APawn* Pawn);
+
+	/** A queued respawn that found no free spawn point tries again after this long. */
+	static constexpr float RespawnRetrySeconds = 1.f;
+
 	/** Picks the best spawn point for a controller, honouring squad spread and enemy distance. */
 	AOneBrahamSpawnPoint* SelectSpawnPointFor(AController* Controller, int32 FloorIndex = INDEX_NONE) const;
 

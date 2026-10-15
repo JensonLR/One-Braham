@@ -907,7 +907,7 @@ def _sign(cx, cy, x, y, zc, yaw, text, size, colour, label, align="center"):
         "center": unreal.HorizTextAligment.EHTA_CENTER, "left": unreal.HorizTextAligment.EHTA_LEFT,
         "right": unreal.HorizTextAligment.EHTA_RIGHT}[align])
     component.set_editor_property("vertical_alignment", unreal.VerticalTextAligment.EVRTA_TEXT_CENTER)
-    component.set_editor_property("text_render_color", unreal.Color(colour[0], colour[1], colour[2], 255))
+    component.set_editor_property("text_render_color", unreal.Color(r=colour[0], g=colour[1], b=colour[2], a=255))
     glow = unreal.load_asset("/Engine/EngineMaterials/DefaultTextMaterialTranslucent.DefaultTextMaterialTranslucent")
     if glow is not None:
         component.set_material(0, glow)
@@ -1045,7 +1045,7 @@ def build_core(floor_index, area_name, cx, cy, z, materials, prefix):
             component.set_editor_property("Intensity", 1800.0)
             component.set_editor_property("AttenuationRadius", 650.0)
             component.set_editor_property("SourceRadius", 12.0)
-            component.set_editor_property("LightColor", unreal.Color(235, 240, 255, 255))
+            component.set_editor_property("LightColor", unreal.Color(r=235, g=240, b=255, a=255))
             component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
             component.set_editor_property("MaxDrawDistance", 3000.0)
             _label(bulkhead, "{0}_Stair_{1}_Bulkhead_{2}".format(prefix, tag, label))
@@ -1267,7 +1267,7 @@ def build_lift_lobby(cx, cy, z, materials, prefix):
             component.set_editor_property("IntensityUnits", unreal.LightUnits.LUMENS)
             component.set_editor_property("Intensity", 1600.0)
             component.set_editor_property("AttenuationRadius", 520.0)
-            component.set_editor_property("LightColor", unreal.Color(255, 236, 210, 255))
+            component.set_editor_property("LightColor", unreal.Color(r=255, g=236, b=210, a=255))
             component.set_editor_property("CastShadows", i % 2 == 0)
             component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
             _label(lamp, "{0}_LiftHall_Downlight_{1}".format(prefix, i + 1))
@@ -1283,7 +1283,7 @@ def build_lift_lobby(cx, cy, z, materials, prefix):
             component.set_editor_property("SourceRadius", 150.0)
             component.set_editor_property("CastShadows", False)
             component.set_editor_property("SpecularScale", 0.0)
-            component.set_editor_property("LightColor", unreal.Color(255, 240, 222, 255))
+            component.set_editor_property("LightColor", unreal.Color(r=255, g=240, b=222, a=255))
             component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
             _label(fill, "{0}_LiftHall_Fill_{1}".format(prefix, i + 1))
 
@@ -1336,12 +1336,14 @@ def _booth(cx, cy, z, x, y, facing, prefix, label):
 
 def build_breakout(cx, cy, z, x0, x1, y0, y1, materials, prefix, label, kitchen=False):
     """Breakout space: purple high-back booths face to face round timber
-    tables, loose armchairs, felt discs overhead - and, in a kitchen, a grey
-    island with stools."""
+    tables, loose armchairs, felt discs overhead. A breakout kitchen is laid
+    out by build_breakout_kitchen instead: the run, the island and one booth
+    pair do not fit the generic arrangement."""
+    if kitchen:
+        build_breakout_kitchen(cx, cy, z, x0, x1, y0, y1, materials, prefix, label)
+        return
     timber = _fitout("TimberLight", materials.get("Wood"))
-    grey = _fitout("PanelCream", materials.get("Plasterboard"))
     black = _fitout("BlackCladding")
-    mesh = _fitout("MeshWhite")
     w, d = x1 - x0, y1 - y0
     long_x = w >= d
     pairs = max(1, int((w if long_x else d) // 330.0))
@@ -1361,15 +1363,215 @@ def build_breakout(cx, cy, z, x0, x1, y0, y1, materials, prefix, label, kitchen=
                 _box((cx + bx + e * 98.0, cy + by, z + 70.0), (12.0, 150.0, 140.0), _fitout("BoothPurple"),
                      "{0}_{1}_Booth{2}{3}_Back".format(prefix, label, p_ + 1, tag))
             _box((cx + bx, cy + by, z + 37.0), (60.0, 120.0, 4.0), timber, "{0}_{1}_BoothTable{2}".format(prefix, label, p_ + 1))
-    if kitchen:
-        ix, iy = x0 + w * 0.5, y1 - 120.0 if long_x else y0 + d * 0.8
-        _box((cx + ix, cy + iy, z + 46.0), (min(360.0, w - 80.0), 90.0, 92.0), grey, "{0}_{1}_Island".format(prefix, label))
-        _box((cx + ix, cy + iy, z + 93.0), (min(370.0, w - 70.0), 100.0, 4.0), timber, "{0}_{1}_IslandTop".format(prefix, label))
-        for st in range(3):
-            sx = ix + (st - 1) * 90.0
-            _box((cx + sx, cy + iy - 85.0, z + 34.0), (36.0, 36.0, 4.0), black, "{0}_{1}_Stool{2}_Seat".format(prefix, label, st + 1))
-            _box((cx + sx, cy + iy - 85.0, z + 16.0), (4.0, 4.0, 32.0), black, "{0}_{1}_Stool{2}_Leg".format(prefix, label, st + 1))
     _felt_discs(cx, cy, z, x0, x1, y0, y1, prefix, label)
+
+
+def _block(cx, cy, z, x0, x1, y0, y1, z0, z1, material, label, mesh_path=None):
+    """A box given by its extents rather than its centre and size: joinery is
+    drawn to its faces, and this keeps the shadow gaps and the reveals exact."""
+    return _box((cx + (x0 + x1) / 2.0, cy + (y0 + y1) / 2.0, z + (z0 + z1) / 2.0),
+                (abs(x1 - x0), abs(y1 - y0), abs(z1 - z0)), material, label, mesh_path=mesh_path)
+
+
+def _soft_light(actor_class, location, rotation, lumens, radius, colour, label, width=None, height=None):
+    """A small fill light that casts no shadows: under-cabinet strips, pendants
+    and canopy lights. A floor's shadows come from its daylight and its ceiling
+    lines; a hundred little shadow casters would cost more than they show."""
+    lamp = _spawn(actor_class, location, rotation)
+    if lamp is None:
+        return None
+    component = lamp.rect_light_component if actor_class is unreal.RectLight else lamp.point_light_component
+    component.set_editor_property("IntensityUnits", unreal.LightUnits.LUMENS)
+    component.set_editor_property("Intensity", lumens)
+    component.set_editor_property("AttenuationRadius", radius)
+    # unreal.Color's positional order is its BGRA memory layout: callers
+    # always pass r=, g=, b=, a= by keyword.
+    component.set_editor_property("LightColor", colour)
+    component.set_editor_property("CastShadows", False)
+    component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
+    if width is not None:
+        # A rect light's width is along its local Y: face it down with
+        # pitch -90 and yaw it 90 for a strip that runs along X.
+        component.set_editor_property("SourceWidth", width)
+        component.set_editor_property("SourceHeight", height)
+    _label(lamp, label)
+    return lamp
+
+
+# A UK kitchen run, in cm: 150 mm plinth, 720 mm carcass, 40 mm worktop (top
+# at 910), 100 mm upstand, wall units 720 tall hung 540 above the worktop,
+# 330 deep, 600 module throughout.
+KITCHEN_PLINTH = 15.0
+KITCHEN_CARCASS_TOP = 87.0
+KITCHEN_WORKTOP_TOP = 91.0
+KITCHEN_WALL_UNIT = (145.0, 217.0)
+
+
+def build_breakout_kitchen(cx, cy, z, x0, x1, y0, y1, materials, prefix, label):
+    """The office floors' breakout kitchen, in the corner by the west glazing.
+
+    A 4.3 m run against a laminate back panel stood off the glass: a tall
+    integrated fridge-freezer at the corner end, then a pull-out recycling bin,
+    the sink with a mixer tap and a boiling-water tap beside it, an integrated
+    dishwasher, drawers, and a bean-to-cup coffee machine on the worktop. Wall
+    units above with an LED strip under them. Facing it across a 120 cm aisle,
+    the long timber-topped island the real floors have, with bar stools and
+    pendants over it; a purple booth pair and a three-stream bin station by
+    the south glass. Everything leaves the room's open north and east edges
+    clear, and the floor's spawn anchor in the corner stands in the open.
+    """
+    front_mat = _fitout("PanelCream", materials.get("Plasterboard"))
+    timber = _fitout("TimberLight", materials.get("Wood"))
+    black = _fitout("BlackCladding", materials.get("Metal"))
+    steel = _fitout("Aluminium", materials.get("Metal"))
+    ribbon = _fitout("LightRibbon")
+    tag = "{0}_{1}".format(prefix, label)
+
+    def block(xa, xb, ya, yb, za, zb, material, name, mesh_path=None):
+        return _block(cx, cy, z, xa, xb, ya, yb, za, zb, material, "{0}_{1}".format(tag, name), mesh_path)
+
+    # --- The run, against the west side ----------------------------------
+    # 200 cm in from the south glass to keep clear of the rounded corner.
+    back = x0                       # the back panel's face to the glass
+    carcass_front = back + 60.0
+    run_y0, run_y1 = y0 + 200.0, y1 - 20.0
+    units = (("TallFridge", 60.0), ("Recycling", 60.0), ("Sink", 60.0), ("Dishwasher", 60.0),
+             ("Drawers", 60.0), ("Coffee", 60.0), ("Cupboard", 70.0))
+    top_y0 = run_y0 + units[0][1]   # the worktop starts past the tall unit
+
+    def front(ya, yb, za, zb, name, handle):
+        """One door or drawer front, 2 cm proud of the carcass, with a 3 mm
+        shadow gap all round and a brushed bar handle."""
+        block(carcass_front, carcass_front + 2.0, ya + 0.2, yb - 0.2, za + 0.2, zb - 0.2, front_mat, name)
+        hx0, hx1 = carcass_front + 2.0, carcass_front + 4.0
+        if handle == "across":
+            half = min(20.0, (yb - ya) / 2.0 - 8.0)
+            mid = (ya + yb) / 2.0
+            block(hx0, hx1, mid - half, mid + half, zb - 7.0, zb - 5.5, steel, name + "_Handle")
+        elif handle == "up":
+            block(hx0, hx1, yb - 5.0, yb - 3.5, zb - 25.0, zb - 5.0, steel, name + "_Handle")
+        elif handle == "down":
+            block(hx0, hx1, yb - 5.0, yb - 3.5, za + 5.0, za + 25.0, steel, name + "_Handle")
+
+    block(back + 2.0, carcass_front - 5.0, run_y0, run_y1, 0.0, KITCHEN_PLINTH, black, "Plinth")
+    y = run_y0
+    for name, width in units:
+        ya, yb = y, y + width
+        if name == "TallFridge":
+            # Full height, its top line with the wall units' top.
+            block(back + 2.0, carcass_front, ya, yb, KITCHEN_PLINTH, KITCHEN_WALL_UNIT[1], front_mat, "TallFridge_Carcass")
+            front(ya, yb, KITCHEN_PLINTH, 95.0, "TallFridge_FreezerDoor", "up")
+            front(ya, yb, 95.0, KITCHEN_WALL_UNIT[1], "TallFridge_FridgeDoor", "down")
+        else:
+            block(back + 2.0, carcass_front, ya, yb, KITCHEN_PLINTH, KITCHEN_CARCASS_TOP, front_mat, name + "_Carcass")
+            if name == "Drawers":
+                for i, (za, zb) in enumerate(((KITCHEN_PLINTH, 44.0), (44.0, 66.0), (66.0, KITCHEN_CARCASS_TOP))):
+                    front(ya, yb, za, zb, "Drawer{0}".format(i + 1), "across")
+            elif name in ("Recycling", "Dishwasher"):
+                # One full-height front each: the bin pulls out, the dishwasher
+                # door drops; both have the handle across the top.
+                front(ya, yb, KITCHEN_PLINTH, KITCHEN_CARCASS_TOP, name + "_Front", "across")
+            else:
+                front(ya, yb, KITCHEN_PLINTH, KITCHEN_CARCASS_TOP, name + "_Door", "up")
+        y = yb
+
+    # Oak worktop with a 2 cm overhang, its upstand, and the back panel to the
+    # underside of the wall units.
+    block(back + 2.0, carcass_front + 4.0, top_y0, run_y1, KITCHEN_CARCASS_TOP, KITCHEN_WORKTOP_TOP, timber, "Worktop")
+    block(back + 2.0, back + 4.0, top_y0, run_y1, KITCHEN_WORKTOP_TOP, KITCHEN_WORKTOP_TOP + 10.0, timber, "Upstand")
+    block(back, back + 2.0, top_y0, run_y1, KITCHEN_WORKTOP_TOP, KITCHEN_WALL_UNIT[1], front_mat, "BackPanel")
+
+    # The sink: an inset steel bowl with a drainer, the mixer tap behind it and
+    # the boiling-water tap beside it, over the dishwasher.
+    sink_y = run_y0 + 150.0
+    block(back + 9.0, back + 54.0, sink_y - 25.0, sink_y + 25.0, KITCHEN_WORKTOP_TOP, KITCHEN_WORKTOP_TOP + 0.6, steel, "Sink_Rim")
+    block(back + 13.0, back + 50.0, sink_y - 21.0, sink_y + 5.0, KITCHEN_WORKTOP_TOP + 0.6, KITCHEN_WORKTOP_TOP + 0.7, black, "Sink_Bowl")
+    block(back + 8.0, back + 13.0, sink_y - 2.5, sink_y + 2.5, KITCHEN_WORKTOP_TOP, KITCHEN_WORKTOP_TOP + 32.0, steel,
+          "Sink_Tap", mesh_path=CYLINDER_MESH)
+    block(back + 8.0, back + 30.0, sink_y - 1.5, sink_y + 1.5, KITCHEN_WORKTOP_TOP + 29.0, KITCHEN_WORKTOP_TOP + 32.0, steel, "Sink_Spout")
+    boil_y = sink_y + 38.0
+    block(back + 8.0, back + 12.0, boil_y - 2.0, boil_y + 2.0, KITCHEN_WORKTOP_TOP, KITCHEN_WORKTOP_TOP + 28.0, black,
+          "BoilingTap", mesh_path=CYLINDER_MESH)
+    block(back + 8.0, back + 24.0, boil_y - 1.2, boil_y + 1.2, KITCHEN_WORKTOP_TOP + 25.5, KITCHEN_WORKTOP_TOP + 28.0, black, "BoilingTap_Spout")
+    block(back + 5.0, back + 15.0, boil_y + 6.0, boil_y + 16.0, KITCHEN_WORKTOP_TOP, KITCHEN_WORKTOP_TOP + 1.0, steel, "BoilingTap_DripTray")
+
+    # Bean-to-cup coffee machine on the coffee unit: black body, steel drip tray.
+    coffee_y = run_y0 + 330.0
+    block(back + 8.0, back + 52.0, coffee_y - 16.0, coffee_y + 16.0, KITCHEN_WORKTOP_TOP, KITCHEN_WORKTOP_TOP + 50.0, black, "CoffeeMachine")
+    block(back + 52.0, back + 58.0, coffee_y - 14.0, coffee_y + 14.0, KITCHEN_WORKTOP_TOP, KITCHEN_WORKTOP_TOP + 2.5, steel, "CoffeeMachine_DripTray")
+    block(back + 52.0, back + 53.0, coffee_y - 10.0, coffee_y + 10.0, KITCHEN_WORKTOP_TOP + 36.0, KITCHEN_WORKTOP_TOP + 46.0, steel, "CoffeeMachine_Panel")
+
+    # Wall units over the worktop, a door per module, handles on the bottom
+    # rail; the LED strip on their underside, with its one soft light.
+    wall_front = back + 33.0
+    block(back + 2.0, wall_front, top_y0, run_y1, KITCHEN_WALL_UNIT[0], KITCHEN_WALL_UNIT[1], front_mat, "WallUnits")
+    y = top_y0
+    for door, (_, width) in enumerate(units[1:]):
+        yb = y + width
+        block(wall_front, wall_front + 2.0, y + 0.2, yb - 0.2, KITCHEN_WALL_UNIT[0] + 0.2, KITCHEN_WALL_UNIT[1] - 0.2, front_mat,
+              "WallUnit_Door{0}".format(door + 1))
+        block(wall_front + 2.0, wall_front + 4.0, yb - 5.0, yb - 3.5, KITCHEN_WALL_UNIT[0] + 4.0, KITCHEN_WALL_UNIT[0] + 22.0, steel,
+              "WallUnit_Door{0}_Handle".format(door + 1))
+        y = yb
+    if ribbon is not None:
+        block(wall_front - 6.0, wall_front - 3.0, top_y0 + 5.0, run_y1 - 5.0, KITCHEN_WALL_UNIT[0] - 1.0, KITCHEN_WALL_UNIT[0],
+              ribbon, "UnderCabinet_LED")
+    _soft_light(unreal.RectLight,
+                unreal.Vector(cx + wall_front - 5.0, cy + (top_y0 + run_y1) / 2.0, z + KITCHEN_WALL_UNIT[0] - 2.0),
+                unreal.Rotator(roll=0.0, pitch=-90.0, yaw=0.0), 900.0, 180.0, unreal.Color(r=255, g=238, b=214, a=255),
+                tag + "_UnderCabinet_Light", width=run_y1 - top_y0 - 10.0, height=3.0)
+
+    # --- The island: grey body, long oak top, bar stools, three pendants ----
+    # A 120 cm aisle from the handles and the worktop nosing (carcass + 4) to
+    # the island top's edge (5 cm proud of its body).
+    ix0 = carcass_front + 4.0 + 120.0 + 5.0
+    ix1 = ix0 + 90.0
+    iy0, iy1 = y1 - 240.0, y1 - 20.0
+    block(ix0, ix1, iy0, iy1, 0.0, KITCHEN_PLINTH, black, "Island_Plinth")
+    block(ix0, ix1, iy0, iy1, KITCHEN_PLINTH, KITCHEN_CARCASS_TOP, front_mat, "Island")
+    # The top oversails the seating side by 30 cm for knees.
+    block(ix0 - 5.0, ix1 + 30.0, iy0 - 5.0, iy1 + 5.0, KITCHEN_CARCASS_TOP, KITCHEN_WORKTOP_TOP, timber, "IslandTop")
+    stool_x = ix1 + 48.0
+    for i in range(3):
+        sy = iy0 + 40.0 + i * 70.0
+        name = "Stool{0}".format(i + 1)
+        block(stool_x - 18.0, stool_x + 18.0, sy - 18.0, sy + 18.0, 62.0, 65.0, black, name + "_Seat", mesh_path=CYLINDER_MESH)
+        block(stool_x - 2.5, stool_x + 2.5, sy - 2.5, sy + 2.5, 2.0, 62.0, black, name + "_Stem")
+        block(stool_x - 20.0, stool_x + 20.0, sy - 20.0, sy + 20.0, 0.0, 2.0, black, name + "_Base", mesh_path=CYLINDER_MESH)
+        block(stool_x - 16.0, stool_x + 16.0, sy - 16.0, sy + 16.0, 24.0, 25.5, steel, name + "_FootRing", mesh_path=CYLINDER_MESH)
+    pend_x = (ix0 + ix1) / 2.0
+    ceiling = C.CEILING_HEIGHT_CM - 40.0          # the soffit's underside
+    for i in range(3):
+        py = iy0 + 40.0 + i * 70.0
+        name = "Pendant{0}".format(i + 1)
+        block(pend_x - 0.5, pend_x + 0.5, py - 0.5, py + 0.5, 225.0, ceiling, black, name + "_Drop")
+        block(pend_x - 15.0, pend_x + 15.0, py - 15.0, py + 15.0, 200.0, 225.0, black, name + "_Shade", mesh_path=CYLINDER_MESH)
+        if ribbon is not None:
+            block(pend_x - 12.0, pend_x + 12.0, py - 12.0, py + 12.0, 199.5, 200.0, ribbon, name + "_Diffuser",
+                  mesh_path=CYLINDER_MESH)
+    _soft_light(unreal.PointLight, unreal.Vector(cx + pend_x, cy + (iy0 + iy1) / 2.0, z + 190.0), None,
+                1200.0, 320.0, unreal.Color(r=255, g=226, b=190, a=255), tag + "_Pendant_Light")
+
+    # --- A booth pair by the south glass, end-on to the run ----------------
+    purple = _fitout("BoothPurple")
+    bx, by = x1 - 130.0, y0 + 140.0
+    for e, side in ((-1.0, "A"), (1.0, "B")):
+        block(bx + e * 70.0 - 30.0, bx + e * 70.0 + 30.0, by - 75.0, by + 75.0, 0.0, 44.0, purple, "Booth" + side + "_Seat")
+        block(bx + e * 98.0 - 6.0, bx + e * 98.0 + 6.0, by - 75.0, by + 75.0, 0.0, 140.0, purple, "Booth" + side + "_Back")
+    block(bx - 30.0, bx + 30.0, by - 60.0, by + 60.0, 72.0, 76.0, timber, "BoothTable")
+    block(bx - 3.0, bx + 3.0, by - 3.0, by + 3.0, 0.0, 72.0, black, "BoothTable_Leg")
+
+    # --- Three-stream recycling against the south glass --------------------
+    for i, stream in enumerate(("General", "Mixed", "Food")):
+        bin_x = bx - 175.0 - i * 37.0
+        name = "Bin_" + stream
+        block(bin_x - 17.0, bin_x + 17.0, y0 + 30.0, y0 + 70.0, 0.0, 78.0, black, name)
+        block(bin_x - 17.5, bin_x + 17.5, y0 + 29.5, y0 + 70.5, 78.0, 82.0, steel, name + "_Lid")
+        block(bin_x - 9.0, bin_x + 9.0, y0 + 45.0, y0 + 55.0, 82.0, 82.3, black, name + "_Aperture")
+
+    _felt_discs(cx, cy, z, x0, x1, y0, y1, prefix, label)
+    _note_surface("Wood", tag + "_Worktop")
+    _note_surface("Metal", tag + "_Sink")
 
 
 def _cubby(cx, cy, z, x, y, prefix, label, along_x=True):
@@ -1670,6 +1872,7 @@ def build_canteen_fixtures(origin_x, origin_y, z, materials, prefix):
          plaster, prefix + "_Kitchen_Wall")
     _box(at(-1150.0, -1300.0, counter_h), (1400.0, 90.0, counter_h), wood, prefix + "_Hot_Food_Counter")
     build_servery_detail(origin_x, origin_y, z, materials, prefix)
+    build_canteen_kitchen(origin_x, origin_y, z, materials, prefix)
 
     # Three servery islands in a row, clear of the lift banks at x > -445.
     for index, x in enumerate((-1500.0, -1050.0, -600.0)):
@@ -1710,7 +1913,9 @@ def build_servery_detail(cx, cy, z, materials, prefix):
     """The hot-food line and coffee bar as the photograph shows them: steel
     service wells under a sneeze-guard and a warm heat-lamp gantry, menu screens
     over the line, a coffee machine and grinder on the till, a lit glass-door
-    chiller, and an extract canopy over the kitchen pass."""
+    chiller; a tray slide along the counter, the tray stack where the queue
+    starts and the cutlery station where it ends. The extract canopy is the
+    kitchen's own, over its cooking line (build_canteen_kitchen)."""
     steel = _district_material("Aluminium") or materials.get("Metal")
     black = _district_material("BlackCladding") or materials.get("Metal")
     glass = materials.get("Glass") or materials.get("BallisticGlass")
@@ -1722,8 +1927,9 @@ def build_servery_detail(cx, cy, z, materials, prefix):
     _box((cx - 1150.0, cy - 1300.0, z + 175.0), (1400.0, 40.0, 6.0), black, prefix + "_Heat_Gantry")
     if warm is not None:
         _box((cx - 1150.0, cy - 1300.0, z + 171.0), (1380.0, 6.0, 2.0), warm, prefix + "_Heat_Lamps")
+    # Facing down, yawed so the source's width (its local Y) runs along the line.
     lamp = _spawn(unreal.RectLight, unreal.Vector(cx - 1150.0, cy - 1300.0, z + 168.0),
-                  unreal.Rotator(roll=0.0, pitch=-90.0, yaw=0.0))
+                  unreal.Rotator(roll=0.0, pitch=-90.0, yaw=90.0))
     if lamp is not None:
         component = lamp.rect_light_component
         component.set_editor_property("IntensityUnits", unreal.LightUnits.LUMENS)
@@ -1731,7 +1937,8 @@ def build_servery_detail(cx, cy, z, materials, prefix):
         component.set_editor_property("SourceWidth", 1300.0)
         component.set_editor_property("SourceHeight", 30.0)
         component.set_editor_property("AttenuationRadius", 400.0)
-        component.set_editor_property("LightColor", unreal.Color(255, 190, 120, 255))
+        component.set_editor_property("LightColor", unreal.Color(r=255, g=190, b=120, a=255))
+        component.set_editor_property("CastShadows", False)
         component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
         _label(lamp, prefix + "_Heat_Lamp_Light")
     # Menu screens over the line.
@@ -1745,8 +1952,258 @@ def build_servery_detail(cx, cy, z, materials, prefix):
     _box((cx - 2104.0, cy - 900.0, z + 100.0), (2.0, 170.0, 185.0), glass, prefix + "_Chiller_Door")
     if warm is not None:
         _box((cx - 2125.0, cy - 900.0, z + 100.0), (2.0, 160.0, 175.0), warm, prefix + "_Chiller_Light")
-    # Extract canopy over the kitchen pass.
-    _box((cx - 1150.0, cy - 1640.0, z + 300.0), (1450.0, 220.0, 60.0), steel, prefix + "_Extract_Canopy")
+
+    # The tray slide: three steel rails on brackets along the queue side of
+    # the hot-food counter, at 85 cm, for the length of the wells.
+    for i in range(3):
+        _block(cx, cy, z, -1835.0, -465.0, -1248.0 + i * 8.0, -1245.0 + i * 8.0, 83.0, 86.0, steel,
+               "{0}_Tray_Slide_Rail{1}".format(prefix, i + 1))
+    for i in range(7):
+        bx = -1800.0 + i * 220.0
+        _block(cx, cy, z, bx - 2.0, bx + 2.0, -1255.0, -1228.0, 80.0, 83.0, steel, "{0}_Tray_Slide_Bracket{1}".format(prefix, i + 1))
+
+    # The queue starts at the east end of the islands: a stack of trays in a
+    # steel holder on the third island. It ends at the till, where the first
+    # island carries the cutlery station - four cutlery cylinders in a steel
+    # caddy, a napkin dispenser and a condiment tray.
+    _block(cx, cy, z, -470.0 - 25.0, -470.0 + 25.0, -1030.0 - 21.0, -1030.0 + 21.0, 95.0, 97.0, steel, prefix + "_Tray_Holder")
+    for i in range(12):
+        _block(cx, cy, z, -470.0 - 23.0, -470.0 + 23.0, -1030.0 - 18.0, -1030.0 + 18.0, 97.0 + i * 2.0, 98.6 + i * 2.0,
+               black, "{0}_Tray_{1}".format(prefix, i + 1))
+    caddy_x = -1620.0
+    _block(cx, cy, z, caddy_x - 30.0, caddy_x + 30.0, -1050.0, -1010.0, 95.0, 103.0, steel, prefix + "_Cutlery_Caddy")
+    for i in range(4):
+        px = caddy_x - 22.5 + i * 15.0
+        _block(cx, cy, z, px - 5.5, px + 5.5, -1035.5, -1024.5, 103.0, 117.0, steel,
+               "{0}_Cutlery_Pot{1}".format(prefix, i + 1), mesh_path=CYLINDER_MESH)
+    _block(cx, cy, z, caddy_x + 42.0, caddy_x + 60.0, -1040.0, -1020.0, 95.0, 120.0, black, prefix + "_Napkin_Dispenser")
+    _block(cx, cy, z, caddy_x + 70.0, caddy_x + 110.0, -1045.0, -1015.0, 95.0, 97.0, black, prefix + "_Condiment_Tray")
+    for i in range(3):
+        px = caddy_x + 78.0 + i * 12.0
+        _block(cx, cy, z, px - 3.5, px + 3.5, -1033.5, -1026.5, 97.0, 115.0, black if i != 1 else steel,
+               "{0}_Condiment{1}".format(prefix, i + 1), mesh_path=CYLINDER_MESH)
+    _note_surface("Metal", prefix + "_Servery_Stations")
+
+
+# Floor 15's kitchen: the strip behind the kitchen wall, from the wall's face
+# to the south slab edge. It is a route as well as a room - open at its east end
+# by the staff door and at its west end behind the till - so the aisle down the
+# middle stays 120 cm clear end to end, knobs and handles included.
+CANTEEN_KITCHEN_WALL_Y = -1507.5
+CANTEEN_KITCHEN_GLASS_Y = -1800.0
+
+
+def _steel_bench(cx, cy, z, xa, xb, ya, yb, steel, label, upstand_y=None, undershelf=True):
+    """A stainless catering bench: 900 top with a 100 upstand on the wall
+    side, box-section legs and a pot shelf underneath."""
+    _block(cx, cy, z, xa, xb, ya, yb, 86.0, 90.0, steel, label + "_Top")
+    if upstand_y is not None:
+        _block(cx, cy, z, xa, xb, upstand_y - 1.0, upstand_y + 1.0, 90.0, 100.0, steel, label + "_Upstand")
+    for i, (lx, ly) in enumerate(((xa + 4.0, ya + 4.0), (xb - 4.0, ya + 4.0), (xa + 4.0, yb - 4.0), (xb - 4.0, yb - 4.0))):
+        _block(cx, cy, z, lx - 2.0, lx + 2.0, ly - 2.0, ly + 2.0, 0.0, 86.0, steel, "{0}_Leg{1}".format(label, i + 1))
+    if undershelf:
+        _block(cx, cy, z, xa + 2.0, xb - 2.0, ya + 2.0, yb - 2.0, 20.0, 21.5, steel, label + "_Shelf")
+
+
+def build_canteen_kitchen(cx, cy, z, materials, prefix):
+    """The canteen's back-of-house kitchen on floor 15, behind the hot-food line.
+
+    The cooking line stands against the kitchen wall, back to back with the
+    servery, under one extract canopy: a two-door upright fridge, a combination
+    oven on its stand, a six-burner range, a solid top, a twin-tank fryer, a
+    chargrill and a bratt pan. Past the canopy, towards the staff door: a prep
+    bench with a wall shelf, the pot-wash sink with its pre-rinse spray, a
+    pass-through dishwasher with its outlet table, and the hand-wash basin by
+    the door. Along the glass, a line of stainless prep benches with
+    undercounter fridges, a mixer, boards and a microwave. All of it is 90 cm
+    catering kit at catering sizes; the aisle between stays clear.
+    """
+    steel = _district_material("Aluminium") or materials.get("Metal")
+    black = _district_material("BlackCladding") or materials.get("Metal")
+    white = _district_material("DeskWhite") or materials.get("Plasterboard")
+    ribbon = _district_material("LightRibbon")
+    wall_y = CANTEEN_KITCHEN_WALL_Y
+    tag = prefix + "_Kitchen"
+
+    def block(xa, xb, ya, yb, za, zb, material, name, mesh_path=None):
+        return _block(cx, cy, z, xa, xb, ya, yb, za, zb, material, "{0}_{1}".format(tag, name), mesh_path)
+
+    def on_legs(xa, xb, depth, za, zb, name):
+        """An appliance body on four 15 cm adjustable feet, backed to the wall."""
+        front = wall_y - depth
+        block(xa, xb, front, wall_y, za, zb, steel, name)
+        for i, (fx, fy) in enumerate(((xa + 5.0, front + 5.0), (xb - 5.0, front + 5.0),
+                                      (xa + 5.0, wall_y - 5.0), (xb - 5.0, wall_y - 5.0))):
+            block(fx - 2.0, fx + 2.0, fy - 2.0, fy + 2.0, 0.0, za, black, "{0}_Foot{1}".format(name, i + 1),
+                  mesh_path=CYLINDER_MESH)
+        return front
+
+    # --- The cooking line, west to east ----------------------------------
+    # Two-door upright fridge.
+    front = on_legs(-1820.0, -1680.0, 80.0, 12.0, 200.0, "Upright_Fridge")
+    for i, (da, db) in enumerate(((-1819.0, -1751.0), (-1749.0, -1681.0))):
+        block(da, db, front - 1.5, front, 14.0, 198.0, steel, "Upright_Fridge_Door{0}".format(i + 1))
+        hx = db - 6.0 if i == 0 else da + 6.0
+        block(hx - 1.5, hx + 1.5, front - 5.0, front - 1.5, 90.0, 150.0, steel, "Upright_Fridge_Handle{0}".format(i + 1))
+    block(-1815.0, -1685.0, front - 1.6, front - 1.5, 185.0, 195.0, black, "Upright_Fridge_Display")
+
+    # Combination oven on its stand.
+    xa, xb = -1670.0, -1580.0
+    stand_front = wall_y - 80.0
+    for i, (lx, ly) in enumerate(((xa + 4.0, stand_front + 4.0), (xb - 4.0, stand_front + 4.0),
+                                  (xa + 4.0, wall_y - 4.0), (xb - 4.0, wall_y - 4.0))):
+        block(lx - 2.0, lx + 2.0, ly - 2.0, ly + 2.0, 0.0, 70.0, steel, "Combi_Stand_Leg{0}".format(i + 1))
+    block(xa, xb, stand_front, wall_y, 66.0, 70.0, steel, "Combi_Stand_Top")
+    block(xa + 2.0, xb - 2.0, stand_front + 2.0, wall_y - 2.0, 20.0, 21.5, steel, "Combi_Stand_Shelf")
+    combi_front = wall_y - 85.0
+    block(xa, xb, combi_front, wall_y, 70.0, 150.0, steel, "Combi_Oven")
+    block(xa + 4.0, xa + 64.0, combi_front - 1.0, combi_front, 76.0, 144.0, black, "Combi_Oven_Door")
+    block(xa + 68.0, xb - 3.0, combi_front - 1.0, combi_front, 110.0, 144.0, black, "Combi_Oven_Controls")
+    block(xa + 58.0, xa + 61.0, combi_front - 5.0, combi_front - 1.0, 90.0, 130.0, steel, "Combi_Oven_Handle")
+
+    # Six-burner range over an oven.
+    xa, xb = -1580.0, -1490.0
+    front = on_legs(xa, xb, 90.0, 15.0, 89.0, "Range")
+    block(xa, xb, front, wall_y, 89.0, 90.0, black, "Range_Hob")
+    for row in range(2):
+        for col in range(3):
+            bx = xa + 15.0 + col * 30.0
+            by = front + 25.0 + row * 40.0
+            block(bx - 11.0, bx + 11.0, by - 11.0, by + 11.0, 90.0, 92.0, black,
+                  "Range_Burner{0}{1}".format(row + 1, col + 1), mesh_path=CYLINDER_MESH)
+    block(xa + 2.0, xb - 2.0, front - 4.0, front, 78.0, 86.0, black, "Range_Knob_Rail")
+    block(xa + 8.0, xb - 8.0, front - 4.0, front - 1.0, 70.0, 72.0, steel, "Range_Oven_Handle")
+
+    # Solid top.
+    xa, xb = -1490.0, -1400.0
+    front = on_legs(xa, xb, 90.0, 15.0, 89.0, "Solid_Top")
+    block(xa + 2.0, xb - 2.0, front + 2.0, wall_y - 2.0, 89.0, 91.0, black, "Solid_Top_Plate")
+    block(xa + 2.0, xb - 2.0, front - 4.0, front, 78.0, 86.0, black, "Solid_Top_Knob_Rail")
+
+    # Twin-tank fryer: two tanks, a basket hung in each.
+    xa, xb = -1400.0, -1320.0
+    front = on_legs(xa, xb, 90.0, 15.0, 90.0, "Fryer")
+    for i in range(2):
+        tx = xa + 20.0 + i * 40.0
+        block(tx - 16.0, tx + 16.0, front + 15.0, front + 60.0, 90.0, 90.3, black, "Fryer_Tank{0}".format(i + 1))
+        block(tx - 1.0, tx + 1.0, front + 2.0, front + 18.0, 96.0, 98.0, steel, "Fryer_Basket{0}_Handle".format(i + 1))
+        block(tx - 12.0, tx + 12.0, front + 18.0, front + 50.0, 90.3, 100.0, steel, "Fryer_Basket{0}".format(i + 1))
+    block(xa + 4.0, xb - 4.0, wall_y - 14.0, wall_y - 2.0, 90.0, 115.0, steel, "Fryer_Flue")
+
+    # Chargrill on a stand: cast bars across a lava-rock bed.
+    xa, xb = -1320.0, -1240.0
+    front = on_legs(xa, xb, 90.0, 15.0, 88.0, "Chargrill")
+    for i in range(9):
+        gx = xa + 8.0 + i * 8.0
+        block(gx - 1.5, gx + 1.5, front + 5.0, wall_y - 18.0, 88.0, 91.0, black, "Chargrill_Bar{0}".format(i + 1))
+    block(xa + 2.0, xb - 2.0, front - 4.0, front, 78.0, 86.0, black, "Chargrill_Knob_Rail")
+
+    # Bratt pan: a tilting pan with its lid up against the wall.
+    xa, xb = -1240.0, -1120.0
+    front = on_legs(xa, xb, 85.0, 40.0, 90.0, "Bratt_Pan")
+    block(xa + 5.0, xb - 5.0, wall_y - 12.0, wall_y - 10.0, 90.0, 150.0, steel, "Bratt_Pan_Lid")
+    block(xb - 2.0, xb + 6.0, front + 30.0, front + 50.0, 55.0, 75.0, black, "Bratt_Pan_Tilt_Wheel",
+          mesh_path=CYLINDER_MESH)
+
+    # The extract canopy over the whole cooking line: 15 cm past each end and
+    # 30 cm past the fronts, its underside at 205 cm, ducted up to the soffit.
+    canopy_x0, canopy_x1 = -1835.0 + 150.0, -1105.0
+    canopy_front = wall_y - 120.0
+    block(canopy_x0, canopy_x1, canopy_front, wall_y, 205.0, 255.0, steel, "Extract_Canopy")
+    block(canopy_x0 + 10.0, canopy_x1 - 10.0, wall_y - 45.0, wall_y - 5.0, 204.0, 205.0, black, "Extract_Canopy_Filters")
+    if ribbon is not None:
+        block(canopy_x0 + 20.0, canopy_x1 - 20.0, canopy_front + 12.0, canopy_front + 16.0, 204.0, 205.0, ribbon,
+              "Extract_Canopy_Light")
+    for i, dx in enumerate((-1540.0, -1250.0)):
+        block(dx - 25.0, dx + 25.0, wall_y - 80.0, wall_y - 40.0, 255.0, C.CEILING_HEIGHT_CM - 40.0, steel,
+              "Extract_Duct{0}".format(i + 1))
+    _soft_light(unreal.RectLight,
+                unreal.Vector(cx + (canopy_x0 + canopy_x1) / 2.0, cy + canopy_front + 14.0, z + 202.0),
+                unreal.Rotator(roll=0.0, pitch=-90.0, yaw=90.0), 3500.0, 260.0, unreal.Color(r=255, g=244, b=232, a=255),
+                tag + "_Canopy_Light", width=canopy_x1 - canopy_x0 - 40.0, height=4.0)
+
+    # --- Past the canopy, towards the staff door --------------------------
+    _steel_bench(cx, cy, z, -1110.0, -930.0, wall_y - 70.0, wall_y, steel, tag + "_Prep_Bench", upstand_y=wall_y - 1.0)
+    block(-1110.0, -930.0, wall_y - 30.0, wall_y, 150.0, 152.0, steel, "Wall_Shelf")
+    for i, sx in enumerate((-1100.0, -940.0)):
+        block(sx - 1.0, sx + 1.0, wall_y - 28.0, wall_y, 135.0, 150.0, steel, "Wall_Shelf_Bracket{0}".format(i + 1))
+    for i in range(3):
+        px = -1080.0 + i * 55.0
+        block(px - 26.5, px + 26.5, wall_y - 30.0, wall_y - 2.0, 152.0, 172.0 - i * 4.0, steel, "GN_Pans{0}".format(i + 1))
+
+    # Pot wash: a double bowl and drainer with the pre-rinse spray over it.
+    _steel_bench(cx, cy, z, -920.0, -740.0, wall_y - 70.0, wall_y, steel, tag + "_Pot_Wash", upstand_y=wall_y - 1.0)
+    for i, bx in enumerate((-890.0, -830.0)):
+        block(bx - 26.0, bx + 26.0, wall_y - 60.0, wall_y - 12.0, 90.0, 90.2, black, "Pot_Wash_Bowl{0}".format(i + 1))
+    for i in range(6):
+        gx = -790.0 + i * 8.0
+        block(gx - 1.0, gx + 1.0, wall_y - 60.0, wall_y - 12.0, 90.0, 90.4, steel, "Pot_Wash_Drainer{0}".format(i + 1))
+    block(-862.0, -858.0, wall_y - 8.0, wall_y - 4.0, 100.0, 215.0, steel, "Pre_Rinse_Pole", mesh_path=CYLINDER_MESH)
+    block(-864.0, -856.0, wall_y - 10.0, wall_y - 2.0, 140.0, 195.0, steel, "Pre_Rinse_Spring", mesh_path=CYLINDER_MESH)
+    block(-862.0, -858.0, wall_y - 40.0, wall_y - 8.0, 212.0, 215.0, steel, "Pre_Rinse_Arm")
+    block(-863.0, -857.0, wall_y - 42.0, wall_y - 36.0, 125.0, 140.0, black, "Pre_Rinse_Head")
+
+    # Pass-through dishwasher, its hood down, and the outlet table after it.
+    front = wall_y - 75.0
+    block(-740.0, -670.0, front, wall_y, 0.0, 85.0, steel, "Dishwasher")
+    block(-742.0, -668.0, front - 2.0, wall_y, 85.0, 150.0, steel, "Dishwasher_Hood")
+    block(-735.0, -675.0, front - 6.0, front - 3.0, 120.0, 122.0, steel, "Dishwasher_Hood_Handle")
+    block(-735.0, -705.0, front - 2.5, front - 2.0, 135.0, 145.0, black, "Dishwasher_Controls")
+    _steel_bench(cx, cy, z, -670.0, -570.0, wall_y - 70.0, wall_y, steel, tag + "_Outlet_Table", upstand_y=wall_y - 1.0)
+
+    # Hand-wash basin by the door, and its towel dispenser.
+    block(-560.0, -520.0, wall_y - 30.0, wall_y, 78.0, 95.0, steel, "Hand_Wash_Basin")
+    block(-543.0, -537.0, wall_y - 6.0, wall_y - 2.0, 95.0, 112.0, steel, "Hand_Wash_Tap", mesh_path=CYLINDER_MESH)
+    block(-555.0, -525.0, wall_y - 12.0, wall_y, 130.0, 160.0, steel, "Towel_Dispenser")
+
+    # --- Along the glass: prep benches -----------------------------------
+    glass_y = CANTEEN_KITCHEN_GLASS_Y + 5.0
+    bench_front = glass_y + 70.0
+    for i in range(6):
+        xa = -1820.0 + i * 222.0
+        xb = xa + 200.0
+        name = "Glass_Bench{0}".format(i + 1)
+        fridge = i in (0, 3)
+        _steel_bench(cx, cy, z, xa, xb, glass_y, bench_front, steel, "{0}_{1}".format(tag, name),
+                     upstand_y=glass_y + 1.0, undershelf=not fridge)
+        if fridge:
+            # Undercounter fridge: two doors under the top.
+            block(xa + 6.0, xb - 6.0, glass_y + 3.0, bench_front - 3.0, 12.0, 86.0, steel, name + "_Fridge")
+            for d in range(2):
+                da = xa + 6.0 + d * 94.0
+                block(da + 1.0, da + 93.0, bench_front - 3.0, bench_front - 1.5, 14.0, 84.0, steel,
+                      "{0}_Fridge_Door{1}".format(name, d + 1))
+                block(da + 20.0, da + 74.0, bench_front - 1.5, bench_front + 1.5, 78.0, 80.0, steel,
+                      "{0}_Fridge_Handle{1}".format(name, d + 1))
+        mid = (xa + xb) / 2.0
+        if i == 1:
+            # Planetary mixer: base, column, head and bowl.
+            block(mid - 22.0, mid + 22.0, glass_y + 12.0, glass_y + 58.0, 90.0, 96.0, steel, name + "_Mixer_Base")
+            block(mid - 10.0, mid + 10.0, glass_y + 8.0, glass_y + 24.0, 96.0, 150.0, steel, name + "_Mixer_Column")
+            block(mid - 12.0, mid + 12.0, glass_y + 8.0, glass_y + 50.0, 140.0, 156.0, steel, name + "_Mixer_Head")
+            block(mid - 15.0, mid + 15.0, glass_y + 25.0, glass_y + 55.0, 100.0, 125.0, steel, name + "_Mixer_Bowl",
+                  mesh_path=CYLINDER_MESH)
+        elif i == 2:
+            for b in range(2):
+                block(mid - 50.0 + b * 55.0, mid - 5.0 + b * 55.0, glass_y + 20.0, glass_y + 52.0, 90.0, 92.0 + b * 0.5,
+                      white, "{0}_Board{1}".format(name, b + 1))
+        elif i == 4:
+            for p in range(4):
+                block(mid - 26.5, mid + 26.5, glass_y + 20.0, glass_y + 52.0, 90.0 + p * 6.5, 96.0 + p * 6.5, steel,
+                      "{0}_GN_Pan{1}".format(name, p + 1))
+        elif i == 5:
+            block(mid - 26.0, mid + 26.0, glass_y + 15.0, glass_y + 58.0, 90.0, 122.0, steel, name + "_Microwave")
+            block(mid - 22.0, mid + 10.0, glass_y + 58.0, glass_y + 58.5, 95.0, 118.0, black, name + "_Microwave_Door")
+
+    # Batten lights down the aisle; the floor above the wall has none of its own.
+    for i, lx in enumerate((-1450.0, -1000.0, -650.0)):
+        if ribbon is not None:
+            block(lx - 75.0, lx + 75.0, -1666.0, -1658.0, 300.0, 304.0, ribbon, "Batten{0}".format(i + 1))
+    _soft_light(unreal.RectLight, unreal.Vector(cx - 1050.0, cy - 1662.0, z + 298.0),
+                unreal.Rotator(roll=0.0, pitch=-90.0, yaw=90.0), 6000.0, 600.0, unreal.Color(r=255, g=248, b=240, a=255),
+                tag + "_Aisle_Light", width=950.0, height=8.0)
+
+    _note_surface("Metal", tag + "_Line")
 
 
 def _planter(cx, cy, z, x0, x1, y0, y1, prefix, label, trees=0, height=90.0):
@@ -2705,7 +3162,7 @@ def build_extraction(report):
                 light.point_light_component.set_editor_property("Intensity", 6000.0)
                 light.point_light_component.set_editor_property("AttenuationRadius", 3000.0)
                 light.point_light_component.set_editor_property("LightColor",
-                    unreal.Color(255, 160, 40, 255))
+                    unreal.Color(r=255, g=160, b=40, a=255))
         except Exception as exc:  # noqa: BLE001
             report.failed("Extraction beacon light", str(exc))
 
@@ -2844,7 +3301,7 @@ def build_lighting(report, floor_index):
                 component.set_editor_property("SourceWidth", 120.0)
                 component.set_editor_property("SourceHeight", 60.0)
                 # 4000 K: the colour of a building's own lighting, everywhere.
-                component.set_editor_property("LightColor", unreal.Color(255, 246, 232, 232))
+                component.set_editor_property("LightColor", unreal.Color(r=255, g=246, b=232, a=232))
                 # Movable: the project disallows static lighting, so a static
                 # light is never baked and Lumen gives it no bounce - pure black
                 # shadow beside a white-hot wall.
@@ -2875,7 +3332,7 @@ def build_lighting(report, floor_index):
                     component.set_editor_property("SpecularScale", 0.0)
                     component.set_editor_property("MaxDrawDistance", 3000.0)
                     component.set_editor_property("MaxDistanceFadeRange", 800.0)
-                    component.set_editor_property("LightColor", unreal.Color(220, 226, 232, 255))
+                    component.set_editor_property("LightColor", unreal.Color(r=220, g=226, b=232, a=255))
                     component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
                 except Exception as exc:  # noqa: BLE001
                     report.failed("bounce light", str(exc))
@@ -3074,7 +3531,7 @@ def build_skydeck_climate(report):
             # the haze, not the default near-black that read as a sea.
             try:
                 atmosphere = atmosphere_actor.get_component_by_class(unreal.SkyAtmosphereComponent)
-                atmosphere.set_editor_property("GroundAlbedo", unreal.Color(110, 108, 104, 255))
+                atmosphere.set_editor_property("GroundAlbedo", unreal.Color(r=110, g=108, b=104, a=255))
             except Exception as exc:  # noqa: BLE001
                 report.failed("sky ground albedo", str(exc))
 
@@ -3092,7 +3549,7 @@ def build_skydeck_climate(report):
             # Skydeck black.
             component.set_editor_property("Intensity", 8000.0)
             colour = sky["colour"] if sky else (214, 222, 232)
-            component.set_editor_property("LightColor", unreal.Color(colour[0], colour[1], colour[2], 255))
+            component.set_editor_property("LightColor", unreal.Color(r=colour[0], g=colour[1], b=colour[2], a=255))
             component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
         except Exception as exc:  # noqa: BLE001
             # This used to pass silently on a wrong accessor name and leave the
@@ -3127,6 +3584,26 @@ def build_skydeck_climate(report):
             skylight.light_component.set_editor_property("bRealTimeCapture", True)
         except Exception as exc:  # noqa: BLE001
             report.failed("skylight", str(exc))
+
+    # The Purge's dusk: AOneBrahamSkyDirector blends these from the day they
+    # are placed at to its DuskState. Wired explicitly so it never picks up
+    # another floor's light; anything left None it finds in the world itself.
+    # No replication of its own (it watches the replicated lockdown stage).
+    director_class = getattr(unreal, "OneBrahamSkyDirector", None)
+    director = _spawn(director_class, unreal.Vector(0.0, 0.0, deck_z + 600.0)) if director_class else None
+    if director is None:
+        report.failed("Sky_Director", "could not spawn OneBrahamSkyDirector - build the editor target")
+    else:
+        _label(director, "Sky_Director")
+        try:
+            for prop, actor in (("Sun", sun), ("SkyLight", skylight), ("HeightFog", fog),
+                                ("SkyDome", sky.get("dome") if sky else None)):
+                if actor is not None:
+                    director.set_editor_property(prop, actor)
+            if sky and sky.get("dusk_cube") is not None:
+                director.set_editor_property("DuskSkyCube", sky["dusk_cube"])
+        except Exception as exc:  # noqa: BLE001
+            report.failed("Sky_Director", str(exc))
 
     # Post-process: a corporate colour grade (slightly desaturated, cool shadows,
     # a small amount of grain) so the building reads as a building even in the

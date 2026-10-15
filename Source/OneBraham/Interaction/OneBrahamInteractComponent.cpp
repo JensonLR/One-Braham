@@ -198,10 +198,15 @@ void UOneBrahamInteractComponent::ServerBeginInteraction_Implementation(AActor* 
 		CancelInteraction();
 	}
 
+	// Tag, hold flag and hold duration all come from the interactable on the
+	// server. The client's InteractionTag and bIsHold are only its prediction for
+	// the HUD ring: trusting bIsHold=false here turned a 12-second terminal
+	// override into an instant one, and a client-picked tag could make a door
+	// play the execution montage.
 	CurrentTarget = Target;
-	ActiveInteractionTag = InteractionTag;
+	ActiveInteractionTag = Interface->GetInteractionTag_Implementation(PC);
 	bIsHoldInteraction = Interface->RequiresHold_Implementation(PC);
-	RequiredHoldSeconds = bIsHold ? Interface->GetHoldDuration_Implementation(PC) : 0.f;
+	RequiredHoldSeconds = bIsHoldInteraction ? FMath::Max(0.f, Interface->GetHoldDuration_Implementation(PC)) : 0.f;
 	HoldStartTime = GetWorld()->GetTimeSeconds();
 	HoldProgress = 0.f;
 
@@ -215,7 +220,7 @@ void UOneBrahamInteractComponent::ServerBeginInteraction_Implementation(AActor* 
 		return;
 	}
 
-	PlayInteractionMontage(InteractionTag, /*bStart*/ true);
+	PlayInteractionMontage(ActiveInteractionTag, /*bStart*/ true);
 	OnHoldProgressChanged.Broadcast(0.f);
 
 	// A zero-duration "hold" is really a tap: complete immediately.
@@ -252,8 +257,22 @@ void UOneBrahamInteractComponent::ServerEndInteraction_Implementation(bool bComp
 	if (Interface != nullptr && bTargetNotified)
 	{
 		// For a tap interaction, "end of press" IS the completion. For a hold, the
-		// tick has already set HoldProgress to 1 when it succeeded.
-		const bool bActuallyCompleted = bCompleted || (!bIsHoldInteraction && Interface->CanInteract_Implementation(PC));
+		// client's bCompleted is only a request: the hold completes on release only
+		// if the server's own clock says it was held long enough. The tolerance
+		// covers the 10 Hz tick not having caught up before the release arrived.
+		bool bActuallyCompleted = false;
+		if (bIsHoldInteraction)
+		{
+			const float HeldSeconds = HoldStartTime >= 0.f ? GetWorld()->GetTimeSeconds() - HoldStartTime : 0.f;
+			bActuallyCompleted = bCompleted
+				&& HasHeldLongEnough(HeldSeconds, RequiredHoldSeconds)
+				&& ValidateInteractionStillLegal()
+				&& Interface->CanInteract_Implementation(PC);
+		}
+		else
+		{
+			bActuallyCompleted = Interface->CanInteract_Implementation(PC);
+		}
 
 		if (!bIsHoldInteraction && bActuallyCompleted && !ValidateInteractionStillLegal())
 		{
@@ -371,12 +390,39 @@ void UOneBrahamInteractComponent::TickHoldProgress(float DeltaTime)
 // ==========================================================================
 //  Validation
 // ==========================================================================
+bool UOneBrahamInteractComponent::HasHeldLongEnough(float HeldSeconds, float RequiredSeconds)
+{
+	if (RequiredSeconds <= 0.f)
+	{
+		return true;
+	}
+	return HeldSeconds >= RequiredSeconds - HoldCompletionToleranceSeconds;
+}
+
 bool UOneBrahamInteractComponent::ValidateInteractionStillLegal() const
 {
 	const AOneBrahamCharacter* Character = CachedCharacter.Get();
 	if (Character == nullptr || CurrentTarget == nullptr)
 	{
 		return false;
+	}
+
+	// Alive and standing, the same rule ServerBeginInteraction applies at the
+	// start: otherwise a client that keeps E held after being downed (or a tap
+	// released by the death path) still finishes the override.
+	if (const UOneBrahamHealthComponent* Health = Character->GetHealthComponent())
+	{
+		if (!Health->IsAlive())
+		{
+			return false;
+		}
+	}
+	if (const UOneBrahamDownedComponent* Downed = Character->GetDownedComponent())
+	{
+		if (Downed->IsDowned())
+		{
+			return false;
+		}
 	}
 
 	// Distance

@@ -209,8 +209,9 @@ pods on the east, a quiet room and a vending alcove on the north.
 Desk farms on the west, east and south: benching in back-to-back pairs with a
 low screen, in rows with aisles - crouch cover everywhere, full cover nowhere. A
 break-out kitchen and a print alcove in the south corners, two meeting pods on
-the north. The programme is identical floor to floor, because that is what an
-office building is.
+the north. The break-out kitchen in the south-west corner: a kitchen run along
+the west glass, a long island with stools, and a booth pair. The programme is
+identical floor to floor, because that is what an office building is.
 
 ### 2.5 Server and Comms — floors 9–11
 
@@ -248,7 +249,11 @@ sky, the Skydeck balcony.
 
 **Fights here.** The canteen is the densest cover in the game: eighteen tables
 mean eighteen fire positions, the servery islands and the hot-food counter are
-waist-high hard cover, and the kitchen is the one place to break line of sight. The screen is ordinary glass, so the canteen and the balcony can
+waist-high hard cover, and the kitchen is the one place to break line of sight.
+The kitchen behind the wall is a 3 m strip open at both ends (the staff door,
+and behind the till). Catering kit lines both sides at 90 cm, with a 120 cm
+aisle down the middle: a flanking route with waist-high cover and one canopy
+you can duck under. The screen is ordinary glass, so the canteen and the balcony can
 see each other, and the one door in it - the Skydeck gate - is where the last
 push happens. Squads arrive with one down, no utility and less than a magazine
 each, and the design intent is that it *feels* like that.
@@ -316,6 +321,10 @@ aimed at the sun in the photograph from the brightest pixel `fetch_open_assets`
 finds), and the bottom 12.5 degrees blended into a London haze the height fog
 matches. The skylight captures the dome, so the ambient matches the sky you see.
 A dusk preset (`belfast_sunset_puresky`) is built in for the finale.
+`Sky_Director` (AOneBrahamSkyDirector) switches to it when the lockdown reaches
+the Purge: twenty seconds from day to dusk, with the sun, skylight, height fog
+and the dome's photograph, luminance and haze blended together. The day end is
+read from the map at BeginPlay; the dusk end is the director's DuskState.
 
 ### 2.9 Outside — Aldgate East, from the map
 
@@ -343,12 +352,38 @@ are turned by the footprint's bearing (about 30 degrees), so the map is the righ
 way round rather than mirrored. Real scale, 1:1: the game tower's 44 x 36 m plate
 sits inside the real building's footprint and the rest is forecourt.
 
-**Facades** are four instances of `M_OB_Facade` - glass curtain wall, Portland
-stone, London stock brick, dark rainscreen - which draws storey bands and window
-bays from world position and the face normal, so any footprint gets windows
-with no UVs, and lights a share of them from inside. Geometry is merged per
-material by Geometry Script into a dozen `SM_District_*` meshes: fourteen
-hundred buildings cost a dozen draw calls.
+**Facades** are eight instances of `M_OB_Facade`, one per
+`district_data.FACADE_VARIANTS` entry: Glass (unitised curtain wall, every tower
+of 45 m or more), GlassRibbon (ribbon glazing over spandrels), Stone (Portland
+stone and render, two-over-two sashes, string courses, rusticated base, slate
+roof), StoneOffice (wide windows in dark aluminium, granite base), Brick
+(stock-brick terrace over a stuccoed shop storey), BrickWarehouse (red stock,
+multi-pane black steel windows, blue-brick bands), BrickBlock (yellow stock
+between pale slab edges, white uPVC) and Dark (rainscreen with a flashing per
+floor). The OSM family is split by height and a hash of the OSM id, so a street
+is a mix rather than a repeat. The master draws storey bands and window bays
+from world position and the face normal, so any footprint gets windows without
+UVs. It also draws a taller ground storey, sills, frames and glazing bars,
+floor-line bands and the roof colour. Per window cell it lights a share of
+rooms from inside (50–120 cd/m², warm white) and pulls blinds in another share.
+
+**Roofscape**: `district_data.roof_plant` puts lift overruns, air-handling
+units, condenser rows and tower plant screens on every roof of 150 m² or more
+near the tower (800 m² in the far city), inside the parapet line and clear of
+each other.
+
+**Shopfronts**: `district_data.shopfronts` finds the facades facing the streets
+in `SHOPFRONT_STREETS` within 450 m. A facade qualifies when it is roughly
+parallel to the street, facing it, and no more than 9 m of pavement from the
+kerb. Buildings mapped as shops qualify on any near street once the dataset is
+regenerated. Each facade is split into 5–7.6 m units: 45 cm stall riser,
+pilasters, lit glazing (about 200 cd/m²) with a 1.1 m door and transom, an
+80 cm fascia from 3 m (heritage green, navy, oxblood, black, or a lit box
+sign), and a cornice.
+
+Geometry is merged per material by Geometry Script into about 21
+`SM_District_*` meshes, so the 8,800 buildings, their plant and the shops cost a
+few dozen draw calls.
 
 **The playable street** is the forecourt and Braham Street: blocking volumes
 65 m out from the tower stop a sprint up Whitechapel High Street. The rest of

@@ -114,6 +114,24 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Weapon")
 	void OnUnequipped();
 
+	/**
+	 * Hangs the weapon off its holder's mesh as *this machine* sees them: the 1P
+	 * arms when this machine controls the holder, the 3P body otherwise. Every
+	 * machine calls it for itself (equip, OnRep_CurrentWeapon, the component's
+	 * tick), because the server's answer is wrong for everyone but the server.
+	 * Does nothing when the weapon is already where it belongs.
+	 */
+	void AttachToOwnerMesh(class AOneBrahamCharacter* HolderCharacter);
+
+	/** Whether this machine draws the holder through the 1P arms: only for a player it controls, never a bot. */
+	static bool UsesFirstPersonView(bool bLocallyControlled, bool bPlayerController);
+
+	/** The socket a held weapon uses: Weapon_1P for its controller's view, Weapon_3P for everyone else's. */
+	static FName GetHeldSocketName(bool bFirstPersonView);
+
+	/** The server's attachment arrives here too; a held weapon keeps the local answer instead. */
+	virtual void OnRep_AttachmentReplication() override;
+
 	UFUNCTION(BlueprintPure, Category = "One Braham|Weapon")
 	class AOneBrahamCharacter* GetOwningOneBrahamCharacter() const { return OwningCharacter.Get(); }
 

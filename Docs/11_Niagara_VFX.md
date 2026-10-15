@@ -235,7 +235,7 @@ helicopter rather than stand next to it.
 | `M_OB_Decal_BulletHole_Carpet` | Carpet, Fabric | 7 cm | dark, matte, ragged |
 | `M_OB_Decal_BulletHole_Plaster` | Plasterboard | 9 cm | large pale crater with a shadowed rim |
 | `M_OB_Decal_GlassCrack` | Glass, BallisticGlass | 24 cm | radial sheet with a 0.4 s crack-through |
-| `M_OB_Decal_Scuff` | Concrete | 30 cm | where a body slid |
+| `M_OB_Decal_Scuff` | Concrete | 30 cm | where a body slid; texture is CC0 ambientCG Smear001 (mask from its roughness map), on `M_OB_DecalTextured` |
 | `M_OB_Decal_Blood` | any surface | 3–64 cm | procedural splatter/pool; see section 9 |
 
 Bullet holes are spawned by `SpawnImpact` with a **25 second** life and a hard

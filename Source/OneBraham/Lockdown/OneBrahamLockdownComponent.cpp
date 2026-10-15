@@ -492,13 +492,16 @@ void UOneBrahamLockdownComponent::ServerApplyPurgeDamage(float DeltaTime)
 		if (UOneBrahamHealthComponent* Health = Character->GetHealthComponent())
 		{
 			// The purge is a game-mode hazard, not a weapon: no instigator, no
-			// headshot multipliers, and it never counts as a player kill.
+			// headshot multipliers, and it never counts as a player kill. The
+			// instigator really is nullptr - passing the GameState made the purge
+			// down players (a null killer is "the building", which never downs)
+			// and tracked it as an attacker for assists.
 			FOneBrahamDamageReport Report;
 			Report.BaseDamage = DamagePerSecond * Slice;
 			Report.HitZone = EOneBrahamHitZone::Torso;
 			Report.Distance = 0.f;
 
-			const float Applied = Health->ApplyDamage(Report.BaseDamage, GetOwner(), Report, nullptr);
+			const float Applied = Health->ApplyDamage(Report.BaseDamage, nullptr, Report, nullptr);
 			if (Applied > 0.f && !Health->IsAlive())
 			{
 				++PurgeKillCount;

@@ -17,6 +17,8 @@ THE BALANCE RULE
 
 WHAT IT CREATES
     /Game/OneBraham/Characters/DA_CharacterRegistry        the cast
+    /Game/OneBraham/Characters/Materials/MI_OB_Cast_*      each archetype's clothing
+                                                           on the stand-in bodies
     /Game/OneBraham/Characters/Meshes/SK_OB_Body_{0..5}    body variants
     /Game/OneBraham/Characters/Cosmetics/...               modular clothing
     /Game/OneBraham/Characters/ABP_OneBrahamCharacter      animation blueprint
@@ -155,6 +157,80 @@ ARCHETYPES = [
     },
 ]
 
+# ---------------------------------------------------------------------------
+#  Clothing on the stand-in bodies
+# ---------------------------------------------------------------------------
+# Until the cast's own bodies and garments exist, each archetype dresses Manny or
+# Quinn in its own colours: a material instance of the mannequin's own material
+# per mesh section, with no new meshes. M_Mannequin (probed) colours its painted
+# panels as Base Texture x "Paint Tint" and gives them "MetalPaintRoughness" and
+# "MetalPaintMetallic"; the dark joint fabric between the panels keeps its own
+# texture values, which reads as seams and an undershirt.
+#
+# Both bodies have two sections, and they split the same way: the torso and arms
+# (with the hands) in one, the head and legs in the other. So each archetype gets
+# a top and a bottom. The head shares the trouser section, which is why the
+# bottoms below are all mid-to-dark cloth colours rather than anything that
+# would make a faceless head read as a bare one.
+#
+# mesh -> ((material slot name, the mannequin's own instance (the parent), part))
+MANNEQUIN_MATERIALS = "/Game/Characters/Mannequins/Materials"
+MANNEQUIN_MATERIAL_SLOTS = {
+    MANNEQUIN_BODIES[0]: (
+        ("M_Torso", MANNEQUIN_MATERIALS + "/Manny/MI_Manny_02_New", "Top"),
+        ("M_HeadLegs", MANNEQUIN_MATERIALS + "/Manny/MI_Manny_01_New", "Bottom"),
+    ),
+    MANNEQUIN_BODIES[1]: (
+        ("Quinn_02", MANNEQUIN_MATERIALS + "/Quinn/MI_Quinn_02", "Top"),
+        ("Quinn_01", MANNEQUIN_MATERIALS + "/Quinn/MI_Quinn_01", "Bottom"),
+    ),
+}
+
+# The mannequin panels' own albedo before the tint: sRGB ~0.85 measured off
+# T_Manny_0x_D and T_Quinn_0x_D, ~0.69 linear. Dividing the cloth albedo by it
+# makes the tint land the panel on the cloth colour, not on 69% of it.
+MANNEQUIN_PANEL_ALBEDO = 0.69
+
+# Cloth albedo is clamped to this range (linear, per channel average): nothing
+# darker than a charcoal wool - the black-on-black rule in Docs/13 section 4 -
+# and nothing brighter than a white cotton shirt.
+CLOTH_ALBEDO_MIN = 0.03
+CLOTH_ALBEDO_MAX = 0.80
+
+# Per archetype: top and bottom as (what it is, sRGB hex, roughness). Colours are
+# measured-cloth values, not palette swatches: real office clothing is
+# desaturated, and the only saturated thing in the cast is the hi-vis, because
+# that is true of the building as well. Matches the default cosmetics above (the
+# Graduate's puffer, Finance's overcoat, IT's fleece, Facilities' hi-vis, the
+# Consultant's soft blazer) so the colours do not change when those meshes land.
+CLOTHING = {
+    "BusinessAnalyst": {
+        "Top":    ("pale blue Oxford shirt", "#A6B8CC", 0.78),
+        "Bottom": ("navy chinos", "#33405A", 0.82),
+    },
+    "Graduate": {
+        "Top":    ("olive nylon puffer", "#565C42", 0.55),
+        "Bottom": ("indigo jeans", "#34425E", 0.86),
+    },
+    "FinanceBroker": {
+        "Top":    ("charcoal wool overcoat", "#3E3F43", 0.90),
+        "Bottom": ("charcoal suit trousers", "#38393D", 0.88),
+    },
+    "ITOperations": {
+        "Top":    ("navy fleece", "#2F3C57", 0.95),
+        "Bottom": ("grey cargo trousers", "#6A695F", 0.85),
+    },
+    "FacilitiesSecurity": {
+        "Top":    ("fluorescent yellow hi-vis", "#D4DE2A", 0.60),
+        "Bottom": ("navy work trousers", "#2E374A", 0.84),
+    },
+    "Consultant": {
+        "Top":    ("camel soft blazer", "#9C7E5A", 0.86),
+        "Bottom": ("mid-grey wool trousers", "#55565B", 0.88),
+    },
+}
+
+
 # Cosmetic slots. The wardrobe is cosmetic-only (the entire monetisation model),
 # so every slot here must be visible and must not confer anything.
 COSMETIC_SLOTS = [
@@ -213,6 +289,120 @@ def _ensure_dirs():
             unreal.EditorAssetLibrary.make_directory(path)
 
 
+def _srgb_to_linear(channel):
+    if channel <= 0.04045:
+        return channel / 12.92
+    return ((channel + 0.055) / 1.055) ** 2.4
+
+
+def cloth_albedo(hex_colour):
+    """'#A6B8CC' -> linear RGB, held inside the cloth albedo range."""
+    value = hex_colour.lstrip("#")
+    linear = [_srgb_to_linear(int(value[i:i + 2], 16) / 255.0) for i in (0, 2, 4)]
+    mean = sum(linear) / 3.0
+    if mean < CLOTH_ALBEDO_MIN:
+        linear = [c * CLOTH_ALBEDO_MIN / max(mean, 1e-4) for c in linear]
+    elif mean > CLOTH_ALBEDO_MAX:
+        linear = [c * CLOTH_ALBEDO_MAX / mean for c in linear]
+    return tuple(linear)
+
+
+def clothing_material_name(archetype_key, body_path, part):
+    """MI_OB_Cast_Graduate_Quinn_Top: one per archetype, body and part.
+
+    The body is in the name because the parent is that body's own instance (its
+    textures are laid out for its UVs), so the Graduate on Quinn and a Graduate
+    on Manny would be two instances, not one.
+    """
+    body = "Manny" if body_path == MANNEQUIN_BODIES[0] else "Quinn"
+    return u"MI_OB_Cast_{0}_{1}_{2}".format(archetype_key, body, part)
+
+
+def clothing_material_paths(archetype_key, body_path):
+    """Material slot name -> clothing instance path, for one archetype's body."""
+    folder = C.CHARACTERS + "/Materials"
+    paths = {}
+    for slot_name, _parent, part in MANNEQUIN_MATERIAL_SLOTS.get(body_path, ()):
+        name = clothing_material_name(archetype_key, body_path, part)
+        paths[slot_name] = u"{0}/{1}.{1}".format(folder, name)
+    return paths
+
+
+def build_clothing_materials(report):
+    """Creates each archetype's clothing instances on its stand-in body.
+
+    One MaterialInstanceConstant per mesh section, parented to the mannequin's
+    own instance for that section so the panel textures, normals and seams come
+    with it; only the cloth colour and finish change. Idempotent: an existing
+    instance is re-tinted in place.
+    """
+    library = unreal.MaterialEditingLibrary
+    folder = C.CHARACTERS + "/Materials"
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    made = 0
+
+    for index, entry in enumerate(ARCHETYPES):
+        key = entry["key"]
+        body = MANNEQUIN_BODIES[index % 2]
+        clothing = CLOTHING.get(key)
+        if clothing is None:
+            report.failed(key, "no clothing defined for this archetype")
+            continue
+
+        for slot_name, parent_path, part in MANNEQUIN_MATERIAL_SLOTS[body]:
+            name = clothing_material_name(key, body, part)
+            path = u"{0}/{1}".format(folder, name)
+
+            # Checked before loading: load_asset on a missing path logs an error,
+            # and the first build has no clothing instances to find.
+            parent = (unreal.EditorAssetLibrary.load_asset(parent_path)
+                      if unreal.EditorAssetLibrary.does_asset_exist(parent_path) else None)
+            if parent is None:
+                report.skipped_asset(path, u"mannequin material {0} not in the project yet "
+                                           u"(fetch_open_assets.py copies it in)".format(parent_path))
+                continue
+
+            created = False
+            instance = (unreal.EditorAssetLibrary.load_asset(path)
+                        if unreal.EditorAssetLibrary.does_asset_exist(path) else None)
+            if instance is None:
+                instance = tools.create_asset(name, folder, unreal.MaterialInstanceConstant,
+                                              unreal.MaterialInstanceConstantFactoryNew())
+                created = True
+            if instance is None:
+                report.failed(path, "could not create the clothing material instance")
+                continue
+
+            what, hex_colour, roughness = clothing[part]
+            albedo = cloth_albedo(hex_colour)
+            tint = [c / MANNEQUIN_PANEL_ALBEDO for c in albedo]
+
+            library.set_material_instance_parent(instance, parent)
+            library.set_material_instance_vector_parameter_value(
+                instance, "Paint Tint", unreal.LinearColor(r=tint[0], g=tint[1], b=tint[2], a=1.0))
+            library.set_material_instance_scalar_parameter_value(
+                instance, "MetalPaintRoughness", float(roughness))
+            # Cloth is a dielectric, and the glow behind the mannequin's chest
+            # logo (EmissivePower 2 on Manny's torso) is not an office worker's.
+            library.set_material_instance_scalar_parameter_value(
+                instance, "MetalPaintMetallic", 0.0)
+            library.set_material_instance_scalar_parameter_value(
+                instance, "EmissivePower", 0.0)
+            library.update_material_instance(instance)
+
+            unreal.EditorAssetLibrary.save_asset(path)
+            if created:
+                report.created_asset(path)
+            else:
+                report.updated_asset(path)
+            made += 1
+            C.log(u"  {0} ({1}): {2} {3}, albedo {4:.3f}/{5:.3f}/{6:.3f}, roughness {7:.2f}".format(
+                name, slot_name, what, hex_colour, albedo[0], albedo[1], albedo[2], roughness))
+
+    C.log(u"  clothing: {0} material instances".format(made))
+    return made
+
+
 def build_registry(report):
     """Creates DA_CharacterRegistry and fills the whole cast.
 
@@ -265,6 +455,9 @@ def build_registry(report):
             # animation blueprint. fetch_open_assets.py copies them in from the
             # installed engine; the paths are the ones that content expects.
             "body_mesh_path": MANNEQUIN_BODIES[index % 2],
+            # Body mesh material slot -> this archetype's clothing instance.
+            "body_material_paths": clothing_material_paths(entry["key"],
+                                                          MANNEQUIN_BODIES[index % 2]),
             "anim_class_path": MANNEQUIN_ANIM_BLUEPRINT,
             "sidearm_anim_class_path": MANNEQUIN_SIDEARM_ANIM_BLUEPRINT,
             "personality": {
@@ -409,6 +602,7 @@ def build_all():
     C.log(u"=== Building the One Braham cast ===")
 
     C.guard(report, "directories", _ensure_dirs)
+    C.guard(report, "clothing", build_clothing_materials, report)
     C.guard(report, "character registry", build_registry, report)
     C.guard(report, "animation blueprint", build_animation_blueprint, report)
     C.guard(report, "voice casting", build_voice_casting, report)

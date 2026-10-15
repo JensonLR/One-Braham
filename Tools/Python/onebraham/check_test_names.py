@@ -81,7 +81,7 @@ RUN_TEST = re.compile(r'bool\s+([A-Za-z_][A-Za-z0-9_]*)::RunTest\s*\(')
 
 #: A "what runs today" table row: | `OneBraham.Core` | `A`, `B`, `C` | prose |
 CATEGORY_ROW = re.compile(
-    r'^\|\s*`(OneBraham\.[A-Za-z]+)`\s*\|\s*([^|]*?)\s*\|', re.MULTILINE)
+    r'^\|\s*`(OneBraham(?:\.[A-Za-z]+)+)`\s*\|\s*([^|]*?)\s*\|', re.MULTILINE)
 
 #: Backticked identifiers, used to pull the test names out of that row's column.
 BACKTICKED = re.compile(r'`([A-Za-z_][A-Za-z0-9_]*)`')

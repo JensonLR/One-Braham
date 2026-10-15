@@ -148,13 +148,19 @@ imported to `/Game/OneBraham/Materials/Textures`. All CC0.
 ## ambientCG (textures)
 
 PBR sets (2K-JPG zips, MD5-pinned in `fetch_open_assets.py`; only the colour,
-DirectX normal and roughness maps are extracted). All CC0.
+DirectX normal and roughness maps - and, for the grime sets, the opacity
+mask - are extracted). All CC0.
 
 | Set | Surface |
 | --- | --- |
 | [Carpet001](https://ambientcg.com/view?id=Carpet001) | office carpet tile (tinted charcoal) |
 | [Metal011](https://ambientcg.com/view?id=Metal011) | brushed steel |
 | [Planks037A](https://ambientcg.com/view?id=Planks037A) | terrace decking |
+| [Fabric030](https://ambientcg.com/view?id=Fabric030) | woven upholstery: spine screens, booths, lounge sofa |
+| [Fabric031](https://ambientcg.com/view?id=Fabric031) | task-chair knit mesh |
+| [Fingerprints002](https://ambientcg.com/view?id=Fingerprints002) | fingerprint/smudge grime on interior glazing |
+| [SurfaceImperfections015](https://ambientcg.com/view?id=SurfaceImperfections015) | dust film on balustrade glass |
+| [Smear001](https://ambientcg.com/view?id=Smear001) | scuff decal (M_OB_Decal_Scuff) |
 
 Poly Haven's [rubber_tiles](https://polyhaven.com/a/rubber_tiles) (CC0) is the canteen floor.
 

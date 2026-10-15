@@ -73,6 +73,9 @@ public:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void InitPlayerState() override;
+	virtual void AcknowledgePossession(APawn* P) override;
+	virtual void OnRep_PlayerState() override;
+	virtual void ReceivedPlayer() override;
 
 	// ======================================================================
 	//  Components
@@ -371,6 +374,16 @@ public:
 	void ServerSetLoadout(FName PrimaryWeaponId, FName SidearmWeaponId,
 		const TArray<FName>& UtilityIds, FName WeaponSkinId);
 
+	/**
+	 * Client -> server: the outfit and clan tag from this player's own profile.
+	 *
+	 * The profile lives on the player's machine, so this is the only way the
+	 * server learns it; the cosmetics travel in their wire form because an RPC
+	 * cannot carry a TMap. Purely cosmetic, sanitised on arrival.
+	 */
+	UFUNCTION(Server, Reliable)
+	void ServerSetProfileCosmetics(const TArray<FOneBrahamNamePairEntry>& Cosmetics, const FString& InClanTag);
+
 	/** True while the comms wheel is open on this client. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Controller|Voice")
 	bool IsQuickLineMenuOpen() const { return bQuickLineMenuOpen; }
@@ -543,4 +556,15 @@ protected:
 
 	/** Client: puts the deferred death screen up. */
 	void ShowPendingDeathScreen();
+
+	/**
+	 * Owning client: sends the GameInstance profile's loadout, cosmetics and clan
+	 * tag to the server, once per player state. Called from every point where
+	 * "local controller with a player state" can first become true: BeginPlay,
+	 * ReceivedPlayer and OnRep_PlayerState.
+	 */
+	void SendLocalProfileToServer();
+
+	/** The player state the profile was last sent for (a new one, after travel, gets it again). */
+	TWeakObjectPtr<APlayerState> ProfileSentForState;
 };

@@ -28,6 +28,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Engine/World.h"
+#include "GameFramework/Controller.h"
 #include "EngineUtils.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
@@ -337,21 +338,9 @@ void AOneBrahamWeaponBase::OnEquippedBy(AOneBrahamCharacter* NewOwnerCharacter)
 		PickupMesh->SetVisibility(false);
 	}
 
-	// Attach to the correct hand/rig socket.
-	if (NewOwnerCharacter != nullptr && WeaponMesh != nullptr)
-	{
-		USkeletalMeshComponent* TargetMesh = NewOwnerCharacter->IsLocallyControlled()
-			? NewOwnerCharacter->GetFirstPersonMesh()
-			: NewOwnerCharacter->GetThirdPersonMesh();
-
-		if (TargetMesh != nullptr)
-		{
-			// Weapon root socket: the anim BP drives the hand IK; the socket is
-			// only the attach point so that recoil/aim offsets are additive.
-			AttachToComponent(TargetMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale,
-				NewOwnerCharacter->IsLocallyControlled() ? TEXT("Weapon_1P") : TEXT("Weapon_3P"));
-		}
-	}
+	// Attach to the correct hand/rig socket - as this machine sees the holder.
+	// Clients do the same from the component's OnRep_CurrentWeapon.
+	AttachToOwnerMesh(NewOwnerCharacter);
 
 	// Draw sound + animation.
 	if (Definition != nullptr && !Definition->DrawSound.IsNull())
@@ -363,6 +352,67 @@ void AOneBrahamWeaponBase::OnEquippedBy(AOneBrahamCharacter* NewOwnerCharacter)
 	}
 
 	ResetShotTracking();
+}
+
+bool AOneBrahamWeaponBase::UsesFirstPersonView(bool bLocallyControlled, bool bPlayerController)
+{
+	return bLocallyControlled && bPlayerController;
+}
+
+FName AOneBrahamWeaponBase::GetHeldSocketName(bool bFirstPersonView)
+{
+	return bFirstPersonView ? FName(TEXT("Weapon_1P")) : FName(TEXT("Weapon_3P"));
+}
+
+void AOneBrahamWeaponBase::AttachToOwnerMesh(AOneBrahamCharacter* HolderCharacter)
+{
+	if (HolderCharacter == nullptr || WeaponMesh == nullptr || GetRootComponent() == nullptr)
+	{
+		return;
+	}
+
+	// IsLocallyControlled is per machine: true on the holder's own machine only.
+	// That is the whole point - the server must not decide this for anyone else.
+	// A bot is locally controlled on the server too, but has no arms on screen
+	// (same rule as AOneBrahamCharacter::UpdateFirstPersonVisibility).
+	const AController* HolderController = HolderCharacter->GetController();
+	const bool bFirstPersonView = UsesFirstPersonView(HolderCharacter->IsLocallyControlled(),
+		HolderController != nullptr && HolderController->IsPlayerController());
+	USkeletalMeshComponent* TargetMesh = bFirstPersonView
+		? HolderCharacter->GetFirstPersonMesh()
+		: HolderCharacter->GetThirdPersonMesh();
+
+	if (TargetMesh == nullptr)
+	{
+		return;
+	}
+
+	const FName Socket = GetHeldSocketName(bFirstPersonView);
+	if (GetRootComponent()->GetAttachParent() == TargetMesh && GetRootComponent()->GetAttachSocketName() == Socket)
+	{
+		return;
+	}
+
+	// Weapon root socket: the anim BP drives the hand IK; the socket is
+	// only the attach point so that recoil/aim offsets are additive.
+	AttachToComponent(TargetMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, Socket);
+}
+
+void AOneBrahamWeaponBase::OnRep_AttachmentReplication()
+{
+	// Replicated movement carries the server's attachment, which names the
+	// server's choice of mesh. While this is someone's held weapon the local
+	// choice wins; on the ground (or holstered) the server's placement stands.
+	if (!IsGroundPickup() && OwningWeaponComponent.IsValid() && OwningWeaponComponent->GetCurrentWeapon() == this)
+	{
+		if (AOneBrahamCharacter* Holder = Cast<AOneBrahamCharacter>(OwningWeaponComponent->GetOwner()))
+		{
+			AttachToOwnerMesh(Holder);
+			return;
+		}
+	}
+
+	Super::OnRep_AttachmentReplication();
 }
 
 void AOneBrahamWeaponBase::OnUnequipped()

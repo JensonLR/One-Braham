@@ -18,6 +18,8 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimSingleNodeInstance.h"
 #include "Characters/OneBrahamCharacter.h"
+#include "Weapons/OneBrahamWeaponBase.h"
+#include "Weapons/OneBrahamWeaponComponent.h"
 #include "OneBraham.h"
 
 #if WITH_AUTOMATION_TESTS
@@ -303,6 +305,102 @@ bool FOneBrahamWeaponCarryPoseTest::RunTest(const FString& Parameters)
 		AOneBrahamCharacter::ChooseCarryAnimClass(EOneBrahamWeaponSlot::Utility, Primary, Sidearm) == Primary);
 	TestTrue(TEXT("no sidearm set falls back to the primary set"),
 		AOneBrahamCharacter::ChooseCarryAnimClass(EOneBrahamWeaponSlot::Sidearm, Primary, nullptr) == Primary);
+	return true;
+}
+
+// ===========================================================================
+//  Burst fire
+// ===========================================================================
+/**
+ * One press, one burst. Holding the trigger past the third round must not arm
+ * a second burst; releasing it (which zeroes both counters) must.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamWeaponBurstLatchTest, "OneBraham.Weapons.BurstLatch",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamWeaponBurstLatchTest::RunTest(const FString& Parameters)
+{
+	int32 Remaining = 0;
+	bool bLatched = false;
+
+	int32 Fired = 0;
+	for (int32 Tick = 0; Tick < 10; ++Tick)
+	{
+		Fired += UOneBrahamWeaponComponent::AdvanceBurst(Remaining, bLatched) ? 1 : 0;
+	}
+	TestEqual(TEXT("a held trigger fires exactly one burst of three"), Fired, 3);
+	TestTrue(TEXT("the burst stays latched while held"), bLatched);
+
+	// Trigger release, as SetTriggerHeld(false) does it.
+	Remaining = 0;
+	bLatched = false;
+
+	Fired = 0;
+	for (int32 Tick = 0; Tick < 10; ++Tick)
+	{
+		Fired += UOneBrahamWeaponComponent::AdvanceBurst(Remaining, bLatched) ? 1 : 0;
+	}
+	TestEqual(TEXT("a re-press fires the next burst"), Fired, 3);
+
+	// A release mid-burst cuts it short, and the next press starts a full one.
+	Remaining = 0;
+	bLatched = false;
+	UOneBrahamWeaponComponent::AdvanceBurst(Remaining, bLatched);
+	Remaining = 0;
+	bLatched = false;
+	Fired = 0;
+	for (int32 Tick = 0; Tick < 10; ++Tick)
+	{
+		Fired += UOneBrahamWeaponComponent::AdvanceBurst(Remaining, bLatched) ? 1 : 0;
+	}
+	TestEqual(TEXT("a press after a cut-short burst fires a full burst"), Fired, 3);
+	return true;
+}
+
+// ===========================================================================
+//  Reserve ammo changing hands
+// ===========================================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamWeaponReserveMergeTest, "OneBraham.Weapons.ReserveMerge",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamWeaponReserveMergeTest::RunTest(const FString& Parameters)
+{
+	TestEqual(TEXT("a pickup adds to what is carried"),
+		UOneBrahamWeaponComponent::MergeReserveAmmo(30, 60, 120), 90);
+	TestEqual(TEXT("a pickup with no rounds keeps what is carried"),
+		UOneBrahamWeaponComponent::MergeReserveAmmo(90, 0, 120), 90);
+	TestEqual(TEXT("the merge never exceeds the weapon's cap"),
+		UOneBrahamWeaponComponent::MergeReserveAmmo(100, 60, 120), 120);
+	TestEqual(TEXT("an empty-handed pickup takes the ground rounds"),
+		UOneBrahamWeaponComponent::MergeReserveAmmo(0, 45, 120), 45);
+	TestEqual(TEXT("negative inputs count as nothing"),
+		UOneBrahamWeaponComponent::MergeReserveAmmo(-5, -10, 120), 0);
+	return true;
+}
+
+// ===========================================================================
+//  Held weapon socket
+// ===========================================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamWeaponHeldSocketTest, "OneBraham.Weapons.HeldSocket",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamWeaponHeldSocketTest::RunTest(const FString& Parameters)
+{
+	// The holder's own machine sees the 1P rig; every other machine the 3P body.
+	TestEqual(TEXT("the holder's view uses the 1P socket"),
+		AOneBrahamWeaponBase::GetHeldSocketName(true), FName(TEXT("Weapon_1P")));
+	TestEqual(TEXT("everyone else's view uses the 3P socket"),
+		AOneBrahamWeaponBase::GetHeldSocketName(false), FName(TEXT("Weapon_3P")));
+
+	// Which view a machine uses for a holder: only a player it controls gets arms.
+	TestTrue(TEXT("this machine's own player is drawn first-person"),
+		AOneBrahamWeaponBase::UsesFirstPersonView(true, true));
+	TestFalse(TEXT("a remote player is drawn third-person"),
+		AOneBrahamWeaponBase::UsesFirstPersonView(false, true));
+	TestFalse(TEXT("a bot on the listen host is drawn third-person"),
+		AOneBrahamWeaponBase::UsesFirstPersonView(true, false));
+	TestFalse(TEXT("a pawn with no controller yet (late join) is drawn third-person"),
+		AOneBrahamWeaponBase::UsesFirstPersonView(false, false));
 	return true;
 }
 

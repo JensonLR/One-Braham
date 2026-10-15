@@ -16,8 +16,16 @@ buildings cost a few draw calls, not fourteen hundred actors.
 
 The facades share one master, M_OB_Facade: storey bands and window bays
 computed from world position and the face normal, so a footprint of any shape
-gets windows without UVs, and the four families (glass, stone, brick, dark
-cladding) are its instances.
+gets windows without UVs - with a ground storey, sills, frames and glazing
+bars, floor-line bands, blinds and lit rooms. The four families (glass, stone,
+brick, dark cladding) split into eight variants by height and a hash of the
+OSM id (district_data.facade_variant), each an instance with its own storey
+height, bay and window pattern. Larger roofs carry plant (lift overruns,
+air-handling units, condensers, tower plant screens), and the facades facing
+the near shopping streets - Leman Street, Alie Street, Commercial Road,
+Whitechapel High Street and the rest of district_data.SHOPFRONT_STREETS - get
+shopfronts: riser, pilasters, lit glazing, door, fascia, cornice. All of it is
+batched into the same per-material meshes.
 
 Map data (c) OpenStreetMap contributors, ODbL 1.0.
 """
@@ -32,6 +40,7 @@ import unreal
 
 from onebraham import common as C
 from onebraham import build_materials as M
+from onebraham import district_data as D
 
 DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "aldgate_district.json")
 FOLDER = C.ENVIRONMENT + "/District"
@@ -44,19 +53,74 @@ KERB_W, KERB_H = 25.0, 12.0
 # Aldgate is scenery: invisible walls stop a sprint up Whitechapel High Street.
 PLAY_HALF_X, PLAY_HALF_Y = 6500.0, 6000.0
 
-# M_OB_Facade instances: wall colour, glass colour, bay width, storey height,
-# window width and height as a fraction of the bay/storey, wall roughness.
+# M_OB_Facade instances, one per district_data.FACADE_VARIANTS entry: London's
+# window patterns, measured off the street rather than invented.
+#   wall/glass/frame/plinth/roof   colours (linear albedo)
+#   bay, storey, ground            bay width, storey height, ground storey (cm)
+#   ww, wh, sill                   window width and height as a share of the
+#                                  bay and storey; sill height as a share of it
+#   ground_ww                      ground-floor opening width, share of the bay
+#   mullions, transoms, bar        glazing bars across and up each window, and
+#                                  their width (cm); the frame is drawn too
+#   band, band_tint                a band at every floor line (cm), and how it
+#                                  shifts the wall (string course, slab edge)
+#   rough, frame_metal             wall roughness, frame metalness
+#   lit, blinds, glow              share of windows lit from inside, share with
+#                                  blinds down, and the lit windows' luminance
 FACADES = {
-    # Curtain wall: a fine mullion grid that is nearly all glass.
-    # The glass is a sky-blue grey, not black: it has to read as glass even
-    # where reflections have nothing to show.
-    "Glass": ((0.16, 0.18, 0.20), (0.30, 0.40, 0.48), 150.0, 380.0, 0.92, 0.86, 0.35),
-    # Portland stone and render: deep reveals, tall windows.
-    "Stone": ((0.62, 0.59, 0.52), (0.07, 0.08, 0.09), 260.0, 360.0, 0.48, 0.58, 0.80),
-    # London stock brick: smaller sash windows.
-    "Brick": ((0.36, 0.25, 0.17), (0.06, 0.06, 0.07), 240.0, 320.0, 0.40, 0.55, 0.90),
-    # Dark rainscreen cladding on the newer blocks.
-    "Dark": ((0.17, 0.17, 0.18), (0.20, 0.26, 0.31), 200.0, 330.0, 0.62, 0.62, 0.55),
+    # Unitised curtain wall: a fine aluminium grid that is nearly all glass, a
+    # double-height lobby. The glass is a sky-blue grey, not black: it has to
+    # read as glass even where reflections have nothing to show.
+    "Glass": dict(wall=(0.16, 0.18, 0.20), glass=(0.30, 0.40, 0.48), frame=(0.55, 0.56, 0.58),
+                  plinth=(0.10, 0.11, 0.12), roof=(0.24, 0.24, 0.25),
+                  bay=150.0, storey=400.0, ground=600.0, ww=0.94, wh=0.80, sill=0.10, ground_ww=0.94,
+                  mullions=0, transoms=0, bar=6.0, band=0.0, band_tint=1.0,
+                  rough=0.35, frame_metal=0.9, lit=0.35, blinds=0.15, glow=120.0),
+    # Ribbon glazing over pale spandrel panels: the 1960s-90s office slab.
+    "GlassRibbon": dict(wall=(0.42, 0.43, 0.44), glass=(0.22, 0.28, 0.33), frame=(0.12, 0.12, 0.13),
+                        plinth=(0.14, 0.14, 0.15), roof=(0.22, 0.22, 0.23),
+                        bay=300.0, storey=370.0, ground=450.0, ww=1.0, wh=0.58, sill=0.28, ground_ww=0.9,
+                        mullions=1, transoms=0, bar=8.0, band=0.0, band_tint=1.0,
+                        rough=0.5, frame_metal=0.7, lit=0.3, blinds=0.25, glow=100.0),
+    # Portland stone and render: tall painted sashes, a string course at each
+    # floor, a darker rusticated base, slate behind the parapet.
+    "Stone": dict(wall=(0.62, 0.59, 0.52), glass=(0.07, 0.08, 0.09), frame=(0.72, 0.72, 0.69),
+                  plinth=(0.40, 0.38, 0.34), roof=(0.12, 0.12, 0.13),
+                  bay=260.0, storey=360.0, ground=450.0, ww=0.46, wh=0.58, sill=0.20, ground_ww=0.7,
+                  mullions=1, transoms=1, bar=5.0, band=25.0, band_tint=1.12,
+                  rough=0.8, frame_metal=0.0, lit=0.18, blinds=0.3, glow=60.0),
+    # Stone-clad modern office: wide windows in dark aluminium, a granite base.
+    "StoneOffice": dict(wall=(0.66, 0.62, 0.55), glass=(0.12, 0.15, 0.18), frame=(0.10, 0.11, 0.12),
+                        plinth=(0.13, 0.13, 0.14), roof=(0.22, 0.22, 0.23),
+                        bay=180.0, storey=375.0, ground=480.0, ww=0.66, wh=0.62, sill=0.20, ground_ww=0.8,
+                        mullions=0, transoms=1, bar=6.0, band=0.0, band_tint=1.0,
+                        rough=0.7, frame_metal=0.7, lit=0.3, blinds=0.2, glow=100.0),
+    # London stock brick terrace: two-over-two sashes, a stuccoed shop storey.
+    "Brick": dict(wall=(0.36, 0.25, 0.17), glass=(0.06, 0.06, 0.07), frame=(0.74, 0.74, 0.71),
+                  plinth=(0.58, 0.55, 0.49), roof=(0.11, 0.11, 0.12),
+                  bay=240.0, storey=310.0, ground=360.0, ww=0.40, wh=0.56, sill=0.22, ground_ww=0.7,
+                  mullions=1, transoms=1, bar=5.0, band=0.0, band_tint=1.0,
+                  rough=0.9, frame_metal=0.0, lit=0.15, blinds=0.35, glow=50.0),
+    # Red-stock warehouse or mansion block: multi-pane black steel windows,
+    # blue-brick bands and base.
+    "BrickWarehouse": dict(wall=(0.31, 0.18, 0.12), glass=(0.08, 0.09, 0.10), frame=(0.05, 0.05, 0.05),
+                           plinth=(0.12, 0.08, 0.07), roof=(0.20, 0.20, 0.21),
+                           bay=290.0, storey=340.0, ground=400.0, ww=0.54, wh=0.60, sill=0.18, ground_ww=0.7,
+                           mullions=2, transoms=2, bar=4.0, band=22.0, band_tint=0.7,
+                           rough=0.9, frame_metal=0.5, lit=0.2, blinds=0.2, glow=60.0),
+    # Post-war and new-build flats: yellow stock between pale concrete slab
+    # edges, white uPVC.
+    "BrickBlock": dict(wall=(0.46, 0.38, 0.27), glass=(0.09, 0.10, 0.11), frame=(0.74, 0.74, 0.72),
+                       plinth=(0.30, 0.29, 0.27), roof=(0.22, 0.22, 0.23),
+                       bay=330.0, storey=290.0, ground=330.0, ww=0.58, wh=0.50, sill=0.28, ground_ww=0.6,
+                       mullions=1, transoms=0, bar=7.0, band=24.0, band_tint=1.35,
+                       rough=0.88, frame_metal=0.0, lit=0.15, blinds=0.35, glow=50.0),
+    # Dark rainscreen cladding on the newer blocks, a metal flashing per floor.
+    "Dark": dict(wall=(0.17, 0.17, 0.18), glass=(0.20, 0.26, 0.31), frame=(0.30, 0.31, 0.32),
+                 plinth=(0.08, 0.08, 0.09), roof=(0.22, 0.22, 0.23),
+                 bay=200.0, storey=330.0, ground=450.0, ww=0.62, wh=0.62, sill=0.20, ground_ww=0.85,
+                 mullions=0, transoms=0, bar=6.0, band=12.0, band_tint=1.4,
+                 rough=0.55, frame_metal=0.8, lit=0.25, blinds=0.2, glow=80.0),
 }
 
 SURFACES = {
@@ -73,6 +137,24 @@ SURFACES = {
     "CabBlack": ((0.02, 0.02, 0.022), 0.25),
     "VehicleGlass": ((0.03, 0.04, 0.05), 0.08),
     "Lamp":    ((0.10, 0.12, 0.11), 0.50),   # Westminster green-black columns
+
+    # Roofscape plant: galvanised units, and the dark louvred screens and lift
+    # overruns.
+    "Plant":     ((0.50, 0.51, 0.52), 0.45, {"Metallic": 0.7}),
+    "PlantDark": ((0.10, 0.10, 0.11), 0.60, {"Metallic": 0.4}),
+    # Shopfronts. The glass shows a lit interior: a shop's ~200 cd/m2 behind
+    # dark glass, warm white; under the 8,000 lux overcast it reads as lit, not
+    # glowing. Frames and stall risers in dark powder-coated aluminium.
+    "ShopGlass": ((0.03, 0.035, 0.04), 0.05, {"Metallic": 0.3, "EmissiveColour": (1.0, 0.86, 0.68),
+                                              "EmissiveStrength": 200.0}),
+    "ShopFrame": ((0.05, 0.05, 0.055), 0.45, {"Metallic": 0.5}),
+    # Fascia boards: London's painted heritage colours, and the internally lit
+    # box sign of the chains.
+    "FasciaGreen": ((0.025, 0.10, 0.06), 0.40, {}),
+    "FasciaNavy":  ((0.02, 0.03, 0.10), 0.40, {}),
+    "FasciaRed":   ((0.20, 0.02, 0.02), 0.40, {}),
+    "FasciaBlack": ((0.015, 0.015, 0.017), 0.35, {}),
+    "FasciaLit":   ((0.80, 0.80, 0.78), 0.30, {"EmissiveColour": (1.0, 0.98, 0.94), "EmissiveStrength": 350.0}),
 
     # One Braham's own finishes, from the reference photographs (Docs/10 §7).
     # Extra parameters ride in a third element.
@@ -116,10 +198,18 @@ def build_facade_master(report):
     """M_OB_Facade: windows from world position, on any wall of any footprint.
 
         n       = normalize(VertexNormalWS.xy)
-        u       = dot(WorldPosition.xy, (-n.y, n.x)) / BayWidth      along the wall
-        v       = WorldPosition.z / StoreyHeight                        up the wall
-        window  = (frac(u) < WindowWidth) * (frac(v) < WindowHeight) * wall
-        wall    = 1 - |n.z|  (roofs get no windows)
+        u       = dot(WorldPosition.xy, (-n.y, n.x)) / BayWidth       along the wall
+        z       = WorldPosition.z - GroundZ                            above the street
+        v       = (z - GroundStorey) / StoreyHeight                    storeys above the ground one
+        window  = |frac(u) - 0.5| <= WindowWidth / 2
+                  * |frac(v) - Sill - WindowHeight / 2| <= WindowHeight / 2
+        bars    = the window's frame, MullionsAcross bars across and
+                  TransomsUp up, BarWidthCm wide
+        ground  = z < GroundStorey: a plinth with wider, taller openings
+        wall    = 1 - |n.z|  (the roof takes RoofColour, no windows)
+
+    Per window cell, a hash of (floor(u), floor(v)) lights a share of them from
+    inside and pulls blinds down on another share.
     """
     path = C.MATERIALS + "/M_OB_Facade"
     if unreal.EditorAssetLibrary.does_asset_exist(path):
@@ -131,132 +221,168 @@ def build_facade_master(report):
         report.failed("M_OB_Facade", "could not create material")
         return None
 
-    wall = M._vector_param(material, "WallColour", (0.5, 0.5, 0.5, 1.0), -400, -600)
-    glass = M._vector_param(material, "GlassColour", (0.1, 0.12, 0.14, 1.0), -400, -460)
-    bay = M._scalar_param(material, "BayWidthCm", 220.0, -1900, -300, 50.0, 800.0)
-    storey = M._scalar_param(material, "StoreyHeightCm", 350.0, -1900, -100, 200.0, 800.0)
-    win_w = M._scalar_param(material, "WindowWidth", 0.5, -1100, -360)
-    win_h = M._scalar_param(material, "WindowHeight", 0.55, -1100, -60)
-    wall_rough = M._scalar_param(material, "WallRoughness", 0.85, -400, 0)
-    lit = M._scalar_param(material, "LitWindowShare", 0.18, -1100, 260)
-    glow = M._scalar_param(material, "WindowGlow", 0.6, -400, 300, 0.0, 20.0)
+    def k(value, x, y):
+        return M._scalar_constant(material, value, x, y)
 
-    world = _node(material, unreal.MaterialExpressionWorldPosition, -2300, -260)
-    normal = _node(material, unreal.MaterialExpressionVertexNormalWS, -2300, 80)
+    def op(cls, a, b, x, y):
+        node = _node(material, cls, x, y)
+        M._connect(material, a, "", node, "A")
+        M._connect(material, b, "", node, "B")
+        return node
+
+    def one(cls, a, x, y):
+        node = _node(material, cls, x, y)
+        M._connect(material, a, "", node, "")
+        return node
+
+    def mask(src, channels, x, y):
+        node = _node(material, unreal.MaterialExpressionComponentMask, x, y)
+        for c in ("r", "g", "b", "a"):
+            node.set_editor_property(c, c in channels)
+        M._connect(material, src, "", node, "")
+        return node
+
+    def at_least(a, b, x, y):
+        # Step: 1 where X >= Y.
+        node = _node(material, unreal.MaterialExpressionStep, x, y)
+        M._connect(material, a, "", node, "X")
+        M._connect(material, b, "", node, "Y")
+        return node
+
+    def lerp(a, b, alpha, x, y):
+        node = _node(material, unreal.MaterialExpressionLinearInterpolate, x, y)
+        M._connect(material, a, "", node, "A")
+        M._connect(material, b, "", node, "B")
+        M._connect(material, alpha, "", node, "Alpha")
+        return node
+
+    mul, add, sub, div = (unreal.MaterialExpressionMultiply, unreal.MaterialExpressionAdd,
+                          unreal.MaterialExpressionSubtract, unreal.MaterialExpressionDivide)
+
+    wall = M._vector_param(material, "WallColour", (0.5, 0.5, 0.5, 1.0), -400, -900)
+    glass = M._vector_param(material, "GlassColour", (0.1, 0.12, 0.14, 1.0), -400, -760)
+    frame = M._vector_param(material, "FrameColour", (0.7, 0.7, 0.68, 1.0), -400, -620)
+    plinth = M._vector_param(material, "PlinthColour", (0.3, 0.3, 0.3, 1.0), -400, -1040)
+    roof = M._vector_param(material, "RoofColour", (0.22, 0.22, 0.23, 1.0), -400, -1180)
+    bay = M._scalar_param(material, "BayWidthCm", 220.0, -3000, -300, 50.0, 800.0)
+    storey = M._scalar_param(material, "StoreyHeightCm", 350.0, -3000, -100, 200.0, 800.0)
+    ground = M._scalar_param(material, "GroundStoreyCm", 400.0, -3000, 100, 0.0, 1000.0)
+    ground_z = M._scalar_param(material, "GroundZ", GROUND_Z, -3000, 300, -1000.0, 1000.0)
+    win_w = M._scalar_param(material, "WindowWidth", 0.5, -2000, -700)
+    win_h = M._scalar_param(material, "WindowHeight", 0.55, -2000, -400)
+    sill = M._scalar_param(material, "SillHeight", 0.2, -2000, -300)
+    ground_w = M._scalar_param(material, "GroundWindowWidth", 0.7, -2000, 700)
+    mullions = M._scalar_param(material, "MullionsAcross", 0.0, -2000, -600, 0.0, 6.0)
+    transoms = M._scalar_param(material, "TransomsUp", 0.0, -2000, -200, 0.0, 6.0)
+    bar_cm = M._scalar_param(material, "BarWidthCm", 5.0, -2000, -500, 0.0, 30.0)
+    band_cm = M._scalar_param(material, "BandCm", 0.0, -2000, 1000, 0.0, 100.0)
+    band_tint = M._scalar_param(material, "BandTint", 1.0, -1000, -1100, 0.0, 3.0)
+    wall_rough = M._scalar_param(material, "WallRoughness", 0.85, -400, 0)
+    frame_metal = M._scalar_param(material, "FrameMetallic", 0.0, -400, 140)
+    lit = M._scalar_param(material, "LitWindowShare", 0.18, -1100, 1300)
+    blinds = M._scalar_param(material, "BlindShare", 0.25, -1100, 1450)
+    glow = M._scalar_param(material, "WindowGlow", 60.0, -400, 1300, 0.0, 500.0)
+
+    world = _node(material, unreal.MaterialExpressionWorldPosition, -3300, -260)
+    normal = _node(material, unreal.MaterialExpressionVertexNormalWS, -3300, 80)
 
     # Along-the-wall direction: (-n.y, n.x), from the normal's xy.
-    n_x = _node(material, unreal.MaterialExpressionComponentMask, -2100, 40)
-    n_x.set_editor_property("r", True); n_x.set_editor_property("g", False)
-    n_x.set_editor_property("b", False); n_x.set_editor_property("a", False)
-    n_y = _node(material, unreal.MaterialExpressionComponentMask, -2100, 140)
-    n_y.set_editor_property("r", False); n_y.set_editor_property("g", True)
-    n_y.set_editor_property("b", False); n_y.set_editor_property("a", False)
-    n_z = _node(material, unreal.MaterialExpressionComponentMask, -2100, 240)
-    n_z.set_editor_property("r", False); n_z.set_editor_property("g", False)
-    n_z.set_editor_property("b", True); n_z.set_editor_property("a", False)
-    for mask in (n_x, n_y, n_z):
-        M._connect(material, normal, "", mask, "")
-    neg_y = _node(material, unreal.MaterialExpressionMultiply, -1950, 120)
-    M._connect(material, n_y, "", neg_y, "A")
-    M._connect(material, M._scalar_constant(material, -1.0, -2100, 320), "", neg_y, "B")
-    tangent = _node(material, unreal.MaterialExpressionAppendVector, -1800, 80)
-    M._connect(material, neg_y, "", tangent, "A")
-    M._connect(material, n_x, "", tangent, "B")
+    n_x = mask(normal, "r", -3100, 40)
+    n_y = mask(normal, "g", -3100, 140)
+    n_z = mask(normal, "b", -3100, 240)
+    tangent = op(unreal.MaterialExpressionAppendVector, op(mul, n_y, k(-1.0, -3100, 320), -2950, 120),
+                 n_x, -2800, 80)
+    along = op(unreal.MaterialExpressionDotProduct, mask(world, "rg", -3100, -320), tangent, -2650, -260)
+    u = op(div, along, bay, -2500, -300)
+    height = op(sub, mask(world, "b", -3100, -180), ground_z, -2650, -120)
+    v = op(div, op(sub, height, ground, -2500, -60), storey, -2350, -120)
+    upper = at_least(height, ground, -2350, 40)                 # 1 above the ground storey
+    fu = one(unreal.MaterialExpressionFrac, u, -2350, -300)
+    fv = one(unreal.MaterialExpressionFrac, v, -2200, -120)
 
-    pos_xy = _node(material, unreal.MaterialExpressionComponentMask, -2100, -320)
-    pos_xy.set_editor_property("r", True); pos_xy.set_editor_property("g", True)
-    pos_xy.set_editor_property("b", False); pos_xy.set_editor_property("a", False)
-    M._connect(material, world, "", pos_xy, "")
-    pos_z = _node(material, unreal.MaterialExpressionComponentMask, -2100, -180)
-    pos_z.set_editor_property("r", False); pos_z.set_editor_property("g", False)
-    pos_z.set_editor_property("b", True); pos_z.set_editor_property("a", False)
-    M._connect(material, world, "", pos_z, "")
+    # The upper storeys' windows, centred in the bay, standing on the sill.
+    half_w = op(mul, win_w, k(0.5, -2000, -800), -1850, -720)
+    half_h = op(mul, win_h, k(0.5, -2000, -330), -1850, -380)
+    off_u = one(unreal.MaterialExpressionAbs, op(sub, fu, k(0.5, -2200, -400), -2050, -360), -1850, -300)
+    off_v = one(unreal.MaterialExpressionAbs,
+                op(sub, fv, op(add, sill, half_h, -1700, -360), -1600, -200), -1450, -200)
+    win_x = at_least(half_w, off_u, -1650, -460)
+    win_y = at_least(half_h, off_v, -1300, -260)
+    window_up = op(mul, win_x, win_y, -1150, -380)
 
-    along = _node(material, unreal.MaterialExpressionDotProduct, -1650, -260)
-    M._connect(material, pos_xy, "", along, "A")
-    M._connect(material, tangent, "", along, "B")
-    u = _node(material, unreal.MaterialExpressionDivide, -1500, -300)
-    M._connect(material, along, "", u, "A")
-    M._connect(material, bay, "", u, "B")
-    v = _node(material, unreal.MaterialExpressionDivide, -1500, -120)
-    M._connect(material, pos_z, "", v, "A")
-    M._connect(material, storey, "", v, "B")
+    # Frame and glazing bars: the distance to the nearest bar line, in cm,
+    # across panes of (window width / (mullions + 1)) and up panes of
+    # (window height / (transoms + 1)); the window's own edges are bar lines.
+    def bars(coord_cm, size_cm, count, y):
+        pane = op(div, size_cm, op(add, count, k(1.0, -1900, y + 60), -1750, y + 60), -1600, y)
+        phase = one(unreal.MaterialExpressionFrac,
+                    op(add, op(div, coord_cm, pane, -1450, y), k(0.5, -1450, y + 80), -1300, y), -1150, y)
+        dist = op(mul, one(unreal.MaterialExpressionAbs, op(sub, phase, k(0.5, -1150, y + 80), -1000, y), -850, y),
+                  pane, -700, y)
+        return at_least(op(mul, bar_cm, k(0.5, -850, y + 80), -700, y + 80), dist, -550, y)
 
-    def window_axis(coord, share, y):
-        fr = _node(material, unreal.MaterialExpressionFrac, -1300, y)
-        M._connect(material, coord, "", fr, "")
-        step = _node(material, unreal.MaterialExpressionStep, -1000, y)   # share >= frac -> 1
-        M._connect(material, fr, "", step, "Y")
-        M._connect(material, share, "", step, "X")
-        return step
+    win_w_cm = op(mul, win_w, bay, -1900, -560)
+    win_h_cm = op(mul, win_h, storey, -1900, -160)
+    x_cm = op(mul, op(add, op(sub, fu, k(0.5, -2050, -520), -1950, -520), half_w, -1800, -520), bay, -1700, -520)
+    y_cm = op(mul, op(sub, fv, sill, -1950, -140), storey, -1800, -140)
+    bar_x = bars(x_cm, win_w_cm, mullions, -620)
+    bar_y = bars(y_cm, win_h_cm, transoms, -120)
+    on_bar = op(mul, op(mul, op(unreal.MaterialExpressionMax, bar_x, bar_y, -400, -400), window_up, -300, -400),
+                upper, -200, -400)
 
-    in_x = window_axis(u, win_w, -320)
-    in_y = window_axis(v, win_h, -120)
-    window = _node(material, unreal.MaterialExpressionMultiply, -820, -220)
-    M._connect(material, in_x, "", window, "A")
-    M._connect(material, in_y, "", window, "B")
+    # The ground storey: wider openings, 7% to 83% of its height, no bars
+    # (the shopfronts on the near streets are geometry).
+    g_x = at_least(op(mul, ground_w, k(0.5, -1900, 760), -1750, 720), off_u, -1600, 700)
+    g_y = at_least(op(mul, ground, k(0.38, -1900, 860), -1750, 820),
+                   one(unreal.MaterialExpressionAbs,
+                       op(sub, height, op(mul, ground, k(0.45, -1900, 960), -1750, 920), -1650, 900), -1550, 880),
+                   -1450, 820)
+    window = lerp(op(mul, g_x, g_y, -1300, 760), window_up, upper, -1000, 400)
 
     # Walls only: 1 - |n.z|, hardened.
-    abs_z = _node(material, unreal.MaterialExpressionAbs, -1950, 240)
-    M._connect(material, n_z, "", abs_z, "")
-    is_wall = _node(material, unreal.MaterialExpressionOneMinus, -1800, 240)
-    M._connect(material, abs_z, "", is_wall, "")
-    wall_mask = _node(material, unreal.MaterialExpressionStep, -1650, 240)
-    M._connect(material, is_wall, "", wall_mask, "X")
-    M._connect(material, M._scalar_constant(material, 0.5, -1800, 340), "", wall_mask, "Y")
-    glazed = _node(material, unreal.MaterialExpressionMultiply, -650, -200)
-    M._connect(material, window, "", glazed, "A")
-    M._connect(material, wall_mask, "", glazed, "B")
+    is_wall = one(unreal.MaterialExpressionOneMinus, one(unreal.MaterialExpressionAbs, n_z, -2950, 240), -2800, 240)
+    wall_mask = at_least(is_wall, k(0.5, -2800, 340), -2650, 240)
+    framed = op(mul, on_bar, wall_mask, -100, -400)
+    glazed = op(mul, op(mul, window, wall_mask, -850, 400),
+                one(unreal.MaterialExpressionOneMinus, on_bar, -850, 500), -700, 420)
 
-    colour = _node(material, unreal.MaterialExpressionLinearInterpolate, -200, -540)
-    M._connect(material, wall, "", colour, "A")
-    M._connect(material, glass, "", colour, "B")
-    M._connect(material, glazed, "", colour, "Alpha")
-    M._connect_property(material, colour, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    # Per-cell randomness on (floor(u), floor(v)): frac(sin(h) * 43758.5).
+    cell = op(unreal.MaterialExpressionAppendVector, one(unreal.MaterialExpressionFloor, u, -2200, 1200),
+              one(unreal.MaterialExpressionFloor, v, -2200, 1300), -2050, 1250)
+    seed = _node(material, unreal.MaterialExpressionConstant2Vector, -2050, 1380)
+    seed.set_editor_property("r", 12.9898)
+    seed.set_editor_property("g", 78.233)
+    hashed = op(unreal.MaterialExpressionDotProduct, cell, seed, -1900, 1250)
+    rnd = one(unreal.MaterialExpressionFrac,
+              op(mul, one(unreal.MaterialExpressionSine, hashed, -1750, 1250), k(43758.5, -1750, 1350), -1600, 1250),
+              -1450, 1250)
+    lit_cell = at_least(lit, rnd, -950, 1300)
+    blind = at_least(blinds, one(unreal.MaterialExpressionFrac, op(mul, rnd, k(7.31, -1450, 1450), -1300, 1420),
+                                 -1150, 1420), -950, 1450)
 
-    rough = _node(material, unreal.MaterialExpressionLinearInterpolate, -200, -40)
-    M._connect(material, wall_rough, "", rough, "A")
-    M._connect(material, M._scalar_constant(material, 0.06, -400, 120), "", rough, "B")
-    M._connect(material, glazed, "", rough, "Alpha")
-    M._connect_property(material, rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
+    # Colour: plinth below, wall above with its floor bands, frames, glass
+    # (pale where the blinds are down), and the roof.
+    band = op(mul, at_least(band_cm, op(mul, fv, storey, -1900, 1060), -1750, 1040), upper, -1600, 1040)
+    wall_c = op(mul, lerp(plinth, wall, upper, -800, -1000),
+                lerp(k(1.0, -1000, -1200), band_tint, band, -800, -1150), -600, -1000)
+    glass_c = lerp(glass, M._constant3(material, (0.30, 0.29, 0.26), -600, -700), blind, -450, -720)
+    colour = lerp(lerp(wall_c, frame, framed, -300, -900), glass_c, glazed, -150, -800)
+    M._connect_property(material, lerp(roof, colour, wall_mask, 0, -900), "",
+                        unreal.MaterialProperty.MP_BASE_COLOR)
 
-    metal = _node(material, unreal.MaterialExpressionMultiply, -200, 100)
-    M._connect(material, glazed, "", metal, "A")
-    M._connect(material, M._scalar_constant(material, 0.85, -400, 200), "", metal, "B")
+    rough = lerp(lerp(wall_rough, k(0.45, -400, 60), framed, -250, 0),
+                 lerp(k(0.06, -400, 220), k(0.5, -400, 260), blind, -250, 220), glazed, -100, 80)
+    M._connect_property(material, lerp(k(0.85, -100, -60), rough, wall_mask, 50, 0), "",
+                        unreal.MaterialProperty.MP_ROUGHNESS)
+
+    metal = op(add, op(mul, glazed, lerp(k(0.85, -400, 380), k(0.3, -400, 420), blind, -250, 400), -100, 400),
+               op(mul, framed, frame_metal, -100, 500), 50, 450)
     M._connect_property(material, metal, "", unreal.MaterialProperty.MP_METALLIC)
 
-    # A share of windows lit from inside: per-cell noise on (floor(u), floor(v)).
-    cell_u = _node(material, unreal.MaterialExpressionFloor, -1300, 200)
-    M._connect(material, u, "", cell_u, "")
-    cell_v = _node(material, unreal.MaterialExpressionFloor, -1300, 300)
-    M._connect(material, v, "", cell_v, "")
-    cell = _node(material, unreal.MaterialExpressionAppendVector, -1150, 240)
-    M._connect(material, cell_u, "", cell, "A")
-    M._connect(material, cell_v, "", cell, "B")
-    hashed = _node(material, unreal.MaterialExpressionDotProduct, -1000, 240)
-    M._connect(material, cell, "", hashed, "A")
-    M._connect(material, M._constant3(material, (12.9898, 78.233, 0.0), -1150, 360), "", hashed, "B")
-    # frac(sin(h) * 43758.5): the classic cheap cell hash.
-    sine = _node(material, unreal.MaterialExpressionSine, -850, 240)
-    M._connect(material, hashed, "", sine, "")
-    big = _node(material, unreal.MaterialExpressionMultiply, -720, 240)
-    M._connect(material, sine, "", big, "A")
-    M._connect(material, M._scalar_constant(material, 43758.5, -850, 340), "", big, "B")
-    rnd = _node(material, unreal.MaterialExpressionFrac, -600, 240)
-    M._connect(material, big, "", rnd, "")
-    lit_cell = _node(material, unreal.MaterialExpressionStep, -480, 240)
-    M._connect(material, rnd, "", lit_cell, "X")
-    M._connect(material, lit, "", lit_cell, "Y")
-    lit_window = _node(material, unreal.MaterialExpressionMultiply, -340, 260)
-    M._connect(material, lit_cell, "", lit_window, "A")
-    M._connect(material, glazed, "", lit_window, "B")
-    emissive = _node(material, unreal.MaterialExpressionMultiply, -200, 280)
-    M._connect(material, lit_window, "", emissive, "A")
-    M._connect(material, glow, "", emissive, "B")
-    warm = _node(material, unreal.MaterialExpressionMultiply, -80, 300)
-    M._connect(material, emissive, "", warm, "A")
-    M._connect(material, M._constant3(material, (1.0, 0.82, 0.6), -200, 400), "", warm, "B")
-    M._connect_property(material, warm, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    # A share of windows lit from inside, warm white, at an interior's luminance.
+    emissive = op(mul, op(mul, op(mul, lit_cell, glazed, -700, 1300), glow, -550, 1300),
+                  M._constant3(material, (1.0, 0.82, 0.6), -700, 1400), -400, 1320)
+    M._connect_property(material, emissive, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 
     M._finish(material, True, "M_OB_Facade", report)
     return material
@@ -288,14 +414,19 @@ def build_district_materials(report):
     surface = unreal.EditorAssetLibrary.load_asset(C.MATERIALS + "/M_OB_Surface")
     out = {}
     if facade is not None:
-        for family, (wall, glass, bay, storey, ww, wh, rough) in FACADES.items():
-            out["Facade_" + family] = _instance(
-                "MI_OB_Facade_" + family, facade,
-                {"WallColour": wall, "GlassColour": glass},
-                {"BayWidthCm": bay, "StoreyHeightCm": storey, "WindowWidth": ww,
-                 "WindowHeight": wh, "WallRoughness": rough,
-                 "LitWindowShare": 0.12 if family == "Glass" else 0.2,
-                 "WindowGlow": 0.8}, report)
+        for variant in D.FACADE_VARIANTS:
+            f = FACADES[variant]
+            out["Facade_" + variant] = _instance(
+                "MI_OB_Facade_" + variant, facade,
+                {"WallColour": f["wall"], "GlassColour": f["glass"], "FrameColour": f["frame"],
+                 "PlinthColour": f["plinth"], "RoofColour": f["roof"]},
+                {"BayWidthCm": f["bay"], "StoreyHeightCm": f["storey"], "GroundStoreyCm": f["ground"],
+                 "GroundZ": GROUND_Z, "WindowWidth": f["ww"], "WindowHeight": f["wh"],
+                 "SillHeight": f["sill"], "GroundWindowWidth": f["ground_ww"],
+                 "MullionsAcross": float(f["mullions"]), "TransomsUp": float(f["transoms"]),
+                 "BarWidthCm": f["bar"], "BandCm": f["band"], "BandTint": f["band_tint"],
+                 "WallRoughness": f["rough"], "FrameMetallic": f["frame_metal"],
+                 "LitWindowShare": f["lit"], "BlindShare": f["blinds"], "WindowGlow": f["glow"]}, report)
     if surface is not None:
         for name, spec in SURFACES.items():
             rgb, rough = spec[0], spec[1]
@@ -504,6 +635,34 @@ def _street_life(batch, roads):
     return vehicle
 
 
+def _shopfront(batch, unit):
+    """One shop on the facade line, built out towards the street: a stall
+    riser, pilasters either side, the lit glazing with a door and its transom,
+    the fascia board and a cornice over it. Real proportions: a 45 cm riser,
+    3 m to the fascia, an 80 cm fascia."""
+    x, y, yaw, w = unit["x"], unit["y"], unit["yaw"], unit["w"]
+    nx, ny = unit["nx"], unit["ny"]
+    tx, ty = math.cos(math.radians(yaw)), math.sin(math.radians(yaw))    # along the facade
+
+    def part(key, along, out, z0, z1, size_x, size_y):
+        batch.box(key, x + tx * along + nx * out, y + ty * along + ny * out, GROUND_Z + z0,
+                  size_x, size_y, z1 - z0, yaw)
+
+    pier = 35.0
+    clear = w - 2.0 * pier
+    door_w = 110.0                                                         # the door, at one end
+    door = -clear / 2.0 + door_w
+    for end in (-1.0, 1.0):
+        part("ShopFrame", end * (w - pier) / 2.0, 11.0, 0.0, 300.0, pier, 22.0)   # pilasters
+    part("ShopFrame", (door + clear / 2.0) / 2.0, 7.0, 0.0, 45.0, clear / 2.0 - door, 14.0)  # stall riser
+    part("ShopGlass", 0.0, 6.0, 45.0, 300.0, clear, 4.0)
+    part("ShopGlass", door - door_w / 2.0, 6.0, 0.0, 45.0, door_w, 4.0)   # the door's glass to the floor
+    part("ShopFrame", door, 8.0, 0.0, 240.0, 6.0, 8.0)
+    part("ShopFrame", 0.0, 8.0, 232.0, 240.0, clear, 8.0)                 # transom
+    part(unit["fascia"], 0.0, 12.0, 300.0, 380.0, w, 24.0)
+    part("ShopFrame", 0.0, 16.0, 380.0, 390.0, w + 10.0, 32.0)            # cornice
+
+
 def build_district(report, materials_hint=None):
     """Places Aldgate East around the tower. Returns a manifest summary."""
     if _geometry_script() is None:
@@ -522,9 +681,21 @@ def build_district(report, materials_hint=None):
     # Ground: paving everywhere, the street grid laid over it.
     batch.box("Paving", 0.0, 0.0, GROUND_Z - 30.0, GROUND_HALF_CM * 2.0, GROUND_HALF_CM * 2.0, 30.0)
 
-    for building in data["buildings"]:
-        family = building["facade"]
-        batch.extrude("Facade_" + family, building["ring"], GROUND_Z, float(building["h"]))
+    # Buildings in their facade variant's mesh, and the plant on their roofs.
+    # The dataset lists the near buildings first.
+    near = data["counts"]["buildings"]
+    variants, plant = {}, 0
+    for index, building in enumerate(data["buildings"]):
+        variant = D.facade_variant(building)
+        variants[variant] = variants.get(variant, 0) + 1
+        batch.extrude("Facade_" + variant, building["ring"], GROUND_Z, float(building["h"]))
+        for kind, x, y, z, sx, sy, sz, yaw in D.roof_plant(building, index < near):
+            batch.box(kind, x, y, GROUND_Z + z, sx, sy, sz, yaw)
+            plant += 1
+
+    shops = D.shopfronts(data)
+    for unit in shops:
+        _shopfront(batch, unit)
 
     for road in data["roads"]:
         _segments_markings(batch, road["segments"], float(road["w"]))
@@ -556,12 +727,14 @@ def build_district(report, materials_hint=None):
         wall.set_actor_scale3d(unreal.Vector(sx / 200.0, sy / 200.0, 3000.0 / 200.0))
         wall.set_actor_label("District_PlayBounds_" + name)
 
+    streets = sorted({unit["street"] for unit in shops})
     C.log(u"  district: {0} buildings near, {1} city to 1.8 km, {2} on the skyline, {3} roads, "
-          u"{4} parks, {5} trees, {6} vehicles ({7})".format(
+          u"{4} parks, {5} trees, {6} vehicles, {7} roof plant units, {8} shopfronts on {9} streets ({10})".format(
               data["counts"]["buildings"], data["counts"].get("city", 0), data["counts"]["skyline"],
               data["counts"]["roads"], data["counts"]["parks"], data["counts"]["trees"], vehicles,
-              data["attribution"]))
+              plant, len(shops), len(streets), data["attribution"]))
     return {"meshes": placed, "counts": data["counts"], "vehicles": vehicles, "frame": data["frame"],
+            "facades": variants, "roof_plant": plant, "shopfronts": len(shops), "shop_streets": streets,
             "attribution": data["attribution"]}
 
 
@@ -592,7 +765,7 @@ def _project_root():
     return os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 
 
-def build_sky_material(report, cube):
+def build_sky_material(report, cube, dusk_cube=None):
     path = C.MATERIALS + "/M_OB_SkyDome"
     if unreal.EditorAssetLibrary.does_asset_exist(path):
         unreal.EditorAssetLibrary.delete_asset(path)
@@ -638,6 +811,18 @@ def build_sky_material(report, cube):
     if cube is not None:
         sample.set_editor_property("texture", cube)
     M._connect(material, direction, "", sample, "UVs")
+    # The dusk photograph, crossfaded in by AOneBrahamSkyDirector at the Purge
+    # (DuskBlend 0 = day). Without the dusk import the day cube stands in, so
+    # the material still compiles and a blend changes nothing.
+    dusk = _node(material, unreal.MaterialExpressionTextureSampleParameterCube, -520, -160)
+    dusk.set_editor_property("parameter_name", "SkyCubeDusk")
+    if dusk_cube is not None or cube is not None:
+        dusk.set_editor_property("texture", dusk_cube or cube)
+    M._connect(material, direction, "", dusk, "UVs")
+    photograph = _node(material, unreal.MaterialExpressionLinearInterpolate, -420, -80)
+    M._connect(material, sample, "RGB", photograph, "A")
+    M._connect(material, dusk, "RGB", photograph, "B")
+    M._connect(material, M._scalar_param(material, "DuskBlend", 0.0, -620, -240, 0.0, 1.0), "", photograph, "Alpha")
     # The horizon: a London haze the height fog matches, rising into the
     # photograph over the bottom 12.5 degrees of sky.
     haze_alpha = _node(material, unreal.MaterialExpressionDivide, -600, 420)
@@ -648,7 +833,7 @@ def build_sky_material(report, cube):
     haze = M._vector_param(material, "HazeColour", (0.78, 0.84, 0.92, 1.0), -480, 520)
     blended = _node(material, unreal.MaterialExpressionLinearInterpolate, -360, 380)
     M._connect(material, haze, "", blended, "A")
-    M._connect(material, sample, "RGB", blended, "B")
+    M._connect(material, photograph, "", blended, "B")
     M._connect(material, haze_alpha_sat, "", blended, "Alpha")
     clamp = _node(material, unreal.MaterialExpressionMin, -300, 0)
     M._connect(material, blended, "", clamp, "A")
@@ -661,12 +846,10 @@ def build_sky_material(report, cube):
     return material
 
 
-def build_sky(report, preset=None):
-    """Imports the preset's sky, places the dome, and returns the sun as
-    (pitch, yaw, colour) for the directional light - or None to keep the
-    procedural sky (no fetched assets on this machine)."""
-    preset = preset or SKY_PRESET
-    asset_id, luminance, colour = SKY_PRESETS[preset]
+def import_sky_cube(report, preset):
+    """Imports the preset's photograph as SKY_FOLDER/T_Sky_<Preset> and returns
+    (cube, manifest entry), or None when it is not fetched or does not import."""
+    asset_id = SKY_PRESETS[preset][0]
     manifest_path = os.path.join(_project_root(), "SourceArt", "open_assets.json")
     if not os.path.exists(manifest_path):
         report.skipped_asset(SKY_FOLDER, "SourceArt/open_assets.json missing - run fetch_open_assets.py")
@@ -691,8 +874,27 @@ def build_sky(report, preset=None):
     if cube is None:
         report.failed(SKY_FOLDER, "could not import " + entry["path"])
         return None
+    return cube, entry
 
-    material = build_sky_material(report, cube)
+
+def build_sky(report, preset=None):
+    """Imports the preset's sky (and the dusk sky the Purge fades to), places
+    the dome, and returns the sun as (pitch, yaw, colour) for the directional
+    light, plus the dome and dusk cube for the sky director - or None to keep
+    the procedural sky (no fetched assets on this machine)."""
+    preset = preset or SKY_PRESET
+    asset_id, luminance, colour = SKY_PRESETS[preset]
+    imported = import_sky_cube(report, preset)
+    if imported is None:
+        return None
+    cube, entry = imported
+    # Imported only, never domed: AOneBrahamSkyDirector crossfades the one dome
+    # to it (T_Sky_Dusk is the path it loads).
+    dusk = imported if preset == "dusk" else import_sky_cube(report, "dusk")
+    dusk_cube = dusk[0] if dusk else None
+
+    material = build_sky_material(report, cube, dusk_cube)
+    dome = None
     if material is not None:
         haze = (0.78, 0.84, 0.92) if preset == "day" else (0.95, 0.62, 0.42)
         instance = _instance("MI_OB_SkyDome_" + preset.capitalize(), material, {"HazeColour": haze},
@@ -710,7 +912,7 @@ def build_sky(report, preset=None):
     yaw = entry["sun_azimuth_deg"] + SKY_AZIMUTH_TO_YAW
     # The light travels away from the sun: opposite yaw, downward pitch.
     return {"pitch": -entry["sun_elevation_deg"], "yaw": yaw + 180.0, "colour": colour,
-            "sky": asset_id, "licence": entry["licence"]}
+            "sky": asset_id, "licence": entry["licence"], "dome": dome, "dusk_cube": dusk_cube}
 
 
 # ---------------------------------------------------------------------------

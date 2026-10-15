@@ -19,6 +19,9 @@ WHAT IT CREATES
     /Game/OneBraham/Materials/M_OB_Emissive        master, unlit signage
     /Game/OneBraham/Materials/M_OB_Screen          master, unlit with a screen texture
     /Game/OneBraham/Materials/M_OB_Decal           master, deferred decal
+    /Game/OneBraham/Materials/M_OB_SurfaceTextured master, world-aligned CC0 texture sets
+    /Game/OneBraham/Materials/M_OB_GlassGrimed     master, glass with a world-aligned grime mask
+    /Game/OneBraham/Materials/M_OB_DecalTextured   master, deferred decal from a CC0 set
     /Game/OneBraham/Materials/Instances/MI_<Surface>       14 surface instances
     /Game/OneBraham/Materials/Instances/MI_OB_Brand_*      brand + alarm instances
 
@@ -666,6 +669,8 @@ def build_all():
     C.guard(report, "surface instances", build_surface_instances, report, masters, physicals)
     C.guard(report, "brand instances", build_brand_instances, report, masters)
     C.guard(report, "textured surfaces", build_textured_surfaces, report)
+    C.guard(report, "glass grime", build_grimed_glass, report)
+    C.guard(report, "decal textures", apply_decal_texture_sets, report)
 
     C.log(report.summary())
     return report
@@ -809,6 +814,9 @@ TEXTURE_SETS = {
     "Metal":        ("Metal011",          140.0, 1.0, 1.9),   # brushed steel (ambientCG)
     "Decking":      ("Planks037A",        240.0, 0.4, 2.4),   # terrace planks (ambientCG)
     "Lino":         ("rubber_tiles",      120.0, 0.7, 1.8),   # canteen floor
+    # Plain-weave contract upholstery (ambientCG), spine screens and seats.
+    # The fifth value scales the set's roughness map: woven cloth is matt.
+    "Fabric":       ("Fabric030",          40.0, 1.0, 8.0, 1.25),
 }
 # District surfaces (build_district) that take a set too.
 DISTRICT_TEXTURE_SETS = {
@@ -817,6 +825,13 @@ DISTRICT_TEXTURE_SETS = {
     "TerracePaving": ("concrete_pavement", 240.0, 1.0, 1.6),
     "Herringbone": ("oak_wood_planks", 90.0, 0.6, 1.9),
     "TimberLight": ("oak_wood_planks", 160.0, 0.6, 2.0),
+    # The fit-out's upholstery: the same woven cloth as MI_Fabric in the
+    # booths' purple and the lounge sofa's ink, and a fine flat knit for the
+    # task chairs' mesh. FeltWhite keeps its flat instance: the textured
+    # master has no emissive, and the discs' edge glow is the point of them.
+    "BoothPurple": ("Fabric030", 40.0, 1.0, 8.0, 1.25),
+    "SofaDark":    ("Fabric030", 40.0, 1.0, 8.0, 1.3),
+    "MeshWhite":   ("Fabric031", 25.0, 1.0, 5.0, 1.4),
 }
 TEXTURE_FOLDER = C.MATERIALS + "/Textures"
 WORLD_ALIGNED_TEXTURE = "/Engine/Functions/Engine_MaterialFunctions01/Texturing/WorldAlignedTexture.WorldAlignedTexture"
@@ -833,8 +848,13 @@ def _source_art_manifest():
         return json.load(handle), os.path.dirname(os.path.dirname(path))
 
 
-def import_texture_set(report, set_id):
-    """Imports a set's albedo, normal and roughness; returns {role: texture}."""
+SURFACE_ROLES = ("albedo", "normal", "roughness")
+
+
+def import_texture_set(report, set_id, roles=SURFACE_ROLES):
+    """Imports a set's maps - albedo, normal and roughness unless `roles` asks
+    for others (the grime and decal sets add an opacity mask); returns
+    {role: texture}."""
     import os
     manifest, root = _source_art_manifest()
     if manifest is None:
@@ -842,7 +862,7 @@ def import_texture_set(report, set_id):
     out = {}
     if not unreal.EditorAssetLibrary.does_directory_exist(TEXTURE_FOLDER):
         unreal.EditorAssetLibrary.make_directory(TEXTURE_FOLDER)
-    for role in ("albedo", "normal", "roughness"):
+    for role in roles:
         entry = manifest.get("{0}:{1}".format(set_id, role))
         if entry is None:
             return None
@@ -864,7 +884,7 @@ def import_texture_set(report, set_id):
         if role == "normal":
             texture.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_NORMALMAP)
             texture.set_editor_property("srgb", False)
-        elif role == "roughness":
+        elif role in ("roughness", "opacity"):
             texture.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_MASKS)
             texture.set_editor_property("srgb", False)
         unreal.EditorAssetLibrary.save_asset(path)
@@ -956,8 +976,11 @@ def build_master_textured(report):
 
 
 def apply_texture_set(report, instance, master, spec, albedo):
-    """Re-parents a surface instance onto the textured master with a set."""
-    set_id, size, desat, gain = spec
+    """Re-parents a surface instance onto the textured master with a set.
+    spec: (set, size cm, desaturation, gain[, roughness]) - the optional fifth
+    value is the textured master's Roughness, a scale on the set's roughness
+    map; without it the instance keeps the flat roughness it already had."""
+    set_id, size, desat, gain = spec[:4]
     textures = import_texture_set(report, set_id)
     if textures is None or master is None:
         return False
@@ -969,6 +992,8 @@ def apply_texture_set(report, instance, master, spec, albedo):
     mel.set_material_instance_scalar_parameter_value(instance, "TextureSizeCm", size)
     mel.set_material_instance_scalar_parameter_value(instance, "Desaturation", desat)
     mel.set_material_instance_scalar_parameter_value(instance, "TextureGain", gain)
+    if len(spec) > 4:
+        mel.set_material_instance_scalar_parameter_value(instance, "Roughness", spec[4])
     mel.set_material_instance_vector_parameter_value(
         instance, "BaseColour", unreal.LinearColor(albedo[0], albedo[1], albedo[2], 1.0))
     return True
@@ -992,4 +1017,264 @@ def build_textured_surfaces(report):
             unreal.EditorAssetLibrary.save_asset(path)
             applied += 1
             C.log(u"  MI_{0}: textured with {1}".format(surface, spec[0]))
+    return applied
+
+
+# ---------------------------------------------------------------------------
+#  Glass grime (CC0 masks from SourceArt/, world-aligned)
+# ---------------------------------------------------------------------------
+# Glass instance -> (set, world size of one repeat cm, grime amount). Clean
+# glass reads as no glass at all; four to eight years of use (Docs/10 §1) puts
+# hand smudges on everything people push past and a dust film on everything
+# they do not. The set's opacity map is the mask: where it is white the glass
+# turns a little milkier and rougher. Puddles keep the plain glass master.
+GLASS_GRIME_SETS = {
+    "MI_Glass":              ("Fingerprints002",         80.0, 0.35),  # partitions, meeting rooms
+    "MI_BallisticGlass":     ("Fingerprints002",         80.0, 0.45),  # gate wings, security screens
+    "MI_OB_Glass_Office":    ("Fingerprints002",         90.0, 0.30),
+    "MI_OB_Glass_Ballistic": ("Fingerprints002",         80.0, 0.45),
+    "MI_OB_Glass_Clear":     ("SurfaceImperfections015", 200.0, 0.25),  # balustrades: dust, not hands
+}
+GRIME_ROLES = ("opacity",)
+
+
+def build_master_glass_grimed(report, default_mask):
+    """M_OB_GlassGrimed: M_OB_Glass's parameters, with a world-aligned grime
+    mask that lifts opacity and roughness and greys the tint where it lies.
+
+        g          = saturate(WorldAligned(GrimeTex, GrimeSizeCm).r * GrimeAmount)
+        BaseColor  = lerp(BaseColour, GrimeColour, g)
+        Opacity    = lerp(Opacity, GrimeOpacity, g)
+        Roughness  = lerp(Roughness, GrimeRoughness, g)
+
+    Lit per pixel (surface forward shading) so the smudges show in the
+    reflections, which is where grime on glass is actually seen.
+
+    `default_mask` is a grime set's opacity map (TC_MASKS, linear): GrimeTex
+    takes its sampler type from its default, so a white sRGB default would
+    clash with every mask an instance sets."""
+    path = C.MATERIALS + "/M_OB_GlassGrimed"
+    if unreal.EditorAssetLibrary.does_asset_exist(path):
+        unreal.EditorAssetLibrary.delete_asset(path)
+    material = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
+        "M_OB_GlassGrimed", C.MATERIALS, unreal.Material, unreal.MaterialFactoryNew())
+    if material is None:
+        report.failed("M_OB_GlassGrimed", "could not create material")
+        return None
+    wat = unreal.load_asset(WORLD_ALIGNED_TEXTURE)
+    if wat is None:
+        report.failed("M_OB_GlassGrimed", "world-aligned material function not found")
+        return None
+
+    _set_shading(material, "MSM_DEFAULT_LIT")
+    _set_blend(material, "BLEND_TRANSLUCENT")
+    try:
+        material.set_editor_property("translucency_lighting_mode",
+                                     unreal.TranslucencyLightingMode.TLM_SURFACE_PER_PIXEL_LIGHTING)
+    except Exception as exc:  # noqa: BLE001
+        C.warn(u"  glass lighting mode not settable: {0}".format(exc))
+
+    grime_obj = _expr(material, unreal.MaterialExpressionTextureObjectParameter, -1500, -500)
+    grime_obj.set_editor_property("parameter_name", "GrimeTex")
+    grime_obj.set_editor_property("texture", default_mask)
+    grime_obj.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_MASKS)
+    grime = _expr(material, unreal.MaterialExpressionMaterialFunctionCall, -1150, -500)
+    grime.set_editor_property("material_function", wat)
+    _connect(material, grime_obj, "", grime, "TextureObject")
+    _connect(material, _scalar_param(material, "GrimeSizeCm", 80.0, -1500, -360, 10.0, 2000.0), "",
+             grime, "TextureSize")
+    grime_r = _expr(material, unreal.MaterialExpressionComponentMask, -900, -500)
+    for channel, on in (("r", True), ("g", False), ("b", False), ("a", False)):
+        grime_r.set_editor_property(channel, on)
+    _connect(material, grime, "XYZ Texture", grime_r, "")
+    amount = _expr(material, unreal.MaterialExpressionMultiply, -720, -500)
+    _connect(material, grime_r, "", amount, "A")
+    _connect(material, _scalar_param(material, "GrimeAmount", 0.0, -900, -380, 0.0, 2.0), "", amount, "B")
+    mask = _expr(material, unreal.MaterialExpressionSaturate, -560, -500)
+    _connect(material, amount, "", mask, "")
+
+    def blend(clean, dirty, y, prop):
+        node = _expr(material, unreal.MaterialExpressionLinearInterpolate, -300, y)
+        _connect(material, clean, "", node, "A")
+        _connect(material, dirty, "", node, "B")
+        _connect(material, mask, "", node, "Alpha")
+        _connect_property(material, node, "", prop)
+
+    blend(_vector_param(material, "BaseColour", (0.75, 0.80, 0.85, 1.0), -700, -260),
+          _vector_param(material, "GrimeColour", (0.55, 0.55, 0.53, 1.0), -700, -120),
+          -200, unreal.MaterialProperty.MP_BASE_COLOR)
+    blend(_scalar_param(material, "Opacity", 0.15, -700, 20),
+          _scalar_param(material, "GrimeOpacity", 0.45, -700, 120),
+          60, unreal.MaterialProperty.MP_OPACITY)
+    blend(_scalar_param(material, "Roughness", 0.04, -700, 240),
+          _scalar_param(material, "GrimeRoughness", 0.45, -700, 340),
+          280, unreal.MaterialProperty.MP_ROUGHNESS)
+
+    _connect_property(material, _scalar_param(material, "Metallic", 0.0, -300, 440), "",
+                      unreal.MaterialProperty.MP_METALLIC)
+    _connect_property(material, _scalar_param(material, "Refraction", 1.02, -300, 540, 1.0, 1.4), "",
+                      unreal.MaterialProperty.MP_REFRACTION)
+    _scalar_param(material, "SurfaceTypeIndex", 4.0, -300, 640, 0.0, 20.0)
+    _finish(material, True, "M_OB_GlassGrimed", report)
+    return material
+
+
+def build_grimed_glass(report):
+    """Moves the glass instances in GLASS_GRIME_SETS onto the grimed master.
+    Their own parameters (tint, opacity, roughness, refraction, surface index)
+    carry over by name. Without SourceArt/ they stay clean, and say so."""
+    manifest, _root = _source_art_manifest()
+    if manifest is None:
+        report.skipped_asset(C.MATERIALS + "/M_OB_GlassGrimed",
+                             "SourceArt/open_assets.json missing - run fetch_open_assets.py")
+        return 0
+    masks = {}
+    for set_id in sorted(set(spec[0] for spec in GLASS_GRIME_SETS.values())):
+        textures = import_texture_set(report, set_id, GRIME_ROLES)
+        if textures is not None:
+            masks[set_id] = textures["opacity"]
+    if not masks:
+        report.skipped_asset(C.MATERIALS + "/M_OB_GlassGrimed", "no grime set in SourceArt/")
+        return 0
+    master = build_master_glass_grimed(report, masks[sorted(masks)[0]])
+    if master is None:
+        return 0
+    mel = unreal.MaterialEditingLibrary
+    applied = 0
+    for name, (set_id, size, amount) in sorted(GLASS_GRIME_SETS.items()):
+        path = "{0}/{1}".format(C.MATERIALS_INSTANCES, name)
+        instance = unreal.EditorAssetLibrary.load_asset(path)
+        if instance is None:
+            continue
+        if set_id not in masks:
+            report.skipped_asset(path, "texture set {0} not in SourceArt/".format(set_id))
+            continue
+        mel.set_material_instance_parent(instance, master)
+        mel.set_material_instance_texture_parameter_value(instance, "GrimeTex", masks[set_id])
+        mel.set_material_instance_scalar_parameter_value(instance, "GrimeSizeCm", size)
+        mel.set_material_instance_scalar_parameter_value(instance, "GrimeAmount", amount)
+        unreal.EditorAssetLibrary.save_asset(path)
+        applied += 1
+        C.log(u"  {0}: grime {1} at {2:.0f} cm".format(name, set_id, size))
+    return applied
+
+
+# ---------------------------------------------------------------------------
+#  Decal textures (CC0 sets from SourceArt/)
+# ---------------------------------------------------------------------------
+# Decal instance (build_vfx.py makes them) -> (set, mask role, tint, texture
+# gain, roughness). The mask role names the map that says where the decal is:
+# a set's opacity map, or, for a smear photographed on black, its roughness.
+# Smear001's colour inside the smear is ~0.04 linear - black rubber already -
+# so it goes on untinted. Bullet holes and the glass crack have no CC0 source
+# that reads as a bullet hole (Docs/15 carries their briefs); the blood decal
+# is procedural by design (build_vfx.M_OB_Decal_Blood).
+DECAL_TEXTURE_SETS = {
+    C.VFX + "/Decals/M_OB_Decal_Scuff": ("Smear001", "roughness", (1.0, 1.0, 1.0), 1.0, 0.6),
+}
+
+
+def build_master_decal_textured(report, defaults):
+    """M_OB_DecalTextured: M_OB_Decal's parameters (DecalTexture, DecalNormal,
+    BaseColour, Opacity), plus the mask that shapes it and a roughness.
+
+        BaseColor = DecalTexture.rgb * TextureGain * BaseColour
+        Opacity   = DecalMask.r * Opacity
+        Roughness = Roughness
+        Normal    = lerp(flat, DecalNormal, NormalStrength)
+
+    `defaults` (role -> texture) are the first set's maps: each sampler needs a
+    default of its own type, so the master is built after the import."""
+    path = C.MATERIALS + "/M_OB_DecalTextured"
+    if unreal.EditorAssetLibrary.does_asset_exist(path):
+        unreal.EditorAssetLibrary.delete_asset(path)
+    material = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
+        "M_OB_DecalTextured", C.MATERIALS, unreal.Material, unreal.MaterialFactoryNew())
+    if material is None:
+        report.failed("M_OB_DecalTextured", "could not create material")
+        return None
+    try:
+        material.set_editor_property("material_domain", unreal.MaterialDomain.MD_DEFERRED_DECAL)
+    except Exception as exc:  # noqa: BLE001
+        C.warn(u"  decal domain not settable: {0}".format(exc))
+    _set_blend(material, "BLEND_TRANSLUCENT")
+
+    def sample(name, sampler, texture, y):
+        node = _expr(material, unreal.MaterialExpressionTextureSampleParameter2D, -900, y)
+        node.set_editor_property("parameter_name", name)
+        node.set_editor_property("sampler_type", sampler)
+        node.set_editor_property("texture", texture)
+        return node
+
+    colour = sample("DecalTexture", unreal.MaterialSamplerType.SAMPLERTYPE_COLOR, defaults["albedo"], -400)
+    gain = _expr(material, unreal.MaterialExpressionMultiply, -560, -400)
+    _connect(material, colour, "RGB", gain, "A")
+    _connect(material, _scalar_param(material, "TextureGain", 1.0, -900, -260, 0.0, 8.0), "", gain, "B")
+    tint = _expr(material, unreal.MaterialExpressionMultiply, -360, -400)
+    _connect(material, gain, "", tint, "A")
+    _connect(material, _vector_param(material, "BaseColour", (1.0, 1.0, 1.0, 1.0), -560, -260), "", tint, "B")
+    _connect_property(material, tint, "", unreal.MaterialProperty.MP_BASE_COLOR)
+
+    mask = sample("DecalMask", unreal.MaterialSamplerType.SAMPLERTYPE_MASKS, defaults["mask"], -120)
+    opacity = _expr(material, unreal.MaterialExpressionMultiply, -560, -120)
+    _connect(material, mask, "R", opacity, "A")
+    _connect(material, _scalar_param(material, "Opacity", 1.0, -900, 20), "", opacity, "B")
+    _connect_property(material, opacity, "", unreal.MaterialProperty.MP_OPACITY)
+
+    _connect_property(material, _scalar_param(material, "Roughness", 0.6, -560, 120), "",
+                      unreal.MaterialProperty.MP_ROUGHNESS)
+
+    normal = sample("DecalNormal", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL, defaults["normal"], 240)
+    lerp = _expr(material, unreal.MaterialExpressionLinearInterpolate, -560, 240)
+    _connect(material, _constant3(material, (0.0, 0.0, 1.0), -900, 400), "", lerp, "A")
+    _connect(material, normal, "RGB", lerp, "B")
+    _connect(material, _scalar_param(material, "NormalStrength", 1.0, -900, 480), "", lerp, "Alpha")
+    _connect_property(material, lerp, "", unreal.MaterialProperty.MP_NORMAL)
+
+    _finish(material, True, "M_OB_DecalTextured", report)
+    return material
+
+
+def apply_decal_texture_sets(report):
+    """Puts the CC0 sets on the decal instances that have one, re-parented
+    onto M_OB_DecalTextured. The instances are build_vfx.py's: a decal not
+    made yet is skipped and picked up on the next materials build (or by
+    build_vfx calling this after it makes them)."""
+    manifest, _root = _source_art_manifest()
+    if manifest is None:
+        report.skipped_asset(C.MATERIALS + "/M_OB_DecalTextured",
+                             "SourceArt/open_assets.json missing - run fetch_open_assets.py")
+        return 0
+    sets = {}
+    for path, (set_id, mask_role, _tint, _gain, _rough) in sorted(DECAL_TEXTURE_SETS.items()):
+        textures = import_texture_set(report, set_id, ("albedo", "normal", mask_role))
+        if textures is None:
+            report.skipped_asset(path, "texture set {0} not in SourceArt/".format(set_id))
+            continue
+        textures["mask"] = textures[mask_role]
+        sets[path] = textures
+    if not sets:
+        return 0
+    master = build_master_decal_textured(report, sets[sorted(sets)[0]])
+    if master is None:
+        return 0
+    mel = unreal.MaterialEditingLibrary
+    applied = 0
+    for path, textures in sorted(sets.items()):
+        set_id, _mask_role, tint, gain, roughness = DECAL_TEXTURE_SETS[path]
+        instance = unreal.EditorAssetLibrary.load_asset(path)
+        if instance is None:
+            report.skipped_asset(path, "decal instance not built yet - run the vfx step, then materials")
+            continue
+        mel.set_material_instance_parent(instance, master)
+        mel.set_material_instance_texture_parameter_value(instance, "DecalTexture", textures["albedo"])
+        mel.set_material_instance_texture_parameter_value(instance, "DecalNormal", textures["normal"])
+        mel.set_material_instance_texture_parameter_value(instance, "DecalMask", textures["mask"])
+        mel.set_material_instance_scalar_parameter_value(instance, "TextureGain", gain)
+        mel.set_material_instance_scalar_parameter_value(instance, "Roughness", roughness)
+        mel.set_material_instance_vector_parameter_value(
+            instance, "BaseColour", unreal.LinearColor(tint[0], tint[1], tint[2], 1.0))
+        unreal.EditorAssetLibrary.save_asset(path)
+        applied += 1
+        C.log(u"  {0}: decal textured with {1}".format(path.rsplit("/", 1)[-1], set_id))
     return applied

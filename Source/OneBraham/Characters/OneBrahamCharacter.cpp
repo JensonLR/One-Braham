@@ -31,6 +31,8 @@
 #include "Components/SpotLightComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
+#include "Materials/MaterialInterface.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/World.h"
 #include "Engine/DamageEvents.h"
 #include "GameFramework/PlayerController.h"
@@ -159,16 +161,47 @@ void AOneBrahamCharacter::BeginPlay()
 	CurrentFloorIndex = 1;
 	UpdateFloorIndex(0.f);
 
-	if (IsLocallyControlled())
+	UpdateFirstPersonVisibility();
+}
+
+void AOneBrahamCharacter::UpdateFirstPersonVisibility()
+{
+	// A bot is "locally controlled" on the server, so a listen host would hide
+	// every bot's body without the player-controller check.
+	const bool bLocalPlayerView = IsLocallyControlled() && Controller != nullptr && Controller->IsPlayerController();
+
+	// The local player never sees their own body: the arms mesh handles that,
+	// and hiding the body removes the classic "gun through the chest" artefact.
+	// Everyone else - other players, spectators, the listen host looking at a
+	// client - sees the body and never the arms.
+	SetOwnMeshVisibility(GetMesh(), !bLocalPlayerView);
+
+	// The death camera owns the arms while it runs (it hides them, and
+	// RestoreFirstPersonView brings them back): a late client restart must
+	// not put arms in front of a corpse's camera.
+	const bool bDeathCam = FeelComponent != nullptr && FeelComponent->IsDeathCamActive();
+	SetOwnMeshVisibility(FirstPersonMesh, bLocalPlayerView && !bDeathCam);
+}
+
+void AOneBrahamCharacter::SetOwnMeshVisibility(USceneComponent* Root, bool bVisible)
+{
+	if (Root == nullptr)
 	{
-		// The local player never sees their own body: the arms mesh handles that,
-		// and hiding the body removes the classic "gun through the chest" artefact.
-		GetMesh()->SetVisibility(false, true);
-		FirstPersonMesh->SetVisibility(true, true);
+		return;
 	}
-	else
+
+	// Not SetVisibility(x, true): that walks into the attached weapon actor and
+	// the lights. Re-run on every cosmetic change, it would switch on every
+	// flashlight and the held gun's pickup mesh, or leave a gun hidden on the
+	// body when it moves to the arms. Only this pawn's own meshes (the cosmetic
+	// layers) follow the body; the weapon manages its own visibility.
+	Root->SetVisibility(bVisible, false);
+	for (USceneComponent* Child : Root->GetAttachChildren())
 	{
-		FirstPersonMesh->SetVisibility(false, true);
+		if (Child != nullptr && Child->GetOwner() == this && Child->IsA<UMeshComponent>())
+		{
+			SetOwnMeshVisibility(Child, bVisible);
+		}
 	}
 }
 
@@ -182,10 +215,19 @@ void AOneBrahamCharacter::PossessedBy(AController* NewController)
 		ApplyCosmetics(State->EquippedCosmetics);
 	}
 
-	if (IsLocallyControlled())
-	{
-		GetMesh()->SetVisibility(false, true);
-	}
+	// Server side of possession: on a listen host this is the host's own pawn
+	// becoming theirs (BeginPlay ran before the possess) or a remote player's
+	// pawn that the host must see as a body.
+	UpdateFirstPersonVisibility();
+}
+
+void AOneBrahamCharacter::PawnClientRestart()
+{
+	Super::PawnClientRestart();
+
+	// Owning-machine side of possession: a remote client's BeginPlay usually runs
+	// before Controller has replicated, so this is where its arms first appear.
+	UpdateFirstPersonVisibility();
 }
 
 void AOneBrahamCharacter::OnRep_PlayerState()
@@ -481,9 +523,11 @@ void AOneBrahamCharacter::RestoreFirstPersonView()
 	FirstPersonCamera->bUsePawnControlRotation = true;
 	FirstPersonCamera->ClearAdditiveOffset();
 
-	if (FirstPersonMesh != nullptr && IsLocallyControlled())
+	// EndDeathCam runs on the old body after the respawn has moved the controller
+	// on; that corpse stays as the ragdoll left it rather than reappearing.
+	if (IsLocallyControlled())
 	{
-		FirstPersonMesh->SetVisibility(true, true);
+		UpdateFirstPersonVisibility();
 	}
 }
 
@@ -756,7 +800,48 @@ void AOneBrahamCharacter::ApplyArchetype(FGameplayTag ArchetypeTag)
 	{
 		if (USkeletalMesh* Mesh = Definition->BodyMesh.LoadSynchronous())
 		{
+			// Overrides are kept by index across a mesh swap, so a Manny outfit
+			// would land on the wrong Quinn slots: start the new body clean.
+			if (GetMesh()->GetSkeletalMeshAsset() != Mesh)
+			{
+				GetMesh()->EmptyOverrideMaterials();
+			}
 			GetMesh()->SetSkeletalMesh(Mesh);
+		}
+	}
+
+	// Archetype clothing, keyed by material slot name because Manny and Quinn do
+	// not share slot order. Applied before any material parameter below, which
+	// would otherwise make MIDs of the bare body materials and lose the outfit.
+	// A dedicated server draws nothing, so it does not load the outfits.
+	USkeletalMeshComponent* Body = GetMesh();
+	if (Body != nullptr && GetNetMode() != NM_DedicatedServer)
+	{
+		for (const TPair<FName, TSoftObjectPtr<UMaterialInterface>>& Pair : Definition->BodyMaterials)
+		{
+			const int32 MaterialIndex = Body->GetMaterialIndex(Pair.Key);
+			if (MaterialIndex == INDEX_NONE || Pair.Value.IsNull())
+			{
+				continue;
+			}
+
+			UMaterialInterface* Material = Pair.Value.LoadSynchronous();
+			if (Material == nullptr)
+			{
+				continue;
+			}
+
+			// ApplyArchetype re-runs on every appearance rep; a slot already
+			// wearing this outfit (or the parameter MID made from it below) is
+			// left alone rather than swapped for a fresh MID each time.
+			UMaterialInterface* Current = Body->GetMaterial(MaterialIndex);
+			const UMaterialInstanceDynamic* CurrentMID = Cast<UMaterialInstanceDynamic>(Current);
+			if (Current == Material || (CurrentMID != nullptr && CurrentMID->Parent == Material))
+			{
+				continue;
+			}
+
+			Body->SetMaterial(MaterialIndex, Material);
 		}
 	}
 
@@ -821,6 +906,10 @@ void AOneBrahamCharacter::ApplyCosmetics(const TMap<FName, FName>& InCosmetics)
 			}
 		}
 	}
+
+	// A freshly created cosmetic component starts visible; the local player's
+	// hidden body must take it with it, or a jacket floats round the camera.
+	UpdateFirstPersonVisibility();
 }
 
 // ==========================================================================

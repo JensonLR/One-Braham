@@ -136,19 +136,40 @@ ASSETS = [
 ]
 
 
-# ambientCG sets come as zips: the archive is pinned by MD5, and only the three
-# maps are extracted - by exact member name, never by path the archive chooses.
-# id, url, md5, page
+# ambientCG sets come as zips: the archive is pinned by MD5, and only the maps
+# a set is used for are extracted - by exact member name, never by path the
+# archive chooses. Surfaces take albedo, normal and roughness; the glass grime
+# and decal sets also take the opacity mask that says where the dirt is.
+# id, url, md5, page, roles
+SURFACE_ROLES = ("albedo", "normal", "roughness")
+MASK_ROLES = ("albedo", "normal", "roughness", "opacity")
 ZIP_SETS = [
     ("Carpet001", "https://ambientcg.com/get?file=Carpet001_2K-JPG.zip",
-     "80c1ffbc1490cdfd580b0b630d624416", "https://ambientcg.com/view?id=Carpet001"),
+     "80c1ffbc1490cdfd580b0b630d624416", "https://ambientcg.com/view?id=Carpet001", SURFACE_ROLES),
     ("Metal011", "https://ambientcg.com/get?file=Metal011_2K-JPG.zip",
-     "7978d4875ef52d47acf5d2403bede19a", "https://ambientcg.com/view?id=Metal011"),
+     "7978d4875ef52d47acf5d2403bede19a", "https://ambientcg.com/view?id=Metal011", SURFACE_ROLES),
     ("Planks037A", "https://ambientcg.com/get?file=Planks037A_2K-JPG.zip",
-     "725f9334e65d54db35b522344b0c948f", "https://ambientcg.com/view?id=Planks037A"),
+     "725f9334e65d54db35b522344b0c948f", "https://ambientcg.com/view?id=Planks037A", SURFACE_ROLES),
+    # Plain-weave contract upholstery: the sofas, booths and spine screens.
+    ("Fabric030", "https://ambientcg.com/get?file=Fabric030_2K-JPG.zip",
+     "9f4f724652df09e8831c1071a8859323", "https://ambientcg.com/view?id=Fabric030", SURFACE_ROLES),
+    # Fine flat knit: the task chairs' knitted mesh.
+    ("Fabric031", "https://ambientcg.com/get?file=Fabric031_2K-JPG.zip",
+     "8388843042b68cc34c8ff68eb72cfc7a", "https://ambientcg.com/view?id=Fabric031", SURFACE_ROLES),
+    # Smudges and fingerprints: the glazing people touch - partitions, the
+    # security gates' glass wings, the meeting-room boxes.
+    ("Fingerprints002", "https://ambientcg.com/get?file=Fingerprints002_2K-JPG.zip",
+     "e86a7576bafbfd647992f3137a2f1c47", "https://ambientcg.com/view?id=Fingerprints002", MASK_ROLES),
+    # A settled dust film: the glazing nobody touches - balustrades, screens.
+    ("SurfaceImperfections015", "https://ambientcg.com/get?file=SurfaceImperfections015_2K-JPG.zip",
+     "acde02642a83ded1c5a62c58b2246b6b", "https://ambientcg.com/view?id=SurfaceImperfections015", MASK_ROLES),
+    # One dragged smear on a black ground: the scuff decal where a body slid.
+    # No opacity map; its roughness map is the mask (black where clean).
+    ("Smear001", "https://ambientcg.com/get?file=Smear001_2K-JPG.zip",
+     "adadadd2b0bfbe415aceb8a16ff79da1", "https://ambientcg.com/view?id=Smear001", SURFACE_ROLES),
 ]
 ZIP_MEMBERS = {"albedo": "_2K-JPG_Color.jpg", "normal": "_2K-JPG_NormalDX.jpg",
-               "roughness": "_2K-JPG_Roughness.jpg"}
+               "roughness": "_2K-JPG_Roughness.jpg", "opacity": "_2K-JPG_Opacity.jpg"}
 
 
 def _md5(path):
@@ -285,7 +306,7 @@ def fetch():
     for path_dir in (folder, archives):
         if not os.path.isdir(path_dir):
             os.makedirs(path_dir)
-    for set_id, url, md5, page in ZIP_SETS:
+    for set_id, url, md5, page, roles in ZIP_SETS:
         archive = os.path.join(archives, set_id + "_2K-JPG.zip")
         if not os.path.exists(archive) or _md5(archive) != md5:
             print("fetching {0}".format(url))
@@ -296,8 +317,8 @@ def fetch():
             print("CHECKSUM MISMATCH: {0}".format(archive))
             return 1
         with zipfile.ZipFile(archive) as bundle:
-            for role, suffix in ZIP_MEMBERS.items():
-                member = set_id + suffix
+            for role in roles:
+                member = set_id + ZIP_MEMBERS[role]
                 target = os.path.join(folder, member)
                 if not os.path.exists(target):
                     with bundle.open(member) as source, open(target, "wb") as handle:

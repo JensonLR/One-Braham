@@ -198,10 +198,32 @@ void AOneBrahamGameMode::Tick(float DeltaSeconds)
 
 		for (AController* Controller : Ready)
 		{
-			PendingRespawns.Remove(Controller);
-			if (Controller->GetPawn() == nullptr)
+			// The death path leaves the corpse possessed (ragdoll, death cam,
+			// looting), so a dead pawn is the normal case here, not null.
+			APawn* OldPawn = Controller->GetPawn();
+			if (OldPawn != nullptr && !IsPawnDeadForRespawn(OldPawn))
 			{
-				RestartPlayer(Controller);
+				// Back on their feet some other way; nothing to restart.
+				PendingRespawns.Remove(Controller);
+				continue;
+			}
+
+			if (OldPawn != nullptr)
+			{
+				// RestartPlayer would otherwise reuse the corpse it is still holding.
+				Controller->UnPossess();
+			}
+
+			RestartPlayer(Controller);
+
+			if (Controller->GetPawn() != nullptr)
+			{
+				PendingRespawns.Remove(Controller);
+			}
+			else
+			{
+				// No spawn point free yet: keep the entry and try again shortly.
+				PendingRespawns.Add(Controller, RespawnRetrySeconds);
 			}
 		}
 	}
@@ -1250,6 +1272,28 @@ AOneBrahamSpawnPoint* AOneBrahamGameMode::SelectSpawnPointFor(AController* Contr
 	return Candidates.Last();
 }
 
+bool AOneBrahamGameMode::IsPawnDeadForRespawn(const APawn* Pawn)
+{
+	if (Pawn == nullptr)
+	{
+		return true;
+	}
+
+	if (const AOneBrahamCharacter* Character = Cast<AOneBrahamCharacter>(Pawn))
+	{
+		if (const UOneBrahamHealthComponent* Health = Character->GetHealthComponent())
+		{
+			if (!Health->IsAlive())
+			{
+				return true;
+			}
+		}
+	}
+
+	const AOneBrahamPlayerState* State = Pawn->GetPlayerState<AOneBrahamPlayerState>();
+	return State != nullptr && State->IsEliminated();
+}
+
 void AOneBrahamGameMode::QueueRespawn(AController* Controller, float DelaySeconds)
 {
 	if (Controller == nullptr)
@@ -1371,9 +1415,12 @@ void AOneBrahamGameMode::PostLogin(APlayerController* NewPlayer)
 		return;
 	}
 
-	// Apply the archetype + display name chosen in the lobby. On a listen server
-	// the local profile is authoritative; on dedicated the travel option is.
-	if (UOneBrahamGameInstance* GameInstance = GetGameInstance<UOneBrahamGameInstance>())
+	// Apply the archetype + display name chosen in the lobby. The GameInstance
+	// profile on this machine is the host's own, so it only ever describes the
+	// local controller; remote players send theirs (cosmetics, clan tag,
+	// loadout) from their own machine, and on dedicated the travel option rules.
+	UOneBrahamGameInstance* GameInstance = NewPlayer->IsLocalController() ? GetGameInstance<UOneBrahamGameInstance>() : nullptr;
+	if (GameInstance != nullptr)
 	{
 		if (const UOneBrahamSaveSettings* Profile = GameInstance->GetProfile())
 		{

@@ -116,6 +116,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Downed")
 	bool ShouldEnterDownedState(AActor* Killer, const FOneBrahamDamageReport& Report) const;
 
+	/**
+	 * The part of that rule which needs no world: revives banked, headshot and
+	 * explosion bypasses, the building (no killer) never downing, and no second
+	 * down while already crawling. Public for the OneBraham.Downed tests.
+	 */
+	bool IsDownableHit(bool bHasKiller, const FOneBrahamDamageReport& Report, int32 RemainingRevives) const;
+
 	/** Server: puts the owner into the downed state. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Downed")
 	void EnterDownedState(AActor* Killer, const FOneBrahamDamageReport& Report);
@@ -149,6 +156,13 @@ public:
 
 	/** Server: bleeds out (timer expired) - counts as a death to the original killer. */
 	void BleedOut();
+
+	/**
+	 * Server: the owner died while downed (executed, shot, the purge). The
+	 * health component calls this after its OnDeath broadcast, so a corpse is
+	 * never left downed and revivable.
+	 */
+	void ClearDownedOnDeath();
 
 	/** Called by the interact component each frame while a reviver holds the button. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Downed")
@@ -185,6 +199,12 @@ public:
 
 protected:
 	UFUNCTION() void OnRep_Downed();
+
+	/**
+	 * Heartbeat and muffle for the player who is down, on their own machine only:
+	 * the owning client from OnRep_Downed, the listen host from the server path.
+	 */
+	void UpdateLocalDownedAudio() const;
 
 	/** The kill credit report, replayed when we eventually die. */
 	FOneBrahamDamageReport DownedReport;

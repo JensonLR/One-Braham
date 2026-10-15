@@ -79,6 +79,43 @@ FACADE_STONE = "Stone"      # Portland stone and render: offices, civic, hotels
 FACADE_BRICK = "Brick"      # London stock brick: terraces, flats, warehouses
 FACADE_DARK = "Dark"        # dark-clad modern blocks
 
+# Each family splits into the window patterns London actually has, chosen by
+# height and, among buildings of one height, by a hash of the OSM id so a
+# street is a mix rather than a repeat. The build gives each variant its own
+# M_OB_Facade instance (storey height, bay, window share, glazing bars) and
+# its own merged mesh: eight facade draw calls for the whole city.
+FACADE_VARIANTS = (
+    "Glass",           # unitised curtain wall: towers
+    "GlassRibbon",     # ribbon glazing over spandrel panels: 1960s-90s offices
+    "Stone",           # Portland stone and render, sash windows, string courses
+    "StoneOffice",     # stone-clad modern office: wide windows, dark frames
+    "Brick",           # Georgian and Victorian terraces: sashes over a shop
+    "BrickWarehouse",  # warehouses and mansion blocks: multi-pane steel windows
+    "BrickBlock",      # post-war and new-build flats: floor bands, uPVC
+    "Dark",            # dark rainscreen cladding
+)
+
+# The near streets with shops on them. Names as OpenStreetMap spells them.
+SHOPFRONT_STREETS = (
+    "Braham Street", "Leman Street", "Alie Street", "Commercial Road",
+    "Whitechapel High Street", "Whitechapel Road", "Aldgate High Street",
+    "Commercial Street", "Goulston Street", "Old Castle Street", "Osborn Street",
+    "Mansell Street",
+)
+SHOPFRONT_RADIUS_CM = 45000.0     # 450 m: everything a player can see up close
+SHOPFRONT_MIN_EDGE_CM = 450.0
+SHOPFRONT_PAVEMENT_CM = 900.0     # facade line to kerb, at most
+SHOPFRONT_PARALLEL = 0.92         # |cos| between facade and street: within ~23 degrees
+SHOPFRONT_UNIT_CM = (520.0, 600.0, 680.0, 760.0)   # one shop's frontage
+SHOPFRONT_FASCIAS = ("FasciaGreen", "FasciaNavy", "FasciaRed", "FasciaBlack", "FasciaLit")
+
+# Roof plant: lift overruns, air-handling units, condenser rows, tower plant
+# screens. Near buildings from 150 m2 of roof; the far city only its big roofs.
+PLANT_MIN_AREA_NEAR_M2 = 150.0
+PLANT_MIN_AREA_FAR_M2 = 800.0
+PLANT_MIN_HEIGHT_CM = 900.0
+PLANT_SETBACK_CM = 150.0          # inside the parapet line
+
 
 # ---------------------------------------------------------------------------
 #  Frame
@@ -209,6 +246,263 @@ def _outer_rings(element):
 
 
 # ---------------------------------------------------------------------------
+#  Dressing: what the build puts on the extruded footprints
+# ---------------------------------------------------------------------------
+# Engine-free and deterministic, so the same dataset always dresses the same
+# street, and so the rules can be checked without Unreal.
+
+def _hash(value, salt=0):
+    """A small integer hash (Knuth's multiplicative, folded): stable across
+    Python versions, unlike hash()."""
+    h = (int(value) * 2654435761 + salt * 40503) & 0xFFFFFFFF
+    h ^= h >> 15
+    h = (h * 2246822519) & 0xFFFFFFFF
+    return h ^ (h >> 13)
+
+
+def facade_variant(building):
+    """The FACADE_VARIANTS entry a building is drawn with."""
+    family, h, pick = building["facade"], building["h"], _hash(building["id"]) % 20
+    if family == FACADE_GLASS:
+        # A tower is a curtain wall; two low glass blocks in three are the
+        # older ribbon-glazed office.
+        if h >= 4500:
+            return "Glass"
+        return "GlassRibbon" if pick < 13 else "Glass"
+    if family == FACADE_STONE:
+        if h > 2200:
+            return "StoneOffice"
+        # The five-storey stock of E1: mostly stone and render, a share of it
+        # modern infill, and some of it brick under an untagged material.
+        if pick < 10:
+            return "Stone"
+        return "StoneOffice" if pick < 16 else "BrickWarehouse"
+    if family == FACADE_BRICK:
+        if h <= 1300:
+            return "Brick"
+        if h <= 2200:
+            return "BrickWarehouse" if pick < 13 else "Brick"
+        return "BrickBlock"
+    return "Dark"
+
+
+def _centroid(ring):
+    a = _area(ring)
+    if abs(a) < 1e-6:
+        return (sum(p[0] for p in ring) / len(ring), sum(p[1] for p in ring) / len(ring))
+    cx = cy = 0.0
+    for p, q in zip(ring, ring[1:] + ring[:1]):
+        cross = p[0] * q[1] - q[0] * p[1]
+        cx += (p[0] + q[0]) * cross
+        cy += (p[1] + q[1]) * cross
+    return (cx / (6.0 * a), cy / (6.0 * a))
+
+
+def _inside(ring, x, y):
+    """Even-odd point in polygon."""
+    inside = False
+    for p, q in zip(ring, ring[1:] + ring[:1]):
+        if (p[1] > y) != (q[1] > y):
+            t = (y - p[1]) / (q[1] - p[1])
+            if x < p[0] + t * (q[0] - p[0]):
+                inside = not inside
+    return inside
+
+
+def _segment_distance(px, py, ax, ay, bx, by):
+    """Distance from a point to a segment, and the closest point on it."""
+    dx, dy = bx - ax, by - ay
+    length2 = dx * dx + dy * dy
+    t = 0.0 if length2 <= 0.0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length2))
+    cx, cy = ax + dx * t, ay + dy * t
+    return math.hypot(px - cx, py - cy), cx, cy
+
+
+def _edge_clearance(ring, x, y):
+    return min(_segment_distance(x, y, p[0], p[1], q[0], q[1])[0]
+               for p, q in zip(ring, ring[1:] + ring[:1]))
+
+
+def _long_axis(ring):
+    best = None
+    for p, q in zip(ring, ring[1:] + ring[:1]):
+        length = math.hypot(q[0] - p[0], q[1] - p[1])
+        if best is None or length > best[0]:
+            best = (length, math.atan2(q[1] - p[1], q[0] - p[0]))
+    return best[1]
+
+
+def roof_plant(building, near=True):
+    """Boxes on the roof: (kind, x, y, z, size_x, size_y, size_z, yaw_deg),
+    centred in x/y, z the base above street level in cm, size_x along yaw.
+    kind is "Plant" (galvanised units) or "PlantDark" (overruns, louvred
+    screens). Every box sits wholly inside the footprint, clear of the parapet
+    by PLANT_SETBACK_CM, and clear of the others."""
+    ring = building["ring"]
+    h = float(building["h"])
+    area_m2 = abs(_area(ring)) / 10000.0
+    if h < PLANT_MIN_HEIGHT_CM or len(ring) < 3:
+        return []
+    if area_m2 < (PLANT_MIN_AREA_NEAR_M2 if near else PLANT_MIN_AREA_FAR_M2):
+        return []
+
+    seed = _hash(building["id"], 7)
+    theta = _long_axis(ring)
+    c, s = math.cos(theta), math.sin(theta)
+    cx, cy = _centroid(ring)
+    if not _inside(ring, cx, cy):
+        return []
+    side = math.sqrt(area_m2) * 100.0      # the roof's scale, cm
+
+    wanted = []
+    if h >= 4500 and area_m2 >= 600.0:
+        # A tower's plant floor: a louvred screen round the top, a third of the roof.
+        screen = round(min(side * 0.55, 2400.0), 1)
+        wanted.append(("PlantDark", screen, round(screen * 0.8, 1), 420.0))
+    if h >= 1800:
+        # Lift overrun and stair head over the core.
+        wanted.append(("PlantDark", 420.0, 300.0, 300.0))
+    if area_m2 >= 400.0:
+        wanted.append(("Plant", 620.0, 240.0, 190.0))           # air-handling unit
+    if area_m2 >= 900.0:
+        wanted.append(("Plant", 480.0, 220.0, 170.0))
+    condensers = 2 + seed % 3
+    for _ in range(condensers):
+        wanted.append(("Plant", 120.0, 110.0, 100.0))          # condenser units in a row
+
+    # Candidate centres in the roof's own frame (along, across), nearest the
+    # middle first; the seed turns the order so neighbours differ.
+    steps = (0.0, 0.18, -0.18, 0.32, -0.32)
+    grid = [(a * side, b * side) for a in steps for b in steps]
+    order = sorted(range(len(grid)), key=lambda i: (round(abs(steps[i // len(steps)]) + abs(steps[i % len(steps)]), 3),
+                                                    (i + seed) % len(grid)))
+    candidates = [grid[i] for i in order]
+
+    placed, out = [], []
+    for kind, sx, sy, sz in wanted:
+        for along, across in candidates:
+            corners = [(along + ex * sx / 2.0, across + ey * sy / 2.0) for ex in (-1, 1) for ey in (-1, 1)]
+            if any(abs(along - pa) * 2.0 < sx + psx + 60.0 and abs(across - pb) * 2.0 < sy + psy + 60.0
+                   for pa, pb, psx, psy in placed):
+                continue
+            ok = True
+            for a, b in corners:
+                x, y = cx + a * c - b * s, cy + a * s + b * c
+                if not _inside(ring, x, y) or _edge_clearance(ring, x, y) < PLANT_SETBACK_CM:
+                    ok = False
+                    break
+            # Corners alone miss a re-entrant corner of an L- or U-shaped roof
+            # poking into the box: no footprint vertex within the setback of it.
+            for px, py in ring if ok else ():
+                dx, dy = px - cx, py - cy
+                gap_x = max(0.0, abs(dx * c + dy * s - along) - sx / 2.0)
+                gap_y = max(0.0, abs(-dx * s + dy * c - across) - sy / 2.0)
+                if math.hypot(gap_x, gap_y) < PLANT_SETBACK_CM:
+                    ok = False
+                    break
+            if not ok:
+                continue
+            placed.append((along, across, sx, sy))
+            out.append((kind, round(cx + along * c - across * s, 1), round(cy + along * s + across * c, 1),
+                        h, sx, sy, sz, round(math.degrees(theta), 2)))
+            break
+    return out
+
+
+def shopfronts(data):
+    """Shop units on the facades that face the near shopping streets (and on
+    any mapped shop facing any near street). Each unit is a dict:
+
+        x, y     the unit's centre on the facade line (cm)
+        yaw      degrees, along the facade (X of the unit's boxes)
+        nx, ny   the facade's outward normal, towards the street
+        w        frontage width (cm)
+        fascia   one of SHOPFRONT_FASCIAS
+        street   the street it faces
+    """
+    streets = []
+    for road in data["roads"]:
+        named = road["name"] in SHOPFRONT_STREETS
+        if not named and road["class"] == "service":
+            continue
+        half = float(road["w"]) / 2.0
+        for (ax, ay), (bx, by) in road["segments"]:
+            if min(math.hypot(ax, ay), math.hypot(bx, by)) > SHOPFRONT_RADIUS_CM + 5000.0:
+                continue
+            length = math.hypot(bx - ax, by - ay)
+            if length < 1.0:
+                continue
+            streets.append((named, road["name"], half, ax, ay, bx, by, (bx - ax) / length, (by - ay) / length,
+                            min(ax, bx), max(ax, bx), min(ay, by), max(ay, by)))
+
+    units = []
+    local = data["counts"]["buildings"]
+    for building in data["buildings"][:local]:
+        ring = building["ring"]
+        if len(ring) < 3 or building["h"] < 450:          # the shopfront stands 3.9 m
+            continue
+        cx, cy = _centroid(ring)
+        if math.hypot(cx, cy) > SHOPFRONT_RADIUS_CM:
+            continue
+        retail = building.get("retail", False)
+        ccw = _area(ring) > 0.0
+        for index, (p, q) in enumerate(zip(ring, ring[1:] + ring[:1])):
+            dx, dy = q[0] - p[0], q[1] - p[1]
+            length = math.hypot(dx, dy)
+            if length < SHOPFRONT_MIN_EDGE_CM:
+                continue
+            tx, ty = dx / length, dy / length
+            nx, ny = (ty, -tx) if ccw else (-ty, tx)        # outward
+            mx, my = (p[0] + q[0]) / 2.0, (p[1] + q[1]) / 2.0
+            reach = SHOPFRONT_PAVEMENT_CM + 1200.0
+            best = None
+            for named, name, half, ax, ay, bx, by, ux, uy, x0, x1, y0, y1 in streets:
+                if not (named or retail):
+                    continue
+                if mx < x0 - reach or mx > x1 + reach or my < y0 - reach or my > y1 + reach:
+                    continue
+                if abs(tx * ux + ty * uy) < SHOPFRONT_PARALLEL:
+                    continue
+                dist, sx, sy = _segment_distance(mx, my, ax, ay, bx, by)
+                # The street has to be in front of the facade, and the
+                # pavement between them no wider than a London pavement.
+                if (sx - mx) * nx + (sy - my) * ny <= 0.0:
+                    continue
+                if dist < half - 100.0 or dist > half + SHOPFRONT_PAVEMENT_CM:
+                    continue
+                if best is None or dist < best[0]:
+                    best = (dist, name)
+            if best is None:
+                continue
+            seed = _hash(building["id"], index)
+            target = SHOPFRONT_UNIT_CM[seed % len(SHOPFRONT_UNIT_CM)]
+            usable = length - 60.0                          # clear of the corners
+            count = max(1, int(round(usable / target)))
+            width = usable / count
+            if width < 300.0:
+                continue
+            yaw = round(math.degrees(math.atan2(ty, tx)), 2)
+            for k in range(count):
+                t = 30.0 + width * (k + 0.5)
+                ux, uy = p[0] + tx * t, p[1] + ty * t
+                # OSM maps some frontages twice (a building over its older
+                # outline, overlapping neighbours): one shop on a stretch of
+                # facade, not two in the same place fighting for the pixels.
+                if any(nx * other["nx"] + ny * other["ny"] > 0.9
+                       and abs((ux - other["x"]) * nx + (uy - other["y"]) * ny) < 100.0
+                       and abs((ux - other["x"]) * tx + (uy - other["y"]) * ty) < (width + other["w"]) / 2.0 - 20.0
+                       for other in units):
+                    continue
+                units.append({
+                    "x": round(ux, 1), "y": round(uy, 1), "yaw": yaw,
+                    "nx": round(nx, 4), "ny": round(ny, 4), "w": round(width, 1),
+                    "fascia": SHOPFRONT_FASCIAS[_hash(seed, k) % len(SHOPFRONT_FASCIAS)],
+                    "street": best[1],
+                })
+    return units
+
+
+# ---------------------------------------------------------------------------
 #  Conversion
 # ---------------------------------------------------------------------------
 
@@ -239,13 +533,18 @@ def convert(local, sky, outer_tiles=()):
             if any(_inside_tower(x, y) for x, y in ring):
                 continue
             height = _height_m(tags)
-            buildings.append({
+            building = {
                 "id": element["id"],
                 "name": tags.get("name", ""),
                 "h": round(height * 100.0),
                 "facade": _facade(tags, height),
                 "ring": [[x, y] for x, y in ring],
-            })
+            }
+            # A mapped shop or retail building gets a shopfront on any near
+            # street, not only the named shopping streets.
+            if "shop" in tags or tags.get("building") == "retail":
+                building["retail"] = True
+            buildings.append(building)
 
     for element in elements:
         tags = element.get("tags", {})

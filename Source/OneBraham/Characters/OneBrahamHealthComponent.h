@@ -133,6 +133,14 @@ public:
 	void ResetHealth();
 
 	/**
+	 * Brings a downed player back up at NewHealth (clamped to 1..MaxHealth).
+	 * Unlike ResetHealth, armour is left as it was: a revive is not a respawn.
+	 * Server only when there is an owner.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Health")
+	void ReviveToHealth(float NewHealth);
+
+	/**
 	 * Applies damage. Returns the damage actually dealt (0 if rejected).
 	 * Server only: calling this on a client does nothing but log a warning.
 	 */
@@ -152,7 +160,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Health")
 	void ClearInvulnerability();
 
-	/** Kills the owner outright (fall damage, purge, out-of-bounds). */
+	/**
+	 * Kills the owner outright (bleed-out, out-of-bounds): no armour, no
+	 * invulnerability, no downed state.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Health")
 	void Kill(AActor* Killer, FName CauseId = NAME_None);
 
