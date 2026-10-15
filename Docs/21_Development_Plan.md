@@ -110,7 +110,9 @@ The known gaps, from the end of Docs/18 and the session log:
       where the voice-activation gate opens.
 - [x] Death recap in place of a replay killcam: under the cause line, each
       attacker's hits, damage, zones and range, and what the killer had left.
-- [ ] First-time player path: a 3-minute guided run of the ground floor.
+- [x] First-time player path: a guided induction on the ground floor (move,
+      look, sprint, crouch, keycard, gates, escalators, fire, reload), once
+      per profile, never able to trap a player.
 - [ ] Bots tuned against human play data from M5.
 
 ### M5 — Play it

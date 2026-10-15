@@ -483,6 +483,10 @@ protected:
 	UPROPERTY()
 	TObjectPtr<UOneBrahamHUDComponent> HUDComponent = nullptr;
 
+	/** The first-time induction on the ground floor. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "One Braham|Components", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<class UOneBrahamInductionComponent> InductionComponent = nullptr;
+
 	UPROPERTY()
 	TObjectPtr<UOneBrahamAudioManagerComponent> AudioManager = nullptr;
 

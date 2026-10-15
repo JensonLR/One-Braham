@@ -19,6 +19,7 @@
 #include "Interaction/OneBrahamInteractionInterface.h"
 #include "Weapons/OneBrahamWeaponComponent.h"
 #include "UI/OneBrahamHUDComponent.h"
+#include "UI/OneBrahamInductionComponent.h"
 #include "UI/OneBrahamHUDWidget.h"
 #include "UI/OneBrahamPauseMenuWidget.h"
 #include "Audio/OneBrahamAudioManagerComponent.h"
@@ -60,6 +61,7 @@ AOneBrahamPlayerController::AOneBrahamPlayerController()
 	bAttachToPawn = false;
 
 	HUDComponent = CreateDefaultSubobject<UOneBrahamHUDComponent>(TEXT("HUDComponent"));
+	InductionComponent = CreateDefaultSubobject<UOneBrahamInductionComponent>(TEXT("InductionComponent"));
 	AudioManager = CreateDefaultSubobject<UOneBrahamAudioManagerComponent>(TEXT("AudioManager"));
 
 	// A 90 degree default FOV matches the weapon art and the HUD safe area.
@@ -80,6 +82,12 @@ void AOneBrahamPlayerController::GetLifetimeReplicatedProps(TArray<FLifetimeProp
 void AOneBrahamPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// A first-time player gets the induction on the ground floor.
+	if (IsLocalController() && InductionComponent != nullptr)
+	{
+		InductionComponent->StartIfFirstTime();
+	}
 
 	UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
 	if (Settings != nullptr)
