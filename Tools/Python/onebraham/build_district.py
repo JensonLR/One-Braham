@@ -143,10 +143,11 @@ SURFACES = {
     "Plant":     ((0.50, 0.51, 0.52), 0.45, {"Metallic": 0.7}),
     "PlantDark": ((0.10, 0.10, 0.11), 0.60, {"Metallic": 0.4}),
     # Shopfronts. The glass shows a lit interior: a shop's ~200 cd/m2 behind
-    # dark glass, warm white; under the 8,000 lux overcast it reads as lit, not
-    # glowing. Frames and stall risers in dark powder-coated aluminium.
+    # dark glass, warm white. Kept low: a flat emissive plane brighter than the
+    # street reads as a beige panel, not as a lit room behind glass - the
+    # reflection has to win in daylight and the glow show in shade. Frames and stall risers in dark powder-coated aluminium.
     "ShopGlass": ((0.03, 0.035, 0.04), 0.05, {"Metallic": 0.3, "EmissiveColour": (1.0, 0.86, 0.68),
-                                              "EmissiveStrength": 200.0}),
+                                              "EmissiveStrength": 45.0}),
     "ShopFrame": ((0.05, 0.05, 0.055), 0.45, {"Metallic": 0.5}),
     # Fascia boards: London's painted heritage colours, and the internally lit
     # box sign of the chains.
@@ -159,6 +160,9 @@ SURFACES = {
     # One Braham's own finishes, from the reference photographs (Docs/10 §7).
     # Extra parameters ride in a third element.
     "Aluminium": ((0.80, 0.81, 0.83), 0.28, {"Metallic": 1.0}),     # the facade fins
+    # Brushed 304 stainless for catering kit: paler and rougher than the fins,
+    # so a kitchen lit from above reads as steel rather than as a black mirror.
+    "Stainless": ((0.66, 0.66, 0.67), 0.42, {"Metallic": 1.0}),
     "BlackCladding": ((0.018, 0.018, 0.02), 0.35, {}),              # reception feature volume
     "Terrazzo": ((0.74, 0.73, 0.70), 0.22, {"ColourVariation": 0.30}),
     "Planter": ((0.10, 0.10, 0.11), 0.60, {"Metallic": 0.6}),       # powder-coated steel

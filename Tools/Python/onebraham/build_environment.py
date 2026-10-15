@@ -2018,7 +2018,7 @@ def build_canteen_kitchen(cx, cy, z, materials, prefix):
     undercounter fridges, a mixer, boards and a microwave. All of it is 90 cm
     catering kit at catering sizes; the aisle between stays clear.
     """
-    steel = _district_material("Aluminium") or materials.get("Metal")
+    steel = _district_material("Stainless") or _district_material("Aluminium") or materials.get("Metal")
     black = _district_material("BlackCladding") or materials.get("Metal")
     white = _district_material("DeskWhite") or materials.get("Plasterboard")
     ribbon = _district_material("LightRibbon")
@@ -2119,7 +2119,7 @@ def build_canteen_kitchen(cx, cy, z, materials, prefix):
               "Extract_Duct{0}".format(i + 1))
     _soft_light(unreal.RectLight,
                 unreal.Vector(cx + (canopy_x0 + canopy_x1) / 2.0, cy + canopy_front + 14.0, z + 202.0),
-                unreal.Rotator(roll=0.0, pitch=-90.0, yaw=90.0), 3500.0, 260.0, unreal.Color(r=255, g=244, b=232, a=255),
+                unreal.Rotator(roll=0.0, pitch=-90.0, yaw=90.0), 6000.0, 260.0, unreal.Color(r=255, g=244, b=232, a=255),
                 tag + "_Canopy_Light", width=canopy_x1 - canopy_x0 - 40.0, height=4.0)
 
     # --- Past the canopy, towards the staff door --------------------------
@@ -2195,12 +2195,13 @@ def build_canteen_kitchen(cx, cy, z, materials, prefix):
             block(mid - 26.0, mid + 26.0, glass_y + 15.0, glass_y + 58.0, 90.0, 122.0, steel, name + "_Microwave")
             block(mid - 22.0, mid + 10.0, glass_y + 58.0, glass_y + 58.5, 95.0, 118.0, black, name + "_Microwave_Door")
 
-    # Batten lights down the aisle; the floor above the wall has none of its own.
+    # Batten lights down the aisle, about 500 lux on the benches (CIBSE for a
+    # commercial kitchen); the floor above the wall has none of its own.
     for i, lx in enumerate((-1450.0, -1000.0, -650.0)):
         if ribbon is not None:
             block(lx - 75.0, lx + 75.0, -1666.0, -1658.0, 300.0, 304.0, ribbon, "Batten{0}".format(i + 1))
     _soft_light(unreal.RectLight, unreal.Vector(cx - 1050.0, cy - 1662.0, z + 298.0),
-                unreal.Rotator(roll=0.0, pitch=-90.0, yaw=90.0), 6000.0, 600.0, unreal.Color(r=255, g=248, b=240, a=255),
+                unreal.Rotator(roll=0.0, pitch=-90.0, yaw=90.0), 15000.0, 600.0, unreal.Color(r=255, g=248, b=240, a=255),
                 tag + "_Aisle_Light", width=950.0, height=8.0)
 
     _note_surface("Metal", tag + "_Line")
