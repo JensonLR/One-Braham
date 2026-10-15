@@ -848,7 +848,7 @@ void UOneBrahamSettingsWidget::RefreshVoiceStatus() const
 	{
 	case EOneBrahamMicrophonePermission::Denied:
 		Permission = NSLOCTEXT("OneBraham", "Settings_MicDenied",
-			"Microphone access has been refused. Allow One Braham in System Settings > Privacy & Security > Microphone, then restart the game.");
+			"Microphone access has been refused. Allow On Break in System Settings > Privacy & Security > Microphone, then restart the game.");
 		break;
 	case EOneBrahamMicrophonePermission::Restricted:
 		Permission = NSLOCTEXT("OneBraham", "Settings_MicRestricted",

@@ -154,6 +154,16 @@ AOneBrahamLift::AOneBrahamLift()
 	{
 		LandingDoors->SetStaticMesh(CubeMesh);
 	}
+
+	GlassFrame = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("GlassFrame"));
+	GlassFrame->SetupAttachment(CarRoot);
+	GlassFrame->SetMobility(EComponentMobility::Movable);
+	GlassFrame->SetCollisionEnabled(ECollisionEnabled::NoCollision); // the glass is the wall
+	GlassFrame->SetCanEverAffectNavigation(false);
+	if (CubeMesh != nullptr)
+	{
+		GlassFrame->SetStaticMesh(CubeMesh);
+	}
 }
 
 // ===========================================================================
@@ -314,21 +324,60 @@ void AOneBrahamLift::BuildLift()
 	// --- materials ------------------------------------------------------------
 	// Set unconditionally (null restores the mesh default), so turning bGlass off
 	// in the editor really does put the steel back.
-	UMaterialInterface* WallMaterial = (bGlass && GlassMaterial != nullptr) ? GlassMaterial.Get() : CarMaterial.Get();
-	for (UStaticMeshComponent* Part : { CarFloor.Get(), CarCeiling.Get(), CarFrontLeft.Get(), CarFrontRight.Get(), CarFrontHeader.Get() })
+	// The glass lift is glass all round - walls, the panels either side of the
+	// door, the car doors and the landing doors - held in a steel frame. Only
+	// the floor, ceiling and door header stay solid.
+	const bool bUseGlass = bGlass && GlassMaterial != nullptr;
+	UMaterialInterface* WallMaterial = bUseGlass ? GlassMaterial.Get() : CarMaterial.Get();
+	UMaterialInterface* LeafMaterial = bUseGlass ? GlassMaterial.Get() : DoorMaterial.Get();
+	for (UStaticMeshComponent* Part : { CarFloor.Get(), CarCeiling.Get(), CarFrontHeader.Get() })
 	{
 		Part->SetMaterial(0, CarMaterial);
 	}
 
-	for (UStaticMeshComponent* Part : { CarWallBack.Get(), CarWallLeft.Get(), CarWallRight.Get() })
+	for (UStaticMeshComponent* Part : { CarWallBack.Get(), CarWallLeft.Get(), CarWallRight.Get(),
+		CarFrontLeft.Get(), CarFrontRight.Get(), CarDoorLeft.Get(), CarDoorRight.Get() })
 	{
-		Part->SetMaterial(0, WallMaterial);
-		Part->SetCastShadow(!bGlass); // A glass car that throws a solid shadow is a box.
+		Part->SetMaterial(0, Part == CarDoorLeft.Get() || Part == CarDoorRight.Get() ? LeafMaterial : WallMaterial);
+		Part->SetCastShadow(!bUseGlass); // A glass car that throws a solid shadow is a box.
 	}
 
-	CarDoorLeft->SetMaterial(0, DoorMaterial);
-	CarDoorRight->SetMaterial(0, DoorMaterial);
-	LandingDoors->SetMaterial(0, DoorMaterial);
+	LandingDoors->SetMaterial(0, LeafMaterial);
+	LandingDoors->SetCastShadow(!bUseGlass);
+
+	// --- the glass car's frame --------------------------------------------
+	GlassFrame->ClearInstances();
+	GlassFrame->SetMaterial(0, CarMaterial);
+	if (bGlass)
+	{
+		const float P = 6.f; // post and rail section, cm
+		auto Member = [this](const FVector& Centre, const FVector& Size)
+		{
+			GlassFrame->AddInstance(FTransform(FRotator::ZeroRotator, Centre, Size / 100.f));
+		};
+		// Corner posts, and a post either side of the door opening.
+		for (const float X : { -D * 0.5f, D * 0.5f })
+		{
+			for (const float Y : { -W * 0.5f, W * 0.5f })
+			{
+				Member(FVector(X, Y, H * 0.5f), FVector(P, P, H));
+			}
+		}
+		Member(FVector(D * 0.5f, -DW * 0.5f - P * 0.5f, H * 0.5f), FVector(P, P, H));
+		Member(FVector(D * 0.5f, DW * 0.5f + P * 0.5f, H * 0.5f), FVector(P, P, H));
+		// Top and bottom rails round all four faces.
+		for (const float Z : { P * 0.5f, H - P * 0.5f })
+		{
+			Member(FVector(-D * 0.5f, 0.f, Z), FVector(P, W, P));
+			Member(FVector(D * 0.5f, 0.f, Z), FVector(P, W, P));
+			Member(FVector(0.f, -W * 0.5f, Z), FVector(D, P, P));
+			Member(FVector(0.f, W * 0.5f, Z), FVector(D, P, P));
+		}
+		// A mid-height rail on the three closed sides: the handrail line.
+		Member(FVector(-D * 0.5f + P, 0.f, 95.f), FVector(P, W - 2.f * P, 4.f));
+		Member(FVector(0.f, -W * 0.5f + P, 95.f), FVector(D - 2.f * P, P, 4.f));
+		Member(FVector(0.f, W * 0.5f - P, 95.f), FVector(D - 2.f * P, P, 4.f));
+	}
 
 	// --- fittings -------------------------------------------------------------
 	CarLight->SetRelativeLocation(FVector(0.f, 0.f, H - 18.f));

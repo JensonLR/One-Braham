@@ -80,7 +80,7 @@ WEAPONS = [
         pen=(0.0, 0.0), ads=0.19, draw=0.32, holster=0.24,
         melee=(32.0, 130.0, 0.7), ads_fov=62.0,
         audio=(7000.0, 11000.0, False), tracer=False,
-        floors=(0, 15), weight=1.0,
+        floors=(0, 17), weight=1.0,
         description="Standard issue. Fifteen rounds, no surprises, and it will "
                     "still be working when the magazine is empty and you are not.",
     ),
@@ -96,7 +96,7 @@ WEAPONS = [
         pen=(0.0, 0.0), ads=0.16, draw=0.26, holster=0.2,
         melee=(28.0, 125.0, 0.65), ads_fov=64.0,
         audio=(6800.0, 10500.0, False), tracer=False,
-        floors=(0, 15), weight=0.8,
+        floors=(0, 17), weight=0.8,
         description="Twenty rounds of nine-millimetre and no pretence of accuracy "
                     "past the end of the corridor. Useful exactly once, at once.",
     ),
@@ -111,7 +111,7 @@ WEAPONS = [
         pen=(0.0, 0.0), ads=0.21, draw=0.34, holster=0.26,
         melee=(32.0, 130.0, 0.7), ads_fov=62.0,
         audio=(2600.0, 3200.0, True), tracer=False,
-        floors=(0, 15), weight=0.9,
+        floors=(0, 17), weight=0.9,
         description="Quieter than the building's own air handling. Most of the "
                     "people in One Braham never learn where a suppressed shot "
                     "came from, which is the entire point of carrying one.",
@@ -127,7 +127,7 @@ WEAPONS = [
         pen=(0.0, 0.0), ads=0.20, draw=0.38, holster=0.28,
         melee=(34.0, 140.0, 0.75), ads_fov=60.0,
         audio=(8600.0, 13500.0, False), tracer=False,
-        floors=(0, 15), weight=1.1,
+        floors=(0, 17), weight=1.1,
         description="The floor-clearer. Nothing in the building beats it inside "
                     "fifteen metres, and nothing in the building is easier to "
                     "hear from three floors up.",
@@ -143,7 +143,7 @@ WEAPONS = [
         pen=(6.0, 0.72), ads=0.19, draw=0.36, holster=0.27,
         melee=(34.0, 140.0, 0.75), ads_fov=60.0,
         audio=(8800.0, 13000.0, False), tracer=False,
-        floors=(3, 15), weight=1.0,
+        floors=(3, 17), weight=1.0,
         description="Small round, high pressure, and it goes through things that "
                     "stop nine-millimetre. The round the server floor is worth "
                     "carrying for.",
@@ -160,7 +160,7 @@ WEAPONS = [
         pen=(0.0, 0.0), ads=0.30, draw=0.55, holster=0.4,
         melee=(40.0, 150.0, 0.9), ads_fov=58.0,
         audio=(10500.0, 16000.0, False), tracer=False,
-        floors=(0, 15), weight=1.4,
+        floors=(0, 17), weight=1.4,
         description="Eight pellets, one pump, and a sound that empties a room "
                     "before the second shot does. Two and a half seconds is a "
                     "very long time.",
@@ -176,7 +176,7 @@ WEAPONS = [
         pen=(0.0, 0.0), ads=0.27, draw=0.52, holster=0.38,
         melee=(40.0, 150.0, 0.9), ads_fov=58.0,
         audio=(10000.0, 15500.0, False), tracer=False,
-        floors=(6, 15), weight=1.5,
+        floors=(6, 17), weight=1.5,
         description="More shots, less per shot, and a pattern you can put on a "
                     "doorway from across the canteen. It is the weapon for "
                     "people who have decided the stairs are a bad idea.",
@@ -193,7 +193,7 @@ WEAPONS = [
         pen=(9.0, 0.78), ads=0.22, draw=0.45, holster=0.32,
         melee=(40.0, 150.0, 0.85), ads_fov=55.0,
         audio=(9200.0, 14000.0, False), tracer=True,
-        floors=(0, 15), weight=1.6,
+        floors=(0, 17), weight=1.6,
         description="The default rifle because it has no bad habit. Thirty "
                     "rounds, one in three of them a tracer, and it will put a "
                     "hole in the partition you are hiding behind.",
@@ -210,7 +210,7 @@ WEAPONS = [
         pen=(9.0, 0.75), ads=0.19, draw=0.4, holster=0.29,
         melee=(40.0, 150.0, 0.85), ads_fov=58.0,
         audio=(9000.0, 13800.0, False), tracer=True,
-        floors=(5, 15), weight=1.5,
+        floors=(5, 17), weight=1.5,
         description="Shorter, faster to the shoulder, and it climbs harder. This "
                     "is the rifle you take into the stairwell: it is the one that "
                     "turns a corner without catching on the wall.",
@@ -226,7 +226,7 @@ WEAPONS = [
         pen=(16.0, 0.88), ads=0.28, draw=0.58, holster=0.42,
         melee=(45.0, 160.0, 1.0), ads_fov=42.0,
         audio=(11000.0, 17500.0, False), tracer=True,
-        floors=(6, 15), weight=1.9,
+        floors=(6, 17), weight=1.9,
         description="Ten rounds of .308 and a scope that makes the length of the "
                     "open-plan floor a problem for whoever is standing at the far "
                     "end of it. Two shots anywhere. One, usually.",

@@ -26,8 +26,11 @@ completes with a `MatchResult` on both the winning and losing paths.
 - [ ] Every `skipped_asset` in the report has a human assigned and a date.
 - [ ] `Scripts\BuildContent.bat --only environment,props --dress` has been run
       since the last mesh import.
-- [ ] `Tools/Python/onebraham_build_manifest.json` exists and lists all 7 areas.
-- [ ] Map opens: `L_Persistent_OneBraham`, 16 streaming levels, all present.
+- [ ] `Tools/Python/onebraham_build_manifest.json` exists and lists all 9 areas.
+- [ ] Map opens: `L_Persistent_OneBraham`, 18 floor levels, all present.
+- [ ] The Aldgate district is present (`District_*` actors in the persistent
+      level) and "Map data © OpenStreetMap contributors (ODbL)" is in the
+      in-game credits and the store page's legal notices (Docs/LICENCES.md).
 
 ## 3. Validation
 

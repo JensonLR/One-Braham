@@ -271,6 +271,8 @@ void UOneBrahamAudioBankAsset::EnsureCoreEntries()
 			{ TEXT("ServerComms"),  TEXT("AMB_Server_Room") },
 			{ TEXT("Executive"),    TEXT("AMB_Executive") },
 			{ TEXT("Skydeck"),      TEXT("AMB_Skydeck_Wind") },
+			{ TEXT("Summit"),       TEXT("AMB_Executive") },	// the management suite: carpet hush
+			{ TEXT("WinterGarden"), TEXT("AMB_London_Bed") },	// the city, heard from the top of it
 			{ TEXT("Stairwell"),    TEXT("AMB_Stairwell_Door") }
 		};
 

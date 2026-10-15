@@ -465,12 +465,12 @@ int32 FOneBrahamLiftLogic::ChooseLockdownStopFloor(float Z, float Velocity) cons
 	float BestDistance = TNumericLimits<float>::Max();
 
 	// First choice: the nearest floor ahead that the car can stop at without an
-	// emergency stop. Never the excluded floor - the lockdown closes the Skydeck
-	// to the lifts, and a car that happened to be heading there must not finish
-	// the trip.
+	// emergency stop. Never an excluded floor - the lockdown closes the Skydeck
+	// and the crown above it to the lifts, and a car that happened to be heading
+	// there must not finish the trip.
 	for (int32 Floor = Config.MinFloor; Floor <= Config.MaxFloor; ++Floor)
 	{
-		if (Floor == Config.LockdownExcludedFloor)
+		if (Config.LockdownExcludedFloor != INDEX_NONE && Floor >= Config.LockdownExcludedFloor)
 		{
 			continue;
 		}
@@ -502,7 +502,7 @@ int32 FOneBrahamLiftLogic::ChooseLockdownStopFloor(float Z, float Velocity) cons
 	{
 		for (int32 Floor = Config.MinFloor; Floor <= Config.MaxFloor; ++Floor)
 		{
-			if (Floor == Config.LockdownExcludedFloor)
+			if (Config.LockdownExcludedFloor != INDEX_NONE && Floor >= Config.LockdownExcludedFloor)
 			{
 				continue;
 			}
@@ -615,6 +615,44 @@ bool FOneBrahamLiftLogic::Update(double Now)
 
 		case EOneBrahamLiftPhase::Moving:
 		{
+			// Pick up on the way: a landing call between the car and its target,
+			// in the direction it is travelling, that it can still brake for,
+			// becomes the next stop. The original target stays wanted (its call
+			// or the in-car choice is untouched), so the car carries on after.
+			if (!State.bLockedDown && Direction != 0)
+			{
+				const float Z = GetCarZ(State, Config, Now);
+				const float Velocity = GetCarVelocity(State, Config, Now);
+				const float Braking = FOneBrahamLiftMotion::BrakingDistance(FMath::Abs(Velocity), Config.AccelCmPerSec2);
+				const float TargetZ = Config.FloorToZ(State.TargetFloor);
+				int32 Pickup = INDEX_NONE;
+				float PickupAhead = TNumericLimits<float>::Max();
+
+				for (int32 Floor = Config.MinFloor; Floor <= Config.MaxFloor; ++Floor)
+				{
+					if (Floor == State.TargetFloor || !State.HasCall(Floor) || !Config.IsServedFloor(Floor))
+					{
+						continue;
+					}
+
+					const float FloorZ = Config.FloorToZ(Floor);
+					const float Ahead = (FloorZ - Z) * static_cast<float>(Direction);
+					const float BeforeTarget = (TargetZ - FloorZ) * static_cast<float>(Direction);
+					if (Ahead >= Braking + 1.f && BeforeTarget > 0.f && Ahead < PickupAhead)
+					{
+						Pickup = Floor;
+						PickupAhead = Ahead;
+					}
+				}
+
+				if (Pickup != INDEX_NONE)
+				{
+					BeginMove(Pickup, Z, Velocity, Now);
+					bStep = true;
+					break;
+				}
+			}
+
 			const double Arrive = State.PhaseStartTime + GetMoveDuration(State, Config);
 			if (Now >= Arrive)
 			{

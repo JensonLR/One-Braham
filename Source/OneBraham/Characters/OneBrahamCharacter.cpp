@@ -627,14 +627,12 @@ float AOneBrahamCharacter::GetSprintSpeedMultiplier() const
 // ==========================================================================
 void AOneBrahamCharacter::UpdateFloorIndex(float DeltaSeconds)
 {
-	// The tower is authored with a fixed 4.0 m floor-to-floor height (see
-	// Tools/Python/build_map.py, FLOOR_HEIGHT_M). Ground floor lobby floor is at
-	// Z = 0, the Skydeck at Z = 15 * 400 = 6000 cm.
-	// One number, defined once: see OneBrahamConstants in OneBraham.h.
-	constexpr float FloorHeightCm = OneBrahamConstants::FloorHeightCm;
+	// The tower is authored on a fixed 4.0 m floor-to-floor pitch with the
+	// ground floor at Z = -400 (Tools/Python/onebraham/build_environment.py,
+	// _floor_z). OneBrahamConstants::FloorIndexForZ is the one conversion.
 
 	const float ActorZ = GetActorLocation().Z;
-	const int32 ComputedFloor = FMath::Clamp(FMath::FloorToInt(ActorZ / FloorHeightCm), 0, ONE_BRAHAM_FLOORS);
+	const int32 ComputedFloor = FMath::Clamp(OneBrahamConstants::FloorIndexForZ(ActorZ), 0, ONE_BRAHAM_FLOORS);
 
 	if (ComputedFloor != CurrentFloorIndex)
 	{
@@ -1500,9 +1498,7 @@ void AOneBrahamCharacter::ServerReportFloor_Implementation(int32 FloorIndex)
 	}
 
 	// Sanity check against the server's own view of the pawn's Z.
-	// One number, defined once: see OneBrahamConstants in OneBraham.h.
-	constexpr float FloorHeightCm = OneBrahamConstants::FloorHeightCm;
-	const int32 ServerFloor = FMath::Clamp(FMath::FloorToInt(GetActorLocation().Z / FloorHeightCm), 0, ONE_BRAHAM_FLOORS);
+	const int32 ServerFloor = FMath::Clamp(OneBrahamConstants::FloorIndexForZ(GetActorLocation().Z), 0, ONE_BRAHAM_FLOORS);
 
 	if (FMath::Abs(ServerFloor - FloorIndex) > 1)
 	{

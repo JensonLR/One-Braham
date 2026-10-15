@@ -35,9 +35,9 @@ struct FOneBrahamSpawnTableEntry
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spawn")
 	int32 MinFloor = 0;
 
-	/** Optional restriction: only spawn at or below this floor. 15 = anywhere. */
+	/** Optional restriction: only spawn at or below this floor. The top floor (17) = anywhere. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spawn")
-	int32 MaxFloor = 15;
+	int32 MaxFloor = ONE_BRAHAM_FLOORS;
 
 	/** Utility slots that come with this weapon when it spawns as a pickup. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spawn")

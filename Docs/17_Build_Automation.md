@@ -18,7 +18,10 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | --- | --- | --- | --- |
 | `generate_input_ini.py` | `Config/DefaultInput.ini` `[OneBraham.Input]`, 41 actions, 72 bindings | no | yes |
 | `build_materials.py` | 15 physical materials, 6 masters (node graphs, one of them the post-process interaction outline), 28 instances | yes | yes |
-| `build_environment.py` | the map: 7 areas, 16 levels, 43 rooms, 10 access zones, 5 terminals, 4 breach walls, 28 shutters | yes | yes |
+| `build_environment.py` | the map: 9 areas, 18 levels, 48 rooms, 10 access zones, 5 terminals, 4 breach walls, 28 shutters | yes | yes |
+| `build_district.py` | Aldgate East round the tower (run by `build_environment`): OSM buildings extruded with `M_OB_Facade`, streets, kerbs, markings, traffic, lamps, parks, trees, play bounds | yes | yes |
+| `fetch_open_assets.py` | engine-free: downloads the open-licence source assets (the CC0 sky HDRIs) into `SourceArt/`, MD5-checked, and records each sky's sun | no | yes |
+| `district_data.py` | engine-free: turns OpenStreetMap extracts into `data/aldgate_district.json` in the game's frame | no | no |
 | `build_props.py` | 12 gameplay blueprints, 4 loot cards, the prop manifest, the dressing pass | yes | yes |
 | `build_weapons.py` | 10 weapon definitions, 10 blueprints, `DA_WeaponRegistry` | yes | yes |
 | `build_characters.py` | the cast payload + `ABP_OneBrahamCharacter` when the skeleton exists | yes | yes |
@@ -87,12 +90,12 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
 | input_ini | OK | 0.0 | wrote 41 actions (40 with a default key) |
-| cpp_symbols | OK | 0.7 | 859 declarations, all defined; compile hygiene clean |
-| uht_contracts | OK | 1.5 | 908 UE reflection contracts, all satisfied |
+| cpp_symbols | OK | 0.7 | 866 declarations, all defined; compile hygiene clean |
+| uht_contracts | OK | 1.5 | 910 UE reflection contracts, all satisfied |
 | soft_paths | OK | 0.0 | 41 soft paths, all conventional |
-| calls | OK | 0.3 | 1493 call sites, all arities plausible |
+| calls | OK | 0.3 | 1502 call sites, all arities plausible |
 | tags | OK | 0.4 | 6 resolvable tag requests and 147 documented tags, all declared |
-| layout | OK | 0.0 | 16 floors, map and layout agree |
+| layout | OK | 0.0 | 18 floors, map and layout agree |
 | voice_lines | OK | 0.0 | 42 line references, all declared and documented |
 | input_actions | OK | 0.0 | 41 actions, 41 fields, 92 reads |
 | doc_numbers | OK | 2.2 | 84 documented numbers, all current |
@@ -102,7 +105,7 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 | weapon_ids | OK | 0.1 | 118 weapon-id checks, the armoury and the spawn table agree |
 | cosmetic_ids | OK | 0.1 | 135 cosmetic checks, one wardrobe |
 | hud_strings | OK | 0.1 | 99 HUD-string checks, 31 rows and 11 widgets, every one shown |
-| audio_ids | OK | 0.6 | 345 audio-id checks, every cue audible or documented |
+| audio_ids | OK | 0.6 | 349 audio-id checks, every cue audible or documented |
 | interaction_ids | OK | 0.3 | 241 interaction checks, 8 interactables, every verb, tag, tuning number and override accounted for |
 | materials | OK | 3.1 | 6 masters, 15 physicals, 28 instances |
 ...

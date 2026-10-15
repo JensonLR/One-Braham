@@ -1,6 +1,6 @@
 # ONE BRAHAM — map implementation
 
-The building: 15 floors, 7 areas, 43 rooms, one vertical line from the ground
+The building: 18 storeys (ground to 17), 9 areas, 48 rooms, one vertical line from the ground
 plaza to the Skydeck. This document is how it is built, why each area is shaped
 the way it is, and what every space is *for* as a fight.
 
@@ -154,6 +154,45 @@ through the gate lanes, so the first fight of a match is about the gate line:
 lanes with nothing between them, a reception desk that is exactly wide enough
 for two, and a coffee shop on the flank.
 
+**Which way is right.** Unreal is left-handed: facing north (+Y) from the
+doors, your right hand is **-X**. The public side - reception's gate line,
+the escalators, the coffee shop - is therefore built at -X, and the core's
+stairs at +X are on the left of the glass lift, as in the real building. Each
+speed-gate pedestal carries its own **glass wings, held permanently open**:
+folded flat against its sides, inside its length, standing above it.
+
+**Reception, as built.** Double height: floor 1's slab is open over the
+reception side, with a glass gallery round it. A black linear-baffle ceiling
+with sweeping light ribbons; a black feature volume behind the desk carrying an
+**OLED screen** running adverts; an open steel **feature stair** with timber
+treads along the east glazing, up to the gallery; the glazed base in black
+mullions with glass fins.
+
+**The main stair is a spiral.** Through the stair door on the left of the
+glass lift (+x, facing it from the lift hall) a spiral runs the full height of
+the tower - twenty treads a storey round a steel column, one turn per floor.
+The other core stair is the switchback fire stair; the real building has two.
+
+**The gates and the escalators.** Through the revolving doors, reception is
+ahead and the main line of card gates to its right; through them, the lift hall
+is straight on, and to the right, along the passage at the foot of the
+escalators, you turn left up **four escalators** side by side. A short wall ends
+the main gate line; beyond it a **second line of card gates** stands right in
+front of the escalators, on the public side. Every gate's glass wings are held
+open. The escalators rise between sloped glass balustrades with black handrails.
+
+**The OLED displays** (`AOneBrahamDisplay`): a double-height screen wall the
+whole length of the escalator run, a screen ceiling over the whole run, one on
+the back wall right in front of you at the top - after which the only way on is
+left, then left again past the lift banks - and one over the reception desk.
+Each runs a loop of fictional adverts in the building's own voice: an eyebrow in
+tracked capitals with an accent rule, a headline, a subline, laid out on a
+margin grid scaled to the panel, the copy fading out and in at each change while
+the aurora field behind it (`M_OB_AdScreen`: soft bands on true black, a
+breathing glow, a vignette at the bezel) crossfades to the next advert's
+colours. Neighbouring screens are phased so they never change together; the
+ceiling runs the field without copy.
+
 ### 2.2 Floor 1 — arrival gallery, showcase, lab
 
 The escalators arrive into a stone gallery along the south side, behind a glass
@@ -250,9 +289,78 @@ with any other material the four states are told through the screen light alone.
 
 ---
 
+### 2.8b The crown — floors 16 and 17
+
+The real building has eighteen storeys and steps back at 15 and 17. Above the
+canteen and the Skydeck the crown stands over the canteen half and the core
+stalk (`CROWN_STALK_X`, `CROWN_NORTH_Y`); the rest of the plate stays the open
+balcony.
+
+* **16 - Management Suite.** A walled suite, a lounge of low sofas and timber
+  tables, and the foot of the **atrium**: planters and multi-stem trees under
+  a void (`ATRIUM_VOID`) that opens through 17 to the glass roof.
+* **17 - Winter Garden and roof terrace.** A glass-roofed bar on steel ribs
+  round the atrium void (glass balustrades), and through a glass screen the
+  open **roof terrace**: pale paving, charcoal planters of grasses and trees,
+  a balustrade at the drop to the Skydeck.
+
+The lockdown closes 15 *and everything above it* to the lifts: a car bound for
+17 stops below the Skydeck, or it could drop a squad a flight above the deck.
+
+### 2.8c The sky
+
+A photographed CC0 sky (`kloofendal_48d_partly_cloudy_puresky`, Poly Haven) on
+a 10 km dome with the `M_OB_SkyDome` material: an IsSky unlit sample of the
+cubemap, the photograph's sun clamped (the real sun is the directional light,
+aimed at the sun in the photograph from the brightest pixel `fetch_open_assets`
+finds), and the bottom 12.5 degrees blended into a London haze the height fog
+matches. The skylight captures the dome, so the ambient matches the sky you see.
+A dusk preset (`belfast_sunset_puresky`) is built in for the finale.
+
+### 2.9 Outside — Aldgate East, from the map
+
+The tower stands in the real neighbourhood. `build_district` extrudes
+`Tools/Python/onebraham/data/aldgate_district.json`, which `district_data.py`
+makes from OpenStreetMap extracts:
+
+* **Every building within 600 m** - Leman Street, Alie Street, the
+  Whitechapel High Street frontage, Goodman's Fields, Aldgate Place - from its
+  real footprint, to its mapped height or its storey count x 3.5 m + roof.
+* **The surrounding city to 1.8 km**, simplified, so the towers on the skyline
+  stand in streets.
+* **The City cluster** - 30 St Mary Axe, 22 Bishopsgate, Heron Tower, Lloyd's -
+  and the other towers over 70 m within 2.6 km.
+* **The streets**: carriageways at their class width, granite kerbs, centre
+  dashes and London's double yellow lines; standing traffic on the main roads
+  (red double-deckers, black cabs); lamp columns every 25 m.
+* **Braham Street Park** and every green space, and the street trees.
+
+**The frame.** The real One Braham (OSM way 100299970, 1 Braham Street) fixes
+it: origin at its footprint's centroid, X along its long axis, -Y out of its
+north-west face onto Braham Street - where the game puts the revolving doors.
+Geographic east/north go in as X = east, Y = south (Unreal is left-handed) and
+are turned by the footprint's bearing (about 30 degrees), so the map is the right
+way round rather than mirrored. Real scale, 1:1: the game tower's 44 x 36 m plate
+sits inside the real building's footprint and the rest is forecourt.
+
+**Facades** are four instances of `M_OB_Facade` - glass curtain wall, Portland
+stone, London stock brick, dark rainscreen - which draws storey bands and window
+bays from world position and the face normal, so any footprint gets windows
+with no UVs, and lights a share of them from inside. Geometry is merged per
+material by Geometry Script into a dozen `SM_District_*` meshes: fourteen
+hundred buildings cost a dozen draw calls.
+
+**The playable street** is the forecourt and Braham Street: blocking volumes
+65 m out from the tower stop a sprint up Whitechapel High Street. The rest of
+Aldgate is the view.
+
+Map data © OpenStreetMap contributors, under the Open Database Licence (ODbL
+1.0). Rebuild the dataset with `python3 -I Tools/Python/onebraham/district_data.py
+local.json sky.json tiles...` (the Overpass queries are in its docstring).
+
 ## 3. The rooms, as data
 
-Forty-three rooms across the seven areas, each `(name, x, y, size_x, size_y)` from
+Forty-eight rooms across the nine areas, each `(name, x, y, size_x, size_y)` from
 the plate's centre, in `ROOM_PROGRAMMES` in `build_environment.py`. Zones listed
 in `OPEN_ROOMS` are open floor with a finish and no walls.
 
@@ -365,19 +473,28 @@ remembering to add them — which is the point of generating the map rather than
 placing it.
 
 **Ceiling light grid.** `RectLight` panels on a 600 cm grid across the whole
-floor plate, 4000 K, 2600 cd, 700 cm attenuation, static mobility. The count is
-derived from the floor's own footprint, so the plaza gets a grid appropriate to
-9000 cm² and a meeting pod does not get one of its own. This is the game's
-central visual contrast: fourteen floors of flat, faintly green office light, one
-floor of London weather.
+floor plate, facing the floor, 4000 K, 16 000 lm, 1600 cm attenuation, movable
+(the project disallows static lighting, so a static light is never baked and
+Lumen gives it no bounce), fading out beyond 40 m. One fitting per ~36 m² puts
+200–300 lux on the desks - a real office's level. Under each fitting, a
+shadowless, diffuse-only **bounce light** (2400 lm) stands in for the light the
+floor throws back onto walls; without it every wall that did not face a fitting
+rendered pitch black. Each stair gets two bulkheads of its own, lobby and mid
+landing, because the grid never lands inside the core.
 
-**One unbound `PostProcessVolume` per floor**, carrying that area's grade:
-manual exposure range, bloom, film grain and vignette, from `AREA_GRADE`. The
-ranges are wide on purpose — clamped exposure is what stops a player walking out
-of the plant room into the glazing and being flash-blinded for a second and a
-half.
+**One `PostProcessVolume` per floor, bounded to that floor's slab** (plus 6 m
+past the facade; floor 0 reaches out over the street, floor 15 up over the open
+balcony). All floors are loaded at once, so eighteen unbound volumes would fight
+over the whole building. Exposure is histogram auto-exposure in **EV100** (the
+project sets ExtendDefaultLuminanceRange): 5.5–9.5 indoors, 6–12 on floor 15
+so the eye adapts between the canteen and the balcony, biased per area from
+`AREA_GRADE`'s first column. Bloom, film grain and vignette come from the
+other columns. Every value is written with its `bOverride_` flag; without
+those the volume silently keeps the engine default, which is how the grade
+first failed to apply. A global unbound volume in the persistent level sits
+underneath at priority -1 and sets no exposure at all.
 
-| Area | Exposure range | Bloom | Grain | Vignette |
+| Area | Exposure bias source (min, max) | Bloom | Grain | Vignette |
 | --- | --- | --- | --- | --- |
 | Ground Plaza | 0.35 – 2.4 | 0.85 | 0.030 | 0.42 |
 | Lobby | 0.40 – 2.2 | 0.75 | 0.028 | 0.38 |
@@ -392,6 +509,12 @@ its own reflection scene from the same geometry and lights. A per-floor capture
 actor would be a capture that is never sampled and a second source of truth for
 reflections — the kind of thing that produces a bug where one room reflects a
 layout that was deleted three months ago.
+
+**Every floor is attached to the persistent level, always loaded.** The
+builder's last environment step adds each `L_OneBraham_Fxx` to
+`L_Persistent_OneBraham` as a `LevelStreamingAlwaysLoaded` sub-level. (Before
+that step existed the persistent map - the one the game opens - had the
+gameplay actors and the facade but none of the floors.)
 
 **One `AudioVolume` per floor**, scaled to the plate, enabled at priority 1. The
 volume is the map telling the audio director where the room boundaries are; the

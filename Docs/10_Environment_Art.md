@@ -1,7 +1,7 @@
 # ONE BRAHAM — environment art
 
 The materials, the lighting, the dressing and the set-dressing principles that
-turn fifteen floors of correctly-scaled blockout into a building a player
+turn eighteen storeys of correctly-scaled blockout into a building a player
 believes in.
 
 The materials in section 2 are **authored as real node graphs** by
@@ -241,10 +241,12 @@ of the systems (see `Docs/11_Niagara_VFX.md`), never scripted.
 
 ## 6. Streaming and the floors
 
-* `L_Persistent_OneBraham` holds the ground plaza, the sky, the atmosphere and the
-  lift core.
-* One streaming level per floor (`L_OneBraham_F00` … `F15`), built by the map
-  builder, streamed by distance and by the vertical axis.
+* `L_Persistent_OneBraham` holds the sky, the atmosphere, the facade, the lifts,
+  the gameplay actors and Aldgate East around the tower (Docs/09 §2.9).
+* One level per floor (`L_OneBraham_F00` … `F15`), built by the map builder and
+  attached to the persistent level **always loaded**: eighteen small floors fit
+  in memory together, and floors seen through the stairs and glazing must not
+  pop in.
 * The Skydeck level uses a **different directional light angle** — the same dusk,
   seen from above the cloud line of the rest of the building. It is the only way
   the roof reads as a different place without a loading screen.
@@ -287,12 +289,23 @@ sources disagree it is said so.
 * **Canteen and community floors.** Some floors carry a café, a restaurant and
   social space; the servery is a set of separate food islands rather than one
   counter. Counters and dense tables are the cover.
-* **Upper floors.** Sources put an atrium over parts of the top floors (they
-  disagree which) and open terraces on two upper levels, one overlooking the
-  other.
+* **Upper floors.** Open terraces on 15 and 17 (Severfield), so the tower
+  steps back twice; an atrium through parts of 14–17; a rooftop Winter Garden
+  bar and roof terrace (McLaughlin & Harvey). The terraces in photographs:
+  pale large-format paving, long charcoal planters of grasses and multi-stem
+  trees, frameless glass balustrades, the City cluster beyond.
+* **Facade.** Fully glazed, unitised, with "soft corners" and dense vertical
+  aluminium fins on the east, south and west elevations; a glass-finned stick
+  curtain wall at ground level (Focchi, AGC).
+* **Reception.** Double height. A black linear-baffle ceiling with sweeping
+  LED light ribbons, some in a violet-to-blue gradient; pale terrazzo; a
+  black-clad volume behind a white desk; full-height glazing with black
+  mullions; structural glass balustrades (BA Systems, The Light Lab).
 * **Below ground.** A basement of cycle stands, lockers and showers.
-* **Height.** Sources say 18 or 19 storeys; the game's tower is fifteen floors
-  over a ground floor by design.
+* **Height.** 18 storeys (19 counting differently). The game builds all of
+  them: the ground floor, 1–14, the canteen and Skydeck on 15, and the crown,
+  16 and 17. The owner's logo is deliberately not reproduced: the tower in the
+  game is "OB".
 
 Sources: [Severfield](https://www.severfield.com/projects/one-braham),
 [Barbour product search](https://www.barbourproductsearch.info/one-braham-london-news120205.html),

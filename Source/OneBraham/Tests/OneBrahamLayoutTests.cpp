@@ -47,9 +47,9 @@ bool FOneBrahamBuildingLayoutTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("the building is named"), Building->BuildingName.IsEmpty());
 	TestFalse(TEXT("and has an address line"), Building->AddressLine.IsEmpty());
 
-	// Sixteen floors: the plaza plus fifteen storeys, with the Skydeck on top.
-	TestEqual(TEXT("the building has sixteen floors"), Building->FloorCount, 16);
-	TestEqual(TEXT("and sixteen floor rows"), Building->Floors.Num(), 16);
+	// Eighteen floors: the ground floor, fifteen up to the Skydeck, and the crown.
+	TestEqual(TEXT("the building has eighteen floors, as the real one does"), Building->FloorCount, 18);
+	TestEqual(TEXT("and eighteen floor rows"), Building->Floors.Num(), 18);
 	TestEqual(TEXT("the extraction floor is the Skydeck"), Building->ExtractionFloorIndex,
 		OneBrahamConstants::FloorSkydeck);
 	TestEqual(TEXT("players start on the ground floor"), Building->GroundFloorIndex,
@@ -90,11 +90,11 @@ bool FOneBrahamBuildingLayoutTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("every floor has an id, a name and a short name"), Unnamed, 0);
 		TestEqual(TEXT("the first row is the ground floor"), Building->Floors[0].FloorIndex,
 			OneBrahamConstants::FloorPlaza);
-		TestEqual(TEXT("the last row is the Skydeck"), Building->Floors.Last().FloorIndex,
-			OneBrahamConstants::FloorSkydeck);
+		TestEqual(TEXT("the last row is the top of the crown"), Building->Floors.Last().FloorIndex,
+			OneBrahamConstants::FloorTop);
 	}
 
-	// The eight areas, in the order the building has them. Asserted by name
+	// The nine areas, in the order the building has them. Asserted by name
 	// because these ids are the interface between the map, the audio zones, the
 	// spawn anchors and the analytics: renaming one is renaming a room.
 	{
@@ -113,7 +113,9 @@ bool FOneBrahamBuildingLayoutTest::RunTest(const FString& Parameters)
 			{ TEXT("OpenPlan"),     3, 8 },
 			{ TEXT("ServerComms"),  9, 11 },
 			{ TEXT("Executive"),    12, 14 },
-			{ TEXT("Skydeck"),      15, 15 }
+			{ TEXT("Skydeck"),      15, 15 },
+			{ TEXT("Summit"),       16, 16 },
+			{ TEXT("WinterGarden"), 17, 17 }
 		};
 
 		TSet<FName> SeenAreas;
@@ -143,13 +145,14 @@ bool FOneBrahamBuildingLayoutTest::RunTest(const FString& Parameters)
 		// And no floor claims an area outside that list.
 		for (const FOneBrahamFloorDescription& Floor : Building->Floors)
 		{
-			TestTrue(*FString::Printf(TEXT("floor %d's area is one of the eight"), Floor.FloorIndex),
+			TestTrue(*FString::Printf(TEXT("floor %d's area is one of the nine"), Floor.FloorIndex),
 				SeenAreas.Contains(Floor.AreaId));
 		}
 	}
 
-	// The endgame floor - the canteen and the Skydeck balcony, both on 15 - is the one the
-	// lockdown never seals and the plan draws in signal yellow.
+	// The endgame floors - the canteen and the Skydeck balcony on 15, and the crown
+	// above them, 16 and 17 - are the ones the lockdown never seals and the plan
+	// draws in signal yellow.
 	{
 		int32 Endgame = 0;
 
@@ -163,8 +166,9 @@ bool FOneBrahamBuildingLayoutTest::RunTest(const FString& Parameters)
 			}
 		}
 
-		// The canteen and the Skydeck balcony share floor 15: one endgame floor.
-		TestEqual(TEXT("one endgame floor"), Endgame, 1);
+		// 15, 16 and 17: everything from the canteen to the roof.
+		TestEqual(TEXT("the endgame is the canteen floor and the crown"), Endgame,
+			OneBrahamConstants::FloorTop - OneBrahamConstants::FloorCanteen + 1);
 		TestTrue(TEXT("the extraction floor is an endgame floor"),
 			Building->FindFloor(Building->ExtractionFloorIndex) != nullptr
 			&& Building->FindFloor(Building->ExtractionFloorIndex)->bEndgameFloor);
@@ -211,11 +215,11 @@ bool FOneBrahamBuildingLayoutTest::RunTest(const FString& Parameters)
 
 	// Asking about a floor that does not exist is a null, an empty name and an
 	// absent breach rather than a crash or a plausible-looking lie.
-	TestNull(TEXT("there is no floor 16"), Building->FindFloor(16));
+	TestNull(TEXT("there is no floor 18"), Building->FindFloor(18));
 	TestNull(TEXT("nor a floor -1"), Building->FindFloor(-1));
-	TestTrue(TEXT("floor 16 has no area"), Building->GetAreaIdForFloor(16).IsNone());
-	TestTrue(TEXT("floor 16 has no short name"), Building->GetFloorShortName(16).IsEmpty());
-	TestFalse(TEXT("floor 16 is not breachable"), Building->IsFloorBreachable(16));
+	TestTrue(TEXT("floor 18 has no area"), Building->GetAreaIdForFloor(18).IsNone());
+	TestTrue(TEXT("floor 18 has no short name"), Building->GetFloorShortName(18).IsEmpty());
+	TestFalse(TEXT("floor 18 is not breachable"), Building->IsFloorBreachable(18));
 	TestEqual(TEXT("an unknown area has no floor"), Building->GetFloorForAreaId(TEXT("Rooftop")), INDEX_NONE);
 	TestEqual(TEXT("and neither does an empty one"), Building->GetFloorForAreaId(NAME_None), INDEX_NONE);
 
@@ -228,11 +232,11 @@ bool FOneBrahamBuildingLayoutTest::RunTest(const FString& Parameters)
 			Floor.ShortName.ToString().Len() <= Floor.AreaName.ToString().Len());
 	}
 
-	// The table has one row per floor between the plaza and the Skydeck: sixteen,
+	// The table has one row per floor from the plaza to the roof: eighteen,
 	// which is also the floor count. A row short is a floor the lockdown cannot
 	// name and the plan cannot draw.
 	TestEqual(TEXT("there is a row for every floor"),
-		Building->FloorCount, OneBrahamConstants::FloorSkydeck - OneBrahamConstants::FloorPlaza + 1);
+		Building->FloorCount, OneBrahamConstants::FloorTop - OneBrahamConstants::FloorPlaza + 1);
 
 	// The extraction gate, from the two constants that define it: the winch
 	// terminal is on the Skydeck and refuses a caller standing a storey below it,

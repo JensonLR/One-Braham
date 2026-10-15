@@ -1,4 +1,4 @@
-# ONE BRAHAM — Steam page, marketing and trailer
+# ON BREAK — Steam page, marketing and trailer
 
 Price, page copy, capsule art, wishlist plan, trailer script, press plan and the
 roadmap. Everything here is written to be published as-is.
@@ -7,12 +7,19 @@ roadmap. Everything here is written to be published as-is.
 
 ## 1. The store page
 
-**Title:** ONE BRAHAM
+**Title:** ON BREAK
+
+The name: the tower is One Braham, "OB" to the people who work there, and the
+game is what happens on their break. Checked 2026-10-15: no game called "On
+Break" on Steam (store search, including unreleased apps) or the Xbox / Microsoft
+Store, and none found on the wider web. Before launch, also clear it with a
+trademark search (UK IPO, EUIPO, USPTO, classes 9 and 41) - store availability
+is not a trademark clearance.
 
 **Short description (300 characters):**
 
-> One building. Fifteen floors. Twelve people. ASCENT is a vertical extraction
-> shooter set inside a London tower at Aldgate: find a keycard, climb, and hold
+> One building. Eighteen floors. Twelve people. ASCENT is a vertical extraction
+> shooter set inside One Braham, a London tower at Aldgate: find a keycard, climb, and hold
 > the Skydeck for thirty seconds. No respawns. No AI. One squad walks out.
 
 **Genre tags:** Extraction Shooter · Multiplayer · Tactical · PvP · Realistic ·
@@ -122,14 +129,14 @@ The capsule that will sell this game is the quiet one that looks like a place.
 | Time | Shot | Sound | On screen |
 | --- | --- | --- | --- |
 | 0:00–0:06 | The lobby at 7:40, empty. Camera slow-pushes past reception | ambient, lift chime, distant traffic | — |
-| 0:06–0:10 | A lift door opens on a floor it should not be stopping at | lift chime, then nothing | **ONE BRAHAM** |
+| 0:06–0:10 | A lift door opens on a floor it should not be stopping at | lift chime, then nothing | **ON BREAK** |
 | 0:10–0:22 | Hard cut to a firefight on the open-plan floor: three shots, a body going over a desk | gunfire, no music | — |
 | 0:22–0:34 | The building: stairwell, server floor, executive floor, canteen. Four cuts, one per floor, on the beat of a footstep | footsteps on four surfaces | floor numbers ticking up |
 | 0:34–0:46 | A keycard being tapped, a door opening, and **four heads turning** in the corridor beyond | reader beep, klaxon starting | — |
 | 0:46–0:58 | The pair override: two players, the ring filling, three seconds, the alarm | rising alarm, music in | — |
 | 0:58–1:10 | The purge climbing: shutters closing floor by floor, the stairwell below filling with red | alarm, music | **THE BUILDING IS CLOSING** |
 | 1:10–1:24 | The Skydeck: the pad, the 30-second hold, a squad arriving, contested freeze | rotor building, music | countdown 30 → 0 |
-| 1:24–1:30 | The winch. The deck falls away | rotor, wind, then cut to silence | **ONE BRAHAM. OUT NOW. £4.99** |
+| 1:24–1:30 | The winch. The deck falls away | rotor, wind, then cut to silence | **ON BREAK. OUT NOW. £4.99** |
 
 **Rules for the trailer:**
 
@@ -171,7 +178,7 @@ everybody."*
 ## 6. Roadmap as published on the store page
 
 > **Now** — ASCENT, FIRE DRILL, 10 weapons, 6 archetypes, proximity voice,
-> dedicated servers, 7 areas.
+> dedicated servers, 9 areas.
 >
 > **Post-launch 1** — NIGHT SHIFT, 4-player co-op survival.
 >

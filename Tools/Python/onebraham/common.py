@@ -117,11 +117,12 @@ PREFIX_ANY = "OB_"
 # ---------------------------------------------------------------------------
 #  The building
 # ---------------------------------------------------------------------------
-# One Braham, Aldgate: fifteen floors of 400 cm, lobby at Z = 0.
+# One Braham, Aldgate: eighteen storeys of 400 cm - the ground floor at Z = -400,
+# floor 1 at Z = 0 - topped by the stepped-back crown on 16 and 17.
 FLOOR_HEIGHT_CM = 400.0
-FLOOR_COUNT = 15
+FLOOR_COUNT = 17
 
-# The eight named areas of the map spec (Docs/09). Each entry is
+# The nine named areas of the map spec (Docs/09). Each entry is
 # (name, first_floor, last_floor, wing_origin_xy, wing_size_xy).
 # The tower is a rectangular core with four wings around a central lift core,
 # which is what gives every floor a chokepoint, a flank and a sightline.
@@ -138,6 +139,12 @@ AREAS = [
     ("ServerComms",      (9, 11),       -2200, -1800, 4400,  3600),
     ("Executive",        (12, 14),      -2200, -1800, 4400,  3600),
     ("Skydeck",          (15, 15),      -2200, -1800, 4400,  3600),
+    # The crown. The real building steps back at 15 and again at 17; here both
+    # crown floors stand over the canteen half and the core, leaving the
+    # Skydeck balcony open to the sky. Their plates are the full plate with
+    # the balcony cut away (build_environment.CROWN_*).
+    ("Summit",           (16, 16),      -2200, -1800, 4400,  3600),
+    ("WinterGarden",     (17, 17),      -2200, -1800, 4400,  3600),
 ]
 
 AREA_NAMES = [a[0] for a in AREAS]

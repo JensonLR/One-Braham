@@ -452,7 +452,7 @@ public:
 	int32 MinFloor = 0;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Loot")
-	int32 MaxFloor = 15;
+	int32 MaxFloor = ONE_BRAHAM_FLOORS;
 
 	// --- Helpers ----------------------------------------------------------
 	/** Seconds between shots, server-enforced. */

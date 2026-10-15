@@ -65,7 +65,7 @@ public:
 
 	/** Number of occupied floors above the plaza. */
 	UPROPERTY(config, EditAnywhere, Category = "Brand", meta = (ClampMin = "1", ClampMax = "40"))
-	int32 Floors = 15;
+	int32 Floors = 17;
 
 	/** Height of the Skydeck above street level, metres (used by fall damage + skybox). */
 	UPROPERTY(config, EditAnywhere, Category = "Brand")

@@ -180,7 +180,7 @@ bool FOneBrahamConstantsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("the server can hold an ASCENT match plus spectators"),
 		OneBrahamConstants::MaxPlayers >= 12);
 
-	// The building. Fifteen floors above the ground floor, 400 cm each: every
+	// The building. Seventeen floors above the ground floor, 400 cm each: every
 	// distance in the level, every fall and every "can my voice carry up the
 	// stairwell" question follows from this one number.
 	TestNearlyEqual(TEXT("floor height, cm"), OneBrahamConstants::FloorHeightCm, 400.f, 0.01f);
@@ -188,6 +188,17 @@ bool FOneBrahamConstantsTest::RunTest(const FString& Parameters)
 		OneBrahamConstants::HalfFloorHeightCm * 2.f, OneBrahamConstants::FloorHeightCm, 0.01f);
 	TestEqual(TEXT("ground floor"), OneBrahamConstants::FloorPlaza, 0);
 	TestEqual(TEXT("the Skydeck is floor 15"), OneBrahamConstants::FloorSkydeck, 15);
+
+	// Z to floor, against the map: floor n's slab top is at (n - 1) * 400, and a
+	// standing pawn's origin is about 90 cm above it.
+	for (int32 Floor = 0; Floor <= ONE_BRAHAM_FLOORS; ++Floor)
+	{
+		const float SlabZ = (Floor - 1) * OneBrahamConstants::FloorHeightCm;
+		TestEqual(FString::Printf(TEXT("a pawn standing on floor %d reads floor %d"), Floor, Floor),
+			OneBrahamConstants::FloorIndexForZ(SlabZ + 90.f), Floor);
+		TestEqual(FString::Printf(TEXT("a pawn jumping on floor %d still reads floor %d"), Floor, Floor),
+			OneBrahamConstants::FloorIndexForZ(SlabZ + 350.f), Floor);
+	}
 
 	// The floors the game names have to be in the order the building is in. The
 	// canteen constant said 15 for a while - the extraction floor - which is the

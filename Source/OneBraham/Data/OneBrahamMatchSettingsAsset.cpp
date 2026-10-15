@@ -33,23 +33,23 @@ void UOneBrahamMatchSettingsAsset::EnsureDefaults()
 		// weapons at all, while the gates it applied disagreed with the
 		// documentation. check_weapon_ids.py now holds the two tables together,
 		// in order.
-		AddEntry(TEXT("W_Pistol"),			1.0f, 0,  15, {});
-		AddEntry(TEXT("W_CompactPistol"),	0.8f, 0,  15, {});
-		AddEntry(TEXT("W_SuppressedPistol"), 0.9f, 0,  15, {});
-		AddEntry(TEXT("W_SMG"),				1.1f, 0,  15, {});
-		AddEntry(TEXT("W_PDW"),				1.0f, 3,  15, {});
-		AddEntry(TEXT("W_PumpShotgun"),		1.4f, 0,  15, {});
-		AddEntry(TEXT("W_SemiShotgun"),		1.5f, 6,  15, {});
-		AddEntry(TEXT("W_Carbine556"),		1.6f, 0,  15, { TEXT("Utility_Frag") });
-		AddEntry(TEXT("W_CompactAR"),		1.5f, 5,  15, { TEXT("Utility_Smoke") });
-		AddEntry(TEXT("W_MarksmanRifle"),	1.9f, 6,  15, {});
+		AddEntry(TEXT("W_Pistol"),			1.0f, 0,  17, {});
+		AddEntry(TEXT("W_CompactPistol"),	0.8f, 0,  17, {});
+		AddEntry(TEXT("W_SuppressedPistol"), 0.9f, 0,  17, {});
+		AddEntry(TEXT("W_SMG"),				1.1f, 0,  17, {});
+		AddEntry(TEXT("W_PDW"),				1.0f, 3,  17, {});
+		AddEntry(TEXT("W_PumpShotgun"),		1.4f, 0,  17, {});
+		AddEntry(TEXT("W_SemiShotgun"),		1.5f, 6,  17, {});
+		AddEntry(TEXT("W_Carbine556"),		1.6f, 0,  17, { TEXT("Utility_Frag") });
+		AddEntry(TEXT("W_CompactAR"),		1.5f, 5,  17, { TEXT("Utility_Smoke") });
+		AddEntry(TEXT("W_MarksmanRifle"),	1.9f, 6,  17, {});
 	}
 
 	if (FloorLootProfiles.Num() == 0)
 	{
-		// 16 floors (0 = plaza). Density ramps up so that floor 9 (server) and
+		// 18 floors (0 = plaza). Density ramps up so that floor 9 (server) and
 		// floor 15 (canteen/skydeck) are the most contested looting grounds.
-		for (int32 Floor = 0; Floor <= 15; ++Floor)
+		for (int32 Floor = 0; Floor <= ONE_BRAHAM_FLOORS; ++Floor)
 		{
 			FOneBrahamFloorLootProfile Profile;
 			Profile.FloorIndex = Floor;

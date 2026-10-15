@@ -1,7 +1,7 @@
-# ONE BRAHAM
+# ON BREAK
 
-A vertical multiplayer extraction shooter set in a fifteen-floor telecoms tower in
-Aldgate, London. Twelve players, three squads of four, no AI, no respawns. Find a
+*Set in One Braham - "OB".* A vertical multiplayer extraction shooter set in an
+eighteen-storey telecoms tower in Aldgate, London. Twelve players, three squads of four, no AI, no respawns. Find a
 keycard, climb the building, and hold the Skydeck for thirty seconds while
 everybody else comes up the stairs behind you.
 
@@ -87,12 +87,13 @@ to learn the building without losing a 25-minute run to it.
 **NIGHT SHIFT** — 4-player co-op survival against the building's own systems.
 Post-launch.
 
-### The seven areas
+### The nine areas
 
 Ground Plaza · Lobby · Mezzanine and Lift Lobby · Open Plan Office (floors 3–8) ·
-Server and Comms (9–11) · Executive (12–14) · Canteen and Skydeck balcony (15).
+Server and Comms (9–11) · Executive (12–14) · Canteen and Skydeck balcony (15) ·
+Management Suite and atrium (16) · Winter Garden and roof terrace (17).
 
-All 7 areas are built at true dimensions: 400 cm floor to floor, 110 cm doors,
+All 9 areas are built at true dimensions: 400 cm floor to floor, 110 cm doors,
 real desk rows, real server aisles, a canteen with eighteen tables and a boardroom
 with a table you have to walk around.
 

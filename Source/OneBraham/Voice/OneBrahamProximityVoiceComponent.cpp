@@ -111,7 +111,7 @@ namespace
 
 	int32 FloorOf(float WorldZ)
 	{
-		return FMath::FloorToInt(WorldZ / OneBrahamConstants::FloorHeightCm);
+		return OneBrahamConstants::FloorIndexForZ(WorldZ);
 	}
 
 	/** Multiplies PCM16 in place, clamping rather than wrapping on overload. */

@@ -28,7 +28,9 @@
 #define ONE_BRAHAM_NET_PROTOCOL_VERSION 1
 
 // Engine-side friendly-name used by Steam, crash reporter and server browser.
-#define ONE_BRAHAM_DISPLAY_NAME TEXT("ONE BRAHAM")
+// The game is called On Break - "OB", like the building it is set in, One
+// Braham. Code and assets keep the OneBraham prefix; this is the player-facing title.
+#define ONE_BRAHAM_DISPLAY_NAME TEXT("ON BREAK")
 
 // ==========================================================================
 //  Log categories. Declared here, defined in OneBraham.cpp.
@@ -86,7 +88,10 @@ namespace OneBrahamConstants
 	/** Hard player cap for both modes. */
 	static constexpr int32 MaxPlayers = 16;
 
-	/** Floors 1..15, with the Skydeck on 15. Index 0 is the plaza/undercroft. */
+	/** Floors 0..17, as the real building's eighteen storeys: the ground floor,
+	 *  fourteen office floors, the canteen and Skydeck balcony on 15, and the
+	 *  stepped-back crown above it - the Management Suite round the atrium on
+	 *  16 and the Winter Garden with its roof terrace on 17. */
 	static constexpr int32 FloorPlaza = 0;
 	static constexpr int32 FloorLobby = 1;
 	static constexpr int32 FloorMezzanine = 2;
@@ -96,8 +101,12 @@ namespace OneBrahamConstants
 	/** The canteen and the Skydeck balcony share the top floor. */
 	static constexpr int32 FloorCanteen = 15;
 	static constexpr int32 FloorSkydeck = 15;
-	/** The purge climbs to the top Executive floor; only floor 15 - the canteen
-	 *  and the Skydeck balcony - is ever clear of gas. */
+	/** The crown: two floors stepped back over the canteen and the core. */
+	static constexpr int32 FloorSummit = 16;
+	static constexpr int32 FloorWinterGarden = 17;
+	static constexpr int32 FloorTop = 17;
+	/** The purge climbs to the top Executive floor; floor 15 - the canteen and
+	 *  the Skydeck balcony - and the crown above it are never gassed. */
 	static constexpr int32 FloorPurgeCeiling = 14;
 
 	/** Extraction hold time, seconds (ASCENT). */
@@ -171,4 +180,19 @@ namespace OneBrahamConstants
 
 	/** Half a storey: the threshold for "that sound came from another floor". */
 	static constexpr float HalfFloorHeightCm = FloorHeightCm * 0.5f;
+
+	/**
+	 * World Z of the ground floor's slab top. The map builder lays floor n at
+	 * (n - 1) * FloorHeightCm - floor 1 on the origin, the ground floor a storey
+	 * below it - so every Z-to-floor conversion has to start from here. Seven
+	 * call sites used Z / FloorHeightCm instead and read every player one floor
+	 * low: the purge gassed the floor above the one it thought it was on.
+	 */
+	static constexpr float GroundFloorZ = -FloorHeightCm;
+
+	/** The floor a world Z is on. The one conversion; use it everywhere. */
+	static FORCEINLINE int32 FloorIndexForZ(float WorldZ)
+	{
+		return FMath::FloorToInt((WorldZ - GroundFloorZ) / FloorHeightCm);
+	}
 }

@@ -162,7 +162,7 @@ void UOneBrahamVoiceLineSet::EnsureCoreLines()
 		Line(TEXT("V_AMBIENT_CANTEEN"),				TEXT("They've still got the sandwich board out. Optimistic."), EOneBrahamVoicePriority::Ambient, 60.f, 0.2f),
 		Line(TEXT("V_AMBIENT_SERVER_ROOM"),			TEXT("It's warm in here. Always warm in here."), EOneBrahamVoicePriority::Ambient, 60.f, 0.2f),
 		Line(TEXT("V_AMBIENT_RAIN"),				TEXT("Rain's coming in sideways off the plaza."), EOneBrahamVoicePriority::Ambient, 60.f, 0.2f),
-		Line(TEXT("V_AMBIENT_STAIRS"),				TEXT("Fifteen floors. Nobody thought to fix the lifts."), EOneBrahamVoicePriority::Ambient, 60.f, 0.2f),
+		Line(TEXT("V_AMBIENT_STAIRS"),				TEXT("Seventeen floors. Nobody thought to fix the lifts."), EOneBrahamVoicePriority::Ambient, 60.f, 0.2f),
 		Line(TEXT("V_AMBIENT_EXEC"),				TEXT("The executive floor always smells like new carpet."), EOneBrahamVoicePriority::Ambient, 60.f, 0.2f),
 		Line(TEXT("V_AMBIENT_TIRED"),				TEXT("I've been on shift since six."), EOneBrahamVoicePriority::Ambient, 60.f, 0.2f),
 		Line(TEXT("V_AMBIENT_COFFEE"),				TEXT("Somebody's left a coffee on the third floor. It's gone cold."), EOneBrahamVoicePriority::Ambient, 60.f, 0.15f),

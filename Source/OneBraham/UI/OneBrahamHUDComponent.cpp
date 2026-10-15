@@ -824,7 +824,7 @@ void UOneBrahamHUDComponent::GatherHUDData()
 							}
 
 							// Distance only when actually on the same floor.
-							const int32 MemberFloor = FMath::FloorToInt(MemberPawn->GetActorLocation().Z / 400.f);
+							const int32 MemberFloor = OneBrahamConstants::FloorIndexForZ(MemberPawn->GetActorLocation().Z);
 							if (MemberCharacter != Character)
 							{
 								Row.DistanceCm = MemberFloor == Data.CurrentFloorIndex

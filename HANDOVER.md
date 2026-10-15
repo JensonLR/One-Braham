@@ -66,7 +66,7 @@ does.
 | `python3 Tools/Python/onebraham/validate_project.py` | `31 pass, 2 warn, 0 fail` | the two warnings are the fresh-clone manifest and surface coverage; anything else is a regression |
 | `python3 Tools/Python/onebraham/check_doc_numbers.py` | `89 numbers checked. agree. OK` | every count quoted in `Docs/17` and the README against the count the tooling produces |
 | `python3 Tools/Python/onebraham/check_interaction.py` | `checks: 222` | the interaction surface: classes, tables, tags, montage chain, interface conformance |
-| `python3 Tools/Python/onebraham/check_cpp_symbols.py` | `859 declarations`, `317 hygiene checks`, `OK` | declared-but-undefined members, scoped enums, shadowed engine properties, duplicate definitions |
+| `python3 Tools/Python/onebraham/check_cpp_symbols.py` | `866 declarations`, `317 hygiene checks`, `OK` | declared-but-undefined members, scoped enums, shadowed engine properties, duplicate definitions |
 | `python3 Tools/Python/onebraham/report_uncalled.py` | `83 member(s) with no call site` | the triage list in §4.2. **This is a report, not a gate** |
 
 Each checker also runs standalone with the import root, which is the only thing
@@ -172,7 +172,7 @@ and better than a third state.
 
 `Scripts/BuildContent.bat` runs the nine builders in their required order and
 writes `Tools/Python/onebraham_build_manifest.json`. This is where the game becomes
-visible: the fifteen floors, the eight areas, the armoury, the wardrobe, the HUD,
+visible: the eighteen floors, the nine areas, the armoury, the wardrobe, the HUD,
 the Niagara systems, the audio bank and the map. Every builder reports created,
 updated, skipped and failed assets; `validate_project.py`'s two warnings clear once
 the manifest exists. Fix the builders the way you fix C++: one change, one run,
@@ -249,7 +249,7 @@ The brief, in one paragraph: **ONE BRAHAM** is a vertical multiplayer extraction
 shooter inside One Braham, Aldgate — twelve players, three squads of four, no AI,
 ground floor to the fifteenth-floor Skydeck. ASCENT (pure PvP extraction), FIRE
 DRILL (6v6/8v8 TDM and control) and NIGHT SHIFT (four-player co-op survival,
-post-launch). Eight areas, fifteen floors, a lot of glass. Serious gunplay,
+post-launch). Nine areas, eighteen floors, a lot of glass. Serious gunplay,
 believable tired London corporate characters, dry humour through realism only. No
 cartoon visuals, no office-supply weapons, no meme characters, no forced jokes, no
 American action-movie clichés. UE 5.5, C++ and Blueprint, Enhanced Input, UMG and
@@ -257,7 +257,7 @@ CommonUI, GameplayTags, data assets, Chaos, Niagara, Lumen, Nanite, MetaHuman-cl
 characters, Steam, the Unreal voice module, dedicated and listen servers, Windows
 first, £4.99/$5.99, cosmetics only.
 
-Done means: it compiles; the content builds; the map is the fifteen floors the
+Done means: it compiles; the content builds; the map is the eighteen floors the
 documents describe; ASCENT can be won and lost, by the winch and by elimination;
 FIRE DRILL plays; the HUD, the audio and the settings work; voice chat works;
 `Scripts/Package.bat` produces a shipping build; `Docs/20`'s checklists pass;

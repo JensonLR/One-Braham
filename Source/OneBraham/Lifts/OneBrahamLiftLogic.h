@@ -104,7 +104,7 @@ struct ONEBRAHAM_API FOneBrahamLiftState
 struct ONEBRAHAM_API FOneBrahamLiftConfig
 {
 	int32 MinFloor = 0;
-	int32 MaxFloor = 15;
+	int32 MaxFloor = ONE_BRAHAM_FLOORS;
 
 	/** World Z of floor 0's finished floor level (the plaza, -400). */
 	float FloorZ0 = -400.f;
@@ -121,7 +121,8 @@ struct ONEBRAHAM_API FOneBrahamLiftConfig
 	/** Seconds the doors stay fully open at a stop. */
 	float DoorDwellSeconds = 2.5f;
 
-	/** The floor a lockdown never delivers a rider to (the Skydeck). INDEX_NONE = none. */
+	/** The lowest floor a lockdown never delivers a rider to, and every floor
+	 *  above it (the Skydeck and the crown). INDEX_NONE = none. */
 	int32 LockdownExcludedFloor = 15;
 
 	float FloorToZ(int32 Floor) const { return FloorZ0 + static_cast<float>(Floor) * FloorHeightCm; }

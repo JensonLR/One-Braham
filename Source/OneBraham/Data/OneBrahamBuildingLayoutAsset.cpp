@@ -20,7 +20,7 @@ UOneBrahamBuildingLayoutAsset::UOneBrahamBuildingLayoutAsset()
 	// -----------------------------------------------------------------------
 	//  The building.
 	//
-	//  Fifteen floors plus the Skydeck. The area names are the lift's own
+	//  The ground floor, fifteen floors to the Skydeck, and the crown above it. The area names are the lift's own
 	//  wording - sentence case, no acronyms - and the short names are what fits
 	//  on a compass strip. Both matter: "Server and comms" fits a lift panel and
 	//  will not fit a 120-pixel compass, which is why there are two.
@@ -51,7 +51,7 @@ UOneBrahamBuildingLayoutAsset::UOneBrahamBuildingLayoutAsset()
 	// build lays the level out from:
 	//
 	//   Ground_Plaza 0 | Lobby 1 | Mezzanine 2 | OpenPlan 3-8
-	//   ServerComms 9-11 | Executive 12 | Canteen 13-14 | Skydeck 15
+	//   ServerComms 9-11 | Executive 12-14 | Skydeck 15 | Summit 16 | WinterGarden 17
 	//
 	// Not a paraphrase: a transcription, and there is a checker for it
 	// (check_building_layout.py) because the first version of this file put the
@@ -105,6 +105,12 @@ UOneBrahamBuildingLayoutAsset::UOneBrahamBuildingLayoutAsset()
 	AddFloor(15, TEXT("Skydeck"),
 		NSLOCTEXT("OneBraham", "Area_15", "Canteen and Skydeck balcony"),
 		NSLOCTEXT("OneBraham", "AreaShort_15", "CANTEEN / SKYDECK"), true, false);
+	AddFloor(16, TEXT("Summit"),
+		NSLOCTEXT("OneBraham", "Area_16", "Management suite and atrium"),
+		NSLOCTEXT("OneBraham", "AreaShort_16", "MANAGEMENT"), true, false);
+	AddFloor(17, TEXT("WinterGarden"),
+		NSLOCTEXT("OneBraham", "Area_17", "Winter Garden and roof terrace"),
+		NSLOCTEXT("OneBraham", "AreaShort_17", "WINTER GARDEN"), true, false);
 
 	FloorCount = Floors.Num();
 	ExtractionFloorIndex = 15;

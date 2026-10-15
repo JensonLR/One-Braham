@@ -60,7 +60,7 @@ bool FOneBrahamLiftTravelTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("floor 1 (the lobby) is at 0"), Config.FloorToZ(1), 0.f);
 	TestEqual(TEXT("floor 15 (the Skydeck) is at 5600"), Config.FloorToZ(15), 5600.f);
 
-	for (int32 Floor = 0; Floor <= 15; ++Floor)
+	for (int32 Floor = 0; Floor <= ONE_BRAHAM_FLOORS; ++Floor)
 	{
 		TestEqual(FString::Printf(TEXT("floor %d matches the builder's pitch"), Floor),
 			Config.FloorToZ(Floor), (Floor - 1) * OneBrahamConstants::FloorHeightCm);
@@ -71,7 +71,7 @@ bool FOneBrahamLiftTravelTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("150 cm above the lobby is still the lobby"), Config.ZToNearestFloor(150.f), 1);
 	TestEqual(TEXT("210 cm above the lobby is nearer the mezzanine"), Config.ZToNearestFloor(210.f), 2);
 	TestEqual(TEXT("below the plaza clamps to the lowest served floor"), Config.ZToNearestFloor(-5000.f), 0);
-	TestEqual(TEXT("above the roof clamps to the highest served floor"), Config.ZToNearestFloor(99999.f), 15);
+	TestEqual(TEXT("above the roof clamps to the highest served floor"), Config.ZToNearestFloor(99999.f), Config.MaxFloor);
 
 	// Travel time: a trapezoid. One storey only just reaches cruise; the full
 	// shaft is 24 s at 250 cm/s plus one ramp's worth of time.
@@ -279,9 +279,40 @@ bool FOneBrahamLiftQueueTest::RunTest(const FString& Parameters)
 		Logic.Update(0.0);
 		TestEqual(TEXT("the car leaves for the chosen floor"), Logic.GetState().TargetFloor, 3);
 
+		// A car on its way picks up a call it is about to pass, then carries on.
+		{
+			FOneBrahamLiftLogic Passing;
+			Passing.Config = Config;
+			Passing.Reset(1, 0.0);
+			Passing.RequestLanding(12, 0.0);
+			Passing.Update(0.0);
+			TestEqual(TEXT("the car sets off for 12"), Passing.GetState().TargetFloor, 12);
+
+			Passing.RequestLanding(8, 2.0);
+			Passing.Update(2.0);
+			TestEqual(TEXT("and stops at 8 on the way up"), Passing.GetState().TargetFloor, 8);
+
+			const double AtEight = 2.0 + FOneBrahamLiftLogic::GetMoveDuration(Passing.GetState(), Config);
+			Passing.Update(AtEight + 0.01);
+			TestEqual(TEXT("it opens at 8"), Passing.GetState().CurrentFloor, 8);
+
+			OBLiftTestRun(Passing, AtEight + 0.01, AtEight + Config.DoorMoveSeconds * 2.0 + Config.DoorDwellSeconds + 0.5);
+			TestEqual(TEXT("then carries on to 12"), Passing.GetState().TargetFloor, 12);
+
+			// A call behind the car, or one too close to brake for, waits.
+			FOneBrahamLiftLogic Late;
+			Late.Config = Config;
+			Late.Reset(1, 0.0);
+			Late.RequestLanding(12, 0.0);
+			Late.Update(0.0);
+			Late.RequestLanding(1, 3.0);
+			Late.Update(3.0);
+			TestEqual(TEXT("a call behind the car is not a pickup"), Late.GetState().TargetFloor, 12);
+		}
+
 		FOneBrahamLiftLogic Top;
 		Top.Config = Config;
-		Top.Reset(15, 0.0);
+		Top.Reset(Config.MaxFloor, 0.0);
 		TestEqual(TEXT("there is no Up from the top floor"), Top.GetNextCarSelection(1), INDEX_NONE);
 
 		FOneBrahamLiftLogic Bottom;
@@ -402,6 +433,20 @@ bool FOneBrahamLiftLockdownTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("and never reaches the Skydeck landing on the way"), Highest < Config.FloorToZ(15) - 1.f);
 		TestTrue(TEXT("it lands on floor 14"),
 			FMath::IsNearlyEqual(FOneBrahamLiftLogic::GetCarZ(State, Config, Arrive), Config.FloorToZ(14), 0.01f));
+	}
+
+	// --- climbing to the crown: the lockdown closes everything from the Skydeck up ---
+	{
+		FOneBrahamLiftLogic Logic;
+		Logic.Config = Config;
+		Logic.Reset(10, 0.0);
+		Logic.RequestLanding(Config.MaxFloor, 0.0);
+		Logic.Update(0.0);
+		Logic.SetLockedDown(true, 2.0);
+
+		const FOneBrahamLiftState& State = Logic.GetState();
+		TestTrue(TEXT("a car bound for the Winter Garden stops below the Skydeck"),
+			State.TargetFloor != INDEX_NONE && State.TargetFloor < Config.LockdownExcludedFloor);
 	}
 
 	// --- parked, and back in service --------------------------------------------------

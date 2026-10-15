@@ -93,7 +93,7 @@ public class OneBraham : ModuleRules
 		PublicDefinitions.Add("ONE_BRAHAM_MAX_SQUADS=4");
 		PublicDefinitions.Add("ONE_BRAHAM_SQUAD_SIZE=4");
 		PublicDefinitions.Add("ONE_BRAHAM_MAX_PLAYERS=16");
-		PublicDefinitions.Add("ONE_BRAHAM_FLOORS=15");
+		PublicDefinitions.Add("ONE_BRAHAM_FLOORS=17");
 		PublicDefinitions.Add("ONE_BRAHAM_MAX_VOICE_FRAME_BYTES=1024");
 		PublicDefinitions.Add("ONE_BRAHAM_VOICE_SAMPLE_RATE=16000");
 

@@ -166,7 +166,7 @@ Priority and cooldown are the runtime's, not the actor's. They are here so the w
 | `V_AMBIENT_CANTEEN` | "They've still got the sandwich board out. Optimistic." | ambient - no gameplay weight, fills a room | 60s | 20% |
 | `V_AMBIENT_SERVER_ROOM` | "It's warm in here. Always warm in here." | ambient - no gameplay weight, fills a room | 60s | 20% |
 | `V_AMBIENT_RAIN` | "Rain's coming in sideways off the plaza." | ambient - no gameplay weight, fills a room | 60s | 20% |
-| `V_AMBIENT_STAIRS` | "Fifteen floors. Nobody thought to fix the lifts." | ambient - no gameplay weight, fills a room | 60s | 20% |
+| `V_AMBIENT_STAIRS` | "Seventeen floors. Nobody thought to fix the lifts." | ambient - no gameplay weight, fills a room | 60s | 20% |
 | `V_AMBIENT_EXEC` | "The executive floor always smells like new carpet." | ambient - no gameplay weight, fills a room | 60s | 20% |
 | `V_AMBIENT_TIRED` | "I've been on shift since six." | ambient - no gameplay weight, fills a room | 60s | 20% |
 | `V_AMBIENT_COFFEE` | "Somebody's left a coffee on the third floor. It's gone cold." | ambient - no gameplay weight, fills a room | 60s | 15% |

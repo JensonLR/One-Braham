@@ -55,6 +55,8 @@ all. Each one is a system with a single owner:
 | `Lockdown/` | the stage director and the purge | PART 6 |
 | `Extraction/` | the Skydeck winch state machine | PART 6 |
 | `Interaction/` | the interaction interface and the interact component | PART 3 |
+| `Lifts/` | the nine lift cars, their panels and the pure lift logic | PART 9 |
+| `World/` | the building's OLED displays (`AOneBrahamDisplay`): slides, layout, crossfades | PART 9 |
 | `Bots/` | the bot controller and behaviour | PART 3 |
 | `Voice/` | types, line set, codec, subsystem, proximity component | PART 7 |
 | `UI/` | HUD types, style, HUD component, HUD widget, crosshair, compass | PART 8 |

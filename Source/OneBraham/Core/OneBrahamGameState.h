@@ -52,7 +52,7 @@ public:
 
 	/** Server display name for the browser and the scoreboard footer. */
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Match")
-	FString ServerName = TEXT("One Braham");
+	FString ServerName = TEXT("On Break");
 
 	/** True when this instance has no human authority (dedicated host). */
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Match")

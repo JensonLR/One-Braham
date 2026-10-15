@@ -57,6 +57,25 @@ PHYSICAL_SURFACE_NAMES = [
 # master; everything else is the lit opaque one.
 GLASS_SURFACES = ("Glass", "BallisticGlass", "Puddle")
 
+# Real-world albedo for the building's surfaces, from the reference photographs
+# (Docs/10 §7). The UI palette's seven colours are brand colours for the HUD;
+# taking surface colours from them made the whole building navy and cyan -
+# navy carpet, navy timber, cyan ductwork. Surfaces not listed (the glass
+# family) keep their palette tint, which the glass master treats as a tint.
+SURFACE_ALBEDO = {
+    "Marble":       (0.74, 0.73, 0.70),   # pale terrazzo, reception
+    "Carpet":       (0.11, 0.12, 0.14),   # charcoal office carpet tile
+    "Concrete":     (0.50, 0.49, 0.47),   # exposed soffits and cores
+    "Metal":        (0.45, 0.46, 0.48),   # galvanised ductwork, steel
+    "Wood":         (0.40, 0.28, 0.17),   # oak-toned timber
+    "Grating":      (0.30, 0.31, 0.32),
+    "Fabric":       (0.22, 0.24, 0.28),   # grey-blue upholstery
+    "ServerRack":   (0.035, 0.035, 0.04),
+    "Plasterboard": (0.82, 0.82, 0.80),   # white partitions
+    "Lino":         (0.56, 0.56, 0.54),
+    "Decking":      (0.38, 0.35, 0.31),
+}
+
 # Which surfaces are metal enough to matter for reflections and impact sparks.
 METAL_SURFACES = ("Metal", "Grating", "Decking", "ServerRack")
 
@@ -256,10 +275,63 @@ def build_master_surface(report):
     _set_blend(material, "BLEND_OPAQUE")
 
     base = _vector_param(material, "BaseColour", (0.5, 0.5, 0.5, 1.0), -700, -420)
-    _connect_property(material, base, "", unreal.MaterialProperty.MP_BASE_COLOR)
-
     rough = _scalar_param(material, "Roughness", 0.5, -700, -280)
-    _connect_property(material, rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
+
+    # Wear: two octaves of world-space noise, a fine grain (scuffs, fibres, the
+    # speckle in terrazzo) and a broad one (traffic paths, patchy concrete),
+    # nudging colour and roughness. Flat single-colour surfaces are what make a
+    # blockout read as a blockout; this is the cheapest thing that stops it.
+    world = _expr(material, unreal.MaterialExpressionWorldPosition, -1700, -700)
+    fine_scale = _scalar_param(material, "GrainScaleCm", 18.0, -1700, -560, 1.0, 400.0)
+    broad_scale = _scalar_param(material, "WearScaleCm", 420.0, -1700, -460, 10.0, 4000.0)
+    fine_pos = _expr(material, unreal.MaterialExpressionDivide, -1480, -640)
+    _connect(material, world, "", fine_pos, "A")
+    _connect(material, fine_scale, "", fine_pos, "B")
+    broad_pos = _expr(material, unreal.MaterialExpressionDivide, -1480, -500)
+    _connect(material, world, "", broad_pos, "A")
+    _connect(material, broad_scale, "", broad_pos, "B")
+    fine = _expr(material, unreal.MaterialExpressionNoise, -1280, -660)
+    broad = _expr(material, unreal.MaterialExpressionNoise, -1280, -480)
+    for node in (fine, broad):
+        for prop, value in (("scale", 1.0), ("levels", 3), ("output_min", 0.0), ("output_max", 1.0)):
+            try:
+                node.set_editor_property(prop, value)
+            except Exception:  # noqa: BLE001 - defaults are acceptable
+                pass
+    _connect(material, fine_pos, "", fine, "Position")
+    _connect(material, broad_pos, "", broad, "Position")
+    mix = _expr(material, unreal.MaterialExpressionLinearInterpolate, -1060, -580)
+    _connect(material, fine, "", mix, "A")
+    _connect(material, broad, "", mix, "B")
+    _connect(material, _scalar_constant(material, 0.55, -1280, -380), "", mix, "Alpha")
+
+    # Colour: base x (1 - amount .. 1 + amount) across the noise.
+    amount = _scalar_param(material, "ColourVariation", 0.12, -1060, -420, 0.0, 0.6)
+    centred = _expr(material, unreal.MaterialExpressionSubtract, -880, -580)
+    _connect(material, mix, "", centred, "A")
+    _connect(material, _scalar_constant(material, 0.5, -1060, -320), "", centred, "B")
+    spread = _expr(material, unreal.MaterialExpressionMultiply, -720, -560)
+    _connect(material, centred, "", spread, "A")
+    _connect(material, amount, "", spread, "B")
+    gain = _expr(material, unreal.MaterialExpressionAdd, -560, -560)
+    _connect(material, spread, "", gain, "A")
+    _connect(material, _scalar_constant(material, 1.0, -720, -440), "", gain, "B")
+    varied = _expr(material, unreal.MaterialExpressionMultiply, -400, -460)
+    _connect(material, base, "", varied, "A")
+    _connect(material, gain, "", varied, "B")
+    _connect_property(material, varied, "", unreal.MaterialProperty.MP_BASE_COLOR)
+
+    # Roughness: worn paths are smoother.
+    rough_amount = _scalar_param(material, "RoughnessVariation", 0.18, -1060, -220, 0.0, 0.6)
+    rough_spread = _expr(material, unreal.MaterialExpressionMultiply, -720, -260)
+    _connect(material, centred, "", rough_spread, "A")
+    _connect(material, rough_amount, "", rough_spread, "B")
+    rough_out = _expr(material, unreal.MaterialExpressionAdd, -560, -280)
+    _connect(material, rough, "", rough_out, "A")
+    _connect(material, rough_spread, "", rough_out, "B")
+    rough_clamped = _expr(material, unreal.MaterialExpressionSaturate, -400, -280)
+    _connect(material, rough_out, "", rough_clamped, "")
+    _connect_property(material, rough_clamped, "", unreal.MaterialProperty.MP_ROUGHNESS)
 
     metal = _scalar_param(material, "Metallic", 0.0, -700, -160)
     _connect_property(material, metal, "", unreal.MaterialProperty.MP_METALLIC)
@@ -287,6 +359,12 @@ def build_master_surface(report):
 
     normal_sample = _expr(material, unreal.MaterialExpressionTextureSampleParameter2D, -500, 460)
     normal_sample.set_editor_property("parameter_name", "NormalMap")
+    # A Normal sampler must default to a normal-compressed texture: the engine's
+    # DefaultTexture is a colour texture, and with it the whole master failed to
+    # compile on Metal - every surface in the game drew as the grey checker.
+    flat_normal = unreal.load_asset("/Engine/EngineMaterials/FlatNormal.FlatNormal")
+    if flat_normal is not None:
+        normal_sample.set_editor_property("texture", flat_normal)
     normal_sample.set_editor_property("sampler_type",
                                      unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL)
     _connect(material, uv_mul, "", normal_sample, "UVs")
@@ -458,7 +536,7 @@ def _apply_instance(material_instance, master, base_key, roughness, metallic,
 
     library.set_material_instance_parent(material_instance, master)
 
-    rgb = _tint(base_key)
+    rgb = base_key if isinstance(base_key, tuple) else _tint(base_key)
     library.set_material_instance_vector_parameter_value(
         material_instance, "BaseColour", unreal.LinearColor(rgb[0], rgb[1], rgb[2], 1.0))
 
@@ -516,7 +594,7 @@ def build_surface_instances(report, masters, physicals):
             continue
 
         _apply_instance(
-            asset, master, colour_key, roughness,
+            asset, master, SURFACE_ALBEDO.get(name, colour_key), roughness,
             0.85 if name in METAL_SURFACES else 0.0,
             SURFACE_ORDER.index(name) if name in SURFACE_ORDER else 2,
             physical=physicals.get(name))
@@ -587,6 +665,7 @@ def build_all():
 
     C.guard(report, "surface instances", build_surface_instances, report, masters, physicals)
     C.guard(report, "brand instances", build_brand_instances, report, masters)
+    C.guard(report, "textured surfaces", build_textured_surfaces, report)
 
     C.log(report.summary())
     return report
@@ -668,8 +747,21 @@ def build_master_highlight(report):
     # else. Written with Abs/Saturate/OneMinus rather than an If node so that it
     # is four nodes a person can read in the editor, not one node they have to
     # open.
+    # SceneTexture hands back float4; the stencil is in R, the frame in RGB.
+    # Mixing a float4 into float3 maths is a compile error on Metal (and the
+    # default material it falls back to is what framed every shot in brown).
+    stencil_r = _expr(material, unreal.MaterialExpressionComponentMask, -760, 20)
+    for channel, keep in (("r", True), ("g", False), ("b", False), ("a", False)):
+        stencil_r.set_editor_property(channel, keep)
+    _connect(material, stencil, "Color", stencil_r, "")
+
+    scene_rgb = _expr(material, unreal.MaterialExpressionComponentMask, -700, -300)
+    for channel, keep in (("r", True), ("g", True), ("b", True), ("a", False)):
+        scene_rgb.set_editor_property(channel, keep)
+    _connect(material, scene, "Color", scene_rgb, "")
+
     subtract = _expr(material, unreal.MaterialExpressionSubtract, -620, 20)
-    _connect(material, stencil, "Color", subtract, "A")
+    _connect(material, stencil_r, "", subtract, "A")
     _connect(material, target, "", subtract, "B")
 
     absolute = _expr(material, unreal.MaterialExpressionAbs, -440, 20)
@@ -689,10 +781,208 @@ def build_master_highlight(report):
     _connect(material, colour, "", tinted, "B")
 
     combined = _expr(material, unreal.MaterialExpressionAdd, 280, -60)
-    _connect(material, scene, "Color", combined, "A")
+    _connect(material, scene_rgb, "", combined, "A")
     _connect(material, tinted, "", combined, "B")
 
     _connect_property(material, combined, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
 
     _finish(material, created, "M_OB_Highlight", report)
     return material
+
+
+# ---------------------------------------------------------------------------
+#  Textured surfaces (CC0 sets from SourceArt/, world-aligned)
+# ---------------------------------------------------------------------------
+# Texture set -> surface, with how the set is used. The textures give detail -
+# grit, grain, joints, the way light catches them - and the colour stays the
+# measured albedo (SURFACE_ALBEDO): a set is desaturated by `desat`, its
+# brightness normalised by `gain`, then tinted. That is how a brown terrazzo
+# photograph becomes One Braham's pale grey one without being re-authored.
+# size: world size of one texture repeat, cm. Docs/21 §4 is the bar a set must
+# clear before it goes in this table.
+TEXTURE_SETS = {
+    "Marble":       ("terrazzo_tiles",    120.0, 1.0, 2.2),
+    "Concrete":     ("concrete_floor_02", 220.0, 0.7, 1.6),
+    "Wood":         ("oak_wood_planks",   180.0, 0.0, 1.0),
+    "Plasterboard": ("white_plaster_02",  200.0, 1.0, 1.25),
+}
+# District surfaces (build_district) that take a set too.
+DISTRICT_TEXTURE_SETS = {
+    "Paving":  ("concrete_pavement", 260.0, 0.6, 1.4),
+    "Asphalt": ("asphalt_02",        320.0, 0.4, 1.8),
+}
+TEXTURE_FOLDER = C.MATERIALS + "/Textures"
+WORLD_ALIGNED_TEXTURE = "/Engine/Functions/Engine_MaterialFunctions01/Texturing/WorldAlignedTexture.WorldAlignedTexture"
+WORLD_ALIGNED_NORMAL = "/Engine/Functions/Engine_MaterialFunctions01/Texturing/WorldAlignedNormal.WorldAlignedNormal"
+
+
+def _source_art_manifest():
+    import json, os
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "SourceArt", "open_assets.json")
+    path = os.path.abspath(path)
+    if not os.path.exists(path):
+        return None, None
+    with open(path) as handle:
+        return json.load(handle), os.path.dirname(os.path.dirname(path))
+
+
+def import_texture_set(report, set_id):
+    """Imports a set's albedo, normal and roughness; returns {role: texture}."""
+    import os
+    manifest, root = _source_art_manifest()
+    if manifest is None:
+        return None
+    out = {}
+    if not unreal.EditorAssetLibrary.does_directory_exist(TEXTURE_FOLDER):
+        unreal.EditorAssetLibrary.make_directory(TEXTURE_FOLDER)
+    for role in ("albedo", "normal", "roughness"):
+        entry = manifest.get("{0}:{1}".format(set_id, role))
+        if entry is None:
+            return None
+        name = "T_{0}_{1}".format(set_id, role)
+        path = "{0}/{1}".format(TEXTURE_FOLDER, name)
+        if not unreal.EditorAssetLibrary.does_asset_exist(path):
+            task = unreal.AssetImportTask()
+            task.set_editor_property("filename", os.path.join(root, entry["path"]))
+            task.set_editor_property("destination_path", TEXTURE_FOLDER)
+            task.set_editor_property("destination_name", name)
+            task.set_editor_property("replace_existing", True)
+            task.set_editor_property("automated", True)
+            task.set_editor_property("save", False)
+            unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
+        texture = unreal.EditorAssetLibrary.load_asset(path)
+        if texture is None:
+            report.failed(path, "could not import " + entry["path"])
+            return None
+        if role == "normal":
+            texture.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_NORMALMAP)
+            texture.set_editor_property("srgb", False)
+        elif role == "roughness":
+            texture.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_MASKS)
+            texture.set_editor_property("srgb", False)
+        unreal.EditorAssetLibrary.save_asset(path)
+        out[role] = texture
+    return out
+
+
+def build_master_textured(report):
+    """M_OB_SurfaceTextured: M_OB_Surface's parameters, with world-aligned
+    (triplanar) albedo detail, roughness and normal maps - box-projected in
+    world space, so a slab made of one scaled cube still shows 60 cm tiles."""
+    path = C.MATERIALS + "/M_OB_SurfaceTextured"
+    if unreal.EditorAssetLibrary.does_asset_exist(path):
+        unreal.EditorAssetLibrary.delete_asset(path)
+    material = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
+        "M_OB_SurfaceTextured", C.MATERIALS, unreal.Material, unreal.MaterialFactoryNew())
+    if material is None:
+        report.failed("M_OB_SurfaceTextured", "could not create material")
+        return None
+    wat = unreal.load_asset(WORLD_ALIGNED_TEXTURE)
+    wan = unreal.load_asset(WORLD_ALIGNED_NORMAL)
+    if wat is None or wan is None:
+        report.failed("M_OB_SurfaceTextured", "world-aligned material functions not found")
+        return None
+
+    def tex_object(name, default, y):
+        node = _expr(material, unreal.MaterialExpressionTextureObjectParameter, -1500, y)
+        node.set_editor_property("parameter_name", name)
+        if default is not None:
+            node.set_editor_property("texture", default)
+        return node
+
+    def call(function, y):
+        node = _expr(material, unreal.MaterialExpressionMaterialFunctionCall, -1150, y)
+        node.set_editor_property("material_function", function)
+        return node
+
+    white = unreal.load_asset("/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture")
+    flat = unreal.load_asset("/Engine/EngineMaterials/FlatNormal.FlatNormal")
+    size = _scalar_param(material, "TextureSizeCm", 200.0, -1500, -700, 10.0, 2000.0)
+
+    albedo_obj = tex_object("AlbedoTex", white, -560)
+    albedo = call(wat, -560)
+    _connect(material, albedo_obj, "", albedo, "TextureObject")
+    _connect(material, size, "", albedo, "TextureSize")
+    desat = _expr(material, unreal.MaterialExpressionDesaturation, -900, -560)
+    _connect(material, albedo, "XYZ Texture", desat, "")
+    _connect(material, _scalar_param(material, "Desaturation", 0.0, -1150, -420), "", desat, "Fraction")
+    gain = _expr(material, unreal.MaterialExpressionMultiply, -720, -560)
+    _connect(material, desat, "", gain, "A")
+    _connect(material, _scalar_param(material, "TextureGain", 1.0, -900, -420, 0.0, 8.0), "", gain, "B")
+    tint = _expr(material, unreal.MaterialExpressionMultiply, -540, -560)
+    _connect(material, gain, "", tint, "A")
+    _connect(material, _vector_param(material, "BaseColour", (1.0, 1.0, 1.0, 1.0), -720, -420), "", tint, "B")
+    _connect_property(material, tint, "", unreal.MaterialProperty.MP_BASE_COLOR)
+
+    rough_obj = tex_object("RoughnessTex", white, -260)
+    rough = call(wat, -260)
+    _connect(material, rough_obj, "", rough, "TextureObject")
+    _connect(material, size, "", rough, "TextureSize")
+    rough_r = _expr(material, unreal.MaterialExpressionComponentMask, -900, -260)
+    for channel, on in (("r", True), ("g", False), ("b", False), ("a", False)):
+        rough_r.set_editor_property(channel, on)
+    _connect(material, rough, "XYZ Texture", rough_r, "")
+    rough_scale = _expr(material, unreal.MaterialExpressionMultiply, -720, -260)
+    _connect(material, rough_r, "", rough_scale, "A")
+    _connect(material, _scalar_param(material, "Roughness", 1.0, -900, -140, 0.0, 2.0), "", rough_scale, "B")
+    rough_sat = _expr(material, unreal.MaterialExpressionSaturate, -540, -260)
+    _connect(material, rough_scale, "", rough_sat, "")
+    _connect_property(material, rough_sat, "", unreal.MaterialProperty.MP_ROUGHNESS)
+
+    normal_obj = tex_object("NormalTex", flat, 60)
+    normal = call(wan, 60)
+    _connect(material, normal_obj, "", normal, "TextureObject")
+    _connect(material, size, "", normal, "TextureSize")
+    lerp = _expr(material, unreal.MaterialExpressionLinearInterpolate, -720, 60)
+    _connect(material, _constant3(material, (0.0, 0.0, 1.0), -900, 180), "", lerp, "A")
+    _connect(material, normal, "XYZ Texture", lerp, "B")
+    _connect(material, _scalar_param(material, "NormalStrength", 1.0, -900, 260), "", lerp, "Alpha")
+    _connect_property(material, lerp, "", unreal.MaterialProperty.MP_NORMAL)
+
+    _connect_property(material, _scalar_param(material, "Metallic", 0.0, -540, 300), "",
+                      unreal.MaterialProperty.MP_METALLIC)
+    _connect_property(material, _scalar_param(material, "Specular", 0.5, -540, 400), "",
+                      unreal.MaterialProperty.MP_SPECULAR)
+    _scalar_param(material, "SurfaceTypeIndex", 2.0, -540, 500, 0.0, 20.0)
+    _finish(material, True, "M_OB_SurfaceTextured", report)
+    return material
+
+
+def apply_texture_set(report, instance, master, spec, albedo):
+    """Re-parents a surface instance onto the textured master with a set."""
+    set_id, size, desat, gain = spec
+    textures = import_texture_set(report, set_id)
+    if textures is None or master is None:
+        return False
+    mel = unreal.MaterialEditingLibrary
+    mel.set_material_instance_parent(instance, master)
+    mel.set_material_instance_texture_parameter_value(instance, "AlbedoTex", textures["albedo"])
+    mel.set_material_instance_texture_parameter_value(instance, "NormalTex", textures["normal"])
+    mel.set_material_instance_texture_parameter_value(instance, "RoughnessTex", textures["roughness"])
+    mel.set_material_instance_scalar_parameter_value(instance, "TextureSizeCm", size)
+    mel.set_material_instance_scalar_parameter_value(instance, "Desaturation", desat)
+    mel.set_material_instance_scalar_parameter_value(instance, "TextureGain", gain)
+    mel.set_material_instance_vector_parameter_value(
+        instance, "BaseColour", unreal.LinearColor(albedo[0], albedo[1], albedo[2], 1.0))
+    return True
+
+
+def build_textured_surfaces(report):
+    """Puts the texture sets on the surfaces that have one. Without SourceArt/
+    (fetch_open_assets.py not run) the flat instances stand, and say so."""
+    manifest, _root = _source_art_manifest()
+    if manifest is None:
+        report.skipped_asset(TEXTURE_FOLDER, "SourceArt/open_assets.json missing - run fetch_open_assets.py")
+        return 0
+    master = build_master_textured(report)
+    applied = 0
+    for surface, spec in sorted(TEXTURE_SETS.items()):
+        path = "{0}/MI_{1}".format(C.MATERIALS_INSTANCES, surface)
+        instance = unreal.EditorAssetLibrary.load_asset(path)
+        if instance is None:
+            continue
+        if apply_texture_set(report, instance, master, spec, SURFACE_ALBEDO[surface]):
+            unreal.EditorAssetLibrary.save_asset(path)
+            applied += 1
+            C.log(u"  MI_{0}: textured with {1}".format(surface, spec[0]))
+    return applied

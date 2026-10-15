@@ -57,6 +57,7 @@ if C.IN_EDITOR:
 #  Engine primitives
 # ---------------------------------------------------------------------------
 CUBE_MESH = "/Engine/BasicShapes/Cube.Cube"        # 100 x 100 x 100 cm
+SPHERE_MESH = "/Engine/BasicShapes/Sphere.Sphere"  # 100 cm diameter: tree crowns
 PLANE_MESH = "/Engine/BasicShapes/Plane.Plane"     # 100 x 100 cm, +Z
 CYLINDER_MESH = "/Engine/BasicShapes/Cylinder.Cylinder"   # 100 dia x 100 tall
 SPHERE_MESH = "/Engine/BasicShapes/Sphere.Sphere"
@@ -169,6 +170,14 @@ ROOM_FLOOR_FINISH = {
     ("Skydeck", "Winch_Control"):   "Lino",
     ("Skydeck", "Plant_Room"):      "Grating",
     ("Skydeck", "Bar_Pavilion"):    "Wood",
+
+    # The crown: the suite on carpet, the lounge and the atrium garden on
+    # timber; the Winter Garden on timber decking, the terrace on stone.
+    ("Summit", "Management_Suite"):  "Carpet",
+    ("Summit", "Collab_Lounge"):     "Wood",
+    ("Summit", "Atrium_Garden"):     "Wood",
+    ("WinterGarden", "Winter_Garden"): "Wood",
+    ("WinterGarden", "Roof_Terrace"):  "Concrete",
 }
 
 # The finish a room gets when it is not named above: the area's own floor.
@@ -180,6 +189,8 @@ AREA_DEFAULT_FINISH = {
     "ServerComms":   "ServerRack",
     "Executive":     "Carpet",
     "Skydeck":       "Decking",
+    "Summit":        "Carpet",
+    "WinterGarden":  "Decking",
 }
 
 # ---------------------------------------------------------------------------
@@ -197,15 +208,17 @@ ROOM_PROGRAMMES = {
     # plate's centre; zones in OPEN_ROOMS are open floor with a finish and no
     # walls. A room's doorway faces the core.
     "Ground_Plaza": [
-        ("Reception_Foyer", -500, -1475, 3300, 650),
-        ("Security_Office", -1800, -500, 800, 900),
-        ("Post_Room", -1800, 650, 800, 900),
-        ("Bike_Store", 1800, 1500, 800, 600),
+        ("Reception_Foyer", 500, -1475, 3300, 650),
+        ("Security_Office", 1800, -500, 800, 900),
+        ("Post_Room", 1800, 650, 800, 900),
+        ("Bike_Store", -1800, 1500, 800, 600),
     ],
     "Lobby": [
-        ("Arrival_Gallery", 0, -1475, 4300, 650),
-        ("Client_Showcase", -1775, 100, 750, 2100),
-        ("Lab", 1775, 600, 750, 1300),
+        # West of the reception void: the gallery's floor stops at its edge.
+        ("Arrival_Gallery", -925, -1475, 2450, 650),
+        # Starts 2.5 m back from the reception void: the feature stair lands there.
+        ("Client_Showcase", 1775, 225, 750, 1850),
+        ("Lab", -1775, 600, 750, 1300),
         ("Meeting_Room", -1500, 1575, 1100, 350),
         ("Coffee_Point", 1500, 1575, 1100, 350),
     ],
@@ -261,6 +274,18 @@ ROOM_PROGRAMMES = {
         ("Winch_Control", -1700, 1350, 600, 500),
         ("Edge_Rail_North", 0, 1740, 4200, 100),
     ],
+    # The crown over the canteen. 16: the Management Suite - the real
+    # building's top office floor - beside a lounge and the foot of the atrium.
+    "Summit": [
+        ("Management_Suite", 1500, -1300, 1300, 800),
+        ("Collab_Lounge", -150, -1175, 1000, 1250),
+        ("Atrium_Garden", -1450, -1175, 1300, 1250),
+    ],
+    # 17: the Winter Garden round the atrium void, and the open roof terrace.
+    "WinterGarden": [
+        ("Winter_Garden", 200, -1175, 1100, 1250),
+        ("Roof_Terrace", 1500, -1175, 1400, 1250),
+    ],
 }
 
 # Zones of an open floor: they get a floor finish but no partition walls. The
@@ -284,6 +309,10 @@ OPEN_ROOMS = {
     ("Skydeck", "Canteen_Hall"),
     ("Skydeck", "Helipad"),
     ("Skydeck", "Edge_Rail_North"),
+    ("Summit", "Collab_Lounge"),
+    ("Summit", "Atrium_Garden"),
+    ("WinterGarden", "Winter_Garden"),
+    ("WinterGarden", "Roof_Terrace"),
 }
 
 # Floor 15's split: the canteen is roofed and glazed south of this line, the
@@ -292,19 +321,106 @@ SKYDECK_SCREEN_Y = -550.0
 SKYDECK_GATE_X = 900.0
 SKYDECK_GATE_WIDTH = 300.0
 
+# The crown: floors 16 and 17 stand over the canteen half (south of the screen
+# line) and over the core stalk, which already rises through the balcony; the
+# rest of the plate is the open Skydeck. CROWN_OUT is the balcony's footprint,
+# cut out of the crown floors' slabs. On 17 the atrium opens down to 16, and
+# the east end of the canteen block is the open roof terrace.
+CROWN_STALK_X = 1120.0
+CROWN_NORTH_Y = 1260.0
+CROWN_OUT = [
+    (-2200.0, -CROWN_STALK_X, SKYDECK_SCREEN_Y, 1800.0),
+    (CROWN_STALK_X, 2200.0, SKYDECK_SCREEN_Y, 1800.0),
+    (-CROWN_STALK_X, CROWN_STALK_X, CROWN_NORTH_Y, 1800.0),
+]
+ATRIUM_VOID = (-1950.0, -850.0, -1550.0, -800.0)
+TERRACE_17 = (800.0, 2200.0, -1800.0, SKYDECK_SCREEN_Y)
+WINTER_GARDEN_EAST_X = 780.0
+
+# The reception is double height, as the real one is: floor 1's slab is open
+# over the reception side, from the frontage back to the feature wall.
+RECEPTION_VOID = (300.0, 2200.0, -1800.0, -955.0)
+
+# The main stair, to the left of the glass lift as you face it from the lift
+# hall (+x), is a spiral that runs the full height of the tower: one turn per
+# storey round a central column, entered through the stair door. The other core
+# stair (-x) is the switchback fire stair - the real building has two.
+SPIRAL_SIDE = 1.0
+SPIRAL_CENTRE = (440.0, 965.0)
+SPIRAL_R_OUT = 205.0
+SPIRAL_R_IN = 22.0
+SPIRAL_STEPS = 20                 # per storey: 20 cm rise, 18 degrees each
+SPIRAL_HOLE = (SPIRAL_CENTRE[0] - 215.0, SPIRAL_CENTRE[0] + 215.0,
+               SPIRAL_CENTRE[1] - 215.0, SPIRAL_CENTRE[1] + 215.0)
+
+# The reception's feature stair: an open steel stair with timber treads along
+# the east glazing, from the public foyer up to the floor-1 gallery.
+FEATURE_STAIR_X = (1960.0, 2160.0)
+
+# Floor 1, the top of the escalators: the wall straight ahead of the riders.
+ESCALATOR_ARRIVAL_WALL_Y = -80.0
+FEATURE_STAIR_Y = (-1571.0, -955.0)     # bottom (ground) -> top (floor-1 slab edge)
+FEATURE_STAIR_STEPS = 22
+
+
+# The "soft corners" of the real curtain wall: the glass turns each corner on
+# a 240 cm radius from floor 1 up, and the slabs are cut back to sit inside it.
+SOFT_CORNER_R = 240.0          # at the glass plane (2215 x 1815)
+SLAB_CORNER_R = 225.0          # at the slab edge, 15 cm inside the glass
+
+
+def _corner_cuts():
+    """Stepped rectangles that remove the slab outside each rounded corner."""
+    r = SLAB_CORNER_R
+    def outside(u):           # how far in from the corner the slab must go, at u along the edge
+        return r - math.sqrt(max(0.0, r * r - (r - u) ** 2))
+    bounds = [0.0, 12.0, 30.0, 55.0, 85.0, 120.0, 160.0, 200.0, r]
+    cuts = []
+    for sx in (-1.0, 1.0):
+        for sy in (-1.0, 1.0):
+            for u0, u1 in zip(bounds, bounds[1:]):
+                v = outside(u0)
+                if v < 1.0:
+                    continue
+                xa, xb = 2200.0 - u1, 2200.0 - u0
+                ya, yb = 1800.0 - v, 1800.0
+                rx = (xa, xb) if sx > 0 else (-xb, -xa)
+                ry = (ya, yb) if sy > 0 else (-yb, -ya)
+                cuts.append((rx[0], rx[1], ry[0], ry[1]))
+                # and the mirror across the diagonal, so both edges are cut
+                rx2 = (2200.0 - v, 2200.0) if sx > 0 else (-2200.0, -2200.0 + v)
+                ry2 = (1800.0 - u1, 1800.0 - u0) if sy > 0 else (-1800.0 + u0, -1800.0 + u1)
+                cuts.append((rx2[0], rx2[1], ry2[0], ry2[1]))
+    return cuts
+
+
+SOFT_CORNER_CUTS = _corner_cuts()
+
+
+def _in_rect(x, y, rect):
+    return rect[0] <= x <= rect[1] and rect[2] <= y <= rect[3]
+
+
+def _district_material(name):
+    """A finish authored by build_district (One Braham's own palette)."""
+    path = "{0}/MI_OB_District_{1}".format(C.MATERIALS_INSTANCES, name)
+    if unreal.EditorAssetLibrary.does_asset_exist(path):
+        return unreal.EditorAssetLibrary.load_asset(path)
+    return None
+
 # Anchors: named, gameplay-relevant positions per area. The manifest this script
 # writes is the authoritative list the C++ and Docs reference.
 ANCHORS = {
     # Clear floor only: the loop round the core, the bands' open zones, never
     # inside the core, a desk row or a walled room.
     "Ground_Plaza": [
-        ("Plaza_Spawn_West", -1900, -1500),
-        ("Plaza_Spawn_East", 1800, -1000),
+        ("Plaza_Spawn_West", -1800, -1000),
+        ("Plaza_Spawn_East", 1900, -1500),
         ("Plaza_Spawn_North", 0, 1500),
     ],
     "Lobby": [
         ("Lobby_Spawn_A", -1800, -1450),
-        ("Lobby_Spawn_B", 1800, -1450),
+        ("Lobby_Spawn_B", 900, -750),     # clear of the reception void
         ("Lobby_Spawn_C", 0, 1500),
     ],
     "Mezzanine": [
@@ -424,6 +540,18 @@ def _spawn(actor_class, location, rotation=None):
     return _actor_subsystem().spawn_actor_from_class(actor_class, location, rot)
 
 
+def _generated_actors(actors):
+    """Everything a build placed in a level, for clearing before a rebuild.
+
+    The only actors a level owns itself are its WorldSettings and its builder
+    brush - an exact Brush. Volumes are Brush subclasses, so filtering on
+    isinstance(Brush) kept every post-process, nav and audio volume: each build
+    stacked another set on the last, and an old grade kept winning.
+    """
+    return [a for a in actors
+            if not isinstance(a, unreal.WorldSettings) and type(a) is not unreal.Brush]
+
+
 def _label(actor, label):
     if actor is None:
         return
@@ -433,14 +561,14 @@ def _label(actor, label):
         pass
 
 
-def _box(location, size_cm, material=None, label=None, static=True):
+def _box(location, size_cm, material=None, label=None, static=True, mesh_path=None):
     """Places a cube scaled to `size_cm` as a single piece of geometry.
 
     A cube is 100 cm, so scale = cm / 100. Using one primitive for the blockout
     means the collision, the nav mesh, the physical material and the lightmaps
     are all correct from the first run: this is real, walkable geometry.
     """
-    mesh = _load(CUBE_MESH)
+    mesh = _load(mesh_path or CUBE_MESH)
     if mesh is None:
         return None
 
@@ -579,6 +707,8 @@ AREA_GRADE = {
     "ServerComms":   (0.22, 1.6, 0.40, 0.034, 0.46),
     "Executive":     (0.65, 2.0, 0.60, 0.020, 0.32),
     "Skydeck":       (0.55, 3.6, 1.15, 0.024, 0.44),
+    "Summit":        (0.65, 2.0, 0.60, 0.020, 0.32),
+    "WinterGarden":  (0.60, 3.4, 1.00, 0.022, 0.40),
 }
 
 
@@ -615,9 +745,20 @@ STAIR_DOOR_X = 440.0                     # the stair door's centre, mirrored
 STAIR_DOOR_WIDTH = 150.0
 TOILET_X = (700.0, 1100.0)               # mirrored
 CORE_NORTH_Y = 1240.0
-ESCALATOR_X = (960.0, 1380.0)            # floor 0 to floor 1, rising north
-ESCALATOR_Y = (-1050.0, -350.0)
-COFFEE_WALL_X = 1450.0
+# The public side of the ground floor is -x. Facing north from the revolving
+# doors, Unreal's +y forward puts -x on your RIGHT (the engine is left-handed),
+# and the brief is "gates to the right, escalators right of them, coffee shop
+# right of that". The core is unchanged: the stairs at +x stay on the left of
+# the glass lift.
+# Four escalators side by side, rising north. Their foot is set back from the
+# gate line: through the main gates you turn right along the passage at their
+# foot, then left up them; their own card gates face that passage from the
+# public side.
+ESCALATOR_X = (-1430.0, -890.0)          # floor 0 to floor 1, rising north
+ESCALATOR_Y = (-900.0, -200.0)
+ESCALATOR_LANES = 4
+MAIN_GATES_END_X = -680.0                # the main gate line stops at the lift hall
+COFFEE_WALL_X = -1450.0
 GATE_LINE_Y = -1150.0
 
 # The lift actors (AOneBrahamLift) bring their own doors; until a build has
@@ -634,7 +775,8 @@ def _slab_holes(floor_index):
                 cx = CORE_SHAFT_X * side
                 holes.append((cx - 125.0, cx + 125.0, y - 135.0, y + 135.0))
         holes.append((-150.0, 150.0, GLASS_LIFT_Y[0], GLASS_LIFT_Y[1]))
-        for side in (-1.0, 1.0):
+        holes.append(SPIRAL_HOLE)
+        for side in (-1.0,):
             if floor_index < C.FLOOR_COUNT:
                 # The whole flight area: the upper floor's first flight sits in it.
                 x0, x1 = STAIR_X
@@ -646,6 +788,13 @@ def _slab_holes(floor_index):
             holes.append((x0, x1, STAIR_FLIGHT_Y[0], STAIR_TOP_Y if floor_index < C.FLOOR_COUNT else STAIR_FLIGHT_Y[1]))
     if floor_index == 1:
         holes.append((ESCALATOR_X[0] - 10.0, ESCALATOR_X[1] + 10.0, ESCALATOR_Y[0] - 10.0, ESCALATOR_Y[1] + 10.0))
+        holes.append(RECEPTION_VOID)
+    if floor_index >= 1:
+        holes.extend(SOFT_CORNER_CUTS)
+    if floor_index >= 16:
+        holes.extend(CROWN_OUT)
+    if floor_index == 17:
+        holes.append(ATRIUM_VOID)
     return holes
 
 
@@ -721,6 +870,30 @@ def _flight(cx, cy, z, x0, x1, y_start, y_end, rise_from, rise_to, steps, materi
              "{0}_{1:02d}".format(label, i + 1))
 
 
+def build_spiral_stair(cx, cy, z, materials, label):
+    """One storey of the spiral: treads 1-19 round the column, rising from this
+    floor's stair lobby to the next floor's, which is tread 20."""
+    concrete = materials.get("Concrete")
+    steel = _district_material("BlackCladding") or materials.get("Metal")
+    rise = C.FLOOR_HEIGHT_CM / SPIRAL_STEPS
+    radius = (SPIRAL_R_IN + SPIRAL_R_OUT) / 2.0
+    length = SPIRAL_R_OUT - SPIRAL_R_IN
+    width = 2.0 * math.pi * SPIRAL_R_OUT / SPIRAL_STEPS - 2.0
+    ox, oy = SPIRAL_CENTRE
+    _box((cx + ox, cy + oy, z + C.FLOOR_HEIGHT_CM / 2.0), (2.0 * SPIRAL_R_IN + 8.0, 2.0 * SPIRAL_R_IN + 8.0,
+         C.FLOOR_HEIGHT_CM), steel, label + "_Column", mesh_path="/Engine/BasicShapes/Cylinder.Cylinder")
+    for i in range(1, SPIRAL_STEPS):
+        angle = math.radians(-90.0 + 360.0 / SPIRAL_STEPS * i)
+        top = rise * i
+        tread = _box((cx + ox + radius * math.cos(angle), cy + oy + radius * math.sin(angle), z + top - 3.0),
+                     (length, width, 6.0), concrete, "{0}_Tread_{1:02d}".format(label, i))
+        if tread is not None:
+            tread.set_actor_rotation(unreal.Rotator(roll=0.0, pitch=0.0, yaw=math.degrees(angle)), False)
+        post_r = SPIRAL_R_OUT - 6.0
+        _box((cx + ox + post_r * math.cos(angle), cy + oy + post_r * math.sin(angle), z + top + 50.0),
+             (4.0, 4.0, 100.0), steel, "{0}_Baluster_{1:02d}".format(label, i))
+
+
 def build_core(floor_index, area_name, cx, cy, z, materials, prefix):
     """The lift banks, glass lift, cross-hallway, toilets and both stairs on one floor."""
     concrete = materials.get("Concrete")
@@ -764,7 +937,10 @@ def build_core(floor_index, area_name, cx, cy, z, materials, prefix):
         _wall_with_door(cx, cy, z, wall_outer, STAIR_LOBBY_Y[0], wall_inner, STAIR_LOBBY_Y[0],
                         STAIR_DOOR_X * side, STAIR_DOOR_WIDTH, concrete, "{0}_Stair_{1}_Door".format(prefix, tag))
 
-        if floor_index < C.FLOOR_COUNT:
+        if side == SPIRAL_SIDE:
+            if floor_index < C.FLOOR_COUNT:
+                build_spiral_stair(cx, cy, z, materials, "{0}_Stair_{1}".format(prefix, tag))
+        elif floor_index < C.FLOOR_COUNT:
             half = C.FLOOR_HEIGHT_CM / 2.0
             # Up-flight on the outer lane, landing at the back, return flight inner.
             up_x0, up_x1 = sorted((outer, (STAIR_DOOR_X + 20.0) * side))
@@ -780,6 +956,25 @@ def build_core(floor_index, area_name, cx, cy, z, materials, prefix):
             div_x = STAIR_DOOR_X * side
             _wall(cx, cy, z, div_x, STAIR_FLIGHT_Y[0], div_x, STAIR_FLIGHT_Y[1], concrete,
                   "{0}_Stair_{1}_Spine".format(prefix, tag), height=C.FLOOR_HEIGHT_CM)
+
+        # Stair lighting: the ceiling grid never lands inside the core, so each
+        # stair gets its own bulkheads - one over the lobby, one over the mid
+        # landing. Cold, low and shadowed: the stairs are meant to feel like
+        # the building's back passages, not like a gap in the lighting.
+        for label, ly, lz in (("Lobby", (STAIR_LOBBY_Y[0] + STAIR_FLIGHT_Y[0]) / 2.0, z + C.CEILING_HEIGHT_CM - 40.0),
+                              ("Landing", (STAIR_FLIGHT_Y[1] + STAIR_TOP_Y) / 2.0, z + C.FLOOR_HEIGHT_CM / 2.0 + 260.0)):
+            bulkhead = _spawn(unreal.PointLight, unreal.Vector(cx + STAIR_DOOR_X * side, cy + ly, lz))
+            if bulkhead is None:
+                continue
+            component = bulkhead.point_light_component
+            component.set_editor_property("IntensityUnits", unreal.LightUnits.LUMENS)
+            component.set_editor_property("Intensity", 1800.0)
+            component.set_editor_property("AttenuationRadius", 650.0)
+            component.set_editor_property("SourceRadius", 12.0)
+            component.set_editor_property("LightColor", unreal.Color(235, 240, 255, 255))
+            component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
+            component.set_editor_property("MaxDrawDistance", 3000.0)
+            _label(bulkhead, "{0}_Stair_{1}_Bulkhead_{2}".format(prefix, tag, label))
 
     # --- Toilets off the cross-hallway: men's left, women's right.
     for side, tag in ((-1.0, "Mens"), (1.0, "Womens")):
@@ -820,7 +1015,7 @@ def build_ground_floor(cx, cy, z, half_x, half_y, materials, prefix):
     h = C.CEILING_HEIGHT_CM
 
     # --- The frontage: glass, with three revolving doors.
-    doors = (-1300.0, -800.0, -300.0)
+    doors = (300.0, 800.0, 1300.0)
     width = 240.0
     x = -half_x
     for index, door_x in enumerate(doors + (half_x + width / 2.0,)):
@@ -841,39 +1036,106 @@ def build_ground_floor(cx, cy, z, half_x, half_y, materials, prefix):
         _wall(cx, cy, z, door_x - 20.0, -half_y, door_x + 20.0, -half_y, glass,
               "{0}_Revolving_{1}_Header".format(prefix, index + 1), height=h - 260.0, base=260.0, thickness=15.0)
 
-    # --- Reception: desk in front of a dark feature wall.
-    _box((cx - 900.0, cy - 1250.0, z + 55.0), (900.0, 110.0, 110.0), marble, prefix + "_Reception_Desk")
-    _wall(cx, cy, z, -1400.0, -950.0, -400.0, -950.0, metal, prefix + "_Reception_FeatureWall", thickness=40.0)
-    # Close the back-of-house behind reception so the gates are the only way in.
-    _wall(cx, cy, z, -half_x, GATE_LINE_Y, -1400.0, GATE_LINE_Y, screen, prefix + "_Reception_Screen_W", thickness=12.0)
-    _wall(cx, cy, z, -1400.0, GATE_LINE_Y, -1400.0, -950.0, plaster, prefix + "_Reception_Return_W")
-    _wall(cx, cy, z, -400.0, GATE_LINE_Y, -400.0, -950.0, plaster, prefix + "_Reception_Return_E")
-
-    # --- The gate line: pedestals every 110 cm, lanes between.
-    pedestal_x = -400.0
+    # The stick curtain wall of the real base: black mullions every 150 cm,
+    # each with a glass fin standing inside it, double height across the
+    # reception void (the floor-1 slab is open behind it) and a black transom
+    # where the floor-1 slab meets the glass elsewhere.
+    black = _district_material("BlackCladding") or metal
+    void_x0, void_x1 = RECEPTION_VOID[0], RECEPTION_VOID[1]
+    mullion_x = -half_x
     index = 0
-    while pedestal_x <= COFFEE_WALL_X - 20.0:
+    while mullion_x <= half_x + 1.0:
         index += 1
-        _box((cx + pedestal_x, cy + GATE_LINE_Y, z + 50.0), (20.0, 120.0, 100.0), metal,
-             "{0}_Gate_Pedestal_{1:02d}".format(prefix, index))
-        pedestal_x += 110.0
+        if not any(abs(mullion_x - door_x) < width / 2.0 + 10.0 for door_x in doors):
+            tall = void_x0 <= mullion_x <= void_x1
+            height = 2.0 * C.FLOOR_HEIGHT_CM if tall else h
+            _box((cx + mullion_x, cy - half_y - 10.0, z + height / 2.0), (8.0, 14.0, height), black,
+                 "{0}_Frontage_Mullion_{1:02d}".format(prefix, index))
+            _box((cx + mullion_x, cy - half_y + 28.0, z + height / 2.0), (2.5, 50.0, height), screen,
+                 "{0}_Frontage_GlassFin_{1:02d}".format(prefix, index))
+        mullion_x += 150.0
+    _box((cx, cy - half_y - 10.0, z + h - 10.0), (2.0 * half_x, 16.0, 20.0), black, prefix + "_Frontage_Transom")
 
-    # --- Escalators behind the gates, up to floor 1, in their enclosure.
-    for index, (x0, x1) in enumerate(((ESCALATOR_X[0], 1160.0), (1180.0, ESCALATOR_X[1]))):
-        _flight(cx, cy, z, x0, x1, ESCALATOR_Y[0], ESCALATOR_Y[1], 0.0, C.FLOOR_HEIGHT_CM, 22, metal,
-                "{0}_Escalator_{1}".format(prefix, index + 1))
-    _wall(cx, cy, z, ESCALATOR_X[0] - 20.0, ESCALATOR_Y[0], ESCALATOR_X[0] - 20.0, ESCALATOR_Y[1], metal,
-          prefix + "_Escalator_Enclosure_W", height=h)
-    _box((cx + 1170.0, cy + (ESCALATOR_Y[0] + ESCALATOR_Y[1]) / 2.0, z + h / 2.0),
-         (20.0, ESCALATOR_Y[1] - ESCALATOR_Y[0], h), metal, prefix + "_Escalator_Divider")
+    # --- Reception: desk in front of a dark feature wall.
+    _box((cx + 900.0, cy - 1250.0, z + 55.0), (900.0, 110.0, 110.0), marble, prefix + "_Reception_Desk")
+    # The black-clad feature volume behind the desk, double height like the
+    # reception itself (the real one carries the owner's roundel; ours stays
+    # plain - the game's tower is OB, not anyone's trademark).
+    black = _district_material("BlackCladding") or metal
+    _box((cx + 900.0, cy - 978.0, z + 390.0), (1000.0, 45.0, 780.0), black, prefix + "_Reception_FeatureWall")
+    # Close the back-of-house behind reception so the gates are the only way in.
+    # The screen stops short of the feature stair, which rises over the corner
+    # of the back-of-house; a return closes it.
+    _wall(cx, cy, z, 1400.0, GATE_LINE_Y, FEATURE_STAIR_X[0] - 20.0, GATE_LINE_Y, screen,
+          prefix + "_Reception_Screen_E", thickness=12.0)
+    _wall(cx, cy, z, FEATURE_STAIR_X[0] - 20.0, GATE_LINE_Y, FEATURE_STAIR_X[0] - 20.0, -955.0, plaster,
+          prefix + "_Reception_Screen_Return", height=200.0)
+    build_feature_stair(cx, cy, z, materials, prefix)
+    _wall(cx, cy, z, 1400.0, GATE_LINE_Y, 1400.0, -950.0, plaster, prefix + "_Reception_Return_E")
+    _wall(cx, cy, z, 400.0, GATE_LINE_Y, 400.0, -950.0, plaster, prefix + "_Reception_Return_W")
+
+    # --- The gate lines. Pedestals every 110 cm, lanes between, each with its
+    # own glass wings held open (folded flat against its sides, inside its
+    # length, standing above it - never in the lane). The main line runs from
+    # reception's corner to the lift hall; then a short wall; then the
+    # escalators' own line, right in front of them.
+    def gate_line(x_from, x_to, label):
+        index = 0
+        step = 110.0 if x_to > x_from else -110.0
+        x = x_from
+        while (x <= x_to + 1.0) if step > 0 else (x >= x_to - 1.0):
+            index += 1
+            _box((cx + x, cy + GATE_LINE_Y, z + 50.0), (20.0, 120.0, 100.0), metal,
+                 "{0}_{1}_Pedestal_{2:02d}".format(prefix, label, index))
+            for face in (-1.0, 1.0):
+                _box((cx + x + face * 11.5, cy + GATE_LINE_Y, z + 85.0), (3.0, 100.0, 130.0), screen,
+                     "{0}_{1}_Pedestal_{2:02d}_Glass_{3}".format(prefix, label, index, "W" if face < 0 else "E"))
+            x += step
+
+    gate_line(400.0, MAIN_GATES_END_X, "Gate")
+    _wall(cx, cy, z, MAIN_GATES_END_X - 20.0, GATE_LINE_Y, ESCALATOR_X[1] + 20.0, GATE_LINE_Y, plaster,
+          prefix + "_Gate_Wall")
+    gate_line(ESCALATOR_X[1], COFFEE_WALL_X + 20.0, "EscalatorGate")
+
+    # --- Four escalators up to floor 1: step flights between sloped glass
+    # balustrades with black handrails and a stainless deck, the east side
+    # closed by the enclosure that carries the escalator's OLED wall.
+    lanes = ESCALATOR_LANES
+    divider = 20.0
+    lane_w = (ESCALATOR_X[1] - ESCALATOR_X[0] - divider * (lanes - 1)) / lanes
+    run = ESCALATOR_Y[1] - ESCALATOR_Y[0]
+    rise = C.FLOOR_HEIGHT_CM
+    slope = math.degrees(math.atan2(rise, run))
+    length = math.hypot(run, rise)
+    glass_rail = materials.get("Glass") or screen
+    rubber = _district_material("BlackCladding") or metal
+    steel = _district_material("Aluminium") or metal
+    for lane in range(lanes):
+        x0 = ESCALATOR_X[0] + lane * (lane_w + divider)
+        _flight(cx, cy, z, x0, x0 + lane_w, ESCALATOR_Y[0], ESCALATOR_Y[1], 0.0, rise, 22, metal,
+                "{0}_Escalator_{1}".format(prefix, lane + 1))
+    for edge in range(lanes + 1):
+        ex = ESCALATOR_X[0] + edge * (lane_w + divider) - divider / 2.0
+        ex = max(ESCALATOR_X[0] - divider / 2.0, min(ESCALATOR_X[1] + divider / 2.0, ex))
+        mid_y = (ESCALATOR_Y[0] + ESCALATOR_Y[1]) / 2.0
+        for part, (w, h_, off, material) in (("Deck", (divider, 40.0, 20.0, steel)),
+                                             ("Glass", (2.0, 90.0, 85.0, glass_rail)),
+                                             ("Handrail", (10.0, 8.0, 134.0, rubber))):
+            piece = _box((cx + ex, cy + mid_y, z + rise / 2.0 + off), (w, length + 40.0, h_), material,
+                         "{0}_Escalator_{1}_{2}".format(prefix, part, edge + 1))
+            if piece is not None:
+                piece.set_actor_rotation(unreal.Rotator(roll=-slope, pitch=0.0, yaw=0.0), False)
+    # The enclosure faces the lift hall and carries the escalator's OLED wall.
+    _wall(cx, cy, z, ESCALATOR_X[1] + 20.0 + divider, ESCALATOR_Y[0] - 40.0, ESCALATOR_X[1] + 20.0 + divider,
+          ESCALATOR_Y[1], metal, prefix + "_Escalator_Enclosure_E", height=h)
 
     # --- Coffee shop: walled off from the escalators, open to the public side.
     _wall_with_door(cx, cy, z, COFFEE_WALL_X, -half_y, COFFEE_WALL_X, -200.0, -1450.0, 180.0, plaster,
-                    prefix + "_Coffee_Wall_W")
-    _wall(cx, cy, z, COFFEE_WALL_X, -200.0, half_x, -200.0, plaster, prefix + "_Coffee_Wall_N")
-    _box((cx + 2000.0, cy - 700.0, z + 52.0), (600.0, 90.0, 105.0), wood, prefix + "_Coffee_Counter")
+                    prefix + "_Coffee_Wall_E")
+    _wall(cx, cy, z, -half_x, -200.0, COFFEE_WALL_X, -200.0, plaster, prefix + "_Coffee_Wall_N")
+    _box((cx - 2000.0, cy - 700.0, z + 52.0), (600.0, 90.0, 105.0), wood, prefix + "_Coffee_Counter")
     for row, ty in enumerate((-1550.0, -1250.0)):
-        for col, tx in enumerate((1650.0, 1900.0, 2100.0)):
+        for col, tx in enumerate((-1650.0, -1900.0, -2100.0)):
             _box((cx + tx, cy + ty, z + 37.0), (80.0, 80.0, 74.0), wood,
                  "{0}_Coffee_Table_{1}_{2}".format(prefix, row + 1, col + 1))
 
@@ -1019,6 +1281,296 @@ def build_canteen_fixtures(origin_x, origin_y, z, materials, prefix):
     _note_surface("Metal", prefix + "_Coffee_Backwall")
 
 
+def _planter(cx, cy, z, x0, x1, y0, y1, prefix, label, trees=0, height=90.0):
+    """A long powder-coated steel planter of grasses, as on the real terraces,
+    with multi-stem trees standing in it."""
+    planter = _district_material("Planter")
+    grass = _district_material("Grass")
+    leaves = _district_material("Leaves")
+    bark = _district_material("Bark")
+    w, d = x1 - x0, y1 - y0
+    mx, my = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+    _box((cx + mx, cy + my, z + height / 2.0), (w, d, height), planter, "{0}_{1}_Planter".format(prefix, label))
+    # The planting: a soft mound of grasses proud of the rim.
+    _box((cx + mx, cy + my, z + height + 15.0), (w - 20.0, d - 20.0, 30.0), grass or leaves,
+         "{0}_{1}_Grasses".format(prefix, label))
+    for i in range(trees):
+        t = (i + 0.5) / float(trees)
+        tx, ty = (x0 + w * t, my) if w >= d else (mx, y0 + d * t)
+        for stem, (ox, oy) in enumerate(((-12.0, 0.0), (10.0, 9.0), (4.0, -12.0))):
+            _box((cx + tx + ox, cy + ty + oy, z + height + 170.0), (7.0, 7.0, 340.0), bark,
+                 "{0}_{1}_Tree{2}_Stem{3}".format(prefix, label, i + 1, stem + 1))
+        # A loose crown of three overlapping spheres, not a cube.
+        for blob, (ox, oy, oz, d) in enumerate(((0.0, 0.0, 0.0, 240.0), (70.0, -40.0, -50.0, 170.0),
+                                                (-60.0, 50.0, 40.0, 180.0))):
+            _box((cx + tx + ox, cy + ty + oy, z + height + 400.0 + oz), (d, d, d * 0.8), leaves,
+                 "{0}_{1}_Tree{2}_Crown{3}".format(prefix, label, i + 1, blob + 1), mesh_path=SPHERE_MESH)
+
+
+def _balustrade(cx, cy, z, x0, y0, x1, y1, materials, label):
+    """Frameless glass balustrade, 110 cm, with a slim steel cap."""
+    glass = materials.get("Glass") or materials.get("BallisticGlass")
+    cap = _district_material("Aluminium") or materials.get("Metal")
+    _wall(cx, cy, z, x0, y0, x1, y1, glass, label, height=110.0, thickness=4.0)
+    _wall(cx, cy, z, x0, y0, x1, y1, cap, label + "_Cap", height=4.0, thickness=6.0, base=110.0)
+
+
+# The OLED screens' slides: fictional, the building's own voice. Each is
+# (eyebrow, headline, subline, colour A, colour B).
+VIOLET, BLUE = (0.42, 0.08, 1.0), (0.04, 0.42, 1.0)
+AMBER, ROSE = (1.0, 0.45, 0.08), (1.0, 0.12, 0.35)
+TEAL, LIME = (0.02, 0.85, 0.7), (0.35, 1.0, 0.25)
+RED, ORANGE = (1.0, 0.05, 0.05), (1.0, 0.35, 0.02)
+DISPLAY_SLIDES = {
+    "Reception": [
+        ("ONE BRAHAM  ·  ALDGATE", "Welcome to OB", "Eighteen floors. One way up.", VIOLET, BLUE),
+        ("OB", "On break?", "The building runs on it. So do you.", ROSE, VIOLET),
+        ("THE WINTER GARDEN  ·  LEVEL 17", "Above it all.", "Bar and roof terrace, the City at your feet", AMBER, ROSE),
+        ("CANTEEN  ·  LEVEL 15", "Lunch is on 15.", "Hot food  ·  coffee bar  ·  the Skydeck", TEAL, LIME),
+        ("SECURITY NOTICE", "Wear your pass.", "Keycards on show beyond the gates, at all times", RED, ORANGE),
+    ],
+    "EscalatorWall": [
+        ("ON BREAK?", "Take five on 15.", "Canteen  ·  coffee bar  ·  the Skydeck balcony", TEAL, BLUE),
+        ("LEVEL 1  ·  CLIENT SHOWCASE", "See what's next.", "Live demonstrations, daily, in the Showcase", VIOLET, ROSE),
+        ("WELLBEING", "Take the stairs.", "The spiral stair runs all the way to 17", LIME, TEAL),
+    ],
+    "EscalatorTop": [
+        ("LEVEL 1", "Welcome up.", "Lifts ahead on the left  ·  Showcase  ·  Lab", BLUE, VIOLET),
+        ("TODAY ON 17", "Sunset sessions.", "The Winter Garden bar opens at five", AMBER, ROSE),
+    ],
+    "EscalatorCeiling": [
+        ("", "", "", VIOLET, BLUE),
+        ("", "", "", TEAL, BLUE),
+        ("", "", "", ROSE, VIOLET),
+    ],
+}
+
+
+def _display(cx, cy, location, rotation, width, height, slides_key, label, show_copy=True, phase=0.0,
+             brightness=60.0):
+    """Places an AOneBrahamDisplay with its slides."""
+    display_class = getattr(unreal, "OneBrahamDisplay", None)
+    if display_class is None:
+        return None
+    x, y, zc = location
+    actor = _spawn(display_class, unreal.Vector(cx + x, cy + y, zc), rotation)
+    if actor is None:
+        return None
+    slides = []
+    for eyebrow, headline, subline, a, b in DISPLAY_SLIDES[slides_key]:
+        slide = unreal.OneBrahamDisplaySlide()
+        slide.set_editor_property("Eyebrow", eyebrow)
+        slide.set_editor_property("Headline", headline)
+        slide.set_editor_property("Subline", subline)
+        slide.set_editor_property("ColourA", unreal.LinearColor(a[0], a[1], a[2], 1.0))
+        slide.set_editor_property("ColourB", unreal.LinearColor(b[0], b[1], b[2], 1.0))
+        slides.append(slide)
+    for prop, value in (("WidthCm", width), ("HeightCm", height), ("bShowCopy", show_copy),
+                        ("Slides", slides), ("PhaseSeconds", phase), ("Brightness", brightness),
+                        ("ScreenMaterial", unreal.EditorAssetLibrary.load_asset(C.MATERIALS + "/M_OB_AdScreen")),
+                        ("BezelMaterial", _district_material("BlackCladding")),
+                        ("AccentMaterial", unreal.EditorAssetLibrary.load_asset(
+                            C.MATERIALS_INSTANCES + "/MI_OB_Signage_White")),
+                        ("TextMaterial", unreal.load_asset(
+                            "/Engine/EngineMaterials/DefaultTextMaterialTranslucent.DefaultTextMaterialTranslucent"))):
+        actor.set_editor_property(prop, value)
+    try:
+        actor.rerun_construction_scripts()
+    except Exception:  # noqa: BLE001 - construction runs on save/load anyway
+        pass
+    _label(actor, label)
+    return actor
+
+
+def build_ad_screens_in_place(cx, cy, z, floor_index, prefix):
+    """The OLED screens. Reception: on the black feature volume over the desk.
+    The escalators: a double-height screen wall the whole length of the run, a
+    screen ceiling over the whole run, and the back wall at the top, right in
+    front of you as you arrive."""
+    facing_south = unreal.Rotator(roll=0.0, pitch=0.0, yaw=-90.0)
+    if floor_index == 0:
+        _display(cx, cy, (900.0, -1004.0, z + 560.0), facing_south, 920.0, 260.0, "Reception",
+                 prefix + "_Display_Reception")
+        # The escalator wall: the enclosure's face, from just above the steps'
+        # foot to the floor-1 ceiling, the length of the run.
+        run_mid = (ESCALATOR_Y[0] + ESCALATOR_Y[1]) / 2.0
+        bottom, top = z + 40.0, z + C.FLOOR_HEIGHT_CM + C.CEILING_HEIGHT_CM - 40.0
+        _display(cx, cy, (ESCALATOR_X[1] + 25.0, run_mid, (bottom + top) / 2.0),
+                 unreal.Rotator(roll=0.0, pitch=0.0, yaw=180.0),
+                 ESCALATOR_Y[1] - ESCALATOR_Y[0] + 40.0, top - bottom, "EscalatorWall",
+                 prefix + "_Display_EscalatorWall", phase=2.5)
+    if floor_index == 1:
+        mid = (ESCALATOR_X[0] + ESCALATOR_X[1]) / 2.0
+        plaster = unreal.EditorAssetLibrary.load_asset(C.MATERIALS_INSTANCES + "/MI_Plasterboard")
+        # The arrival: the wall straight ahead, the west side closed - the only
+        # way on is left, then left again past the lift banks.
+        _wall(cx, cy, z, ESCALATOR_X[0] - 20.0, ESCALATOR_ARRIVAL_WALL_Y, ESCALATOR_X[1] + 60.0,
+              ESCALATOR_ARRIVAL_WALL_Y, plaster, prefix + "_Escalator_BackWall")
+        _wall(cx, cy, z, ESCALATOR_X[0] - 20.0, GATE_LINE_Y, ESCALATOR_X[0] - 20.0, ESCALATOR_ARRIVAL_WALL_Y,
+              plaster, prefix + "_Escalator_WestWall")
+        _display(cx, cy, (mid, ESCALATOR_ARRIVAL_WALL_Y - 14.0, z + 205.0), facing_south,
+                 ESCALATOR_X[1] - ESCALATOR_X[0], 300.0, "EscalatorTop", prefix + "_Display_EscalatorTop", phase=4.0)
+        # The ceiling over the whole run, facing down: field only.
+        _display(cx, cy, (mid, (ESCALATOR_Y[0] + ESCALATOR_Y[1]) / 2.0, z + C.CEILING_HEIGHT_CM - 48.0),
+                 unreal.Rotator(roll=0.0, pitch=-90.0, yaw=0.0),
+                 ESCALATOR_Y[1] - ESCALATOR_Y[0] + 80.0, ESCALATOR_X[1] - ESCALATOR_X[0] + 40.0,
+                 "EscalatorCeiling", prefix + "_Display_EscalatorCeiling", show_copy=False, brightness=35.0)
+
+
+def build_feature_stair(cx, cy, z, materials, prefix):
+    """The reception's open stair: floating timber treads on black sawtooth
+    stringers, glass balustrades either side, air underneath."""
+    x0, x1 = FEATURE_STAIR_X
+    y0, y1 = FEATURE_STAIR_Y
+    steps = FEATURE_STAIR_STEPS
+    going = (y1 - y0) / steps
+    rise = C.FLOOR_HEIGHT_CM / steps
+    timber = _district_material("Timber") or materials.get("Wood")
+    steel = _district_material("BlackCladding") or materials.get("Metal")
+    glass = materials.get("Glass") or materials.get("BallisticGlass")
+    for i in range(steps):
+        top = rise * (i + 1)
+        y = y0 + going * (i + 0.5)
+        _box((cx + (x0 + x1) / 2.0, cy + y, z + top - 2.0), (x1 - x0, going + 2.0, 4.0), timber,
+             "{0}_FeatureStair_Tread_{1:02d}".format(prefix, i + 1))
+        for side, sx in (("W", x0 + 4.0), ("E", x1 - 4.0)):
+            _box((cx + sx, cy + y, z + top - 20.0), (8.0, going + 2.0, 36.0), steel,
+                 "{0}_FeatureStair_Stringer{1}_{2:02d}".format(prefix, side, i + 1))
+            _box((cx + sx + (-6.0 if side == "W" else 6.0), cy + y, z + top + 52.0), (2.0, going + 1.0, 100.0), glass,
+                 "{0}_FeatureStair_Glass{1}_{2:02d}".format(prefix, side, i + 1))
+
+
+def build_reception_gallery(cx, cy, z, materials, prefix):
+    """Floor 1 over the double-height reception: the gallery's glass edge, and
+    the reception ceiling - black linear baffles with sweeping light ribbons
+    running through them, as the real one has."""
+    x0, x1, y0, y1 = RECEPTION_VOID
+    _balustrade(cx, cy, z, x0, y0, x0, y1, materials, prefix + "_Reception_Gallery_W")
+    # The north edge opens where the feature stair arrives.
+    _balustrade(cx, cy, z, x0, y1, FEATURE_STAIR_X[0] - 10.0, y1, materials, prefix + "_Reception_Gallery_N")
+
+    baffle = _district_material("Baffle") or materials.get("Metal")
+    underside = z + C.CEILING_HEIGHT_CM - 20.0
+    y = y0 + 20.0
+    index = 0
+    while y < y1 - 10.0:
+        index += 1
+        _box((cx + (x0 + x1) / 2.0, cy + y, underside - 14.0), (x1 - x0 - 20.0, 4.0, 28.0), baffle,
+             "{0}_Reception_Baffle_{1:02d}".format(prefix, index))
+        y += 25.0
+
+    # Three ribbons of light sweeping the length of the hall, one in the
+    # violet the real one uses. Short emissive segments along a sine.
+    white = _district_material("LightRibbon")
+    violet = _district_material("LightRibbonViolet") or white
+    for ribbon, (yc, amp, period, phase, mat) in enumerate((
+            (-1600.0, 130.0, 900.0, 0.0, white), (-1350.0, 170.0, 1300.0, 1.4, violet),
+            (-1120.0, 110.0, 1000.0, 2.6, white))):
+        step = 40.0
+        x = x0 + 60.0
+        prev = None
+        while x <= x1 - 60.0:
+            y = yc + amp * math.sin(x / period * 2.0 * math.pi + phase)
+            if prev is not None:
+                px, py = prev
+                length = math.hypot(x - px, y - py)
+                yaw = math.degrees(math.atan2(y - py, x - px))
+                piece = _box((cx + (x + px) / 2.0, cy + (y + py) / 2.0, underside - 70.0 - ribbon * 18.0),
+                             (length + 2.0, 14.0, 2.0), mat,
+                             "{0}_Reception_Ribbon{1}_{2:03d}".format(prefix, ribbon + 1, int(x)))
+                if piece is not None:
+                    piece.set_actor_rotation(unreal.Rotator(roll=0.0, pitch=0.0, yaw=yaw), False)
+            prev = (x, y)
+            x += step
+
+
+def build_summit(cx, cy, z, materials, prefix):
+    """Floor 16: the Management Suite and the collaboration lounge, round the
+    foot of the atrium garden that rises through 17 to the Winter Garden's
+    glass roof."""
+    x0, x1, y0, y1 = ATRIUM_VOID
+    # The atrium garden: planters framing the void's footprint, trees tall
+    # enough to reach up into the Winter Garden.
+    _planter(cx, cy, z, x0, x1, y0, y0 + 120.0, prefix, "Atrium_S", trees=3)
+    _planter(cx, cy, z, x0, x1, y1 - 120.0, y1, prefix, "Atrium_N", trees=3)
+    _planter(cx, cy, z, x0, x0 + 120.0, y0 + 160.0, y1 - 160.0, prefix, "Atrium_W", trees=1)
+
+    # The lounge: low sofas and timber tables, cover at crouch height.
+    fabric = materials.get("Fabric")
+    timber = _district_material("Timber") or materials.get("Wood")
+    for row, y in enumerate((-1550.0, -1200.0, -850.0)):
+        for col, x in enumerate((-550.0, 0.0, 450.0)):
+            _box((cx + x, cy + y, z + 22.0), (180.0, 80.0, 44.0), fabric,
+                 "{0}_Lounge_Sofa_{1}_{2}".format(prefix, row + 1, col + 1))
+            _box((cx + x, cy + y + 95.0, z + 20.0), (110.0, 60.0, 40.0), timber,
+                 "{0}_Lounge_Table_{1}_{2}".format(prefix, row + 1, col + 1))
+
+
+def build_winter_garden(cx, cy, z, materials, prefix):
+    """Floor 17: the Winter Garden - a glass-roofed bar and garden round the
+    atrium void - and, through a glass screen, the open roof terrace."""
+    glass = materials.get("Glass") or materials.get("BallisticGlass")
+    timber = _district_material("Timber") or materials.get("Wood")
+    x0, x1, y0, y1 = ATRIUM_VOID
+    for label, (ax0, ay0, ax1, ay1) in (("S", (x0, y0, x1, y0)), ("N", (x0, y1, x1, y1)),
+                                        ("W", (x0, y0, x0, y1)), ("E", (x1, y0, x1, y1))):
+        _balustrade(cx, cy, z, ax0, ay0, ax1, ay1, materials, "{0}_Atrium_Edge_{1}".format(prefix, label))
+
+    # The bar: a long timber counter on the south glazing, stools in front.
+    _box((cx + 200.0, cy - 1700.0, z + 55.0), (900.0, 70.0, 110.0), timber, prefix + "_WG_Bar_Counter")
+    for i in range(7):
+        _box((cx - 200.0 + i * 130.0, cy - 1610.0, z + 38.0), (40.0, 40.0, 76.0), materials.get("Metal"),
+             "{0}_WG_Bar_Stool_{1}".format(prefix, i + 1))
+    for row, y in enumerate((-1300.0, -900.0)):
+        for col, x in enumerate((-300.0, 150.0, 550.0)):
+            _box((cx + x, cy + y, z + 37.0), (90.0, 90.0, 74.0), timber,
+                 "{0}_WG_Table_{1}_{2}".format(prefix, row + 1, col + 1))
+    _planter(cx, cy, z, -650.0, -450.0, -1700.0, -700.0, prefix, "WG_Bed", trees=2)
+
+    # The glass screen between the garden and the terrace, with its door.
+    _wall_with_door(cx, cy, z, WINTER_GARDEN_EAST_X, -1800.0, WINTER_GARDEN_EAST_X, SKYDECK_SCREEN_Y,
+                    -1175.0, 180.0, glass, prefix + "_WG_Terrace_Screen")
+    _wall(cx, cy, z, WINTER_GARDEN_EAST_X, SKYDECK_SCREEN_Y, CROWN_STALK_X, SKYDECK_SCREEN_Y, glass,
+          prefix + "_WG_Terrace_Screen_N")
+
+    # The roof terrace: pale large-format paving, charcoal planters of grasses
+    # and multi-stem trees, a glass balustrade at the drop to the Skydeck.
+    tx0, tx1, ty0, ty1 = TERRACE_17
+    paving = _district_material("TerracePaving")
+    _box((cx + (tx0 + tx1) / 2.0, cy + (ty0 + ty1) / 2.0, z + 0.3),
+         (tx1 - tx0 - 20.0, ty1 - ty0 - 20.0, 0.6), paving, prefix + "_Terrace_Paving")
+    _planter(cx, cy, z, 1000.0, 2100.0, -1760.0, -1640.0, prefix, "Terrace_S", trees=2)
+    _planter(cx, cy, z, 2060.0, 2160.0, -1500.0, -800.0, prefix, "Terrace_E", trees=1)
+    _planter(cx, cy, z, 1200.0, 1700.0, -1200.0, -1100.0, prefix, "Terrace_Mid", trees=0, height=60.0)
+    _balustrade(cx, cy, z, CROWN_STALK_X, SKYDECK_SCREEN_Y, 2200.0, SKYDECK_SCREEN_Y, materials,
+                prefix + "_Terrace_Edge_N")
+
+
+def build_winter_garden_roof(cx, cy, z, materials, prefix):
+    """The top of the building: the Winter Garden's glass roof on steel ribs,
+    a solid roof over the core stalk, and open sky over the terrace."""
+    glass = materials.get("Glass") or materials.get("BallisticGlass")
+    rib = _district_material("Aluminium") or materials.get("Metal")
+    concrete = materials.get("Concrete")
+    top = z + C.CEILING_HEIGHT_CM
+    gx0, gx1, gy0, gy1 = -2200.0, WINTER_GARDEN_EAST_X, -1800.0, SKYDECK_SCREEN_Y
+    _box((cx + (gx0 + gx1) / 2.0, cy + (gy0 + gy1) / 2.0, top + 5.0), (gx1 - gx0, gy1 - gy0, 4.0), glass,
+         prefix + "_WG_Glass_Roof")
+    x = gx0
+    index = 0
+    while x <= gx1 + 1.0:
+        index += 1
+        _box((cx + x, cy + (gy0 + gy1) / 2.0, top - 12.0), (10.0, gy1 - gy0, 30.0), rib,
+             "{0}_WG_Roof_Rib_{1:02d}".format(prefix, index))
+        x += 300.0
+    for label, y in (("S", gy0), ("N", gy1)):
+        _box((cx + (gx0 + gx1) / 2.0, cy + y, top - 12.0), (gx1 - gx0, 12.0, 30.0), rib,
+             prefix + "_WG_Roof_Edge_" + label)
+    # The core stalk is roofed solid: plant and lift motor rooms live up here.
+    _box((cx, cy + (SKYDECK_SCREEN_Y + CROWN_NORTH_Y) / 2.0, top + 10.0),
+         (2.0 * CROWN_STALK_X, CROWN_NORTH_Y - SKYDECK_SCREEN_Y, 20.0), concrete, prefix + "_Core_Roof")
+
+
 def build_floor_shell(report, floor_index, materials):
     """Builds one floor: slab, ceiling, perimeter glazing, core, rooms, circulation.
 
@@ -1051,7 +1603,7 @@ def build_floor_shell(report, floor_index, materials):
     # them is carpeted office space except the lobby, which is marble.
     # The ground floor is pale stone (terrazzo in the real reception).
     slab_material = marble if area_name in ("Lobby", "Ground_Plaza") else carpet
-    if area_name == "Skydeck":
+    if area_name in ("Skydeck", "WinterGarden"):
         slab_material = decking or concrete
 
     # 20 cm of slab, cut over the stairs, the lift shafts and (on floor 1) the
@@ -1059,24 +1611,37 @@ def build_floor_shell(report, floor_index, materials):
     _slab_with_holes(origin_x, origin_y, z, size_x, size_y, _slab_holes(floor_index), slab_material, prefix + "_Slab")
     created.append((prefix + "_Slab", (origin_x, origin_y, z - 10.0)))
     _note_surface("Marble" if area_name in ("Lobby", "Ground_Plaza") else
-                  ("Decking" if area_name == "Skydeck" else "Carpet"),
+                  ("Decking" if area_name in ("Skydeck", "WinterGarden") else "Carpet"),
                   prefix + "_Slab")
 
     # --- Ceiling ----------------------------------------------------------
     # One Braham has no suspended ceilings: the soffit is bare concrete with the
     # services hung under it (see build_exposed_services). Floor 15 is roofed
     # only over the canteen; the Skydeck balcony is open sky.
+    #
+    # The soffit sits directly UNDER the next floor's slab (z+360 to z+380 under
+    # a slab at z+380 to z+400). It used to sit on top of it, 20 cm proud, so on
+    # every floor players walked on a hidden concrete layer instead of the carpet
+    # or stone, and every stair arrived 20 cm short.
     if area_name == "Skydeck":
         roofed_y = SKYDECK_SCREEN_Y + half_y
-        _box((origin_x, origin_y - half_y + roofed_y / 2.0, z + C.CEILING_HEIGHT_CM + 10.0),
+        _box((origin_x, origin_y - half_y + roofed_y / 2.0, z + C.CEILING_HEIGHT_CM - 30.0),
              (size_x, roofed_y, 20.0), concrete, prefix + "_Soffit")
         build_exposed_services(origin_x, origin_y, z, size_x, -half_y, SKYDECK_SCREEN_Y, materials, prefix)
+    elif area_name == "WinterGarden":
+        build_winter_garden_roof(origin_x, origin_y, z, materials, prefix)
     else:
         # The soffit is the underside of the floor above, so it has that
         # floor's openings too.
-        _slab_with_holes(origin_x, origin_y, z + C.CEILING_HEIGHT_CM + 20.0, size_x, size_y,
-                         _slab_holes(floor_index + 1), concrete, prefix + "_Soffit")
-        if area_name != "Ground_Plaza":
+        soffit_holes = _slab_holes(floor_index + 1)
+        if floor_index == 0:
+            # The base is square; the tower's rounded corners start above it.
+            soffit_holes = [hole for hole in soffit_holes if hole not in SOFT_CORNER_CUTS]
+        _slab_with_holes(origin_x, origin_y, z + C.CEILING_HEIGHT_CM - 20.0, size_x, size_y,
+                         soffit_holes, concrete, prefix + "_Soffit")
+        if area_name == "Summit":
+            build_exposed_services(origin_x, origin_y, z, size_x, -half_y, SKYDECK_SCREEN_Y, materials, prefix)
+        elif area_name != "Ground_Plaza":
             build_exposed_services(origin_x, origin_y, z, size_x, -half_y, half_y, materials, prefix)
     _note_surface("Concrete", prefix + "_Soffit")
 
@@ -1104,6 +1669,13 @@ def build_floor_shell(report, floor_index, materials):
         build_ground_floor(origin_x, origin_y, z, half_x, half_y, materials, prefix)
     if floor_index == 1:
         build_escalator_balustrade(origin_x, origin_y, z, materials, prefix)
+        build_reception_gallery(origin_x, origin_y, z, materials, prefix)
+    if floor_index in (0, 1):
+        build_ad_screens_in_place(origin_x, origin_y, z, floor_index, prefix)
+    if area_name == "Summit":
+        build_summit(origin_x, origin_y, z, materials, prefix)
+    if area_name == "WinterGarden":
+        build_winter_garden(origin_x, origin_y, z, materials, prefix)
 
     # --- Room partitions --------------------------------------------------
     rooms = ROOM_PROGRAMMES.get(area_name, [])
@@ -1186,7 +1758,7 @@ def build_floor_shell(report, floor_index, materials):
     return created
 
 
-def build_lifts(report):
+def build_lifts(report, materials=None):
     """The nine lift cars: two banks of four and the glass lift at the back.
 
     One actor per shaft, in the persistent level, standing at its shaft's
@@ -1222,6 +1794,16 @@ def build_lifts(report):
                 lift.set_editor_property("DoorFacing", getattr(facing, face))
             lift.set_editor_property("FloorHeightCm", C.FLOOR_HEIGHT_CM)
             lift.set_editor_property("FloorZ0", _floor_z(0))
+            # Brushed steel car and doors, ballistic glass for the glass lift;
+            # unset, every car rendered as the engine's grey checker.
+            materials = materials or {}
+            steel = materials.get("Metal")
+            if steel is not None:
+                lift.set_editor_property("CarMaterial", steel)
+                lift.set_editor_property("DoorMaterial", steel)
+            pane = materials.get("BallisticGlass") or materials.get("Glass")
+            if pane is not None:
+                lift.set_editor_property("GlassMaterial", pane)
             if glass:
                 lift.set_editor_property("CarWidthCm", 270.0)
                 lift.set_editor_property("CarDepthCm", 270.0)
@@ -1578,6 +2160,12 @@ def build_shutters(report):
                 shutter = _spawn(shutter_class, unreal.Vector(x, y, z))
                 if shutter is not None:
                     _label(shutter, "Shutter_{0}_F{1:02d}".format(side_name, floor))
+                    # Galvanised steel: the class has no material of its own,
+                    # and without one every stair door drew the engine checker.
+                    steel = unreal.EditorAssetLibrary.load_asset(C.MATERIALS_INSTANCES + "/MI_Metal")
+                    if steel is not None:
+                        for part in shutter.get_components_by_class(unreal.StaticMeshComponent):
+                            part.set_material(0, steel)
                     try:
                         shutter.set_editor_property("FloorIndex", floor)
                         shutter.set_editor_property("ShutterId", unreal.Name(
@@ -1736,25 +2324,73 @@ def build_lighting(report, floor_index):
             # by its floodlight masts, not by panels hanging in the open air.
             if area_name == "Skydeck" and ly > origin_y + SKYDECK_SCREEN_Y:
                 continue
+            # No panels over open sky (the crown's balcony cut-outs, the roof
+            # terrace) or hanging in a void (the double-height reception, the
+            # atrium): the floor above's fittings light those from on high.
+            px, py = lx - origin_x, ly - origin_y
+            if floor_index >= 16 and any(_in_rect(px, py, r) for r in CROWN_OUT):
+                continue
+            if floor_index == 17 and _in_rect(px, py, TERRACE_17):
+                continue
+            if (floor_index == 0 and _in_rect(px, py, RECEPTION_VOID)) or \
+                    (floor_index == 16 and _in_rect(px, py, ATRIUM_VOID)):
+                continue
+            bounce_wanted = not ((floor_index == 1 and _in_rect(px, py, RECEPTION_VOID)) or
+                                 (floor_index == 17 and _in_rect(px, py, ATRIUM_VOID)))
 
             light = _spawn(unreal.RectLight, unreal.Vector(lx, ly, ceiling_z),
-                           unreal.Rotator(0.0, 0.0, -90.0))
+                           unreal.Rotator(roll=0.0, pitch=-90.0, yaw=0.0))  # facing the floor
             if light is None:
                 continue
 
             try:
                 component = light.rect_light_component
-                component.set_editor_property("Intensity", 2600.0)
-                component.set_editor_property("AttenuationRadius", 700.0)
-                component.set_editor_property("SourceWidth", 60.0)
+                # Lumens, sized for the grid: one fitting per ~36 m2 has to put
+                # 200-300 lux on the desks (an office's real level, and EV100
+                # 6.5 under the floor's exposure), and reach the next fitting's
+                # pool so the floor reads as lit, not as spotlights in a void.
+                component.set_editor_property("IntensityUnits", unreal.LightUnits.LUMENS)
+                component.set_editor_property("Intensity", 16000.0)
+                component.set_editor_property("AttenuationRadius", 1600.0)
+                component.set_editor_property("SourceWidth", 120.0)
                 component.set_editor_property("SourceHeight", 60.0)
                 # 4000 K: the colour of a building's own lighting, everywhere.
                 component.set_editor_property("LightColor", unreal.Color(255, 246, 232, 232))
-                component.set_editor_property("Mobility", unreal.ComponentMobility.STATIC)
-            except Exception:  # noqa: BLE001
-                pass
+                # Movable: the project disallows static lighting, so a static
+                # light is never baked and Lumen gives it no bounce - pure black
+                # shadow beside a white-hot wall.
+                component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
+                # Every floor is loaded at once: fittings more than ~40 m away
+                # (most of them on other floors) fade out instead of costing.
+                component.set_editor_property("MaxDrawDistance", 4000.0)
+                component.set_editor_property("MaxDistanceFadeRange", 1000.0)
+            except Exception as exc:  # noqa: BLE001
+                report.failed("ceiling light", str(exc))
 
             _label(light, "Ceiling_Light_{0}_F{1:02d}_{2}".format(area_name, floor_index, spawn_count))
+
+            # The fitting's bounce: what the floor under it throws back onto the
+            # walls and ceiling. Lumen gets almost nothing back from the scaled
+            # blockout cubes, which left every wall that didn't face a fitting
+            # pitch black - unreadable, and a free hiding place. Shadowless and
+            # diffuse-only, so it costs little and never adds a second hotspot.
+            bounce = _spawn(unreal.PointLight, unreal.Vector(lx, ly, z + 90.0)) if bounce_wanted else None
+            if bounce is not None:
+                try:
+                    component = bounce.point_light_component
+                    component.set_editor_property("IntensityUnits", unreal.LightUnits.LUMENS)
+                    component.set_editor_property("Intensity", 2400.0)
+                    component.set_editor_property("AttenuationRadius", 1100.0)
+                    component.set_editor_property("SourceRadius", 200.0)
+                    component.set_editor_property("CastShadows", False)
+                    component.set_editor_property("SpecularScale", 0.0)
+                    component.set_editor_property("MaxDrawDistance", 3000.0)
+                    component.set_editor_property("MaxDistanceFadeRange", 800.0)
+                    component.set_editor_property("LightColor", unreal.Color(220, 226, 232, 255))
+                    component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
+                except Exception as exc:  # noqa: BLE001
+                    report.failed("bounce light", str(exc))
+                _label(bounce, "Bounce_Light_{0}_F{1:02d}_{2}".format(area_name, floor_index, spawn_count))
             spawn_count += 1
 
     C.log(u"  floor {0:02d} ({1}): {2} ceiling lights".format(floor_index, area_name, spawn_count))
@@ -1788,29 +2424,61 @@ def build_post_process(report, floor_index):
     min_brightness, max_brightness, bloom, grain, vignette = AREA_GRADE.get(
         area_name, (0.5, 2.0, 0.6, 0.025, 0.35))
 
+    # Bounded to its own floor. Every floor is loaded at once, so sixteen
+    # unbound volumes at one priority would fight over the whole building.
+    # The brush is a 200 cm cube; it is scaled to the slab plus a margin past
+    # the facade. The ground floor reaches out over the street the players
+    # start on, and the top floor up over the open balcony.
+    margin = 600.0
+    extent_x, extent_y = size_x + margin, size_y + margin
+    height = C.FLOOR_HEIGHT_CM
+    if floor_index == 0:
+        extent_x = extent_y = 30000.0
+    if floor_index == C.FLOOR_COUNT:
+        height = C.FLOOR_HEIGHT_CM * 6.0
     try:
-        volume.set_editor_property("bUnbound", True)
+        volume.set_actor_location(unreal.Vector(origin_x, origin_y, _floor_z(floor_index) + height / 2.0), False, False)
+        volume.set_actor_scale3d(unreal.Vector(extent_x / 200.0, extent_y / 200.0, height / 200.0))
+        volume.set_editor_property("bUnbound", False)
+        volume.set_editor_property("BlendRadius", 150.0)
         volume.set_editor_property("BlendWeight", 1.0)
-        volume.set_editor_property("Priority", 0.0)
-    except Exception:  # noqa: BLE001
-        pass
+        volume.set_editor_property("Priority", 1.0)
+    except Exception as exc:  # noqa: BLE001
+        report.failed("post-process bounds", str(exc))
 
     try:
         settings = volume.settings
 
-        # Exposure: manual range, so a dark plant room does not auto-brighten the
-        # whole floor and a bright one does not auto-dim it.
-        settings.set_editor_property("AutoExposureMethod", unreal.AutoExposureMethod.AEM_MANUAL)
-        settings.set_editor_property("AutoExposureMinBrightness", float(min_brightness))
-        settings.set_editor_property("AutoExposureMaxBrightness", float(max_brightness))
+        # Every value needs its bOverride_ flag, or the volume silently keeps the
+        # engine default - which is how this grade never applied before.
+        def grade(name, value):
+            settings.set_editor_property("bOverride_" + name, True)
+            settings.set_editor_property(name, value)
 
-        # Grade: restrained. One Braham is a corporate building, not a film.
-        settings.set_editor_property("BloomIntensity", float(bloom))
-        settings.set_editor_property("FilmGrainIntensity", float(grain))
-        settings.set_editor_property("VignetteIntensity", float(vignette))
-        settings.set_editor_property("MotionBlurAmount", 0.28)
-    except Exception:  # noqa: BLE001
-        pass
+        # Exposure: histogram auto-exposure clamped to an indoor range (EV100),
+        # brighter on the open balcony, so a bright canteen does not blow out
+        # and a dark plant room does not glow. The area's grade still biases it.
+        outdoor = area_name in ("Skydeck", "WinterGarden")
+        grade("AutoExposureMethod", unreal.AutoExposureMethod.AEM_HISTOGRAM)
+        # Floor 15 is both an indoor canteen and an open balcony: a wide range
+        # lets the eye adapt from one to the other through the gate.
+        grade("AutoExposureMinBrightness", 6.0 if outdoor else 5.5)
+        grade("AutoExposureMaxBrightness", 12.0 if outdoor else 9.5)
+        grade("AutoExposureBias", float(max(-1.0, min(1.0, (min_brightness - 0.5) * 1.5))))
+        grade("AutoExposureSpeedUp", 2.5)
+        grade("AutoExposureSpeedDown", 1.2)
+
+        # Grade: restrained. One Braham is a corporate building, not a film -
+        # but a building at dusk with the lights on, seen by someone scared.
+        grade("BloomIntensity", float(min(bloom, 0.6)))
+        grade("BloomThreshold", 1.2)
+        grade("FilmGrainIntensity", float(min(grain * 6.0, 0.18)))
+        grade("VignetteIntensity", float(min(vignette, 0.35)))
+        grade("LensFlareIntensity", 0.0)
+        grade("MotionBlurAmount", 0.25)
+        grade("SceneFringeIntensity", 0.15)
+    except Exception as exc:  # noqa: BLE001
+        report.failed("post-process grade", str(exc))
 
     # The interaction outline. Six interactables in this game set custom-depth
     # stencil 2 when the player looks at them (SetInteractionHighlight), and
@@ -1892,51 +2560,84 @@ def build_nav(report, floor_index):
 def build_skydeck_climate(report):
     """Skydeck weather: this is the only floor that gets a sky, wind and rain.
 
-    The contrast is the point. Fifteen floors of sealed, over-lit corporate space
+    The contrast is the point. Fourteen floors of sealed, over-lit corporate space
     and then one floor where the weather is real and the wind takes your voice
     away - which is why proximity voice is quieter up here and why the extraction
     announcement is the loudest cue in the game.
     """
     deck_z = _floor_z(15)
 
-    sky = _spawn(unreal.SkyAtmosphere, unreal.Vector(0.0, 0.0, deck_z))
-    if sky is None:
-        report.failed("SkyAtmosphere", "could not spawn")
-    else:
-        _label(sky, "Sky_OneBraham")
+    # The photographed sky, and the sun aimed at the sun in it. Without the
+    # fetched sky (SourceArt/), the procedural atmosphere and a fixed sun stand.
+    from onebraham import build_district
+    sky = C.guard(report, "sky", build_district.build_sky, report)
 
+    # The procedural atmosphere only stands in when there is no photograph: under
+    # the photographed dome its aerial perspective darkened the horizon into a
+    # navy band. The height fog carries the haze either way.
+    if not sky:
+        atmosphere_actor = _spawn(unreal.SkyAtmosphere, unreal.Vector(0.0, 0.0, deck_z))
+        if atmosphere_actor is None:
+            report.failed("SkyAtmosphere", "could not spawn")
+        else:
+            _label(atmosphere_actor, "Sky_OneBraham")
+            # Past the mapped streets the planet's surface shows: city grey under
+            # the haze, not the default near-black that read as a sea.
+            try:
+                atmosphere = atmosphere_actor.get_component_by_class(unreal.SkyAtmosphereComponent)
+                atmosphere.set_editor_property("GroundAlbedo", unreal.Color(110, 108, 104, 255))
+            except Exception as exc:  # noqa: BLE001
+                report.failed("sky ground albedo", str(exc))
+
+    sun_pitch, sun_yaw = (sky["pitch"], sky["yaw"]) if sky else (-38.0, 145.0)
     sun = _spawn(unreal.DirectionalLight, unreal.Vector(0.0, 0.0, deck_z + 2000.0),
-                 unreal.Rotator(-38.0, 145.0, 0.0))
+                 unreal.Rotator(roll=0.0, pitch=sun_pitch, yaw=sun_yaw))  # Rotator() is (roll, pitch, yaw)
     if sun is not None:
         _label(sun, "Sun_London_Overcast")
         try:
-            component = sun.directional_light_component
+            component = sun.light_component
             # An overcast London afternoon: wide, soft, low contrast. Sunlight
             # would make the office floors look like a Mediterranean resort.
-            component.set_editor_property("Intensity", 2.2)
-            component.set_editor_property("LightColor", unreal.Color(214, 222, 232, 255))
+            # Lux. 8,000 is overcast daylight; the 2.2 this used to be is
+            # moonlight, which under EV100 exposure left the lobby and the
+            # Skydeck black.
+            component.set_editor_property("Intensity", 8000.0)
+            colour = sky["colour"] if sky else (214, 222, 232)
+            component.set_editor_property("LightColor", unreal.Color(colour[0], colour[1], colour[2], 255))
             component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            # This used to pass silently on a wrong accessor name and leave the
+            # sun at the engine's default 10 lux: a building in permanent dusk.
+            report.failed("sun", str(exc))
 
-    fog = _spawn(unreal.ExponentialHeightFog, unreal.Vector(0.0, 0.0, deck_z))
+    # London haze from street level: pale, thin, starting a few streets out so
+    # rooms and the plaza stay crisp and the City softens on the horizon.
+    fog = _spawn(unreal.ExponentialHeightFog, unreal.Vector(0.0, 0.0, _floor_z(0)))
     if fog is not None:
         _label(fog, "Fog_London")
         try:
             component = fog.component
-            component.set_editor_property("FogDensity", 0.012)
-            component.set_editor_property("FogHeightFalloff", 0.12)
-        except Exception:  # noqa: BLE001
-            pass
+            component.set_editor_property("FogDensity", 0.0035)
+            component.set_editor_property("FogHeightFalloff", 0.04)
+            component.set_editor_property("StartDistance", 4000.0)
+            # Physical units: the haze is as bright as the sky at the horizon
+            # (the dome's HazeColour x its 2500 luminance scale). The 0.55 this
+            # used to be is near black at daylight exposure, and darkened the
+            # distance instead of hazing it.
+            component.set_editor_property("FogInscatteringLuminance", unreal.LinearColor(1900.0, 2050.0, 2250.0, 1.0))
+        except Exception as exc:  # noqa: BLE001
+            report.failed("fog", str(exc))
 
     skylight = _spawn(unreal.SkyLight, unreal.Vector(0.0, 0.0, deck_z + 400.0))
     if skylight is not None:
         _label(skylight, "Skylight_OneBraham")
         try:
-            skylight.sky_light_component.set_editor_property("Intensity", 0.8)
-            skylight.sky_light_component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
-        except Exception:  # noqa: BLE001
-            pass
+            skylight.light_component.set_editor_property("Intensity", 0.8)
+            skylight.light_component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
+            # Capture the SkyAtmosphere live, so the sky's light matches the sky.
+            skylight.light_component.set_editor_property("bRealTimeCapture", True)
+        except Exception as exc:  # noqa: BLE001
+            report.failed("skylight", str(exc))
 
     # Post-process: a corporate colour grade (slightly desaturated, cool shadows,
     # a small amount of grain) so the building reads as a building even in the
@@ -1951,10 +2652,11 @@ def build_skydeck_climate(report):
             settings.set_editor_property("FilmGrainIntensity", 0.18)
             settings.set_editor_property("bOverride_ColorSaturation", True)
             settings.set_editor_property("ColorSaturation", unreal.Vector4(0.94, 0.94, 0.94, 1.0))
-            settings.set_editor_property("bOverride_AutoExposureMinBrightness", True)
-            settings.set_editor_property("AutoExposureMinBrightness", 0.65)
-            settings.set_editor_property("bOverride_AutoExposureMaxBrightness", True)
-            settings.set_editor_property("AutoExposureMaxBrightness", 1.6)
+            # No exposure here: this project measures exposure in EV100
+            # (ExtendDefaultLuminanceRange), and the 0.65-1.6 this used to set is
+            # a pitch-dark range that pushed every lit floor six stops over. Each
+            # floor's own volume owns exposure, and this one sits beneath them.
+            ppv.set_editor_property("Priority", -1.0)
         except Exception as exc:  # noqa: BLE001
             report.failed("Post-process volume", str(exc))
 
@@ -1970,19 +2672,27 @@ def build_floor_level(report, floor_index, materials):
 
     level_subsystem = _level_subsystem()
 
-    if unreal.EditorAssetLibrary.does_asset_exist(level_path):
-        C.log(u"  floor {0:02d}: streaming level already exists, updating".format(floor_index))
-        report.updated_asset(level_path)
-        return level_path
-
-    try:
-        created = level_subsystem.new_level(level_path)
-    except Exception as exc:  # noqa: BLE001
-        report.failed(level_path, u"could not create streaming level: {0}".format(exc))
-        return None
-    if not created:
-        report.failed(level_path, u"could not create streaming level")
-        return None
+    # An existing floor is reopened and cleared, then rebuilt like a new one.
+    # It used to be returned untouched as "updating", so every change to the
+    # shell, lights or grade after a floor's first build silently never landed.
+    existed = unreal.EditorAssetLibrary.does_asset_exist(level_path)
+    if existed:
+        if not level_subsystem.load_level(level_path):
+            report.failed(level_path, u"could not open the existing streaming level")
+            return None
+        actors = _actor_subsystem()
+        generated = _generated_actors(actors.get_all_level_actors())
+        actors.destroy_actors(generated)
+        C.log(u"  floor {0:02d}: reopened; {1} generated actors cleared".format(floor_index, len(generated)))
+    else:
+        try:
+            created = level_subsystem.new_level(level_path)
+        except Exception as exc:  # noqa: BLE001
+            report.failed(level_path, u"could not create streaming level: {0}".format(exc))
+            return None
+        if not created:
+            report.failed(level_path, u"could not create streaming level")
+            return None
 
     build_floor_shell(report, floor_index, materials)
     build_lighting(report, floor_index)
@@ -1996,8 +2706,53 @@ def build_floor_level(report, floor_index, materials):
         report.failed(level_path, u"could not save: {0}".format(exc))
         return None
 
-    report.created_asset(level_path)
+    if existed:
+        report.updated_asset(level_path)
+    else:
+        report.created_asset(level_path)
     return level_path
+
+
+def link_floor_levels(report, level_paths):
+    """Attaches every floor level to the persistent level, always loaded.
+
+    Without this the persistent map - the one the game opens - had the
+    gameplay actors and the facade but none of the floors: no slabs, rooms,
+    lights or grade were ever loaded in play. Sixteen small floors fit in memory
+    together, and a building whose floors can be seen through stairwells and
+    the atrium should not pop in, so they are always loaded rather than
+    streamed by distance.
+    """
+    level_subsystem = _level_subsystem()
+    persistent_path = "{0}/{1}".format(C.MAPS, C.MAP_PERSISTENT)
+    if not level_subsystem.load_level(persistent_path):
+        report.failed(persistent_path, u"could not reopen to attach the floors")
+        return 0
+
+    world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
+    present = set()
+    for level in unreal.EditorLevelUtils.get_levels(world):
+        present.add(level.get_path_name().split(":")[0].split(".")[0])
+
+    added = 0
+    for path in level_paths:
+        if path in present:
+            continue
+        streaming = unreal.EditorLevelUtils.add_level_to_world(world, path, unreal.LevelStreamingAlwaysLoaded)
+        if streaming is None:
+            report.failed(path, u"could not attach to the persistent level")
+            continue
+        added += 1
+
+    # Adding a level makes it the current one, so save_current_level would
+    # save the last floor and drop the new streaming references.
+    try:
+        if not level_subsystem.save_all_dirty_levels():
+            report.failed(persistent_path, u"could not save after attaching floors")
+    except Exception as exc:  # noqa: BLE001
+        report.failed(persistent_path, u"could not save after attaching floors: {0}".format(exc))
+    C.log(u"  persistent level: {0} floors attached ({1} already present)".format(added, len(level_paths) - added))
+    return added
 
 
 def open_fresh_persistent_level(report):
@@ -2016,8 +2771,7 @@ def open_fresh_persistent_level(report):
             report.failed(persistent_path, u"could not open the existing persistent level")
             return False
         actors = _actor_subsystem()
-        generated = [a for a in actors.get_all_level_actors()
-                     if not isinstance(a, (unreal.WorldSettings, unreal.Brush))]
+        generated = _generated_actors(actors.get_all_level_actors())
         actors.destroy_actors(generated)
         C.log(u"  persistent level reopened; {0} generated actors cleared".format(len(generated)))
         report.updated_asset(persistent_path)
@@ -2027,6 +2781,126 @@ def open_fresh_persistent_level(report):
             return False
         report.created_asset(persistent_path)
     return True
+
+
+def build_facade(materials):
+    """The curtain wall and its fins, stepped like the real crown.
+
+    One Braham is glass on every face, with dense vertical aluminium fins on
+    the east, south and west elevations (our +X, +Y and -X; the entrance face,
+    -Y onto Braham Street, has none). The tower runs full-plate to the
+    floor-15 slab; above it the crown - floors 16 and 17 - stands over the
+    canteen half and the core stalk, the Skydeck balcony round it behind glass
+    balustrades, and the roof terrace on 17 steps back again.
+
+    The entrance face starts at floor 1: the ground floor's glazed base and its
+    revolving doors are floor 0's own.
+    """
+    glass = materials.get("BallisticGlass") or materials.get("Glass")
+    fin = _district_material("Aluminium") or materials.get("Metal")
+    rail = materials.get("Glass") or glass
+    fx, fy = 2215.0, 1815.0
+    z_ground, z1 = _floor_z(0), _floor_z(1)
+    z15, z16, z17, z_roof = _floor_z(15), _floor_z(16), _floor_z(17), _floor_z(18)
+    sx, ny = CROWN_STALK_X + 15.0, CROWN_NORTH_Y + 15.0
+    screen = SKYDECK_SCREEN_Y
+    terrace_x = TERRACE_17[0]
+
+    def pane(label, x0, y0, x1, y1, za, zb, material=glass):
+        if zb - za < 1.0:
+            return
+        if abs(x1 - x0) >= abs(y1 - y0):
+            size = (abs(x1 - x0) + 30.0, 30.0, zb - za)
+        else:
+            size = (30.0, abs(y1 - y0) + 30.0, zb - za)
+        _box(((x0 + x1) / 2.0, (y0 + y1) / 2.0, (za + zb) / 2.0), size, material, "Facade_" + label)
+
+    def balustrade(label, x0, y0, x1, y1, z):
+        pane(label, x0, y0, x1, y1, z, z + 110.0, rail)
+
+    def fins(label, x0, y0, x1, y1, za, zb, out):
+        """Fins every metre along a face, standing `out` cm proud of it."""
+        length = math.hypot(x1 - x0, y1 - y0)
+        count = max(1, int(length // 100.0))
+        ux, uy = (x1 - x0) / length, (y1 - y0) / length
+        nx, ny_ = -uy * out, ux * out
+        # Always outward: away from the tower's centre.
+        if (x0 + x1) * nx + (y0 + y1) * ny_ < 0.0:
+            nx, ny_ = -nx, -ny_
+        for i in range(count + 1):
+            t = i * length / count
+            px, py = x0 + ux * t + nx, y0 + uy * t + ny_
+            size = (6.0, 38.0, zb - za) if abs(ux) > abs(uy) else (38.0, 6.0, zb - za)
+            _box((px, py, (za + zb) / 2.0), size, fin, "Facade_Fin_{0}_{1:03d}".format(label, i))
+
+    r = SOFT_CORNER_R
+
+    def arc(label, cx_, cy_, a0, za, zb, with_fins):
+        """A quarter-round glass corner of six segments, centre (cx_, cy_),
+        from angle a0 for ninety degrees, with fins wrapping it."""
+        segments = 6
+        chord = 2.0 * r * math.sin(math.radians(90.0 / segments / 2.0))
+        for i in range(segments):
+            mid = math.radians(a0 + (i + 0.5) * 90.0 / segments)
+            piece = _box((cx_ + r * math.cos(mid), cy_ + r * math.sin(mid), (za + zb) / 2.0),
+                         (chord + 4.0, 30.0, zb - za), glass, "Facade_Corner_{0}_{1}".format(label, i + 1))
+            if piece is not None:
+                piece.set_actor_rotation(unreal.Rotator(roll=0.0, pitch=0.0, yaw=math.degrees(mid) + 90.0), False)
+            if with_fins and i % 2 == 0:
+                out = r + 22.0
+                blade = _box((cx_ + out * math.cos(mid), cy_ + out * math.sin(mid), (za + zb) / 2.0),
+                             (38.0, 6.0, zb - za), fin, "Facade_Fin_Corner_{0}_{1}".format(label, i + 1))
+                if blade is not None:
+                    blade.set_actor_rotation(unreal.Rotator(roll=0.0, pitch=0.0, yaw=math.degrees(mid)), False)
+
+    # --- The ground floor: the square glazed base ---------------------------
+    pane("North_Base", -fx, fy, fx, fy, z_ground, z1)
+    pane("West_Base", -fx, -fy, -fx, fy, z_ground, z1)
+    pane("East_Base", fx, -fy, fx, fy, z_ground, z1)
+    fins("North_Base", fx, fy, -fx, fy, z_ground, z1, 22.0)
+    fins("West_Base", -fx, fy, -fx, -fy, z_ground, z1, 22.0)
+    fins("East_Base", fx, -fy, fx, fy, z_ground, z1, 22.0)
+
+    # --- The tower, floor 1 to the floor-15 slab, corners rounded -----------
+    pane("South", -fx + r, -fy, fx - r, -fy, z1, z15)
+    pane("North", -fx + r, fy, fx - r, fy, z1, z15)
+    pane("West", -fx, -fy + r, -fx, fy - r, z1, z15)
+    pane("East", fx, -fy + r, fx, fy - r, z1, z15)
+    fins("North", fx - r, fy, -fx + r, fy, z1, z15, 22.0)
+    fins("West", -fx, fy - r, -fx, -fy + r, z1, z15, 22.0)
+    fins("East", fx, -fy + r, fx, fy - r, z1, z15, 22.0)
+    arc("NE", fx - r, fy - r, 0.0, z1, z15, True)
+    arc("NW", -fx + r, fy - r, 90.0, z1, z15, True)
+    # The south corners carry on up past the canteen into the crown.
+    arc("SW", -fx + r, -fy + r, 180.0, z1, z_roof, True)
+    arc("SE", fx - r, -fy + r, 270.0, z1, z17, True)
+
+    # --- Floor 15: the canteen glazed, the balcony behind balustrades -------
+    pane("Canteen_South", -fx + r, -fy, fx - r, -fy, z15, z16)
+    pane("Canteen_West", -fx, -fy + r, -fx, screen, z15, z16)
+    pane("Canteen_East", fx, -fy + r, fx, screen, z15, z16)
+    balustrade("Skydeck_Rail_West", -fx, screen, -fx, fy, z15)
+    balustrade("Skydeck_Rail_East", fx, screen, fx, fy, z15)
+
+    # --- The crown: 16 and 17 over the canteen block and the core stalk -----
+    pane("Crown_South_West", -fx + r, -fy, terrace_x, -fy, z16, z_roof)
+    pane("Crown_South_East", terrace_x, -fy, fx - r, -fy, z16, z17)
+    pane("Crown_West", -fx, -fy + r, -fx, screen, z16, z_roof)
+    pane("Crown_East", fx, -fy + r, fx, screen, z16, z17)
+    pane("Crown_North_West", -fx, screen, -sx, screen, z16, z_roof)
+    pane("Crown_North_East", sx, screen, fx, screen, z16, z17)
+    pane("Stalk_West", -sx, screen, -sx, ny, z16, z_roof)
+    pane("Stalk_East", sx, screen, sx, ny, z16, z_roof)
+    pane("Stalk_North", -sx, ny, sx, ny, z16, z_roof)
+    balustrade("Terrace_Rail_South", terrace_x, -fy, fx - r, -fy, z17)
+    balustrade("Terrace_Rail_East", fx, -fy + r, fx, screen, z17)
+    arc("SE_TerraceRail", fx - r, -fy + r, 270.0, z17, z17 + 110.0, False)
+    fins("Crown_West", -fx, screen, -fx, -fy + r, z15, z_roof, 22.0)
+    fins("Crown_East", fx, -fy + r, fx, screen, z15, z17, 22.0)
+    fins("Stalk_West", -sx, ny, -sx, screen, z16, z_roof, 22.0)
+    fins("Stalk_East", sx, screen, sx, ny, z16, z_roof, 22.0)
+    fins("Stalk_North", sx, ny, -sx, ny, z16, z_roof, 22.0)
+    _note_surface("BallisticGlass" if materials.get("BallisticGlass") is not None else "Glass", "Facade")
 
 
 def build_persistent_level(report, materials, manifest):
@@ -2041,49 +2915,26 @@ def build_persistent_level(report, materials, manifest):
     # --- The building shell -----------------------------------------------
     # A single exterior mass so the tower is visible from the Skydeck, the lobby
     # windows look onto something, and the plaza has a building above it.
-    shell_material = materials.get("Concrete")
-    _box((0.0, 0.0, -220.0), (9000.0, 8000.0, 400.0), shell_material, "Ground_Slab_Exterior")
-
-    # Curtain wall, four sides, from the lobby to the Skydeck. Deliberately one
-    # mass rather than fifteen stacked bands: the interior floors have their own
-    # glazing, and this is the silhouette the players see in the trailer.
-    glass = materials.get("BallisticGlass") or materials.get("Glass")
-    # The curtain wall sits on the floor plates' edges (4400 x 3600), so it is
-    # the window you stand at on every floor. The south face starts above the
-    # ground floor, whose frontage - glass and three revolving doors - is part
-    # of floor 0's level; the north face stops at the floor-15 slab, above
-    # which is the open balcony.
-    base = _floor_z(0)
-    total_height = (C.FLOOR_COUNT + 1) * C.FLOOR_HEIGHT_CM
-    face_x, face_y = 2215.0, 1815.0
-    south_base = _floor_z(1)
-    south_height = _floor_z(C.FLOOR_COUNT + 1) - south_base
-    _box((0.0, -face_y, south_base + south_height / 2.0), (2.0 * face_x + 30.0, 30.0, south_height), glass, "Facade_South")
-    north_height = _floor_z(C.FLOOR_COUNT) - base
-    _box((0.0, face_y, base + north_height / 2.0), (2.0 * face_x + 30.0, 30.0, north_height), glass, "Facade_North")
-    _box((-face_x, 0.0, base + total_height / 2.0), (30.0, 2.0 * face_y, total_height), glass, "Facade_West")
-    _box((face_x, 0.0, base + total_height / 2.0), (30.0, 2.0 * face_y, total_height), glass, "Facade_East")
-    _note_surface("BallisticGlass" if materials.get("BallisticGlass") is not None else "Glass", "Facade")
-
-    # Vertical fins on the outside, every 1.5 m: the real tower's brise-soleil,
-    # and the banded light and shadow they throw across every floor.
-    fin = materials.get("Metal")
-    fins = int((2.0 * face_x) // 150.0)
-    for index in range(fins + 1):
-        fx = -face_x + index * (2.0 * face_x / fins)
-        for side, fy in (("S", -face_y - 35.0), ("N", face_y + 35.0)):
-            height = south_height if side == "S" else north_height
-            bottom = south_base if side == "S" else base
-            _box((fx, fy, bottom + height / 2.0), (8.0, 40.0, height), fin, "Facade_Fin_{0}_{1}".format(side, index))
+    # (There was a 4 m solid "exterior slab" here, z -420 to -20, from when the
+    # ground floor stood at z 0. It enclosed the whole of floor 0 - the lobby
+    # was inside a block. The district's paving is the ground now.)
 
     # --- Ground: the plaza and Aldgate ------------------------------------
     # Asphalt, kerbs, a road with markings, and the low buildings opposite:
     # the outside of One Braham has to look like Aldgate, because the first thing
     # the player does is walk in the front door.
-    _box((0.0, 0.0, -410.0), (26000.0, 26000.0, 20.0), materials.get("Concrete"), "Aldgate_Asphalt")
-    for i in range(4):
-        offset = -6000.0 + i * 1200.0
-        _box((offset, 7000.0, -395.0), (900.0, 40.0, 4.0), None, "Road_Crossing_{0}".format(i))
+    # The real streets, from OpenStreetMap: see build_district. A flat apron
+    # stands in only if the district could not be built.
+    from onebraham import build_district
+    district = C.guard(report, "district", build_district.build_district, report)
+    if district:
+        manifest["district"] = district
+    else:
+        _box((0.0, 0.0, -410.0), (26000.0, 26000.0, 20.0), materials.get("Concrete"), "Aldgate_Apron")
+
+    # The curtain wall comes after the district, whose build authors the
+    # aluminium the fins are made of.
+    build_facade(materials)
 
     # --- Persistent gameplay actors ---------------------------------------
     # The winch's return value goes into the manifest: whether the pad and the
@@ -2148,7 +2999,7 @@ def build_all(write_manifest=True):
     manifest["terminals"] = C.guard(report, "terminals", build_override_terminals, report) or []
     manifest["breachable_walls"] = C.guard(report, "breachable walls", build_breachable_walls, report, materials) or []
     manifest["shutters"] = C.guard(report, "shutters", build_shutters, report) or []
-    manifest["lifts"] = C.guard(report, "lifts", build_lifts, report) or []
+    manifest["lifts"] = C.guard(report, "lifts", build_lifts, report, materials) or []
     manifest["rooms"] = [
         {"area": area, "name": room[0], "x": room[1], "y": room[2],
          "size": [room[3], room[4]]}
@@ -2187,6 +3038,7 @@ def build_all(write_manifest=True):
     if len(floors) != C.FLOOR_COUNT + 1:
         report.failed("floor levels", u"only {0} of {1} floors built".format(
             len(floors), C.FLOOR_COUNT + 1))
+    C.guard(report, "floor streaming", link_floor_levels, report, [f["level"] for f in floors])
 
     C.step(5, 6, "fire drill arena")
     C.guard(report, "fire drill arena", build_fire_drill_arena, report, materials)
@@ -2209,15 +3061,20 @@ def build_fire_drill_arena(report, materials):
     """
     path = "{0}/{1}".format(C.MAPS, C.MAP_FIRE_DRILL)
 
+    # Reopened and cleared when it exists, as the tower floors are: returning
+    # it untouched meant no change to the arena ever reached it.
     if unreal.EditorAssetLibrary.does_asset_exist(path):
-        report.updated_asset(path)
-        return path
-
-    try:
-        _level_subsystem().new_level(path)
-    except Exception as exc:  # noqa: BLE001
-        report.failed(path, u"could not create: {0}".format(exc))
-        return None
+        if not _level_subsystem().load_level(path):
+            report.failed(path, u"could not open the existing arena")
+            return None
+        actors = _actor_subsystem()
+        actors.destroy_actors(_generated_actors(actors.get_all_level_actors()))
+    else:
+        try:
+            _level_subsystem().new_level(path)
+        except Exception as exc:  # noqa: BLE001
+            report.failed(path, u"could not create: {0}".format(exc))
+            return None
 
     concrete = materials.get("Concrete")
     carpet = materials.get("Carpet")
@@ -2253,15 +3110,18 @@ def build_fire_drill_arena(report, materials):
     for ix in range(-2, 3):
         for iy in range(-3, 4):
             light = _spawn(unreal.RectLight, unreal.Vector(ix * 1000.0, iy * 1000.0, 380.0),
-                           unreal.Rotator(0.0, 0.0, -90.0))
+                           unreal.Rotator(roll=0.0, pitch=-90.0, yaw=0.0))  # facing the floor
             if light is None:
                 continue
             try:
                 component = light.rect_light_component
-                component.set_editor_property("Intensity", 3200.0)
-                component.set_editor_property("AttenuationRadius", 900.0)
-                component.set_editor_property("SourceWidth", 80.0)
+                # One fitting per 100 m2, so roughly twice the tower's lumens.
+                component.set_editor_property("IntensityUnits", unreal.LightUnits.LUMENS)
+                component.set_editor_property("Intensity", 30000.0)
+                component.set_editor_property("AttenuationRadius", 2000.0)
+                component.set_editor_property("SourceWidth", 120.0)
                 component.set_editor_property("SourceHeight", 80.0)
+                component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
             except Exception:  # noqa: BLE001
                 pass
 

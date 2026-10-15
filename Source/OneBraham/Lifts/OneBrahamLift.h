@@ -98,9 +98,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "One Braham|Lift", meta = (ClampMin = "0", ClampMax = "30"))
 	int32 MinFloor = 0;
 
-	/** Highest floor this car serves. 15 is the Skydeck. */
+	/** Highest floor this car serves. 15 is the Skydeck, 17 the Winter Garden at the top. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "One Braham|Lift", meta = (ClampMin = "0", ClampMax = "30"))
-	int32 MaxFloor = 15;
+	int32 MaxFloor = ONE_BRAHAM_FLOORS;
 
 	/** Floor the car is parked at when the match loads. Clamped into the served range. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "One Braham|Lift", meta = (ClampMin = "0", ClampMax = "30"))
@@ -174,7 +174,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "One Braham|Lift|Behaviour")
 	bool bStopsOnLockdown = true;
 
-	/** The floor a lockdown never delivers a rider to. The Skydeck: the last climb is the stairs. */
+	/** The lowest floor a lockdown never delivers a rider to - it and every floor
+	 *  above it. The Skydeck: the endgame (15 and the crown over it) is climbed
+	 *  by the stairs, or a car could drop a squad on 16, a flight above the deck. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "One Braham|Lift|Behaviour")
 	int32 LockdownExcludedFloor = 15;
 
@@ -324,6 +326,11 @@ protected:
 	/** Two instances per served floor (left leaf, right leaf). */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "One Braham|Components")
 	TObjectPtr<UInstancedStaticMeshComponent> LandingDoors = nullptr;
+
+	/** The glass car's steel skeleton: corner posts and the top and bottom
+	 *  rails round every face. Empty on a steel car. Rides with the car. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "One Braham|Components")
+	TObjectPtr<UInstancedStaticMeshComponent> GlassFrame = nullptr;
 
 	// --- replicated state -------------------------------------------------
 	UPROPERTY(ReplicatedUsing = OnRep_LiftState, BlueprintReadOnly, Category = "One Braham|Lift")

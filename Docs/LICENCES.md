@@ -100,3 +100,47 @@ game and a legal review that ends one.
 The end credits are generated from this table. An entry with a credit requirement
 appears on screen automatically; an entry without one does not. If a credit is
 missing from the build, the fix is in this file, not in the credits screen.
+
+## OpenStreetMap (map data)
+
+The streets, buildings, parks and trees of Aldgate East around the tower
+(`Tools/Python/onebraham/data/aldgate_district.json` and the `SM_District_*`
+meshes built from it) are derived from OpenStreetMap.
+
+Map data © OpenStreetMap contributors, available under the Open Database
+Licence (ODbL 1.0): https://www.openstreetmap.org/copyright. The credit must
+appear in the game's credits and on the store page alongside other third-party
+notices.
+
+Two things, two rules. The rendered map in the game (the meshes, screenshots,
+trailer frames) is a *Produced Work*: it needs the credit above and nothing
+else. `aldgate_district.json` is a *derivative database*: if it is ever
+distributed outside the studio (in a public repository, a mod kit), it goes
+under the ODbL too, with the same notice. The repository is public, so it is
+published that way: `Tools/Python/onebraham/data/LICENCE.md` carries the notice.
+
+## Poly Haven (skies)
+
+Fetched by `Tools/Python/onebraham/fetch_open_assets.py` into `SourceArt/Sky/`
+(not committed), MD5-checked, imported as `T_Sky_Day` / `T_Sky_Dusk`.
+
+| Asset | Use | Licence |
+| --- | --- | --- |
+| [kloofendal_48d_partly_cloudy_puresky](https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky) | the day sky over the Skydeck and terraces | CC0 |
+| [belfast_sunset_puresky](https://polyhaven.com/a/belfast_sunset_puresky) | the dusk preset | CC0 |
+
+CC0 needs no credit; Poly Haven is credited anyway, in the in-game credits.
+
+## Poly Haven (textures)
+
+PBR sets (2K albedo, DirectX normal, roughness), fetched like the skies and
+imported to `/Game/OneBraham/Materials/Textures`. All CC0.
+
+| Set | Surface |
+| --- | --- |
+| [terrazzo_tiles](https://polyhaven.com/a/terrazzo_tiles) | reception terrazzo (desaturated, tinted pale grey) |
+| [concrete_floor_02](https://polyhaven.com/a/concrete_floor_02) | exposed soffits and cores |
+| [oak_wood_planks](https://polyhaven.com/a/oak_wood_planks) | timber |
+| [white_plaster_02](https://polyhaven.com/a/white_plaster_02) | partitions |
+| [concrete_pavement](https://polyhaven.com/a/concrete_pavement) | street paving |
+| [asphalt_02](https://polyhaven.com/a/asphalt_02) | carriageway |

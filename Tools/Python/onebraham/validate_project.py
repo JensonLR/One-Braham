@@ -679,15 +679,20 @@ def check_manifest(v, config_only):
     spawns = data.get("spawn_anchors", [])
     floors = data.get("floors", [])
 
-    # Seven: the canteen shares floor 15 with the Skydeck balcony.
-    if len(areas) != 7:
-        v.fail("manifest", u"{0} areas in the manifest, expected 7".format(len(areas)))
-    if len(floors) < 16:
-        v.fail("manifest", u"{0} floors built, expected 16 (plaza + 15)".format(len(floors)))
+    # Nine: the canteen shares floor 15 with the Skydeck balcony, and the crown
+    # is two areas, 16 and 17. Both numbers come from common.py, so the check
+    # follows the building rather than a copy of it.
+    expected_areas = len(C.AREAS)
+    expected_floors = C.FLOOR_COUNT + 1
+    if len(areas) != expected_areas:
+        v.fail("manifest", u"{0} areas in the manifest, expected {1}".format(len(areas), expected_areas))
+    if len(floors) < expected_floors:
+        v.fail("manifest", u"{0} floors built, expected {1} (ground + {2})".format(
+            len(floors), expected_floors, C.FLOOR_COUNT))
     if len(spawns) < 24:
         v.warn("manifest", u"only {0} spawn anchors: 12 players need options".format(len(spawns)))
 
-    if len(areas) == 7 and len(floors) >= 16:
+    if len(areas) == expected_areas and len(floors) >= expected_floors:
         v.pass_("manifest", u"{0} areas, {1} floors, {2} spawn anchors".format(
             len(areas), len(floors), len(spawns)))
 
@@ -862,11 +867,34 @@ def check_performance(v, config_only):
         v.pass_("performance", u"{0} actors, {1} static mesh actors, {2} lights".format(
             len(actors), meshes, lights))
 
-    if lights > PERF_CAPS["point_lights"]:
-        v.fail("performance", u"{0} lights, cap is {1}".format(lights, PERF_CAPS["point_lights"]))
-    elif lights > PERF_CAPS["point_lights"] * 0.8:
-        v.warn("performance", u"{0} lights is close to the cap of {1}".format(
-            lights, PERF_CAPS["point_lights"]))
+    # The budget is shadow-casting local lights: each one renders shadow
+    # depths, which is the cost that scales. Shadowless fill (the bounce light
+    # under every ceiling fitting) is a few ALU per pixel inside its radius,
+    # fades out with distance, and is reported but not capped.
+    shadowed = 0
+    fill = 0
+    for actor in actors:
+        component = getattr(actor, "light_component", None)
+        if component is None or isinstance(actor, (unreal.DirectionalLight, unreal.SkyLight)):
+            continue
+        try:
+            casts = component.get_editor_property("cast_shadows")
+        except Exception:  # noqa: BLE001
+            casts = True
+        if casts:
+            shadowed += 1
+        else:
+            fill += 1
+
+    if shadowed > PERF_CAPS["point_lights"]:
+        v.fail("performance", u"{0} shadow-casting lights, cap is {1} ({2} shadowless fill)".format(
+            shadowed, PERF_CAPS["point_lights"], fill))
+    elif shadowed > PERF_CAPS["point_lights"] * 0.8:
+        v.warn("performance", u"{0} shadow-casting lights is close to the cap of {1} ({2} shadowless fill)".format(
+            shadowed, PERF_CAPS["point_lights"], fill))
+    else:
+        v.pass_("performance", u"{0} shadow-casting lights within the cap of {1}, {2} shadowless fill".format(
+            shadowed, PERF_CAPS["point_lights"], fill))
 
 
 # ---------------------------------------------------------------------------
