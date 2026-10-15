@@ -12,6 +12,7 @@
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
+#include "UObject/Package.h"
 
 #include "Core/OneBrahamGameSettings.h"
 #include "OneBraham.h"
@@ -283,6 +284,344 @@ bool FOneBrahamVoiceWheelTest::RunTest(const FString& Parameters)
 		UOneBrahamVoiceSubsystem::GetQuickLineWheel(LineId, Label, 1000000);
 		TestTrue(TEXT("an absurd index yields nothing"), LineId.IsNone() && Label.IsEmpty());
 	}
+
+	return true;
+}
+
+// ===========================================================================
+//  Voice activation
+// ===========================================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamVoiceActivityDetectorTest, "OneBraham.Voice.ActivityDetector",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamVoiceActivityDetectorTest::RunTest(const FString& Parameters)
+{
+	constexpr float Frame = 0.02f;
+
+	// RMS is a fraction of full scale: silence is zero, a full-scale square wave
+	// is one, and a null buffer is silence rather than a crash.
+	{
+		int16 Silence[320] = {};
+		TestEqual(TEXT("silence has no level"), FOneBrahamVoiceActivityDetector::ComputeRms(Silence, 320), 0.f);
+
+		int16 Square[320];
+		for (int32 Index = 0; Index < 320; ++Index)
+		{
+			Square[Index] = (Index % 2 == 0) ? 32767 : -32767;
+		}
+		TestEqual(TEXT("a full-scale square wave is level 1"),
+			FOneBrahamVoiceActivityDetector::ComputeRms(Square, 320), 1.f, 0.001f);
+		TestEqual(TEXT("no samples is silence"), FOneBrahamVoiceActivityDetector::ComputeRms(nullptr, 0), 0.f);
+	}
+
+	// A quiet room never opens the gate; a voice opens it on the first frame.
+	{
+		FOneBrahamVoiceActivityDetector Gate;
+		bool bEverOpened = false;
+		for (int32 Index = 0; Index < 50; ++Index)
+		{
+			bEverOpened |= Gate.ProcessFrame(0.001f, Frame);
+		}
+		TestFalse(TEXT("a second of room noise transmits nothing"), bEverOpened);
+		TestTrue(TEXT("speech opens the gate at once"), Gate.ProcessFrame(0.08f, Frame));
+	}
+
+	// The hang time holds the gate through the gaps between words, then lets go.
+	{
+		FOneBrahamVoiceActivityDetector Gate;
+		Gate.ProcessFrame(0.08f, Frame);
+
+		bool bHeldThroughGap = true;
+		for (int32 Index = 0; Index < 15; ++Index)
+		{
+			bHeldThroughGap &= Gate.ProcessFrame(0.f, Frame);
+		}
+		TestTrue(TEXT("a 300 ms pause does not close the gate"), bHeldThroughGap);
+
+		for (int32 Index = 0; Index < 10; ++Index)
+		{
+			Gate.ProcessFrame(0.f, Frame);
+		}
+		TestFalse(TEXT("500 ms of silence does"), Gate.bOpen);
+	}
+
+	// Hysteresis: a level between the close and open thresholds keeps an open
+	// gate open, but does not open a closed one - no flutter on the HUD icon.
+	{
+		FOneBrahamVoiceActivityDetector Open;
+		FOneBrahamVoiceActivityDetector Closed;
+		for (int32 Index = 0; Index < 50; ++Index)
+		{
+			Open.ProcessFrame(0.002f, Frame);
+			Closed.ProcessFrame(0.002f, Frame);
+		}
+
+		TestTrue(TEXT("speech opens the first gate"), Open.ProcessFrame(0.02f, Frame));
+
+		bool bStayedOpen = true;
+		bool bOpenedClosed = false;
+		for (int32 Index = 0; Index < 100; ++Index)
+		{
+			bStayedOpen &= Open.ProcessFrame(0.007f, Frame);
+			bOpenedClosed |= Closed.ProcessFrame(0.007f, Frame);
+		}
+
+		TestTrue(TEXT("a level just under the threshold keeps an open gate open"), bStayedOpen);
+		TestFalse(TEXT("and does not open a closed one"), bOpenedClosed);
+	}
+
+	// The noise floor learns a steady hum: a desktop fan above the threshold
+	// eventually stops holding the gate open, and speech over it still opens it.
+	{
+		FOneBrahamVoiceActivityDetector Gate;
+		for (int32 Index = 0; Index < 750; ++Index)
+		{
+			Gate.ProcessFrame(0.02f, Frame);
+		}
+
+		TestFalse(TEXT("fifteen seconds of fan noise no longer transmits"), Gate.bOpen);
+		TestTrue(TEXT("the bar rose above the hum"), Gate.GetEffectiveOpenThreshold() > 0.02f);
+		TestTrue(TEXT("but a voice over the fan still opens it"), Gate.ProcessFrame(0.15f, Frame));
+	}
+
+	{
+		FOneBrahamVoiceActivityDetector Gate;
+		Gate.ProcessFrame(0.2f, Frame);
+		Gate.Reset();
+		TestFalse(TEXT("Reset closes the gate"), Gate.bOpen);
+		TestEqual(TEXT("and forgets the room"), Gate.NoiseFloor, 0.f);
+	}
+
+	return true;
+}
+
+// ===========================================================================
+//  Routing
+// ===========================================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamVoiceRoutingTest, "OneBraham.Voice.Routing",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamVoiceRoutingTest::RunTest(const FString& Parameters)
+{
+	using namespace OneBrahamVoiceRouting;
+
+	auto MakeParty = [](int32 PlayerId, EOneBrahamTeam Team, int32 SquadId, const FVector& Location)
+	{
+		FOneBrahamVoiceRouteParty Party;
+		Party.PlayerId = PlayerId;
+		Party.Team = Team;
+		Party.SquadId = SquadId;
+		Party.bHasLocation = true;
+		Party.Location = Location;
+		return Party;
+	};
+
+	FOneBrahamVoiceRouteRules Rules;
+	Rules.ProximityRangeCm = 3500.f;
+
+	const FOneBrahamVoiceRouteParty Speaker = MakeParty(1, EOneBrahamTeam::Alpha, 0, FVector::ZeroVector);
+	const FOneBrahamVoiceRouteParty Squadmate = MakeParty(2, EOneBrahamTeam::Alpha, 0, FVector(1000.f, 0.f, 0.f));
+	const FOneBrahamVoiceRouteParty NearEnemy = MakeParty(3, EOneBrahamTeam::Bravo, 1, FVector(2000.f, 0.f, 0.f));
+	const FOneBrahamVoiceRouteParty FarEnemy = MakeParty(4, EOneBrahamTeam::Bravo, 1, FVector(5000.f, 0.f, 0.f));
+	const FOneBrahamVoiceRouteParty FarSquadmate = MakeParty(5, EOneBrahamTeam::Alpha, 0, FVector(90000.f, 0.f, 0.f));
+	const FOneBrahamVoiceRouteParty OtherSquad = MakeParty(6, EOneBrahamTeam::Alpha, 2, FVector(500.f, 0.f, 0.f));
+
+	EOneBrahamVoiceChannel Channel = EOneBrahamVoiceChannel::None;
+
+	// --- Proximity: a sphere, enemies included ---------------------------
+	TestTrue(TEXT("a squadmate in range hears proximity"), ResolveRoute(Squadmate, Speaker, Rules, Channel));
+	TestEqual(TEXT("on the proximity channel"), Channel, EOneBrahamVoiceChannel::Proximity);
+	TestTrue(TEXT("an enemy in range hears it too"), ResolveRoute(NearEnemy, Speaker, Rules, Channel));
+	TestFalse(TEXT("an enemy out of range does not"), ResolveRoute(FarEnemy, Speaker, Rules, Channel));
+	TestFalse(TEXT("nor a squadmate out of range"), ResolveRoute(FarSquadmate, Speaker, Rules, Channel));
+	TestFalse(TEXT("nobody hears themselves"), ResolveRoute(Speaker, Speaker, Rules, Channel));
+
+	{
+		FOneBrahamVoiceRouteRules Off = Rules;
+		Off.bProximityEnabled = false;
+		TestFalse(TEXT("a match without proximity voice routes none"), ResolveRoute(Squadmate, Speaker, Off, Channel));
+	}
+
+	// --- Mutes -----------------------------------------------------------
+	{
+		const TArray<int32> Muted = { Speaker.PlayerId };
+		FOneBrahamVoiceRouteParty Listener = Squadmate;
+		Listener.MutedPlayerIds = &Muted;
+		TestFalse(TEXT("a listener who muted the speaker hears nothing"), ResolveRoute(Listener, Speaker, Rules, Channel));
+
+		// The old rule read the listener's "muted by" list: muting somebody
+		// silenced yourself for them. The speaker's own list must not matter.
+		FOneBrahamVoiceRouteParty MutingSpeaker = Speaker;
+		const TArray<int32> SpeakerMutes = { Squadmate.PlayerId };
+		MutingSpeaker.MutedPlayerIds = &SpeakerMutes;
+		TestTrue(TEXT("a speaker's own mute list does not silence them"), ResolveRoute(Squadmate, MutingSpeaker, Rules, Channel));
+
+		FOneBrahamVoiceRouteParty SelfMutedSpeaker = Speaker;
+		SelfMutedSpeaker.bSelfMuted = true;
+		TestFalse(TEXT("a self-muted speaker is heard by nobody"), ResolveRoute(Squadmate, SelfMutedSpeaker, Rules, Channel));
+
+		FOneBrahamVoiceRouteParty SelfMutedListener = Squadmate;
+		SelfMutedListener.bSelfMuted = true;
+		TestTrue(TEXT("a listener who muted their own mic still hears"), ResolveRoute(SelfMutedListener, Speaker, Rules, Channel));
+	}
+
+	// --- Squad and team radio -------------------------------------------
+	{
+		FOneBrahamVoiceRouteParty Radio = Speaker;
+		Radio.Channel = EOneBrahamVoiceChannel::Squad;
+		TestTrue(TEXT("squad radio reaches a squadmate at any distance"), ResolveRoute(FarSquadmate, Radio, Rules, Channel));
+		TestEqual(TEXT("on the squad channel"), Channel, EOneBrahamVoiceChannel::Squad);
+		TestFalse(TEXT("but not another squad"), ResolveRoute(OtherSquad, Radio, Rules, Channel));
+		TestFalse(TEXT("nor an enemy beside the speaker"), ResolveRoute(NearEnemy, Radio, Rules, Channel));
+
+		FOneBrahamVoiceRouteParty Unassigned = Radio;
+		Unassigned.Team = EOneBrahamTeam::None;
+		FOneBrahamVoiceRouteParty UnassignedListener = FarSquadmate;
+		UnassignedListener.Team = EOneBrahamTeam::None;
+		TestFalse(TEXT("players with no team share no squad"), ResolveRoute(UnassignedListener, Unassigned, Rules, Channel));
+
+		FOneBrahamVoiceRouteParty TeamRadio = Speaker;
+		TeamRadio.Channel = EOneBrahamVoiceChannel::Team;
+		TestTrue(TEXT("team radio reaches another squad of the team"), ResolveRoute(OtherSquad, TeamRadio, Rules, Channel));
+		TestFalse(TEXT("but not the enemy"), ResolveRoute(NearEnemy, TeamRadio, Rules, Channel));
+
+		FOneBrahamVoiceRouteRules NoTeam = Rules;
+		NoTeam.bTeamEnabled = false;
+		TestFalse(TEXT("a match without team voice routes none"), ResolveRoute(OtherSquad, TeamRadio, NoTeam, Channel));
+
+		FOneBrahamVoiceRouteParty Off = Speaker;
+		Off.Channel = EOneBrahamVoiceChannel::None;
+		TestFalse(TEXT("the Off channel reaches nobody"), ResolveRoute(Squadmate, Off, Rules, Channel));
+	}
+
+	// --- The eliminated --------------------------------------------------
+	// Dead players keep squad radio, and only squad radio.
+	{
+		FOneBrahamVoiceRouteParty Dead = Speaker;
+		Dead.bEliminated = true;
+		Dead.bHasLocation = false;
+
+		TestEqual(TEXT("a dead speaker on proximity is moved to squad radio"),
+			ResolveSpeakerChannel(Dead), EOneBrahamVoiceChannel::Squad);
+		TestTrue(TEXT("their squad hears them at any distance"), ResolveRoute(FarSquadmate, Dead, Rules, Channel));
+		TestEqual(TEXT("over the radio"), Channel, EOneBrahamVoiceChannel::Squad);
+		TestFalse(TEXT("an enemy beside the body hears nothing"), ResolveRoute(NearEnemy, Dead, Rules, Channel));
+
+		FOneBrahamVoiceRouteParty DeadOnTeam = Dead;
+		DeadOnTeam.Channel = EOneBrahamVoiceChannel::Team;
+		TestFalse(TEXT("a dead speaker's team radio stays inside the squad"), ResolveRoute(OtherSquad, DeadOnTeam, Rules, Channel));
+
+		FOneBrahamVoiceRouteParty DeadOff = Dead;
+		DeadOff.Channel = EOneBrahamVoiceChannel::None;
+		TestFalse(TEXT("a dead player who switched voice off stays off"), ResolveRoute(FarSquadmate, DeadOff, Rules, Channel));
+	}
+
+	// Spectators hear proximity from where the watched player stands.
+	{
+		FOneBrahamVoiceRouteParty Spectator = MakeParty(7, EOneBrahamTeam::Bravo, 1, FVector(500.f, 0.f, 0.f));
+		Spectator.bEliminated = true;
+		TestTrue(TEXT("a spectator watching somebody near the speaker hears them"), ResolveRoute(Spectator, Speaker, Rules, Channel));
+		TestEqual(TEXT("spatialised, on proximity"), Channel, EOneBrahamVoiceChannel::Proximity);
+
+		Spectator.Location = FVector(60000.f, 0.f, 0.f);
+		TestFalse(TEXT("but not when the watched player is across the building"), ResolveRoute(Spectator, Speaker, Rules, Channel));
+
+		Spectator.bHasLocation = false;
+		TestFalse(TEXT("nor with nobody to watch"), ResolveRoute(Spectator, Speaker, Rules, Channel));
+
+		FOneBrahamVoiceRouteParty DeadSquadmate = FarSquadmate;
+		DeadSquadmate.bEliminated = true;
+		FOneBrahamVoiceRouteParty Radio = Speaker;
+		Radio.Channel = EOneBrahamVoiceChannel::Squad;
+		TestTrue(TEXT("a dead squadmate still hears squad radio"), ResolveRoute(DeadSquadmate, Radio, Rules, Channel));
+
+		Radio.Channel = EOneBrahamVoiceChannel::Team;
+		TestFalse(TEXT("but not team radio"), ResolveRoute(DeadSquadmate, Radio, Rules, Channel));
+	}
+
+	// The building's channel is everyone's.
+	{
+		FOneBrahamVoiceRouteParty Building = Speaker;
+		Building.Channel = EOneBrahamVoiceChannel::Announcement;
+		TestTrue(TEXT("announcements reach the far side of the map"), ResolveRoute(FarEnemy, Building, Rules, Channel));
+	}
+
+	// --- Range precedence ------------------------------------------------
+	// The match setting wins whenever it names a range: the old default of 3500
+	// in the chat config silently shadowed it.
+	TestEqual(TEXT("the match's range wins"), ResolveProximityRangeCm(5000.f, 3500.f, 3500.f), 5000.f);
+	TestEqual(TEXT("an override applies without match settings"), ResolveProximityRangeCm(0.f, 2000.f, 3500.f), 2000.f);
+	TestEqual(TEXT("then the project default"), ResolveProximityRangeCm(0.f, 0.f, 3000.f), 3000.f);
+	TestEqual(TEXT("then the documented 35 m"), ResolveProximityRangeCm(0.f, 0.f, 0.f), 3500.f);
+	TestEqual(TEXT("the chat config no longer carries a range of its own"), FOneBrahamVoiceChatConfig().ProximityRangeCm, 0.f);
+
+	return true;
+}
+
+// ===========================================================================
+//  Proximity shaping
+// ===========================================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamVoiceProximityShapingTest, "OneBraham.Voice.ProximityShaping",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamVoiceProximityShapingTest::RunTest(const FString& Parameters)
+{
+	using namespace OneBrahamVoiceRouting;
+	constexpr float Range = 3500.f;
+
+	// Beside you: full level, unfiltered.
+	const FOneBrahamProximityVoiceShaping Beside = ShapeProximityVoice(100.f, Range, 0, 0, false);
+	TestEqual(TEXT("a voice beside you is at full level"), Beside.Gain, 1.f, 0.001f);
+	TestTrue(TEXT("and unfiltered"), Beside.LowPassHz > 19000.f);
+
+	// Natural rolloff: never rises with distance, is well below linear at ten
+	// metres (the ear hears level logarithmically), and is silent at the range.
+	float Previous = 2.f;
+	bool bMonotonic = true;
+	for (float Distance = 0.f; Distance <= Range + 500.f; Distance += 50.f)
+	{
+		const float Gain = ShapeProximityVoice(Distance, Range, 0, 0, false).Gain;
+		bMonotonic &= Gain <= Previous + KINDA_SMALL_NUMBER;
+		Previous = Gain;
+	}
+	TestTrue(TEXT("gain never rises with distance"), bMonotonic);
+
+	const float TenMetres = ShapeProximityVoice(1000.f, Range, 0, 0, false).Gain;
+	TestTrue(TEXT("ten metres is a clear but quieter voice"), TenMetres > 0.2f && TenMetres < 0.5f);
+	TestEqual(TEXT("silent at the range"), ShapeProximityVoice(Range, Range, 0, 0, false).Gain, 0.f);
+	TestEqual(TEXT("and beyond it"), ShapeProximityVoice(Range * 2.f, Range, 0, 0, false).Gain, 0.f);
+	TestTrue(TEXT("far voices lose their top end"),
+		ShapeProximityVoice(3000.f, Range, 0, 0, false).LowPassHz < ShapeProximityVoice(500.f, Range, 0, 0, false).LowPassHz);
+
+	// Walls: each surface is quieter and duller than the last.
+	const FOneBrahamProximityVoiceShaping Clear = ShapeProximityVoice(800.f, Range, 0, 0, false);
+	const FOneBrahamProximityVoiceShaping OneWall = ShapeProximityVoice(800.f, Range, 1, 0, false);
+	const FOneBrahamProximityVoiceShaping TwoWalls = ShapeProximityVoice(800.f, Range, 2, 0, false);
+	TestTrue(TEXT("a wall costs at least 6 dB"), OneWall.Gain <= Clear.Gain * 0.5f);
+	TestTrue(TEXT("and muffles to under 1.5 kHz"), OneWall.LowPassHz <= 1500.f);
+	TestTrue(TEXT("a second wall is quieter still"), TwoWalls.Gain < OneWall.Gain);
+	TestTrue(TEXT("and duller still"), TwoWalls.LowPassHz < OneWall.LowPassHz);
+
+	// Floors: another storey is a murmur, two is almost nothing.
+	const FOneBrahamProximityVoiceShaping OneFloor = ShapeProximityVoice(800.f, Range, 0, 1, false);
+	const FOneBrahamProximityVoiceShaping TwoFloors = ShapeProximityVoice(800.f, Range, 0, 2, false);
+	TestTrue(TEXT("a voice on another floor is at least 12 dB down"), OneFloor.Gain <= Clear.Gain * 0.25f + KINDA_SMALL_NUMBER);
+	TestTrue(TEXT("and heavily muffled"), OneFloor.LowPassHz <= 700.f);
+	TestTrue(TEXT("two floors is quieter than one"), TwoFloors.Gain < OneFloor.Gain);
+	TestTrue(TEXT("a floor muffles more than a wall"), OneFloor.Gain < OneWall.Gain);
+
+	// Crouched speakers whisper: as clear as ever up close, gone at mid range.
+	const float StandingNear = ShapeProximityVoice(150.f, Range, 0, 0, false).Gain;
+	const float CrouchedNear = ShapeProximityVoice(150.f, Range, 0, 0, true).Gain;
+	const float StandingMid = ShapeProximityVoice(2000.f, Range, 0, 0, false).Gain;
+	const float CrouchedMid = ShapeProximityVoice(2000.f, Range, 0, 0, true).Gain;
+	TestTrue(TEXT("a crouched voice is nearly as loud up close"), CrouchedNear >= StandingNear * 0.8f);
+	TestTrue(TEXT("and a whisper at twenty metres"), CrouchedMid < StandingMid * 0.1f);
+
+	// Every output is a usable value, whatever the input.
+	const FOneBrahamProximityVoiceShaping Degenerate = ShapeProximityVoice(-50.f, 0.f, 99, 99, true);
+	TestTrue(TEXT("degenerate input stays in range"), Degenerate.Gain >= 0.f && Degenerate.Gain <= 1.f
+		&& Degenerate.LowPassHz >= 300.f && Degenerate.LowPassHz <= ClearLowPassHz);
 
 	return true;
 }

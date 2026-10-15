@@ -1,6 +1,6 @@
 # ONE BRAHAM — map implementation
 
-The building: 15 floors, 7 areas, 40 rooms, one vertical line from the ground
+The building: 15 floors, 7 areas, 43 rooms, one vertical line from the ground
 plaza to the Skydeck. This document is how it is built, why each area is shaped
 the way it is, and what every space is *for* as a fight.
 
@@ -32,7 +32,7 @@ hear a firefight two floors up and hear a fire door close one floor down.
 
 | Route | Cost | Cost in practice |
 | --- | --- | --- |
-| Lift core | one keycard, fast, loud | Stops at floor 3 and 9 only. Whoever holds the lobby holds the lift |
+| Lift core | one keycard, fast, loud | Nine cars, every floor, until the Lockdown stage stops them. Whoever holds the lobby holds the lift |
 | Stairwell A (west) | free, slow, audible | No cover, no doors, four storeys of concrete that carry sound |
 | Stairwell B (east) | free, slow, visible from the atrium | The fast route if nobody is watching the mezzanine |
 | Breach | a charge, 3 s, whole floor hears it | Cuts a hole in four specific partitions; not a general route |
@@ -40,6 +40,32 @@ hear a firefight two floors up and hear a fire door close one floor down.
 
 Every route is a decision with a cost. Nothing is free, and nothing is a
 shortcut a player can take without somebody knowing.
+
+### Lifts
+
+Nine `AOneBrahamLift` actors (`Source/OneBraham/Lifts/`): two banks of four
+facing each other across the core hall (west shafts at x = −300 with doors
+facing +X, east shafts at x = +300 facing −X, at y = −750, −450, −150 and 150),
+and the glass car at (0, 710) with its doors facing −Y onto the back of the hall.
+The map builder places each actor at its shaft centre at floor 0's level
+(Z = −400), unrotated, and sets its properties; the actor builds its own car,
+car doors, landing doors on every served floor, and the call buttons.
+
+* **Moving.** 250 cm/s with 160 cm/s² ramps at each end: one storey in about
+  3.2 s, plaza to Skydeck in about 25.6 s. The server replicates the trip (start
+  height, start speed, target floor, start time), not a position; every machine
+  computes the same curve from it, so a rider never jitters. The car floor is the
+  movement base riders stand on.
+* **Calling.** The button beside each landing door calls the car, or holds its
+  doors if it is already there. Inside, Up and Down move the chosen floor one
+  storey per press. Cars serve calls in the direction they are already going.
+  Doors take 0.9 s to move and stay open 2.5 s, and reopen for anybody standing
+  in the doorway.
+* **Lockdown.** At the Lockdown stage every car drops its calls, stops at the
+  nearest floor it can brake for, opens its doors and stays open, and refuses
+  every button until the stage drops back. A car never finishes a trip to the
+  Skydeck in lockdown: the last climb is the stairs. PreLockdown leaves the lifts
+  running, because the warning is only useful if people can act on it.
 
 ---
 
@@ -90,105 +116,82 @@ floor-name table now asks this one.
 
 ### Area by area
 
-### 2.1 Ground Plaza and Entrance — floor 0
+### The core — every floor
 
-**Layout.** 5200 × 4400 cm. A canopy, a revolving door, a bank of four
-turnstiles, a commissionaire's desk, a bike store and a loading bay set back on
-the left.
+Every floor is the same 4400 × 3600 cm plate round the same core, laid out from
+the real building's ground floor:
 
-**Fights here.** Opening rush and the last stand of a failed run. The plaza is
-open, so it is decided by who controls the turnstiles — three lanes, no cover
-between them, and a desk beside them that is exactly wide enough for two.
+* **The lift hall** runs north–south between two banks of four lifts facing each
+  other (shafts at x ±310). Lifts are actors (`AOneBrahamLift`); until a build
+  has the class, closed landing doors stand in the openings.
+* **The glass lift** stands at the back (north) of the hall.
+* **The cross-hallway** runs left and right between the banks and the glass
+  lift, out to the floor loop on both sides. Off it: the men's toilets on the
+  left, the women's on the right, three cubicles and a vanity each.
+* **The main stair**, left of the glass lift, goes from the ground floor to the
+  roof; an escape stair mirrors it on the right. Each is a switchback behind a
+  stair lobby whose 150 cm door is what the lockdown's fire shutter seals.
+* **Every slab is cut** over the stairs and the lift shafts (and, on floor 1,
+  over the escalators), so the stairs climb and the cars travel.
+* **The loop.** Above the ground floor, each floor loops round the core, with
+  rooms in four bands between the loop and the curtain wall. Every room's door
+  faces the core.
 
-**Spawn safety.** Three anchors (one per squad cluster), minimum 2,000 cm
-*horizontally on the same storey* between opposing clusters. The loading bay is a
-separate spawn pocket so a squad cannot be caught in the open at the doors.
+### 2.1 Ground floor — reception, gates, escalators, coffee shop
 
-**Streaming.** In the persistent level, always loaded, because it is where every
-match starts and a hitch at spawn is the worst possible first impression.
+Walk in through one of **three revolving doors** in the glass frontage and
+**reception** is in front of you: a stone desk in front of a dark feature wall.
+To the right is the **line of keycard gates** (speed-gate pedestals every
+110 cm). Behind the gates, straight ahead, is the **lift hall**; to its right,
+also behind the gates, the **escalators** up to floor 1 in their enclosure. To
+the right of the escalators, behind a wall, the **coffee shop** - which opens
+onto the public side in front of the gates, not behind them. Back-of-house
+behind reception: a security office and a post room; a bike store in the north
+corner.
 
-### 2.2 Lobby — floor 1
+**Fights here.** The opening rush. Everything north of the gates is reached
+through the gate lanes, so the first fight of a match is about the gate line:
+lanes with nothing between them, a reception desk that is exactly wide enough
+for two, and a coffee shop on the flank.
 
-**Layout.** 4400 × 3600 cm. Reception island (700 × 400 cm) centre, waiting
-seating, three lifts in a dark metal bank, four steel columns, two large planters.
+### 2.2 Floor 1 — arrival gallery, showcase, lab
 
-**Fights here.** The first real fight. The reception island is the best cover in
-the room and the four columns make the room a set of four lanes, so the lobby is
-about choosing a lane and holding it.
+The escalators arrive into a stone gallery along the south side, behind a glass
+balustrade round the escalator opening. A client showcase on the west, a lab on
+the east, a meeting room and a coffee point on the north.
 
-**Chokepoints.** The lift bank (three doors, one corridor), the atrium bridge to
-the mezzanine (one route, visible from above), and the stair door on the west
-wall.
+### 2.3 Floor 2 — breakout and meeting rooms
 
-**Sightlines.** 44 m diagonal across the marble, broken at 12 m by the planters.
-Long enough for a marksman to matter, broken enough that they cannot own it.
-
-### 2.3 Mezzanine and Lift Lobby — floor 2
-
-**Layout.** 4000 × 3200 cm. A bridge across the atrium, glass meeting pods, a
-coffee point, a soft seating area.
-
-**Fights here.** The decision floor. Every route up is visible from the bridge
-and the bridge is visible from everywhere. Players cross it because it is 40 m
-faster than the stairs and they can see that it is a bad idea at the same moment
-they decide to do it.
-
-**Why the pods exist.** Glass boxes are the best cover in the game: they stop
-bullets, they let you see, and breaking one is a sound cue everyone hears.
+Breakout seating on the west, team desks along the south, two glass meeting
+pods on the east, a quiet room and a vending alcove on the north.
 
 ### 2.4 Open Plan Office — floors 3–8
 
-**Layout.** 4400 × 3600 cm per floor. Desk farms A and B, two meeting pods, a
-break-out kitchen, a print alcove, four offices, two wind-core plant rooms. The
-room programme is identical floor to floor with different furniture arrangement,
-because that is what an office building is.
-
-**Fights here.** The main battleground of a 25-minute match, and it has to hold
-up for eight of them. Desks give crouch cover, screens give sightline breaks,
-cabinets give full cover, and the print alcove is the only place with a
-one-way-visible angle into the corridor.
-
-**Sightlines.** 38 m down the long axis, cut at 9 m by the acoustic screens.
-Scanning is possible; camping is not, because every desk row has a flank.
-
-**Vertical.** The wind-core plant rooms (two per floor) are the only interior
-rooms with a floor above and below: they are where a firefight becomes a
-grenade fight.
+Desk farms on the west, east and south: benching in back-to-back pairs with a
+low screen, in rows with aisles - crouch cover everywhere, full cover nowhere. A
+break-out kitchen and a print alcove in the south corners, two meeting pods on
+the north. The programme is identical floor to floor, because that is what an
+office building is.
 
 ### 2.5 Server and Comms — floors 9–11
 
-**Layout.** 3200 × 2800 cm. Four rack rows with cold-aisle containment, a CRAC
-wall, a UPS bank, cable trays overhead, the NOC workstation, a comms cupboard.
+Two server halls, west and east, full-height walls, 2 m rack rows with cold
+aisles between them: long, narrow, symmetrical lanes. The NOC along the south,
+the power room and comms cupboard on the north. The loudest floors in the
+building. Tier `Secure`, with the two-panel override on floor 9.
 
-**Fights here.** The room is a sightline trap: four rows create long, narrow,
-perfectly symmetrical lanes with no cover inside them. Whoever takes the NOC has
-the room; whoever walks the lanes does not come back.
+### 2.6 Executive — floors 12–14
 
-**Audio.** It is the loudest room in the building (fan loops at 70 dB
-equivalent), so it is the only room where two players can be 5 m apart and
-neither hears the other. That is a deliberate tactical affordance and it is
-implemented as an audio bed, not as a gameplay flag.
+The boardroom along the south between two corner offices, an executive suite on
+the west, the PA desk and the executive lounge on the east. Tier `Executive`,
+with a paired zone between the floor and the east wing. Breach walls on 12 and
+14.
 
-**Access.** Tier `Secure` (IT Operations badge), with the two-panel override on
-this floor: the designed co-op moment of the game.
+### 2.7 Ceilings
 
-### 2.6 Executive — floor 12
-
-**Layout.** 3600 × 3000 cm. Boardroom (3.2 m table, twelve chairs), corner
-office, PA desk, two offices, a bar pavilion, wet room.
-
-**Fights here.** The boardroom is a long, brave push: one table, twelve chairs,
-two doors, and nowhere to be. It is the most cinematic room in the game and it
-punishes anybody who tries to hold it.
-
-**Access.** Tier `Executive`, with a paired zone between the floor and the east
-wing, so the two-panel rule appears twice in a match rather than once.
-
-### 2.7 Executive — floors 12–14
-
-**Layout.** The typical floor plate. The boardroom wing on 12, executive offices
-on 13 and suites on 14, each with the boardroom, corner office, PA desk and
-lounge programme. Breach walls on 12 and 14.
+None, anywhere in the tower: like the real building ("OB"), every floor shows
+its bare concrete soffit with steel beams, ducts, pipes and cable trays hung
+under it, stopping at the core so nothing hangs in a stairwell.
 
 ### 2.8 Canteen and Skydeck — floor 15
 
@@ -211,8 +214,9 @@ see each other, and the one door in it - the Skydeck gate - is where the last
 push happens. Squads arrive with one down, no utility and less than a magazine
 each, and the design intent is that it *feels* like that.
 
-**The balcony.** Extraction pad (900 cm hold radius) marked in safety
-yellow, the winch rig, three air-handling units, four floodlight masts, a steel
+**The balcony.** The roof core stands in the middle of it. On the east wing, the
+extraction pad (900 cm hold radius) marked in safety yellow; on the west, the bar
+pavilion and the winch control room; along the north edge, a glass balustrade. The winch rig, three air-handling units, four floodlight masts, a steel
 balustrade, planters, a winch control room.
 
 **Fights here.** The ending, and the only place the game deliberately holds a
@@ -248,11 +252,24 @@ with any other material the four states are told through the screen light alone.
 
 ## 3. The rooms, as data
 
-Forty rooms across the seven areas, each `(name, x, y, size_x, size_y)` in the
-area's local frame, in `ROOM_PROGRAMMES` in `build_environment.py`:
+Forty-three rooms across the seven areas, each `(name, x, y, size_x, size_y)` from
+the plate's centre, in `ROOM_PROGRAMMES` in `build_environment.py`. Zones listed
+in `OPEN_ROOMS` are open floor with a finish and no walls.
 
 | Area | Rooms |
 | --- | --- |
+| Ground floor | Reception_Foyer, Security_Office, Post_Room, Bike_Store |
+| Floor 1 | Arrival_Gallery, Client_Showcase, Lab, Meeting_Room, Coffee_Point |
+| Floor 2 | Breakout_Area, Team_Desks, Meeting_Pod_1, Meeting_Pod_2, Quiet_Room, Vending_Alcove |
+| Open Plan | Desk_Farm_West, Desk_Farm_East, Desk_Farm_South, Break_Out_Kitchen, Print_Alcove, Meeting_Pod_1, Meeting_Pod_2 |
+| Server & Comms | Server_Hall_West, Server_Hall_East, NOC, Power_Room, Comms_Cupboard |
+| Executive | Boardroom, Corner_Office_West, Corner_Office_East, Exec_Suite, Exec_PA_Desk, Exec_Lounge |
+| Skydeck | Coffee_Bar, Kitchen, Hot_Food_Line, Servery, Canteen_Hall, Helipad, Plant_Room, Bar_Pavilion, Winch_Control, Edge_Rail_North |
+
+The toilets, stairs, lift hall and glass lift are the core, built by
+`build_core` on every floor, not rooms in the programme.
+
+--- | --- |
 | Ground Plaza | Reception_Island, Turnstile_Bank_1, Turnstile_Bank_2, Security_Desk, Bike_Store, Loading_Bay |
 | Lobby | Reception_Desk, Waiting_Seating, West_Lounge, Lift_Lobby, Coffee_Point |
 | Mezzanine | Bridge_To_Core, Meeting_Pod_1, Meeting_Pod_2, Breakout_Area, Lift_Lobby |

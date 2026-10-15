@@ -28,11 +28,62 @@
 #include "Kismet/GameplayStatics.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Materials/MaterialInstanceDynamic.h"
+
+namespace
+{
+	/** Brass size by weapon class: a 12-gauge hull is twice a 9 mm case. */
+	float CalibreScaleFor(const UOneBrahamWeaponDefinition* Definition)
+	{
+		if (Definition == nullptr)
+		{
+			return 1.f;
+		}
+
+		switch (Definition->Category)
+		{
+		case EOneBrahamWeaponCategory::PumpShotgun:
+		case EOneBrahamWeaponCategory::SemiAutoShotgun:
+			return 2.f;
+		case EOneBrahamWeaponCategory::Carbine556:
+		case EOneBrahamWeaponCategory::CompactAssaultRifle:
+			return 1.45f;
+		case EOneBrahamWeaponCategory::MarksmanRifle:
+			return 1.7f;
+		default:
+			return 1.f;
+		}
+	}
+
+	/** Procedural muzzle flare size: pistols are small, shotguns and rifles are not. */
+	float MuzzleScaleFor(const UOneBrahamWeaponDefinition* Definition)
+	{
+		if (Definition == nullptr)
+		{
+			return 1.f;
+		}
+
+		switch (Definition->Category)
+		{
+		case EOneBrahamWeaponCategory::Pistol:
+		case EOneBrahamWeaponCategory::CompactPistol:
+		case EOneBrahamWeaponCategory::SuppressedPistol:
+			return 0.7f;
+		case EOneBrahamWeaponCategory::PumpShotgun:
+		case EOneBrahamWeaponCategory::SemiAutoShotgun:
+			return 1.4f;
+		case EOneBrahamWeaponCategory::MarksmanRifle:
+			return 1.25f;
+		default:
+			return 1.f;
+		}
+	}
+}
 
 AOneBrahamWeaponBase::AOneBrahamWeaponBase()
 {
@@ -397,6 +448,7 @@ float AOneBrahamWeaponBase::ServerFireShot(const FVector& StartLocation, const F
 	OnRep_Ammo();
 
 	float TotalDamage = 0.f;
+	TArray<FOneBrahamCharacterHitFX> CharacterHits;
 
 	const int32 Pellets = FMath::Max(1, Definition->PelletCount);
 	for (int32 PelletIndex = 0; PelletIndex < Pellets; ++PelletIndex)
@@ -416,16 +468,13 @@ float AOneBrahamWeaponBase::ServerFireShot(const FVector& StartLocation, const F
 			}
 		}
 
-		FOneBrahamImpactInfo Impact;
 		AActor* HitActor = nullptr;
-		TotalDamage += TraceBullet(StartLocation, Direction, Impact, HitActor);
+		TotalDamage += TraceBullet(StartLocation, Direction, OutImpacts, HitActor, CharacterHits);
 
 		if (PelletIndex == 0)
 		{
 			OutFirstHitActor = HitActor;
 		}
-
-		OutImpacts.Add(Impact);
 	}
 
 	if (AmmoInMagazine <= 0)
@@ -447,14 +496,29 @@ float AOneBrahamWeaponBase::ServerFireShot(const FVector& StartLocation, const F
 	MulticastPlayFireFX(GetMuzzleLocation(), AimDirection, bSuppressorFitted);
 	MulticastPlayImpactFX(OutImpacts);
 
+	if (CharacterHits.Num() > 0)
+	{
+		MulticastPlayCharacterHitFX(CharacterHits);
+	}
+
 	return TotalDamage;
 }
 
-float AOneBrahamWeaponBase::TraceBullet(const FVector& Start, const FVector& Direction, FOneBrahamImpactInfo& OutImpact, AActor*& OutHitActor)
+float AOneBrahamWeaponBase::GetMaxTraceDistance() const
+{
+	// Rounds do not stop where the damage band bottoms out: MinDamageRange is
+	// the distance at which falloff reaches its floor, and a round fired across
+	// the Skydeck keeps going (at floor damage) well past it. The old trace
+	// length of MinDamageRange * 2 made a pistol round vanish at 80 m on a
+	// sightline the level designers had built to be 120 m.
+	const float BandEnd = Definition != nullptr ? Definition->Falloff.MinDamageRange : 0.f;
+	return FMath::Max(20000.f, BandEnd * 1.5f);
+}
+
+float AOneBrahamWeaponBase::TraceBullet(const FVector& Start, const FVector& Direction, TArray<FOneBrahamImpactInfo>& OutImpacts, AActor*& OutHitActor,
+	TArray<FOneBrahamCharacterHitFX>& OutCharacterHits)
 {
 	OutHitActor = nullptr;
-	OutImpact.Location = Start + Direction * Definition->Falloff.MinDamageRange;
-	OutImpact.Normal = -Direction;
 
 	const UWorld* World = GetWorld();
 	if (World == nullptr || Definition == nullptr)
@@ -467,7 +531,7 @@ float AOneBrahamWeaponBase::TraceBullet(const FVector& Start, const FVector& Dir
 	// penetration simulation: at 60 Hz with 16 players this is the difference
 	// between a stable server and a stuttering one. Cover penetration is modelled
 	// by the two-surface rule below.
-	const float MaxDistance = Definition->Falloff.MinDamageRange * 2.f;
+	const float MaxDistance = GetMaxTraceDistance();
 	const FVector End = Start + Direction * MaxDistance;
 
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(OBWeaponTrace), /*bTraceComplex*/ true);
@@ -489,140 +553,302 @@ float AOneBrahamWeaponBase::TraceBullet(const FVector& Start, const FVector& Dir
 
 	if (!bHit)
 	{
+		NotifyNearMisses(Start, End, nullptr);
 		return 0.f;
 	}
 
-	OutImpact.Location = Hit.ImpactPoint;
-	OutImpact.Normal = Hit.ImpactNormal;
-	OutImpact.Surface = ResolveSurface(Hit.PhysMaterial.Get());
-	OutImpact.HitBoneName = Hit.BoneName;
+	FOneBrahamImpactInfo Entry;
+	Entry.Location = Hit.ImpactPoint;
+	Entry.Normal = Hit.ImpactNormal;
+	Entry.Surface = ResolveSurface(Hit.PhysMaterial.Get());
+	Entry.HitBoneName = Hit.BoneName;
 	OutHitActor = Hit.GetActor();
 
 	// --- Character hit ----------------------------------------------------
 	if (AOneBrahamCharacter* HitCharacter = Cast<AOneBrahamCharacter>(Hit.GetActor()))
 	{
-		OutImpact.bHitCharacter = true;
+		Entry.bHitCharacter = true;
+		OutImpacts.Add(Entry);
 
-		FOneBrahamDamageReport Report;
-		Report.BaseDamage = Definition->GetDamageAtDistance(Hit.Distance);
-		Report.HitZone = ResolveHitZone(Hit.BoneName);
-		Report.HitBoneName = Hit.BoneName;
-		Report.HitLocation = Hit.ImpactPoint;
-		Report.ShotDirection = Direction;
-		Report.Distance = Hit.Distance;
-		Report.bWasPenetrated = false;
-
-		AController* InstigatorController = OwningCharacter.IsValid() ? OwningCharacter->GetController() : nullptr;
-
-		if (UOneBrahamHealthComponent* Health = HitCharacter->GetHealthComponent())
-		{
-			const float Dealt = Health->ApplyDamage(Report.BaseDamage, OwningCharacter.Get(), Report, InstigatorController);
-
-			// Non-lethal hit reaction: the limb takes the physics, the player keeps
-			// control. Killing blows go through the health component's OnDeath.
-			if (Dealt > 0.f && Health->IsAlive())
-			{
-				if (UOneBrahamRagdollComponent* Ragdoll = HitCharacter->GetRagdollComponent())
-				{
-					Ragdoll->ApplyHitReaction(Hit.BoneName, Direction, Dealt);
-				}
-			}
-
-			// Hit confirmation goes only to the shooter's own machine, and only
-			// when damage actually landed: shooting a corpse or a downed player who
-			// has already bled out must not reward a hit marker.
-			if (Dealt > 0.f && OwningCharacter.IsValid())
-			{
-				if (UOneBrahamWeaponComponent* ShooterWeapons = OwningCharacter->GetWeaponComponent())
-				{
-					const bool bHeadshot = Report.HitZone == EOneBrahamHitZone::Head
-						|| Report.HitZone == EOneBrahamHitZone::Neck;
-					const bool bKilled = !Health->IsAlive();
-
-					ShooterWeapons->NotifyLocalHitConfirmed(bHeadshot, bKilled, Hit.Distance);
-				}
-			}
-
-			OutImpact.bHitCharacter = true;
-			return Dealt;
-		}
-
-		return 0.f;
+		NotifyNearMisses(Start, Hit.ImpactPoint, HitCharacter);
+		return ApplyBulletHitToCharacter(HitCharacter, Hit, Direction, Hit.Distance, 1.f, /*bPenetrated*/ false, OutCharacterHits);
 	}
 
 	// --- Breakable glass --------------------------------------------------
 	if (Hit.GetComponent() != nullptr && Hit.GetComponent()->GetCollisionObjectType() == ECC_GameTraceChannel2 /*Glass*/)
 	{
-		OutImpact.bHitGlass = true;
+		Entry.bHitGlass = true;
+		OutImpacts.Add(Entry);
+
 		// Glass is handled by AOneBrahamBreakableGlass implementing the damage
 		// interface; the weapon only reports the impact.
 		UGameplayStatics::ApplyPointDamage(Hit.GetActor(), Definition->GetDamageAtDistance(Hit.Distance),
 			Direction, Hit, OwningCharacter.IsValid() ? OwningCharacter->GetController() : nullptr, this, nullptr);
+
+		NotifyNearMisses(Start, Hit.ImpactPoint, nullptr);
 		return 0.f;
 	}
 
+	// The entry hole is always reported, penetrated or not. It used to be
+	// overwritten by whatever the round hit beyond the wall, so shooting through
+	// a partition left no mark on the side you were standing on.
+	OutImpacts.Add(Entry);
+
 	// --- Penetration: cubicle walls, plasterboard partitions --------------
-	if (Definition->bCanPenetrateCover)
+	const AActor* Surface = Hit.GetActor();
+	const bool bPenetrable = Definition->bCanPenetrateCover && Surface != nullptr &&
+		Surface->GetRootComponent() != nullptr &&
+		Surface->GetRootComponent()->GetCollisionObjectType() == ECC_GameTraceChannel4; /*Penetrable*/
+
+	if (!bPenetrable)
 	{
-		const AActor* HitActor = Hit.GetActor();
-		const bool bPenetrable = HitActor != nullptr &&
-			HitActor->GetRootComponent() != nullptr &&
-			HitActor->GetRootComponent()->GetCollisionObjectType() == ECC_GameTraceChannel4; /*Penetrable*/
+		NotifyNearMisses(Start, Hit.ImpactPoint, nullptr);
+		return 0.f;
+	}
 
-		if (bPenetrable)
+	// --- Thickness --------------------------------------------------------
+	// Find the far face by tracing *back* into the surface from beyond its
+	// thickness budget, against that one component only. No far face inside the
+	// budget means the wall is thicker than the round can get through.
+	float Thickness = 2.f;
+	FVector ExitPoint = Hit.ImpactPoint + Direction * Thickness;
+	FHitResult ExitHit;
+	bool bFoundExit = false;
+
+	if (UPrimitiveComponent* SurfaceComponent = Hit.GetComponent())
+	{
+		const float Budget = Definition->MaxPenetrationThickness > 0.f ? Definition->MaxPenetrationThickness : 30.f;
+		const FVector ProbeFar = Hit.ImpactPoint + Direction * (Budget + 1.f);
+
+		FCollisionQueryParams ExitParams(SCENE_QUERY_STAT(OBWeaponTraceExit), /*bTraceComplex*/ false);
+		ExitParams.bReturnPhysicalMaterial = true;
+
+		if (SurfaceComponent->LineTraceComponent(ExitHit, ProbeFar, Hit.ImpactPoint + Direction * 0.1f, ExitParams)
+			&& !ExitHit.bStartPenetrating)
 		{
-			// Continue the trace past the surface: the second hit is what actually
-			// takes the damage. This is how shooting through a cubicle wall works.
-			const FVector SecondStart = Hit.ImpactPoint + Direction * 2.f;
-			const FVector SecondEnd = SecondStart + Direction * MaxDistance;
-
-			FCollisionQueryParams SecondParams(SCENE_QUERY_STAT(OBWeaponTracePenetrated), true);
-			SecondParams.AddIgnoredActor(this);
-			SecondParams.AddIgnoredActor(HitActor);
-			if (OwningCharacter.IsValid())
+			bFoundExit = true;
+			ExitPoint = ExitHit.ImpactPoint;
+			Thickness = FVector::Dist(Hit.ImpactPoint, ExitPoint);
+		}
+		else if (Definition->MaxPenetrationThickness > 0.f)
+		{
+			// No far face inside the budget. If there is one further out, the
+			// wall is thicker than this round can get through and it stops here.
+			// If there is none at all (single-sided or degenerate collision),
+			// the surface is treated as thin, which is what the old code assumed
+			// for every penetrable surface.
+			FHitResult FarFace;
+			if (SurfaceComponent->LineTraceComponent(FarFace, ProbeFar + Direction * 200.f, ProbeFar, ExitParams))
 			{
-				SecondParams.AddIgnoredActor(OwningCharacter.Get());
-			}
-
-			FHitResult SecondHit;
-			if (World->LineTraceSingleByChannel(SecondHit, SecondStart, SecondEnd, ECC_GameTraceChannel1, SecondParams))
-			{
-				if (AOneBrahamCharacter* HitCharacter = Cast<AOneBrahamCharacter>(SecondHit.GetActor()))
-				{
-					FOneBrahamDamageReport Report;
-					Report.BaseDamage = Definition->GetDamageAtDistance(SecondHit.Distance);
-					Report.HitZone = ResolveHitZone(SecondHit.BoneName);
-					Report.HitBoneName = SecondHit.BoneName;
-					Report.HitLocation = SecondHit.ImpactPoint;
-					Report.ShotDirection = Direction;
-					Report.Distance = SecondHit.Distance;
-					Report.bWasPenetrated = true;
-
-					OutImpact.Location = SecondHit.ImpactPoint;
-					OutImpact.Normal = SecondHit.ImpactNormal;
-					OutImpact.bPenetrated = true;
-					OutImpact.bHitCharacter = true;
-					OutImpact.HitBoneName = SecondHit.BoneName;
-					OutHitActor = SecondHit.GetActor();
-
-					if (UOneBrahamHealthComponent* Health = HitCharacter->GetHealthComponent())
-					{
-						return Health->ApplyDamage(Report.BaseDamage, OwningCharacter.Get(), Report,
-							OwningCharacter.IsValid() ? OwningCharacter->GetController() : nullptr);
-					}
-				}
-				else
-				{
-					// The round went through the wall and hit the far wall.
-					OutImpact.Location = SecondHit.ImpactPoint;
-					OutImpact.Normal = SecondHit.ImpactNormal;
-					OutImpact.Surface = ResolveSurface(SecondHit.PhysMaterial.Get());
-				}
+				NotifyNearMisses(Start, Hit.ImpactPoint, nullptr);
+				return 0.f;
 			}
 		}
 	}
 
+	// Exit spall on the far side: the people on the other side of the partition
+	// see the wall burst towards them, which is half of what makes
+	// wall-banging feel real.
+	{
+		FOneBrahamImpactInfo Exit;
+		Exit.Location = ExitPoint;
+		Exit.Normal = Direction;
+		Exit.Surface = bFoundExit && ExitHit.PhysMaterial.IsValid() ? ResolveSurface(ExitHit.PhysMaterial.Get()) : Entry.Surface;
+		Exit.bPenetrated = true;
+		OutImpacts.Add(Exit);
+	}
+
+	// --- Beyond the wall --------------------------------------------------
+	const FVector SecondStart = ExitPoint + Direction * 1.f;
+	const FVector SecondEnd = Start + Direction * MaxDistance;
+
+	FCollisionQueryParams SecondParams(SCENE_QUERY_STAT(OBWeaponTracePenetrated), /*bTraceComplex*/ true);
+	// Without this the far-side surface was always resolved as concrete: a round
+	// through a partition into a server rack threw dust instead of sparks.
+	SecondParams.bReturnPhysicalMaterial = true;
+	SecondParams.AddIgnoredActor(this);
+	SecondParams.AddIgnoredActor(Surface);
+	if (OwningCharacter.IsValid())
+	{
+		SecondParams.AddIgnoredActor(OwningCharacter.Get());
+	}
+	if (AActor* Owner = GetOwner())
+	{
+		SecondParams.AddIgnoredActor(Owner);
+	}
+
+	FHitResult SecondHit;
+	if (!World->LineTraceSingleByChannel(SecondHit, SecondStart, SecondEnd, ECC_GameTraceChannel1 /*Weapon*/, SecondParams))
+	{
+		NotifyNearMisses(Start, SecondEnd, nullptr);
+		return 0.f;
+	}
+
+	const float TotalDistance = Hit.Distance + Thickness + SecondHit.Distance;
+	const float Retention = FMath::Clamp(Definition->PenetrationDamageRetention, 0.f, 1.f);
+
+	FOneBrahamImpactInfo Beyond;
+	Beyond.Location = SecondHit.ImpactPoint;
+	Beyond.Normal = SecondHit.ImpactNormal;
+	Beyond.Surface = ResolveSurface(SecondHit.PhysMaterial.Get());
+	Beyond.HitBoneName = SecondHit.BoneName;
+	Beyond.bPenetrated = true;
+
+	if (AOneBrahamCharacter* HitCharacter = Cast<AOneBrahamCharacter>(SecondHit.GetActor()))
+	{
+		Beyond.bHitCharacter = true;
+		OutImpacts.Add(Beyond);
+		OutHitActor = HitCharacter;
+
+		// A hit through cover is still a hit: the shooter gets the marker and
+		// the victim the flinch, exactly as for a clean shot. It used to be
+		// damage only - the one case where a player most needs to know whether
+		// the round connected was the one case that told them nothing.
+		NotifyNearMisses(Start, SecondHit.ImpactPoint, HitCharacter);
+		return ApplyBulletHitToCharacter(HitCharacter, SecondHit, Direction, TotalDistance, Retention, /*bPenetrated*/ true, OutCharacterHits);
+	}
+
+	if (SecondHit.GetComponent() != nullptr && SecondHit.GetComponent()->GetCollisionObjectType() == ECC_GameTraceChannel2 /*Glass*/)
+	{
+		Beyond.bHitGlass = true;
+		UGameplayStatics::ApplyPointDamage(SecondHit.GetActor(), Definition->GetDamageAtDistance(TotalDistance) * Retention,
+			Direction, SecondHit, OwningCharacter.IsValid() ? OwningCharacter->GetController() : nullptr, this, nullptr);
+	}
+
+	// The round went through the wall and hit whatever was behind it.
+	OutImpacts.Add(Beyond);
+	NotifyNearMisses(Start, SecondHit.ImpactPoint, nullptr);
 	return 0.f;
+}
+
+float AOneBrahamWeaponBase::ApplyBulletHitToCharacter(AOneBrahamCharacter* HitCharacter, const FHitResult& Hit, const FVector& Direction,
+	float TotalDistance, float DamageScale, bool bPenetrated, TArray<FOneBrahamCharacterHitFX>& OutCharacterHits)
+{
+	if (HitCharacter == nullptr || Definition == nullptr)
+	{
+		return 0.f;
+	}
+
+	UOneBrahamHealthComponent* Health = HitCharacter->GetHealthComponent();
+	if (Health == nullptr)
+	{
+		return 0.f;
+	}
+
+	FOneBrahamDamageReport Report;
+	Report.BaseDamage = Definition->GetDamageAtDistance(TotalDistance) * DamageScale;
+	Report.HitZone = ResolveHitZone(Hit.BoneName);
+	Report.HitBoneName = Hit.BoneName;
+	Report.HitLocation = Hit.ImpactPoint;
+	Report.ShotDirection = Direction;
+	Report.Distance = TotalDistance;
+	Report.bWasPenetrated = bPenetrated;
+
+	AController* InstigatorController = OwningCharacter.IsValid() ? OwningCharacter->GetController() : nullptr;
+	const float Dealt = Health->ApplyDamage(Report.BaseDamage, OwningCharacter.Get(), Report, InstigatorController);
+
+	if (Dealt <= 0.f)
+	{
+		// Shooting a corpse or a downed player who has already bled out must
+		// not reward a hit marker or paint more blood.
+		return 0.f;
+	}
+
+	const bool bHeadshot = Report.HitZone == EOneBrahamHitZone::Head || Report.HitZone == EOneBrahamHitZone::Neck;
+	const bool bKilled = !Health->IsAlive();
+
+	// Hit confirmation goes only to the shooter's own machine.
+	if (OwningCharacter.IsValid())
+	{
+		if (UOneBrahamWeaponComponent* ShooterWeapons = OwningCharacter->GetWeaponComponent())
+		{
+			ShooterWeapons->NotifyLocalHitConfirmed(bHeadshot, bKilled, TotalDistance);
+		}
+	}
+
+	// The flinch, the stagger and the blood go to everybody, through
+	// MulticastPlayCharacterHitFX after the whole trigger pull is traced. The
+	// reaction used to be applied here, on the server only - where nobody is
+	// looking - and never replicated.
+	FOneBrahamCharacterHitFX& FX = OutCharacterHits.AddDefaulted_GetRef();
+	FX.Victim = HitCharacter;
+	FX.Bone = Hit.BoneName;
+	FX.Location = Hit.ImpactPoint;
+	FX.Direction = Direction;
+	FX.Damage = static_cast<uint8>(FMath::Clamp(FMath::RoundToInt(Dealt), 1, 255));
+	FX.bHeadshot = bHeadshot;
+	FX.bKilled = bKilled;
+
+	return Dealt;
+}
+
+void AOneBrahamWeaponBase::NotifyNearMisses(const FVector& Start, const FVector& End, const AActor* HitActor)
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr || !HasAuthority())
+	{
+		return;
+	}
+
+	const AOneBrahamPlayerState* ShooterState = OwningCharacter.IsValid() ? OwningCharacter->GetPlayerState<AOneBrahamPlayerState>() : nullptr;
+	const float Now = World->GetTimeSeconds();
+
+	if (LastNearMissTime.Num() > 32)
+	{
+		LastNearMissTime.Reset();
+	}
+
+	for (TActorIterator<AOneBrahamCharacter> It(World); It; ++It)
+	{
+		AOneBrahamCharacter* Other = *It;
+
+		// Players only: a bot has no machine to hear the crack on, and a Client
+		// RPC on a server-owned pawn would play the whizz on the listen host.
+		if (Other == nullptr || Other == OwningCharacter.Get() || Other == HitActor || !Other->IsPlayerControlled())
+		{
+			continue;
+		}
+
+		const UOneBrahamHealthComponent* OtherHealth = Other->GetHealthComponent();
+		if (OtherHealth == nullptr || !OtherHealth->IsAlive())
+		{
+			continue;
+		}
+
+		const AOneBrahamPlayerState* OtherState = Other->GetPlayerState<AOneBrahamPlayerState>();
+		if (ShooterState != nullptr && OtherState != nullptr && ShooterState->IsFriendlyWith(OtherState))
+		{
+			continue;
+		}
+
+		const FVector Head = Other->GetPawnViewLocation();
+		const FVector Closest = FMath::ClosestPointOnSegment(Head, Start, End);
+
+		// The round has to actually go *past*: one that stopped in the wall in
+		// front of you is an impact you can see, not a crack by your ear; and a
+		// muzzle against your head is a different problem.
+		if (FVector::DistSquared(Closest, End) < 1.f || FVector::DistSquared(Closest, Start) < FMath::Square(100.f))
+		{
+			continue;
+		}
+
+		if (FVector::DistSquared(Head, Closest) > FMath::Square(NearMissRadius))
+		{
+			continue;
+		}
+
+		float& Last = LastNearMissTime.FindOrAdd(Other, -1000.f);
+		if (Now - Last < 0.25f)
+		{
+			continue;
+		}
+		Last = Now;
+
+		if (UOneBrahamRagdollComponent* Ragdoll = Other->GetRagdollComponent())
+		{
+			Ragdoll->ClientNearMiss(Closest);
+		}
+	}
 }
 
 EOneBrahamHitZone AOneBrahamWeaponBase::ResolveHitZone(FName BoneName)
@@ -1196,9 +1422,20 @@ float AOneBrahamWeaponBase::GetEffectiveADSTime() const
 void AOneBrahamWeaponBase::MulticastPlayFireFX_Implementation(const FVector_NetQuantize& MuzzleLocation, const FVector_NetQuantizeNormal& Direction, bool bSuppressed)
 {
 	// --- Muzzle flash -----------------------------------------------------
+	// The authored (or generated) system when it will draw something, the
+	// procedural flare when it will not: an empty NS_OB_MuzzleFlash activates
+	// happily and shows nothing, which is how every gun in a fresh checkout
+	// used to fire without a flash.
 	if (!bSuppressed && MuzzleFlashComponent != nullptr)
 	{
-		MuzzleFlashComponent->Activate(true);
+		if (UOneBrahamVFXStatics::IsNiagaraSystemUsable(MuzzleFlashComponent->GetAsset()))
+		{
+			MuzzleFlashComponent->Activate(true);
+		}
+		else
+		{
+			UOneBrahamVFXStatics::SpawnMuzzleFlashFallback(this, GetMuzzleTransform(), MuzzleScaleFor(Definition));
+		}
 	}
 
 	if (!bSuppressed && MuzzleLight != nullptr)
@@ -1216,10 +1453,15 @@ void AOneBrahamWeaponBase::MulticastPlayFireFX_Implementation(const FVector_NetQ
 			? Definition->ShellEject.LoadSynchronous()
 			: CachedShellEject.Get();
 
-		if (System != nullptr)
+		if (UOneBrahamVFXStatics::IsNiagaraSystemUsable(System))
 		{
 			UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, System, GetShellEjectTransform().GetLocation(),
 				GetShellEjectTransform().Rotator(), FVector(1.f), /*bAutoDestroy*/ true);
+		}
+		else
+		{
+			const FVector Inherited = OwningCharacter.IsValid() ? OwningCharacter->GetVelocity() : FVector::ZeroVector;
+			UOneBrahamVFXStatics::SpawnShellEjectFallback(this, GetShellEjectTransform(), Inherited, CalibreScaleFor(Definition));
 		}
 	}
 
@@ -1264,7 +1506,48 @@ void AOneBrahamWeaponBase::MulticastPlayFireFX_Implementation(const FVector_NetQ
 
 void AOneBrahamWeaponBase::MulticastPlayImpactFX_Implementation(const TArray<FOneBrahamImpactInfo>& Impacts)
 {
-	UOneBrahamVFXStatics::SpawnImpactsForHits(this, Impacts);
+	// The muzzle is the shot origin every machine already has: it gives the
+	// impacts a direction (debris and blood spray along the shot, grazing
+	// rounds ricochet) without a single extra byte on the wire.
+	UOneBrahamVFXStatics::SpawnImpactsForHits(this, Impacts, GetMuzzleLocation());
+}
+
+void AOneBrahamWeaponBase::MulticastPlayCharacterHitFX_Implementation(const TArray<FOneBrahamCharacterHitFX>& Hits)
+{
+	// Cosmetic only, so nothing on a dedicated server: its hitboxes follow the
+	// animation, not the flinch, and it has nobody to show the blood to.
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	// Bounded like the impacts: a shotgun at point blank is eight entries.
+	const int32 Count = FMath::Min(Hits.Num(), 12);
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		const FOneBrahamCharacterHitFX& Hit = Hits[Index];
+		AOneBrahamCharacter* Victim = Hit.Victim;
+		if (Victim == nullptr)
+		{
+			continue;
+		}
+
+		const FVector Direction = FVector(Hit.Direction).GetSafeNormal();
+		const float Damage = static_cast<float>(Hit.Damage);
+
+		UOneBrahamVFXStatics::SpawnBloodForHit(this, Victim, Hit.Location, Direction, Damage, Hit.bHeadshot);
+
+		if (UOneBrahamRagdollComponent* Ragdoll = Victim->GetRagdollComponent())
+		{
+			// The killing blow's push comes from EnterRagdoll; a flinch on top of
+			// it would fight the ragdoll for a frame.
+			if (!Hit.bKilled)
+			{
+				Ragdoll->PlayHitReaction(Hit.Bone, Direction, Damage, Hit.bHeadshot);
+			}
+			Ragdoll->AddWoundShading(Damage);
+		}
+	}
 }
 
 void AOneBrahamWeaponBase::MulticastPlayReloadFX_Implementation(bool bStarted)
@@ -1331,7 +1614,36 @@ void AOneBrahamWeaponBase::PlayTracerLocal(const FVector& Start, const FVector& 
 		? Definition->Tracer.LoadSynchronous()
 		: CachedTracer.Get();
 
-	if (System != nullptr)
+	if (!UOneBrahamVFXStatics::IsNiagaraSystemUsable(System))
+	{
+		// Procedural tracer, one round in three (Docs/11: tracers are subtle). It
+		// stops at the first wall on this machine's own view of the world, so a
+		// streak never pokes out of the far side of a partition.
+		if ((LocalTracerCounter++ % 3) != 0)
+		{
+			return;
+		}
+
+		FVector TracerEnd = End;
+		if (UWorld* World = GetWorld())
+		{
+			FCollisionQueryParams Params(SCENE_QUERY_STAT(OBTracerFallback), /*bTraceComplex*/ false, this);
+			if (OwningCharacter.IsValid())
+			{
+				Params.AddIgnoredActor(OwningCharacter.Get());
+			}
+
+			FHitResult Hit;
+			if (World->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params))
+			{
+				TracerEnd = Hit.ImpactPoint;
+			}
+		}
+
+		UOneBrahamVFXStatics::SpawnTracerFallback(this, Start, TracerEnd, Definition->MuzzleVelocity);
+		return;
+	}
+
 	{
 		UNiagaraComponent* TracerComponent = UNiagaraFunctionLibrary::SpawnSystemAtLocation(this, System, Start,
 			(End - Start).Rotation(), FVector(1.f), /*bAutoDestroy*/ true, /*bAutoActivate*/ true);

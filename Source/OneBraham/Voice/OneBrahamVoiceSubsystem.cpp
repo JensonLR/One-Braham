@@ -18,6 +18,8 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "TimerManager.h"
+#include "HAL/IConsoleManager.h"
+#include "GameFramework/GameStateBase.h"
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundBase.h"
 
@@ -102,31 +104,17 @@ void UOneBrahamVoiceSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	LineSet->EnsureCoreLines();
 
 	// --- Transport config -------------------------------------------------
+	// The match-dependent parts (range, relay budget) cannot be read here: a
+	// world subsystem initialises before the game state that carries the match
+	// settings exists. They are resolved on first use instead - see
+	// GetChatConfig and GetProximityRangeCm.
 	ChatConfig = FOneBrahamVoiceChatConfig();
-
-	// Priority is resolved from the match settings asset when the world has one,
-	// so a designer can widen proximity chat for a big FIRE DRILL map without a
-	// code change.
-	if (UWorld* World = GetWorld())
-	{
-		if (const AOneBrahamGameState* GS = World->GetGameState<AOneBrahamGameState>())
-		{
-			if (const UOneBrahamMatchSettingsAsset* Settings = GS->GetMatchSettings())
-			{
-				ChatConfig.ProximityRangeCm = Settings->ProximityVoiceRangeCm;
-
-				// Bigger rooms get a slightly wider relay budget: a 12-player TDM uses
-				// a lot more talking than three squads creeping up a stairwell.
-				const int32 ExtraFrames = Settings->GetExpectedPlayerCount() > 12 ? 20 : 10;
-				ChatConfig.MaxFramesPerSecond = FMath::Clamp(
-					ChatConfig.SendFramesPerSecond + ExtraFrames, 40, 120);
-			}
-		}
-	}
+	bChatConfigResolved = false;
+	LocalMuteIntent.Reset();
 
 	UE_LOG(LogOneBrahamVoice, Log,
-		TEXT("[OB.VOICE] Voice subsystem ready - %d line(s), proximity %.0f cm, budget %d frames/s."),
-		LineSet->Lines.Num(), ChatConfig.ProximityRangeCm, ChatConfig.MaxFramesPerSecond);
+		TEXT("[OB.VOICE] Voice subsystem ready - %d line(s); range and relay budget follow the match settings."),
+		LineSet->Lines.Num());
 
 	if (GetWorld() != nullptr && GetWorld()->GetNetMode() != NM_Client)
 	{
@@ -391,25 +379,21 @@ void UOneBrahamVoiceSubsystem::HandleAmbientLineTimer()
 // ==========================================================================
 void UOneBrahamVoiceSubsystem::SetTransmitting(const AActor* Context, bool bTransmitting)
 {
-	UWorld* World = GetWorld();
-	if (World == nullptr || Context == nullptr)
+	if (GetWorld() == nullptr || Context == nullptr)
 	{
 		return;
 	}
 
-	// Resolve the player state and the character from whatever we were handed.
-	AOneBrahamPlayerState* State = const_cast<AOneBrahamPlayerState*>(Cast<AOneBrahamPlayerState>(Context));
-	AOneBrahamCharacter* Character = const_cast<AOneBrahamCharacter*>(Cast<AOneBrahamCharacter>(Context));
+	// Resolve the player state from whatever we were handed.
+	const AOneBrahamPlayerState* State = Cast<AOneBrahamPlayerState>(Context);
 
-	if (const AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(Context))
+	if (const AController* Controller = Cast<AController>(Context))
 	{
-		State = PC->GetPlayerState<AOneBrahamPlayerState>();
-		Character = Cast<AOneBrahamCharacter>(PC->GetPawn());
+		State = Controller->GetPlayerState<AOneBrahamPlayerState>();
 	}
-
-	if (State == nullptr && Character != nullptr)
+	else if (const APawn* Pawn = Cast<APawn>(Context))
 	{
-		State = Cast<AOneBrahamPlayerState>(Character->GetPlayerState());
+		State = Pawn->GetPlayerState<AOneBrahamPlayerState>();
 	}
 
 	if (State == nullptr)
@@ -417,32 +401,105 @@ void UOneBrahamVoiceSubsystem::SetTransmitting(const AActor* Context, bool bTran
 		return;
 	}
 
-	// Self-muted or the channel is Off: push-to-talk does nothing, and the HUD
-	// shows the mic-muted icon rather than the transmitting one.
-	const bool bAllowed = bTransmitting
-		&& !State->bSelfMuted
-		&& State->VoiceChannel != EOneBrahamVoiceChannel::None;
-
-	UOneBrahamProximityVoiceComponent* VoiceComponent = Character != nullptr
-		? Character->FindComponentByClass<UOneBrahamProximityVoiceComponent>()
-		: nullptr;
-
-	if (VoiceComponent != nullptr)
+	// The PlayerState's copy owns capture, so push-to-talk works with or without a
+	// body. Self-mute and the Off channel are applied there (the device stays
+	// closed), and the server applies them again when it sets bIsTransmitting -
+	// this used to set the flag only when called with authority, so a remote
+	// client's mic icon never lit for anybody.
+	if (UOneBrahamProximityVoiceComponent* VoiceComponent = State->GetVoiceComponent())
 	{
-		// Local capture is driven on the owning client; the server only flips the
-		// replicated transmitting flag that drives the HUD indicator and the duck.
-		VoiceComponent->SetLocalTransmitting(bAllowed);
-	}
-
-	if (State->HasAuthority())
-	{
-		State->MulticastSetTransmitting(bAllowed);
+		VoiceComponent->SetLocalTransmitting(bTransmitting);
 	}
 }
 
 bool UOneBrahamVoiceSubsystem::IsTransmitting(const AOneBrahamPlayerState* PlayerState) const
 {
 	return PlayerState != nullptr && PlayerState->bIsTransmitting;
+}
+
+FOneBrahamVoiceRouteParty UOneBrahamVoiceSubsystem::MakeRouteParty(const AOneBrahamPlayerState* State, bool bAsListener) const
+{
+	FOneBrahamVoiceRouteParty Party;
+	if (State == nullptr)
+	{
+		return Party;
+	}
+
+	Party.PlayerId = State->GetPlayerId();
+	Party.Team = State->Team;
+	Party.SquadId = State->SquadId;
+	Party.bEliminated = State->IsEliminated();
+	Party.bSelfMuted = State->bSelfMuted;
+	Party.Channel = State->VoiceChannel;
+	Party.MutedPlayerIds = &State->MutedPlayerIds;
+
+	const APawn* LocationPawn = nullptr;
+
+	if (!Party.bEliminated)
+	{
+		// Alive (or downed): their own body. A corpse never counts - after death
+		// the pawn may still be possessed, lying on the carpet.
+		LocationPawn = State->GetPawn();
+	}
+	else if (bAsListener)
+	{
+		// Eliminated listener: hear from the player being spectated. The server
+		// owns SpectatedPlayerId (set in ServerBeginSpectating).
+		const AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(State->GetPlayerController());
+		if (PC != nullptr && PC->bIsSpectating && PC->SpectatedPlayerId >= 0)
+		{
+			if (const AGameStateBase* GameState = GetWorld() != nullptr ? GetWorld()->GetGameState() : nullptr)
+			{
+				for (const APlayerState* Other : GameState->PlayerArray)
+				{
+					const AOneBrahamPlayerState* OtherState = Cast<AOneBrahamPlayerState>(Other);
+					if (OtherState != nullptr && OtherState->GetPlayerId() == PC->SpectatedPlayerId && !OtherState->IsEliminated())
+					{
+						LocationPawn = OtherState->GetPawn();
+						break;
+					}
+				}
+			}
+		}
+	}
+
+	if (LocationPawn != nullptr)
+	{
+		Party.bHasLocation = true;
+		Party.Location = LocationPawn->GetActorLocation();
+	}
+
+	return Party;
+}
+
+FOneBrahamVoiceRouteRules UOneBrahamVoiceSubsystem::GetRouteRules() const
+{
+	FOneBrahamVoiceRouteRules Rules;
+	Rules.ProximityRangeCm = GetProximityRangeCm();
+
+	if (const AOneBrahamGameState* GS = GetWorld() != nullptr ? GetWorld()->GetGameState<AOneBrahamGameState>() : nullptr)
+	{
+		if (const UOneBrahamMatchSettingsAsset* Settings = GS->GetMatchSettings())
+		{
+			Rules.bProximityEnabled = Settings->bProximityVoiceEnabled;
+			Rules.bTeamEnabled = Settings->bTeamVoiceEnabled;
+		}
+	}
+
+	return Rules;
+}
+
+bool UOneBrahamVoiceSubsystem::IsVoiceOcclusionEnabled() const
+{
+	if (const AOneBrahamGameState* GS = GetWorld() != nullptr ? GetWorld()->GetGameState<AOneBrahamGameState>() : nullptr)
+	{
+		if (const UOneBrahamMatchSettingsAsset* Settings = GS->GetMatchSettings())
+		{
+			return Settings->bVoiceOcclusionEnabled;
+		}
+	}
+
+	return true;
 }
 
 bool UOneBrahamVoiceSubsystem::ShouldHear(const AOneBrahamPlayerState* Listener,
@@ -453,114 +510,145 @@ bool UOneBrahamVoiceSubsystem::ShouldHear(const AOneBrahamPlayerState* Listener,
 		return false;
 	}
 
-	// Muting is per listener, so the caller is responsible for the audio graph.
-	if (Listener->MutedByPlayerIds.Contains(Speaker->GetPlayerId()))
+	EOneBrahamVoiceChannel Channel = EOneBrahamVoiceChannel::None;
+	return OneBrahamVoiceRouting::ResolveRoute(MakeRouteParty(Listener, true), MakeRouteParty(Speaker, false),
+		GetRouteRules(), Channel);
+}
+
+int32 UOneBrahamVoiceSubsystem::CountVoiceOccluders(const FVector& From, const FVector& To, const AActor* IgnoreA,
+	const AActor* IgnoreB, int32 MaxSurfaces) const
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr || MaxSurfaces <= 0)
 	{
-		return false;
+		return 0;
 	}
 
-	if (Listener->bSelfMuted || Speaker->bSelfMuted)
+	const FVector Delta = To - From;
+	const float Distance = Delta.Size();
+	if (Distance <= 1.f)
 	{
-		return false;
+		return 0;
 	}
 
-	// Dead players can still hear (they are spectating the match) but cannot be
-	// heard: enforced on the transmit path, so nothing to do here.
-	switch (Speaker->VoiceChannel)
-	{
-	case EOneBrahamVoiceChannel::Proximity:
-	{
-		const APawn* ListenerPawn = Listener->GetPawn();
-		const APawn* SpeakerPawn = Speaker->GetPawn();
+	const FVector Direction = Delta / Distance;
 
-		if (ListenerPawn == nullptr || SpeakerPawn == nullptr)
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(OneBrahamVoiceOcclusion), /*bTraceComplex*/ false);
+	Params.bReturnPhysicalMaterial = false;
+	Params.AddIgnoredActor(IgnoreA);
+	Params.AddIgnoredActor(IgnoreB);
+
+	// The VoiceOccluder channel is authored per mesh: desks and glass do not block
+	// voice, but walls, shutters, slabs and lift doors do. That distinction is
+	// what makes proximity chat feel physical rather than psychic.
+	//
+	// A blocking trace stops at its first hit, so surfaces are counted by walking:
+	// trace, step a wall's thickness past the hit, trace again. A trace that
+	// starts inside the same wall reports a start-penetrating hit, which is the
+	// far side of the surface already counted, so it is stepped over uncounted.
+	constexpr float StepCm = 25.f;
+	FVector Start = From;
+	int32 Surfaces = 0;
+
+	for (int32 Iteration = 0; Iteration < MaxSurfaces * 3 && Surfaces < MaxSurfaces; ++Iteration)
+	{
+		if (((To - Start) | Direction) <= 0.f)
 		{
-			return false;
+			break;
 		}
 
-		const float Range = GetProximityRangeCm();
-		return FVector::DistSquared(ListenerPawn->GetActorLocation(), SpeakerPawn->GetActorLocation())
-			<= FMath::Square(Range);
+		FHitResult Hit;
+		if (!World->LineTraceSingleByChannel(Hit, Start, To, ECC_GameTraceChannel7, Params))
+		{
+			break;
+		}
+
+		if (!Hit.bStartPenetrating)
+		{
+			++Surfaces;
+		}
+
+		Start = (Hit.bStartPenetrating ? Start : Hit.ImpactPoint) + Direction * StepCm;
 	}
 
-	case EOneBrahamVoiceChannel::Squad:
-		// A dead squad member's radio still works: that is a deliberate design
-		// decision. It keeps eliminated players useful instead of bored.
-		return Speaker->Team == Listener->Team && Speaker->SquadId == Listener->SquadId;
-
-	case EOneBrahamVoiceChannel::Team:
-		return Speaker->Team == Listener->Team;
-
-	case EOneBrahamVoiceChannel::Announcement:
-		return true;
-
-	case EOneBrahamVoiceChannel::None:
-	default:
-		return false;
-	}
+	return Surfaces;
 }
 
 float UOneBrahamVoiceSubsystem::ComputeOcclusionAlpha(const FVector& SpeakerLocation,
 	const FVector& ListenerLocation) const
 {
-	UWorld* World = GetWorld();
-	if (World == nullptr)
-	{
-		return 0.f;
-	}
-
 	const float Distance = FVector::Dist(SpeakerLocation, ListenerLocation);
 	if (Distance <= 250.f)
 	{
 		return 0.f; // same room, always clear
 	}
 
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(OneBrahamVoiceOcclusion), /*bTraceComplex*/ false);
-	Params.bReturnPhysicalMaterial = false;
-
-	// The VoiceOccluder channel is authored per mesh: desks and glass do not block
-	// voice, but walls, shutters and lift doors do. That distinction is what makes
-	// proximity chat feel physical rather than psychic.
-	FHitResult Hit;
-	const bool bBlocked = World->LineTraceSingleByChannel(
-		Hit, SpeakerLocation, ListenerLocation, ECC_GameTraceChannel7, Params);
-
-	if (!bBlocked)
+	const int32 Surfaces = CountVoiceOccluders(SpeakerLocation, ListenerLocation);
+	if (Surfaces == 0)
 	{
 		// Long-distance falloff even with a clear line: a shout does not carry
-		// across an entire open-plan floor plan unchanged.
+		// across an entire open-plan floor unchanged.
 		const float Range = FMath::Max(500.f, GetProximityRangeCm());
 		return FMath::Clamp(Distance / Range, 0.f, 1.f) * 0.5f;
 	}
 
 	// Each blocking surface adds more muffle, up to fully unintelligible.
-	TArray<FHitResult> Hits;
-	World->LineTraceMultiByChannel(Hits, SpeakerLocation, ListenerLocation, ECC_GameTraceChannel7, Params);
-
-	const int32 BlockingSurfaces = FMath::Max(1, Hits.Num());
-	return FMath::Clamp(0.55f + 0.2f * static_cast<float>(BlockingSurfaces - 1), 0.f, 1.f);
+	return FMath::Clamp(0.55f + 0.2f * static_cast<float>(Surfaces - 1), 0.f, 1.f);
 }
 
 float UOneBrahamVoiceSubsystem::GetProximityRangeCm() const
 {
-	if (ChatConfig.ProximityRangeCm > 0.f)
-	{
-		return ChatConfig.ProximityRangeCm;
-	}
+	// The match settings asset is authoritative whenever it names a range. It is
+	// read live rather than cached at Initialize, because the game state that
+	// carries it does not exist yet when this subsystem starts - which is why the
+	// match override used to never apply.
+	float MatchRange = 0.f;
 
-	// Match settings asset override, then the documented default.
-	if (UWorld* World = GetWorld())
+	if (const UWorld* World = GetWorld())
 	{
 		if (const AOneBrahamGameState* GS = World->GetGameState<AOneBrahamGameState>())
 		{
 			if (const UOneBrahamMatchSettingsAsset* Settings = GS->GetMatchSettings())
 			{
-				return Settings->ProximityVoiceRangeCm;
+				MatchRange = Settings->ProximityVoiceRangeCm;
 			}
 		}
 	}
 
-	return 3500.f;
+	return OneBrahamVoiceRouting::ResolveProximityRangeCm(MatchRange, ChatConfig.ProximityRangeCm,
+		UOneBrahamGameSettings::Get().VoiceMaxDistanceCm);
+}
+
+const FOneBrahamVoiceChatConfig& UOneBrahamVoiceSubsystem::GetChatConfig() const
+{
+	ResolveChatConfigFromMatch();
+	return ChatConfig;
+}
+
+void UOneBrahamVoiceSubsystem::ResolveChatConfigFromMatch() const
+{
+	if (bChatConfigResolved)
+	{
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	const AOneBrahamGameState* GS = World != nullptr ? World->GetGameState<AOneBrahamGameState>() : nullptr;
+	const UOneBrahamMatchSettingsAsset* Settings = GS != nullptr ? GS->GetMatchSettings() : nullptr;
+
+	if (Settings == nullptr)
+	{
+		return; // try again on the next use
+	}
+
+	// Bigger rooms get a slightly wider relay budget: a 12-player TDM uses a lot
+	// more talking than three squads creeping up a stairwell.
+	const int32 ExtraFrames = Settings->GetExpectedPlayerCount() > 12 ? 20 : 10;
+	ChatConfig.MaxFramesPerSecond = FMath::Clamp(ChatConfig.SendFramesPerSecond + ExtraFrames, 40, 120);
+	bChatConfigResolved = true;
+
+	UE_LOG(LogOneBrahamVoice, Log, TEXT("[OB.VOICE] Match voice: proximity %.0f cm, relay budget %d frames/s."),
+		GetProximityRangeCm(), ChatConfig.MaxFramesPerSecond);
 }
 
 bool UOneBrahamVoiceSubsystem::ConsumeRelayBudget(APlayerState* Talker, int32 FrameBytes)
@@ -576,6 +664,8 @@ bool UOneBrahamVoiceSubsystem::ConsumeRelayBudget(APlayerState* Talker, int32 Fr
 
 	UWorld* World = GetWorld();
 	const float Now = World != nullptr ? World->GetTimeSeconds() : 0.f;
+
+	ResolveChatConfigFromMatch();
 
 	FOneBrahamVoiceBudget& Budget = RelayBudgets.FindOrAdd(Talker);
 
@@ -790,4 +880,147 @@ void UOneBrahamVoiceSubsystem::GetQuickLineWheel(FName& OutLineId, FText& OutLab
 
 	OutLineId = WheelIds[SegmentIndex];
 	OutLabel = WheelLabels[SegmentIndex];
+}
+
+// ==========================================================================
+//  Per-player mute
+// ==========================================================================
+AOneBrahamPlayerState* UOneBrahamVoiceSubsystem::GetLocalPlayerState() const
+{
+	const UWorld* World = GetWorld();
+	const APlayerController* PC = World != nullptr ? World->GetFirstPlayerController() : nullptr;
+	return PC != nullptr && PC->IsLocalController() ? PC->GetPlayerState<AOneBrahamPlayerState>() : nullptr;
+}
+
+bool UOneBrahamVoiceSubsystem::SetPlayerMuted(APlayerState* Target, bool bMuted)
+{
+	AOneBrahamPlayerState* LocalState = GetLocalPlayerState();
+	if (LocalState == nullptr || Target == nullptr || Target == LocalState)
+	{
+		return false;
+	}
+
+	const int32 TargetId = Target->GetPlayerId();
+	LocalMuteIntent.Add(TargetId, bMuted);
+
+	// Silence them here at once - the frames already in flight would otherwise
+	// play for a round trip after the click - and ask the server to stop relaying.
+	if (UOneBrahamProximityVoiceComponent* VoiceComponent = LocalState->GetVoiceComponent())
+	{
+		VoiceComponent->SetSpeakerMutedLocally(TargetId, bMuted);
+	}
+
+	LocalState->ServerSetPlayerMuted(TargetId, bMuted);
+
+	UE_LOG(LogOneBrahamVoice, Log, TEXT("[OB.VOICE] %s '%s'."),
+		bMuted ? TEXT("Muted") : TEXT("Unmuted"), *Target->GetPlayerName());
+
+	return true;
+}
+
+bool UOneBrahamVoiceSubsystem::IsPlayerMuted(const APlayerState* Target) const
+{
+	if (Target == nullptr)
+	{
+		return false;
+	}
+
+	if (const bool* Intent = LocalMuteIntent.Find(Target->GetPlayerId()))
+	{
+		return *Intent;
+	}
+
+	const AOneBrahamPlayerState* LocalState = GetLocalPlayerState();
+	return LocalState != nullptr && LocalState->MutedPlayerIds.Contains(Target->GetPlayerId());
+}
+
+APlayerState* UOneBrahamVoiceSubsystem::FindPlayerByName(const FString& Name) const
+{
+	const UWorld* World = GetWorld();
+	const AGameStateBase* GameState = World != nullptr ? World->GetGameState() : nullptr;
+	if (GameState == nullptr || Name.IsEmpty())
+	{
+		return nullptr;
+	}
+
+	APlayerState* PrefixMatch = nullptr;
+	int32 PrefixMatches = 0;
+
+	for (APlayerState* State : GameState->PlayerArray)
+	{
+		if (State == nullptr)
+		{
+			continue;
+		}
+
+		const FString PlayerName = State->GetPlayerName();
+		if (PlayerName.Equals(Name, ESearchCase::IgnoreCase))
+		{
+			return State;
+		}
+
+		if (PlayerName.StartsWith(Name, ESearchCase::IgnoreCase))
+		{
+			PrefixMatch = State;
+			++PrefixMatches;
+		}
+	}
+
+	// A prefix that fits two players is refused rather than guessed: muting the
+	// wrong person is worse than asking for the full name.
+	return PrefixMatches == 1 ? PrefixMatch : nullptr;
+}
+
+namespace
+{
+	void HandleMuteCommand(const TArray<FString>& Args, UWorld* World, bool bMute)
+	{
+		UOneBrahamVoiceSubsystem* Voice = World != nullptr ? World->GetSubsystem<UOneBrahamVoiceSubsystem>() : nullptr;
+		if (Voice == nullptr)
+		{
+			UE_LOG(LogOneBrahamVoice, Warning, TEXT("[OB.VOICE] No voice subsystem in this world."));
+			return;
+		}
+
+		// Names may contain spaces; the console splits on them, so rejoin.
+		const FString Name = FString::Join(Args, TEXT(" ")).TrimStartAndEnd().TrimQuotes();
+		if (Name.IsEmpty())
+		{
+			UE_LOG(LogOneBrahamVoice, Display, TEXT("[OB.VOICE] Usage: ob.Voice.%s <PlayerName>"),
+				bMute ? TEXT("Mute") : TEXT("Unmute"));
+			return;
+		}
+
+		APlayerState* Target = Voice->FindPlayerByName(Name);
+		if (Target == nullptr)
+		{
+			UE_LOG(LogOneBrahamVoice, Display, TEXT("[OB.VOICE] No single player matches '%s'."), *Name);
+			return;
+		}
+
+		if (!Voice->SetPlayerMuted(Target, bMute))
+		{
+			UE_LOG(LogOneBrahamVoice, Display, TEXT("[OB.VOICE] Cannot %s '%s' (no local player, or that is you)."),
+				bMute ? TEXT("mute") : TEXT("unmute"), *Target->GetPlayerName());
+		}
+	}
+
+	// Minimal player-facing mute until the scoreboard has a button: the console
+	// is available in every build that ships with one, and the command goes
+	// through the same SetPlayerMuted path a button would.
+	FAutoConsoleCommandWithWorldAndArgs GVoiceMuteCommand(
+		TEXT("ob.Voice.Mute"),
+		TEXT("Mutes a player's voice chat for you. Usage: ob.Voice.Mute <PlayerName> (exact name, or a unique prefix)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
+		{
+			HandleMuteCommand(Args, World, true);
+		}));
+
+	FAutoConsoleCommandWithWorldAndArgs GVoiceUnmuteCommand(
+		TEXT("ob.Voice.Unmute"),
+		TEXT("Unmutes a player's voice chat for you. Usage: ob.Voice.Unmute <PlayerName>."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic([](const TArray<FString>& Args, UWorld* World)
+		{
+			HandleMuteCommand(Args, World, false);
+		}));
 }

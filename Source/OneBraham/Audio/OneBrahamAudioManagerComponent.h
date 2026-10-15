@@ -42,7 +42,9 @@ class UOneBrahamWeaponDefinition;
 class USceneComponent;
 class USoundAttenuation;
 class USoundBase;
+class USoundWaveProcedural;
 class UPhysicalMaterial;
+struct FOneBrahamHeartbeatControl;
 
 /**
  * Audio priorities used when a mix decision has to be made. Higher wins a duck;
@@ -92,10 +94,27 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Audio")
 	UAudioComponent* PlaySoundAttached(FName SoundId, USceneComponent* AttachTo, FName SocketName = NAME_None, float Volume = 1.f, float Pitch = 1.f);
 
+	/**
+	 * The audio manager of the controller this machine is listening through,
+	 * or null on a dedicated server. The one-line way for a gameplay system to
+	 * reach the local mix: `if (auto* Audio = UOneBrahamAudioManagerComponent::GetLocal(this))`.
+	 */
+	static UOneBrahamAudioManagerComponent* GetLocal(const UObject* WorldContextObject);
+
 	// ======================================================================
 	//  Gameplay cue wrappers (called from the systems that own the event)
 	// ======================================================================
-	/** A gunshot from the weapon definition, or a synthesised fallback per calibre. */
+	/**
+	 * A gunshot, layered for the local listener:
+	 *   close report  - crack, blast and thump per calibre; fades past ~15 m
+	 *   action        - the bolt cycling, within ~12 m (baked in when suppressed)
+	 *   distant report- filtered boom and city echoes, dominant past ~40 m
+	 *   room tail     - the listener's area reverb profile, with slap-back
+	 *   shell drop    - brass on whatever floor is under the muzzle, close only
+	 * Every layer arrives after distance / 343 m/s. A shot from another storey
+	 * keeps the interior attenuation and is muffled per floor between.
+	 * Suppressed: the quiet thump and the clack, no distant layer.
+	 */
 	void PlayWeaponShot(const UOneBrahamWeaponDefinition* Definition, const FVector& MuzzleLocation, bool bSuppressed, AActor* Shooter);
 
 	/** Mechanical weapon foley: bolt, mag out, mag in, charge handle, dry fire, safety. */
@@ -114,8 +133,18 @@ public:
 	 */
 	void PlayImpactSound(const FOneBrahamImpactInfo& Impact, float VolumeScale = 1.f);
 
-	/** A round went past the local player: the whizz/crack pair, 3D and short. */
-	void PlayNearMissWhizz(const FVector& Location);
+	/**
+	 * A round went past the local player. Supersonic rounds crack (the N-wave
+	 * of their shock cone) before they whizz; subsonic ones only whizz.
+	 */
+	void PlayNearMissWhizz(const FVector& Location, bool bSupersonic = true);
+
+	/** A spent case landing. The floor decides whether it rings or vanishes. */
+	void PlayShellDrop(const FVector& Location, EOneBrahamFootstepSurface Surface, float Pitch = 1.f);
+
+	/** A body hitting the floor: death, a corpse landing, a downed collapse. */
+	void PlayBodyFall(const FVector& Location, float ImpactSpeedCmPerSec = 400.f,
+		EOneBrahamFootstepSurface Surface = EOneBrahamFootstepSurface::Concrete);
 
 	/** Footstep scheduling. Call every frame; the manager owns the stride length. */
 	void TickFootstepAudio(AActor* Stepper, EOneBrahamFootstepSurface Surface, float Speed2D, bool bCrouched, bool bSprinting, bool bInAir, bool bLocalPlayer);
@@ -142,7 +171,13 @@ public:
 	/** The Tannoy two-tone that precedes a building announcement. */
 	void PlayAnnouncementChime();
 
-	/** Explosion set: body, debris tail, and a distance-scaled ear-ring for the local player. */
+	/**
+	 * Explosion set: the blast (crack, boom, sub tail), debris patter, a distant
+	 * rumble past ~25 m, the room's tail, all delayed by distance. Inside 1.35x
+	 * the radius the listener's ears ring and the world muffles; inside 3.5x it
+	 * ducks briefly. SoundId is SFX_Frag_Explosion, SFX_Breach_Explosion or
+	 * SFX_Flashbang_Bang. PlaySoundAtLocation routes those three ids here too.
+	 */
 	void PlayExplosion(const FVector& Location, float RadiusCm, FName SoundId);
 
 	// ======================================================================
@@ -168,6 +203,17 @@ public:
 
 	/** Flashbang tinnitus, with a ringing bed for the duration. */
 	void SetTinnitusState(bool bActive, float DurationSeconds);
+
+	/**
+	 * Low-health heartbeat, 0 = none, 1 = 150 bpm and loud. The manager also
+	 * drives it from the local pawn's health (from 40% down) and holds it high
+	 * while downed; the loudest of the three wins.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Audio")
+	void SetHeartbeatIntensity(float Intensity01);
+
+	UFUNCTION(BlueprintPure, Category = "One Braham|Audio")
+	float GetHeartbeatIntensity() const { return EffectiveHeartbeat; }
 
 	/** Spectating after death: everything gets distant. */
 	void SetDeafened(bool bInDeafened);
@@ -249,6 +295,36 @@ protected:
 
 	/** Resolves a cue to something playable: bank asset, else synthesised, else null. */
 	USoundBase* ResolveSound(FName SoundId, const FOneBrahamSoundBankEntry** OutEntry);
+
+	/** PlaySoundAtLocation without the explosion routing: what the layers call. */
+	UAudioComponent* PlayCueAtLocation(FName SoundId, const FVector& Location, float Volume, float Pitch, AActor* SourceActor, USoundAttenuation* AttenuationOverride);
+
+	/** The explosion layers. Returns the blast component when it played this frame. */
+	UAudioComponent* PlayExplosionLayers(const FVector& Location, float RadiusCm, FName SoundId, float VolumeScale);
+
+	/** True when this manager belongs to the controller this machine listens through. */
+	bool IsLocalListener() const;
+
+	/** Where the listener is: the pawn, else the camera. False on a server. */
+	bool GetListenerLocation(FVector& OutLocation) const;
+
+	/** The tail cue and wet level for the room the listener is standing in. */
+	FName GetRoomTailCue(float& OutWet) const;
+
+	/** Long-range attenuation for the distant layers. Authored first, else built. */
+	USoundAttenuation* GetDistantAttenuation();
+
+	/** The floor under a point, classified, for shell drops. */
+	EOneBrahamFootstepSurface TraceFloorSurface(const FVector& From, const AActor* IgnoredActor, FVector& OutFloor) const;
+
+	/** Every muffle the game has, combined: the strongest one wins. */
+	void RecomputeLowPassTarget();
+
+	/** Tinnitus with its own strength: a flashbang is 400 Hz, a grenade at the edge of its radius is not. */
+	void SetTinnitusInternal(float DurationSeconds, float LowPassHz, float RingVolume);
+
+	/** Heartbeat director: health, downed state and the explicit request. */
+	void UpdateHeartbeat(float DeltaTime);
 
 	/** Runtime attenuation chain for a category, built once and cached. */
 	USoundAttenuation* GetAttenuation(EOneBrahamAudioCategory Category, float MaxDistanceCm);
@@ -344,6 +420,37 @@ protected:
 	FVector ExtractionPadLocation = FVector::ZeroVector;
 
 	float TinnitusRemaining = 0.f;
+
+	/** Low-pass while ringing. 400 Hz for a flashbang, gentler for a distant blast. */
+	float TinnitusLowPassHz = 400.f;
+
+	/** The short duck a blast gives listeners outside its ringing radius. */
+	float BlastDuckRemaining = 0.f;
+	float BlastDuckLowPassHz = 20000.f;
+
+	/** True for the explosion layers' own plays, so they are not routed back. */
+	bool bInLayeredPlay = false;
+
+	/** Combat cues are rendered one per tick until this goes false. */
+	bool bPrewarmingCues = true;
+
+	// --- heartbeat --------------------------------------------------------
+	float ExternalHeartbeat = 0.f;
+	float HealthHeartbeat = 0.f;
+	float EffectiveHeartbeat = 0.f;
+	float HeartbeatPollAccumulator = 0.f;
+	float HeartbeatSilentSeconds = 0.f;
+
+	TSharedPtr<FOneBrahamHeartbeatControl, ESPMode::ThreadSafe> HeartbeatControl;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USoundWaveProcedural> HeartbeatWave = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UAudioComponent> HeartbeatComponent = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<USoundAttenuation> DistantAttenuation = nullptr;
 
 	/** Effective low-pass in Hz, smoothed towards its target each tick. */
 	float CurrentLowPassHz = 20000.f;

@@ -31,6 +31,11 @@ class IVoiceDecoder;
 /**
  * Encode/decode helper. Owns the engine codec objects and is safe to use when
  * they could not be created.
+ *
+ * Opus is stateful in both directions: the decoder predicts each frame from the
+ * ones before it. So one instance encodes ONE outgoing stream, and each speaker
+ * a listener hears gets a decoder of their own - sharing one decoder between
+ * talkers feeds it interleaved streams and produces warbling and clicks.
  */
 class ONEBRAHAM_API FOneBrahamVoiceCodec
 {
@@ -49,14 +54,22 @@ public:
 	~FOneBrahamVoiceCodec();
 
 	/**
-	 * Creates the engine encoder/decoder when the Voice module provides them.
-	 * Returns true when compression is available.
+	 * Creates the engine encoder and decoder when the Voice module provides them.
+	 * Returns true when compression is available in both directions.
 	 */
 	bool Initialise();
+
+	/** Encoder only: the sending side never needs to decode its own voice. */
+	bool InitialiseEncoder();
+
+	/** Decoder only: one per remote speaker on the listening side. */
+	bool InitialiseDecoder();
 
 	void Shutdown();
 
 	bool IsUsingEngineCodec() const { return Encoder.IsValid() && Decoder.IsValid(); }
+	bool HasEncoder() const { return Encoder.IsValid(); }
+	bool HasDecoder() const { return Decoder.IsValid(); }
 
 	/** Raw PCM16 -> transport frame. False only when the input is malformed. */
 	bool EncodeFrame(const TArray<uint8>& RawPcm, TArray<uint8>& OutFrame);
@@ -65,6 +78,9 @@ public:
 	bool DecodeFrame(const TArray<uint8>& Frame, TArray<uint8>& OutRawPcm);
 
 private:
+	/** Checks the frame cap relationship once; shared by both initialisers. */
+	static void CheckFrameBudget();
+
 	TSharedPtr<IVoiceEncoder> Encoder;
 	TSharedPtr<IVoiceDecoder> Decoder;
 };
@@ -75,16 +91,29 @@ private:
  * Capture is deliberately pull-based from Tick rather than callback-driven: at
  * 20 ms frames the cost is trivial and the game thread already has the exact
  * update cadence we want, which keeps the jitter buffer honest on a frame hitch.
+ *
+ * The device object is created once and then started and stopped: re-creating
+ * a CoreAudio/WASAPI unit on every push-to-talk press costs a few milliseconds
+ * on the game thread and clips the first syllable.
  */
 class ONEBRAHAM_API FOneBrahamVoiceCapture
 {
 public:
 	~FOneBrahamVoiceCapture();
 
-	/** Starts the default recording device. Returns false when unavailable. */
+	/**
+	 * Starts recording, creating the device object on first use. Returns false
+	 * when unavailable: no Voice module, no device, or the OS has not granted
+	 * microphone access (see OneBrahamMicrophonePermission).
+	 */
 	bool Start(const FString& DeviceName = FString());
 
+	/** Stops recording but keeps the device object for the next Start. */
 	void Stop();
+
+	/** Stops and releases the device object (device change, leaving the match). */
+	void Shutdown();
+
 	bool IsCapturing() const { return bCapturing; }
 
 	/**
@@ -102,4 +131,7 @@ private:
 	TArray<uint8> PendingBytes;
 	bool bCapturing = false;
 	FString ActiveDeviceName;
+
+	/** The device the object was created for; a different request recreates it. */
+	FString CreatedForDevice;
 };

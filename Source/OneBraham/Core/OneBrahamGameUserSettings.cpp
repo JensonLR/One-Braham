@@ -298,6 +298,12 @@ void UOneBrahamGameUserSettings::ApplySettings(bool bCheckForCommandLineOverride
 	ApplyQualityPresetCVars(GraphicsQualityPreset);
 	ApplyAudioSettings();
 	ApplyVoiceSettings();
+
+	// Blood is a player's choice; the VFX code reads ob.Gore (VFX/OneBrahamVFXStatics.cpp).
+	if (IConsoleVariable* Gore = IConsoleManager::Get().FindConsoleVariable(TEXT("ob.Gore")))
+	{
+		Gore->Set(bGoreEnabled ? 1 : 0, ECVF_SetByGameSetting);
+	}
 	OnSettingsChanged.Broadcast();
 
 	Super::ApplySettings(bCheckForCommandLineOverrides);
@@ -554,16 +560,24 @@ void UOneBrahamGameUserSettings::SetVoiceOutputGain(float Gain)
 void UOneBrahamGameUserSettings::SetVoiceInputDevice(const FString& DeviceId)
 {
 	VoiceInputDeviceId = DeviceId;
+
+	// One field from here on: the legacy copy is retired the first time the player
+	// picks a device, so the two can never disagree again.
+	AudioInputDeviceId.Reset();
 	ApplyVoiceSettings();
+}
+
+FString UOneBrahamGameUserSettings::GetVoiceInputDeviceId() const
+{
+	return !VoiceInputDeviceId.IsEmpty() ? VoiceInputDeviceId : AudioInputDeviceId;
 }
 
 void UOneBrahamGameUserSettings::ApplyVoiceSettings()
 {
-	// The voice subsystem picks these up through the settings delegate; keeping
-	// the push inside the subsystem avoids a circular dependency here.
-	OnVoiceSettingsChanged.Broadcast(bVoiceChatEnabled && VoiceChatMode != EOneBrahamVoiceChatMode::Muted);
-
-	// Mirror into CVars so QA can inspect the effective values from the console.
+	// Mirror into the ob.Voice.* CVars first (registered in
+	// Voice/OneBrahamVoiceRules.cpp): capture and playback read the gains and the
+	// gate from there, so a listener reacting to the broadcast below already sees
+	// the new values. QA can inspect or override them from the console.
 	if (IConsoleVariable* GainCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("ob.Voice.InputGain")))
 	{
 		GainCVar->Set(VoiceInputGain, ECVF_SetByGameSetting);
@@ -576,6 +590,11 @@ void UOneBrahamGameUserSettings::ApplyVoiceSettings()
 	{
 		GateCVar->Set(VoiceActivationThreshold, ECVF_SetByGameSetting);
 	}
+
+	// The live voice component (on the local PlayerState) subscribes to this and
+	// re-reads mode, enable flag and device; keeping the push on that side avoids
+	// a dependency from settings onto gameplay code.
+	OnVoiceSettingsChanged.Broadcast(bVoiceChatEnabled && VoiceChatMode != EOneBrahamVoiceChatMode::Muted);
 }
 
 // ==========================================================================

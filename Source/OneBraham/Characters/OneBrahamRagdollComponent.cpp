@@ -2,6 +2,7 @@
 
 #include "Characters/OneBrahamRagdollComponent.h"
 
+#include "Audio/OneBrahamAudioManagerComponent.h"
 #include "OneBraham.h"
 #include "Core/OneBrahamGameMode.h"
 #include "Characters/OneBrahamCharacter.h"
@@ -154,6 +155,22 @@ void UOneBrahamRagdollComponent::OnRep_Ragdolling()
 
 	if (bRagdolling)
 	{
+		// A flinch in progress hands over to the ragdoll rather than being
+		// unwound under it: every body is about to simulate anyway.
+		bReactionActive = false;
+		bReactionEnabledPhysics = false;
+
+		// Arm the local corpse bookkeeping on every machine, not just the server:
+		// the pool and the landing puff are drawn by clients.
+		LocalRagdollStartTime = GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() : 0.f;
+		bCorpsePoolSpawned = false;
+		if (!Character->HasAuthority())
+		{
+			bCorpseFalling = true;
+			LastCorpseFallSpeed = 0.f;
+			CorpseAirTime = 0.f;
+		}
+
 		// Owner's own body is hidden in first person; the ragdoll only needs to
 		// exist for everyone else, so we skip it entirely on the owning client.
 		if (Character->IsLocallyControlled() && Character->GetController() != nullptr)
@@ -209,6 +226,8 @@ void UOneBrahamRagdollComponent::ExitRagdoll()
 	bRagdolling = false;
 	bFadingOut = false;
 	FadeStartTime = -1.f;
+	LocalRagdollStartTime = -1.f;
+	bCorpsePoolSpawned = false;
 
 	OnRep_Ragdolling();
 	RestoreLivingCollision();
@@ -329,40 +348,310 @@ EOneBrahamDeathPose UOneBrahamRagdollComponent::DetermineDeathPose(const FVector
 
 void UOneBrahamRagdollComponent::ApplyHitReaction(FName HitBone, const FVector& ShotDir, float Damage)
 {
-	// Non-lethal hit reactions use a physics blend on the hit bone only: the arm
+	PlayHitReaction(HitBone, ShotDir, Damage, /*bHeadshot*/ false);
+}
+
+FName UOneBrahamRagdollComponent::FindSimulatedBone(USkeletalMeshComponent* Mesh, FName Bone) const
+{
+	// Hits land on bones without bodies (fingers, twist bones, the face): walk
+	// up the hierarchy to the first bone the physics asset actually simulates.
+	int32 Guard = 0;
+	while (Mesh != nullptr && Bone != NAME_None && Guard++ < 32)
+	{
+		if (Mesh->GetBodyInstance(Bone) != nullptr)
+		{
+			return Bone;
+		}
+		Bone = Mesh->GetParentBone(Bone);
+	}
+	return NAME_None;
+}
+
+void UOneBrahamRagdollComponent::PlayHitReaction(FName HitBone, const FVector& ShotDir, float Damage, bool bHeadshot)
+{
+	// Non-lethal hit reactions use a physics blend below the hit bone: the arm
 	// moves, the player keeps control. This is what makes gunfights read without
-	// shipping a hundred bespoke flinch animations.
+	// shipping a hundred bespoke flinch animations. It is cosmetic and local -
+	// every machine plays it from the weapon's hit multicast - so a dedicated
+	// server, which nobody watches, skips it.
+	if (GetNetMode() == NM_DedicatedServer || bRagdolling)
+	{
+		return;
+	}
+
+	AOneBrahamCharacter* Character = CachedCharacter.Get();
+	USkeletalMeshComponent* Mesh = GetTargetMesh();
+	if (Character == nullptr || Mesh == nullptr)
+	{
+		return;
+	}
+
+	const bool bStagger = bHeadshot || Damage >= StaggerDamage;
+
+	// The victim does not watch their own third-person body; what they feel is
+	// the camera. Heavier hits kick harder.
+	if (Character->IsLocallyControlled())
+	{
+		UOneBrahamVFXStatics::PlayLocalCameraFlinch(this, bStagger ? 0.55f : FMath::GetMappedRangeValueClamped(FVector2D(10.f, 40.f), FVector2D(0.18f, 0.4f), Damage));
+	}
+
+	if (Mesh->GetPhysicsAsset() == nullptr || !Mesh->IsVisible())
+	{
+		return;
+	}
+
+	// A stagger rocks everything above the waist: the spine takes the hit and
+	// the head and arms follow. A light hit moves only the limb it landed on.
+	FName Root = NAME_None;
+	if (bStagger)
+	{
+		static const FName SpineBones[] = { TEXT("spine_02"), TEXT("spine_01"), TEXT("spine_03") };
+		for (const FName& Spine : SpineBones)
+		{
+			if (Mesh->GetBodyInstance(Spine) != nullptr)
+			{
+				Root = Spine;
+				break;
+			}
+		}
+	}
+	if (Root == NAME_None)
+	{
+		Root = FindSimulatedBone(Mesh, HitBone);
+	}
+	if (Root == NAME_None)
+	{
+		return;
+	}
+
+	// A new hit replaces the old reaction rather than stacking on it.
+	if (bReactionActive && Root != ReactionBone)
+	{
+		EndHitReaction(/*bRestoreCollision*/ false);
+	}
+
+	// The living body is query-only (it is the hitbox). Partial simulation needs
+	// physics collision on the mesh for the duration of the flinch; pawns are
+	// ignored so the limb cannot shove its own capsule or a teammate.
+	if (Mesh->GetCollisionEnabled() == ECollisionEnabled::QueryOnly)
+	{
+		Mesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		Mesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+		bReactionEnabledPhysics = true;
+	}
+
+	ReactionBone = Root;
+	ReactionDuration = bStagger ? 0.65f : FMath::GetMappedRangeValueClamped(FVector2D(10.f, 40.f), FVector2D(0.28f, 0.45f), Damage);
+	ReactionRemaining = ReactionDuration;
+	ReactionPeakWeight = bStagger ? 0.8f : FMath::Clamp(Damage / 45.f, 0.25f, 0.65f);
+	bReactionActive = true;
+
+	Mesh->SetAllBodiesBelowSimulatePhysics(Root, true, /*bIncludeSelf*/ true);
+	Mesh->SetAllBodiesBelowPhysicsBlendWeight(Root, ReactionPeakWeight, /*bSkipCustomPhysicsType*/ false, /*bIncludeSelf*/ true);
+
+	// Velocity change rather than impulse, so a heavy torso and a light forearm
+	// both move by an amount that reads, not by their mass ratio.
+	const FVector Push = ShotDir.GetSafeNormal() + FVector(0.f, 0.f, bStagger ? 0.05f : 0.15f);
+	const float Speed = bStagger
+		? FMath::GetMappedRangeValueClamped(FVector2D(40.f, 100.f), FVector2D(220.f, 420.f), Damage)
+		: FMath::GetMappedRangeValueClamped(FVector2D(10.f, 40.f), FVector2D(120.f, 300.f), Damage);
+	Mesh->AddImpulseToAllBodiesBelow(Push.GetSafeNormal() * Speed, Root, /*bVelChange*/ true, /*bIncludeSelf*/ true);
+
+	// The bone that was actually hit gets an extra shove: on a stagger the
+	// spine rocks, and the shoulder that took the round still snaps back.
+	const FName HitBody = FindSimulatedBone(Mesh, HitBone);
+	if (HitBody != NAME_None && HitBody != Root && Mesh->GetBodyInstance(HitBody) != nullptr && Mesh->GetBodyInstance(HitBody)->IsInstanceSimulatingPhysics())
+	{
+		Mesh->AddImpulse(Push.GetSafeNormal() * Speed * 0.6f, HitBody, /*bVelChange*/ true);
+	}
+
+	// Blend-out needs a per-frame tick for the next fraction of a second.
+	SetComponentTickInterval(0.f);
+}
+
+void UOneBrahamRagdollComponent::TickHitReaction(float DeltaTime)
+{
+	if (!bReactionActive)
+	{
+		return;
+	}
+
 	USkeletalMeshComponent* Mesh = GetTargetMesh();
 	if (Mesh == nullptr || bRagdolling)
 	{
+		bReactionActive = false;
 		return;
 	}
 
-	if (HitBone == NAME_None)
+	ReactionRemaining -= DeltaTime;
+	if (ReactionRemaining <= 0.f)
 	{
+		EndHitReaction(/*bRestoreCollision*/ true);
 		return;
 	}
 
-	const FVector ReactionDirection = ShotDir.GetSafeNormal();
-	const float Magnitude = FMath::Clamp(Damage * 40.f, 0.f, 12000.f);
+	// Hold the peak for the first fifth, then ease back into the animation.
+	const float Alpha = FMath::Clamp(ReactionRemaining / (ReactionDuration * 0.8f), 0.f, 1.f);
+	Mesh->SetAllBodiesBelowPhysicsBlendWeight(ReactionBone, ReactionPeakWeight * Alpha * Alpha, false, true);
+}
 
-	// Blend weight scales with damage: a pistol round barely moves a shoulder, a
-	// 5.56 round swings the whole arm.
-	const float BlendWeight = FMath::Clamp(Damage / 45.f, 0.1f, 0.9f);
-	Mesh->SetAllBodiesBelowPhysicsBlendWeight(HitBone, BlendWeight, true, true);
-	Mesh->AddImpulseToAllBodiesBelow(ReactionDirection * Magnitude, HitBone, true, true);
-
-	// Blend back out so the pose recovers into the animation.
-	if (UWorld* World = GetWorld())
+void UOneBrahamRagdollComponent::EndHitReaction(bool bRestoreCollision)
+{
+	USkeletalMeshComponent* Mesh = GetTargetMesh();
+	if (Mesh != nullptr && !bRagdolling && ReactionBone != NAME_None)
 	{
-		FTimerHandle RestoreHandle;
-		World->GetTimerManager().SetTimer(RestoreHandle, FTimerDelegate::CreateWeakLambda(this, [this]()
+		Mesh->SetAllBodiesBelowPhysicsBlendWeight(ReactionBone, 0.f, false, true);
+		Mesh->SetAllBodiesBelowSimulatePhysics(ReactionBone, false, true);
+
+		if (bRestoreCollision && bReactionEnabledPhysics)
 		{
-			if (USkeletalMeshComponent* RestoreMesh = GetTargetMesh())
+			Mesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+			Mesh->SetCollisionProfileName(TEXT("OneBrahamHitbox"));
+			bReactionEnabledPhysics = false;
+		}
+	}
+
+	bReactionActive = false;
+	ReactionBone = NAME_None;
+}
+
+void UOneBrahamRagdollComponent::AddWoundShading(float Damage)
+{
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	USkeletalMeshComponent* Mesh = GetTargetMesh();
+	if (Mesh == nullptr)
+	{
+		return;
+	}
+
+	// Skeletal meshes cannot take decals, so wounds are a material parameter:
+	// the character master reads "BloodAmount" to darken and wet the clothing.
+	// A material without the parameter ignores it, so this is safe before the
+	// character art pass adds it.
+	WoundAmount = UOneBrahamVFXStatics::IsGoreEnabled() ? FMath::Clamp(WoundAmount + Damage / 120.f, 0.f, 1.f) : 0.f;
+	Mesh->SetScalarParameterValueOnMaterials(TEXT("BloodAmount"), WoundAmount);
+}
+
+void UOneBrahamRagdollComponent::ClientNearMiss_Implementation(FVector_NetQuantize PassLocation)
+{
+	UOneBrahamVFXStatics::PlayNearMiss(this, PassLocation);
+}
+
+// ==========================================================================
+//  Blood pools
+// ==========================================================================
+bool UOneBrahamRagdollComponent::FindFloorBelow(const FVector& From, FVector& OutFloor) const
+{
+	const UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return false;
+	}
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(OBBloodPool), false, GetOwner());
+	FCollisionObjectQueryParams Objects(ECC_WorldStatic);
+	Objects.AddObjectTypesToQuery(ECC_WorldDynamic);
+
+	FHitResult Hit;
+	if (World->LineTraceSingleByObjectType(Hit, From + FVector(0.f, 0.f, 20.f), From - FVector(0.f, 0.f, 160.f), Objects, Params)
+		&& Hit.ImpactNormal.Z > 0.6f)
+	{
+		OutFloor = Hit.ImpactPoint;
+		return true;
+	}
+	return false;
+}
+
+void UOneBrahamRagdollComponent::TickBlood(float DeltaTime)
+{
+	if (GetNetMode() == NM_DedicatedServer || !UOneBrahamVFXStatics::IsGoreEnabled())
+	{
+		return;
+	}
+
+	AOneBrahamCharacter* Character = CachedCharacter.Get();
+	USkeletalMeshComponent* Mesh = GetTargetMesh();
+	const UWorld* World = GetWorld();
+	if (Character == nullptr || Mesh == nullptr || World == nullptr)
+	{
+		return;
+	}
+
+	const float Now = World->GetTimeSeconds();
+
+	// --- Corpse -----------------------------------------------------------
+	// The pool starts once the body has had time to settle, and spreads over
+	// fifteen seconds. Arriving with a ready-made puddle is what a placed prop
+	// does; spreading is what a body does.
+	if (bRagdolling)
+	{
+		if (!bCorpsePoolSpawned && LocalRagdollStartTime >= 0.f && Now - LocalRagdollStartTime > 1.6f && !bFadingOut)
+		{
+			bCorpsePoolSpawned = true;
+
+			FVector Floor;
+			if (FindFloorBelow(Mesh->GetBoneLocation(TEXT("pelvis")), Floor))
 			{
-				RestoreMesh->SetAllBodiesPhysicsBlendWeight(0.f, true);
+				const float Hold = CorpseLifetimeSeconds > 0.f ? FMath::Min(CorpseLifetimeSeconds, 240.f) : 240.f;
+				UOneBrahamVFXStatics::SpawnBloodPool(this, Floor, FMath::FRandRange(42.f, 64.f), 15.f, Hold);
 			}
-		}), 0.45f, false);
+		}
+		return;
+	}
+
+	// --- Downed -----------------------------------------------------------
+	const UOneBrahamDownedComponent* Downed = Character->GetDownedComponent();
+	const bool bDowned = Downed != nullptr && Downed->IsDowned();
+
+	if (!bDowned)
+	{
+		bWasDowned = false;
+		DownedPools.Reset();
+		return;
+	}
+
+	const FVector Here = Mesh->GetBoneLocation(TEXT("pelvis"));
+
+	if (!bWasDowned)
+	{
+		bWasDowned = true;
+		DownedSince = Now;
+		StationarySince = Now;
+		LastBleedLocation = Here;
+		LastDripLocation = Here;
+		DownedPools.Reset();
+	}
+
+	// Crawling leaves a trail of drops; staying put for a few seconds leaves a
+	// pool. Both are how the squad coming up the stairs finds a wounded player,
+	// and how the enemy does.
+	if (FVector::DistSquared2D(Here, LastBleedLocation) > FMath::Square(25.f))
+	{
+		LastBleedLocation = Here;
+		StationarySince = Now;
+	}
+
+	if (FVector::DistSquared2D(Here, LastDripLocation) > FMath::Square(35.f))
+	{
+		LastDripLocation = Here;
+		UOneBrahamVFXStatics::SpawnBloodDrip(this, Character, Here + FMath::VRand() * 8.f, FMath::FRandRange(4.f, 8.f));
+	}
+
+	const bool bSettled = Now - StationarySince > (DownedPools.Num() == 0 ? 1.5f : 3.f);
+	const bool bNewSpot = !DownedPools.ContainsByPredicate([&Here](const FVector& Pool) { return FVector::DistSquared2D(Pool, Here) < FMath::Square(80.f); });
+
+	if (bSettled && bNewSpot && DownedPools.Num() < 3)
+	{
+		FVector Floor;
+		if (FindFloorBelow(Here, Floor))
+		{
+			DownedPools.Add(Here);
+			UOneBrahamVFXStatics::SpawnBloodPool(this, Floor, FMath::FRandRange(22.f, 32.f), 20.f, 120.f);
+		}
 	}
 }
 
@@ -426,6 +715,12 @@ void UOneBrahamRagdollComponent::TickCorpseLanding(float DeltaTime)
 			// corpse FX component to hold it.
 			UOneBrahamVFXStatics::SpawnEffect(this, EOneBrahamVFXEffect::CorpseImpact,
 				ImpactLocation, FRotator::ZeroRotator, FVector(1.f));
+
+			// The weight of a body hitting the floor.
+			if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this))
+			{
+				Audio->PlayBodyFall(ImpactLocation, LastCorpseFallSpeed);
+			}
 		}
 	}
 
@@ -435,6 +730,22 @@ void UOneBrahamRagdollComponent::TickCorpseLanding(float DeltaTime)
 void UOneBrahamRagdollComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	// --- Cosmetic, every state ----------------------------------------------
+	TickHitReaction(DeltaTime);
+
+	// Back to bookkeeping rate once the flinch is over.
+	if (!bReactionActive && GetComponentTickInterval() < 0.5f)
+	{
+		SetComponentTickInterval(0.5f);
+	}
+
+	BloodTickAccumulator += DeltaTime;
+	if (BloodTickAccumulator >= 0.45f)
+	{
+		TickBlood(BloodTickAccumulator);
+		BloodTickAccumulator = 0.f;
+	}
 
 	AOneBrahamCharacter* Character = CachedCharacter.Get();
 	if (Character == nullptr || !bRagdolling)

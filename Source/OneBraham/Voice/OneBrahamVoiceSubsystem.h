@@ -80,7 +80,12 @@ public:
 	UOneBrahamVoiceLineSet* GetLineSet() const { return LineSet; }
 
 	// --- live voice chat policy -------------------------------------------
-	/** Fired when the local player presses/uses the push-to-talk key. */
+	/**
+	 * Push-to-talk key state for the local player. Context may be the player's
+	 * controller, pawn or PlayerState. Capture runs on the owning client and the
+	 * replicated transmitting flag is set by the server through
+	 * UOneBrahamProximityVoiceComponent::ServerSetTransmitting.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Voice")
 	void SetTransmitting(const AActor* Context, bool bTransmitting);
 
@@ -88,18 +93,61 @@ public:
 	UFUNCTION(BlueprintPure, Category = "One Braham|Voice")
 	bool IsTransmitting(const AOneBrahamPlayerState* PlayerState) const;
 
-	/** Server-side routing test: should Listener receive Speaker's voice? */
+	/** Server-side routing test: should Listener receive Speaker's voice? Thin
+	 *  wrapper over OneBrahamVoiceRouting::ResolveRoute. */
 	bool ShouldHear(const AOneBrahamPlayerState* Listener, const AOneBrahamPlayerState* Speaker) const;
+
+	/**
+	 * Flattens a player into the routing rule's input. As a listener, an
+	 * eliminated player's location is the pawn of the player they spectate (read
+	 * from their controller's replicated SpectatedPlayerId), so spectators hear
+	 * proximity voice from where the watched player stands.
+	 */
+	FOneBrahamVoiceRouteParty MakeRouteParty(const AOneBrahamPlayerState* State, bool bAsListener) const;
+
+	/** Range and per-channel switches from the match settings. */
+	FOneBrahamVoiceRouteRules GetRouteRules() const;
+
+	/** Match setting: whether walls and floors muffle proximity voice. */
+	bool IsVoiceOcclusionEnabled() const;
+
+	/**
+	 * Number of VoiceOccluder surfaces (ECC_GameTraceChannel7) between two points,
+	 * up to MaxSurfaces. A single trace stops at the first blocker, so it walks
+	 * through the geometry one surface at a time.
+	 */
+	int32 CountVoiceOccluders(const FVector& From, const FVector& To, const AActor* IgnoreA = nullptr,
+		const AActor* IgnoreB = nullptr, int32 MaxSurfaces = 4) const;
 
 	/** 0 = clear line of sight, 1 = fully blocked. Uses the VoiceOccluder channel. */
 	float ComputeOcclusionAlpha(const FVector& SpeakerLocation, const FVector& ListenerLocation) const;
+
+	// --- per-player mute (the scoreboard's hook) -------------------------
+	/**
+	 * Mutes or unmutes Target for the local player: silences them on this machine
+	 * at once and asks the server to stop relaying them. This is what a
+	 * scoreboard row's mute button should call. Returns false when there is no
+	 * local player or the target is the local player.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Voice")
+	bool SetPlayerMuted(APlayerState* Target, bool bMuted);
+
+	/** True when the local player has muted Target (local intent first, then the
+	 *  server's replicated list). */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Voice")
+	bool IsPlayerMuted(const APlayerState* Target) const;
+
+	/** Finds a player by name: exact (case-insensitive) first, then a unique
+	 *  prefix. Null when there is no match or the prefix is ambiguous. */
+	APlayerState* FindPlayerByName(const FString& Name) const;
 
 	/** Proximity voice radius in cm for the current match. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Voice")
 	float GetProximityRangeCm() const;
 
-	/** Transport tunables, resolved once from the match settings. */
-	const FOneBrahamVoiceChatConfig& GetChatConfig() const { return ChatConfig; }
+	/** Transport tunables. The match-dependent parts are resolved once a game
+	 *  state with match settings exists, which is after this subsystem starts. */
+	const FOneBrahamVoiceChatConfig& GetChatConfig() const;
 
 	/** Server-side frame budget. Returns false when the talker should be throttled. */
 	bool ConsumeRelayBudget(APlayerState* Talker, int32 FrameBytes);
@@ -155,7 +203,17 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<UOneBrahamVoiceLineSet> LineSet = nullptr;
 
-	FOneBrahamVoiceChatConfig ChatConfig;
+	/** Pulls the relay budget from the match settings once they exist. */
+	void ResolveChatConfigFromMatch() const;
+
+	/** The local player's state, or null on a dedicated server. */
+	AOneBrahamPlayerState* GetLocalPlayerState() const;
+
+	mutable FOneBrahamVoiceChatConfig ChatConfig;
+	mutable bool bChatConfigResolved = false;
+
+	/** Local mute intent, ahead of the server's replicated list. */
+	TMap<int32, bool> LocalMuteIntent;
 
 	TMap<TWeakObjectPtr<APlayerState>, FOneBrahamVoiceBudget> RelayBudgets;
 

@@ -315,6 +315,8 @@ void AOneBrahamProjectileBase::ResolveDetonationFX()
 		*GetClass()->GetName());
 #endif
 
+	// LoadEffectSystem returns null for an empty generated system, in which case
+	// the component stays empty and OnRep_Detonated plays the procedural blast.
 	if (UNiagaraSystem* Fallback = UOneBrahamVFXStatics::LoadEffectSystem(GetDetonationEffect()))
 	{
 		DetonationFX->SetAsset(Fallback);
@@ -337,11 +339,28 @@ void AOneBrahamProjectileBase::MulticastDetonationFeedback_Implementation(FVecto
 	// which meant a player who threw a grenade on a dedicated server felt it and
 	// nobody else did. A Client RPC on a locally controlled controller runs on
 	// that machine immediately, so the host is covered by the same loop.
+	// This runs on every machine already (a multicast), so each one shakes only
+	// its own local players - calling the client RPC on every controller from
+	// every machine is what made remote clients shake twice.
 	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 	{
-		if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(It->Get()))
+		AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(It->Get());
+		if (PC != nullptr && PC->IsLocalController())
 		{
-			PC->ClientApplyExplosionShake(DetonationLocation, Magnitude);
+			PC->ApplyExplosionShakeLocally(DetonationLocation, Magnitude);
+		}
+	}
+
+	// The blast itself: crack, boom, debris, rumble and the room's tail, with
+	// ringing for anyone close. Smoke has its own hiss.
+	if (UtilityType != EOneBrahamUtilityType::Smoke)
+	{
+		if (UOneBrahamAudioManagerComponent* Audio = UOneBrahamAudioManagerComponent::GetLocal(this))
+		{
+			const bool bBreach = UtilityType == EOneBrahamUtilityType::BreachCharge;
+			const FName Cue = bBreach ? FName(TEXT("SFX_Breach_Explosion"))
+				: (UtilityType == EOneBrahamUtilityType::Flashbang ? FName(TEXT("SFX_Flashbang_Bang")) : FName(TEXT("SFX_Frag_Explosion")));
+			Audio->PlayExplosion(DetonationLocation, bBreach ? BreachRadius : BlastRadius, Cue);
 		}
 	}
 
@@ -778,9 +797,21 @@ void AOneBrahamProjectileBase::OnRep_Detonated()
 	const bool bComponentOwnsBurst = UtilityType == EOneBrahamUtilityType::Frag
 		|| UtilityType == EOneBrahamUtilityType::BreachCharge;
 
-	if (bDetonated && DetonationFX != nullptr && bComponentOwnsBurst)
+	if (bDetonated && bComponentOwnsBurst)
 	{
-		DetonationFX->Activate(true);
+		if (DetonationFX != nullptr && UOneBrahamVFXStatics::IsNiagaraSystemUsable(DetonationFX->GetAsset()))
+		{
+			DetonationFX->Activate(true);
+		}
+		else
+		{
+			// No system that will draw anything - none assigned, or the empty
+			// one the content build creates. Without this a frag in a fresh
+			// checkout detonated as a sound, a shake and a death with nothing
+			// to see. The procedural blast is flash, fireball, smoke and debris.
+			const bool bBreach = UtilityType == EOneBrahamUtilityType::BreachCharge;
+			UOneBrahamVFXStatics::SpawnExplosion(this, GetActorLocation(), bBreach ? BreachRadius * 1.4f : FMath::Max(BlastRadius, 300.f), bBreach);
+		}
 	}
 
 	// Smoke keeps its cloud alive after detonation; the FX component handles that.

@@ -213,7 +213,9 @@ protected:
 
 	/** Pad location. Replicated once on first set: it never moves after that. */
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Extraction")
-	FVector HelipadLocation = FVector(0.f, 0.f, 6000.f);
+	/** Set by the pad at BeginPlay; this default is the built map's pad, on the
+	 *  Skydeck balcony's east wing at floor 15's level (Z 5600). */
+	FVector HelipadLocation = FVector(1650.f, 900.f, 5600.f);
 
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Extraction")
 	float HoldRadiusCm = 900.f;

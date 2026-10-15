@@ -16,7 +16,15 @@
 //   * Cleans up after DeathBagLifetimeSeconds with a fade-out (bodies must not
 //     accumulate forever on a 16-player server).
 //   * Provides hit reactions for limbs on non-lethal hits (physics blend on the
-//     hit bone only, so a shot to the arm moves the arm).
+//     hit bone only, so a shot to the arm moves the arm), and a whole-upper-body
+//     stagger on heavy hits and headshots. These are cosmetic and play on every
+//     machine from AOneBrahamWeaponBase::MulticastPlayCharacterHitFX.
+//   * Blood: a pool that spreads under a body once it has settled, and under a
+//     downed player (with a drip trail when they crawl); wound shading on the
+//     body's materials. All gated by ob.Gore.
+//   * Near-miss delivery: the owning client's "a round just went past your
+//     head" RPC lives here because this component is on every character and
+//     is owned by that character's player.
 
 #pragma once
 
@@ -108,9 +116,35 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Corpse")
 	void DestroyCorpseNow();
 
-	/** Applies a physics impulse to limbs on a non-lethal hit. */
+	/** Applies a physics impulse to limbs on a non-lethal hit. Kept for
+	 *  Blueprint callers; PlayHitReaction is the full version. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Corpse")
 	void ApplyHitReaction(FName HitBone, const FVector& ShotDir, float Damage);
+
+	/**
+	 * Cosmetic flinch on THIS machine: a short partial physics blend below the
+	 * hit bone, or below the upper spine for a stagger (Damage >= StaggerDamage
+	 * or a headshot). On the victim's own machine it is a small camera flinch
+	 * instead, because their third-person body is not what they are looking at.
+	 * Does nothing on a dedicated server.
+	 */
+	void PlayHitReaction(FName HitBone, const FVector& ShotDir, float Damage, bool bHeadshot);
+
+	/** Accumulates wound shading: sets "BloodAmount" (0..1) on the body's
+	 *  materials. Does nothing with ob.Gore 0 or on a dedicated server. */
+	void AddWoundShading(float Damage);
+
+	/**
+	 * Owning client: a round passed within ~1.5 m of this player's head. Sent by
+	 * AOneBrahamWeaponBase::NotifyNearMisses, throttled to four a second per
+	 * victim on the server - which is why it can afford to be reliable.
+	 */
+	UFUNCTION(Client, Reliable)
+	void ClientNearMiss(FVector_NetQuantize PassLocation);
+
+	/** Damage at or above which a hit staggers the whole upper body. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Corpse")
+	float StaggerDamage = 40.f;
 
 	UFUNCTION(BlueprintPure, Category = "One Braham|Corpse")
 	bool IsRagdolling() const { return bRagdolling; }
@@ -173,6 +207,47 @@ protected:
 
 	/** Finds the skeletal mesh to ragdoll (3P body). */
 	USkeletalMeshComponent* GetTargetMesh() const;
+
+	// --- Hit reaction state (cosmetic, local) -----------------------------
+	/** Blends the active reaction out; ends it when its time is up. */
+	void TickHitReaction(float DeltaTime);
+
+	/** Stops the active reaction immediately and restores the living mesh. */
+	void EndHitReaction(bool bRestoreCollision);
+
+	/** First bone at or above Bone that has a physics body, or NAME_None. */
+	FName FindSimulatedBone(USkeletalMeshComponent* Mesh, FName Bone) const;
+
+	FName ReactionBone = NAME_None;
+	float ReactionDuration = 0.f;
+	float ReactionRemaining = 0.f;
+	float ReactionPeakWeight = 0.f;
+	bool bReactionActive = false;
+	bool bReactionEnabledPhysics = false;
+
+	/** Wound shading so far, 0..1. */
+	float WoundAmount = 0.f;
+
+	// --- Blood pools (cosmetic, local) ------------------------------------
+	/** Pool under a settled corpse, and pools/drips under a downed player. */
+	void TickBlood(float DeltaTime);
+
+	/** Floor point under a world location, ignoring the body. */
+	bool FindFloorBelow(const FVector& From, FVector& OutFloor) const;
+
+	/** The blood pass runs at about 2 Hz even while the flinch ticks every frame. */
+	float BloodTickAccumulator = 0.f;
+
+	/** Local time this machine saw the body go limp. */
+	float LocalRagdollStartTime = -1.f;
+	bool bCorpsePoolSpawned = false;
+
+	bool bWasDowned = false;
+	float DownedSince = 0.f;
+	float StationarySince = 0.f;
+	FVector LastBleedLocation = FVector::ZeroVector;
+	FVector LastDripLocation = FVector::ZeroVector;
+	TArray<FVector> DownedPools;
 
 	TWeakObjectPtr<class AOneBrahamCharacter> CachedCharacter;
 

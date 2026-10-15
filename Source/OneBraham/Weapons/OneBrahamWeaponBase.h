@@ -47,6 +47,40 @@ enum class EOneBrahamWeaponState : uint8
 	Empty = 7
 };
 
+/**
+ * One character hit, as every machine needs to see it: who, where, which way,
+ * how hard. Carried by MulticastPlayCharacterHitFX so the victim's flinch, the
+ * blood on the wall behind them and the wound shading play on every client,
+ * not just on the server that traced the shot.
+ */
+USTRUCT()
+struct FOneBrahamCharacterHitFX
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TObjectPtr<class AOneBrahamCharacter> Victim = nullptr;
+
+	UPROPERTY()
+	FName Bone = NAME_None;
+
+	UPROPERTY()
+	FVector_NetQuantize Location = FVector::ZeroVector;
+
+	UPROPERTY()
+	FVector_NetQuantizeNormal Direction = FVector::ForwardVector;
+
+	/** Damage actually dealt, rounded and clamped to a byte: it only scales visuals. */
+	UPROPERTY()
+	uint8 Damage = 0;
+
+	UPROPERTY()
+	bool bHeadshot = false;
+
+	UPROPERTY()
+	bool bKilled = false;
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOneBrahamWeaponFired, AOneBrahamWeaponBase*, Weapon, bool, bWasSuppressed);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOneBrahamWeaponStateChanged, EOneBrahamWeaponState, NewState);
 
@@ -205,6 +239,15 @@ public:
 	UFUNCTION(NetMulticast, Reliable, Category = "One Braham|Weapon")
 	void MulticastPlayReloadFX(bool bStarted);
 
+	/**
+	 * Character hits from one trigger pull (one entry per pellet that landed).
+	 * Unreliable: it is purely cosmetic - flinch, stagger, blood decals, wound
+	 * shading - and a lost packet costs a splash of blood, not a hit. Damage,
+	 * the hit marker and death all travel on their own reliable paths.
+	 */
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastPlayCharacterHitFX(const TArray<FOneBrahamCharacterHitFX>& Hits);
+
 public:
 	/** Total length of the current reload, seconds. 0 when not reloading. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Weapon")
@@ -325,8 +368,37 @@ protected:
 	/** Applies the skin to the weapon master material. */
 	void RefreshMaterialParameters();
 
-	/** Server: single bullet trace, resolves damage + impact and applies it. */
-	float TraceBullet(const FVector& Start, const FVector& Direction, FOneBrahamImpactInfo& OutImpact, AActor*& OutHitActor);
+	/**
+	 * Server: one bullet. Traces, penetrates a shoot-through surface if the
+	 * weapon can, applies damage, and appends every impact the round made
+	 * (entry, exit and far side) to OutImpacts and every character it hurt to
+	 * OutCharacterHits. Returns the damage dealt.
+	 */
+	float TraceBullet(const FVector& Start, const FVector& Direction, TArray<FOneBrahamImpactInfo>& OutImpacts, AActor*& OutHitActor,
+		TArray<FOneBrahamCharacterHitFX>& OutCharacterHits);
+
+	/** Server: damage, hit confirmation and the hit-FX entry for one character hit. */
+	float ApplyBulletHitToCharacter(class AOneBrahamCharacter* HitCharacter, const FHitResult& Hit, const FVector& Direction,
+		float TotalDistance, float DamageScale, bool bPenetrated, TArray<FOneBrahamCharacterHitFX>& OutCharacterHits);
+
+	/**
+	 * Server: tells every living enemy player whose head the round passed within
+	 * NearMissRadius of (and did not hit) that they are being shot at, through
+	 * their own UOneBrahamRagdollComponent::ClientNearMiss.
+	 */
+	void NotifyNearMisses(const FVector& Start, const FVector& End, const AActor* HitActor);
+
+	/** How far a round is traced. Not the falloff band: rounds do not stop where damage bottoms out. */
+	float GetMaxTraceDistance() const;
+
+	/** Head-to-path distance under which a passing round counts as a near miss, cm. */
+	static constexpr float NearMissRadius = 150.f;
+
+	/** Server: last near-miss time per victim, so automatic fire sends four a second, not fifteen. */
+	TMap<TWeakObjectPtr<AActor>, float> LastNearMissTime;
+
+	/** Client: counts shots locally so the fallback tracer is one round in three. */
+	int32 LocalTracerCounter = 0;
 
 	/** Server: converts a bone name into a hit zone. */
 	static EOneBrahamHitZone ResolveHitZone(FName BoneName);

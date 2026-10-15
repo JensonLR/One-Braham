@@ -80,7 +80,7 @@ is the rule the old 4.0 s revive in section 4 needed and did not have.
 | Gravity | the engine's own `DefaultGravityZ` (Config/DefaultEngine.ini); no scale |
 | Jump Z velocity | 380 cm/s (`UOneBrahamCharacterMovementComponent::JumpZVelocity`) |
 | Air control | 0.14 (`UOneBrahamCharacterMovementComponent::GroundAirControl`) |
-| Braking deceleration, walking | 2000 cm/s² (`UOneBrahamCharacterMovementComponent::GroundBrakingDeceleration`) |
+| Braking deceleration, walking | 1400 cm/s² (`UOneBrahamCharacterMovementComponent::GroundBrakingDeceleration`) |
 | Max step height | 45 cm (`UOneBrahamCharacterMovementComponent::MaxStepHeight`) |
 | Walkable floor angle | 46° (`UOneBrahamCharacterMovementComponent::SetWalkableFloorAngle`) |
 | Ledge tolerance | 12 cm (`UOneBrahamCharacterMovementComponent::PerchRadiusThreshold`) |
@@ -98,9 +98,19 @@ that never reached the code, which makes it the same kind of sentence as a
 weapon that is in the design document and not in the game.
 
 The numbers are chosen for one feel: **committing to a movement decision should
-be hard to undo.** Braking at 2,000 cm/s² means a full-speed sprint takes about
-0.30 s to stop — long enough that a player who runs into a room has already
-decided to be in it.
+be hard to undo.** Braking is a constant 1,400 cm/s² plus a speed-proportional
+friction of 3 (`GroundBrakingFriction`, with `bUseSeparateBrakingFriction` on and
+the engine's braking-friction factor of 2 taken out), so a full-speed sprint takes
+about 0.28 s to stop — long enough that a player who runs into a room has already
+decided to be in it. (The old 2,000 cm/s² braked against ground friction 8 doubled,
+which stopped a sprint in about 0.15 s while this paragraph said 0.30.) Ground
+friction stays at 8 for turning, so a change of direction is still crisp.
+
+Acceleration has two weights on top of `GroundAcceleration`: a sprint from a
+standstill starts at `SprintStartAcceleration` and blends up to the full value by
+jog speed (the first two steps are heavy; a jog that becomes a sprint is not slowed),
+and aiming down sights caps it at `AimingAcceleration`. Both inputs are known to
+the server and the owning client, so prediction agrees with the authority.
 
 Sliding and mantling **are** in the game, bound to their own input actions and
 implemented as movement states, not as animations: a slide is 0.85 s
@@ -299,3 +309,72 @@ Feedback on hit: a directional hit marker, a short impact sound, a body flinch i
 the mesh (cosmetic, never affecting aim), and a blood decal only on the surface
 behind the hit — never a particle spray in front of the camera, because a
 first-person blood effect that obscures the screen is a mechanic nobody asked for.
+
+---
+
+## 9. First-person feel
+
+`UOneBrahamFirstPersonFeelComponent` (on every character, ticked by the character
+straight after `UpdateLean`) owns everything that makes the view feel like a body.
+It is cosmetic and local: it runs only for the local player's own pawn, nothing in
+it replicates, and nothing in it moves the aim ray.
+
+**The additive camera layer.** The camera uses pawn control rotation, so
+`UCameraComponent::GetCameraView` sets its world rotation every frame and anything
+written to its relative rotation never reaches the screen — which is why the hit
+flinch and the lean roll never worked. Every cosmetic rotation is now summed into
+one camera-space transform and handed to `AddAdditiveOffset` each frame: lean roll,
+the hit punch, the landing dip and nod, strafe roll and view bob. The lean's
+sideways slide stays on the component, because `GetEyeLocation` (the trace origin)
+reads it.
+
+| Layer | Driven by | Tuning |
+| --- | --- | --- |
+| Hit punch | `AOneBrahamPlayerController::ClientDamageTaken` (amount and attacker position) into a damped spring; a hit from the left turns and rolls the view right, from the front lifts it, from behind drops it | `PunchPitchDegrees`, `PunchYawDegrees`, `PunchRollDegrees`, `PunchReferenceDamage`, `PunchSpringFrequency`, `PunchSpringDamping` |
+| Landing | `AOneBrahamCharacter::Landed` on the owning client: dip, nod and `GetLandingShakeClass`, heavier past the safe-fall speed | `LandingMinSpeed`, `LandingHardSpeed`, `LandingDipCm`, `LandingPitchDegrees`, `LandingShakeScale`, `HardLandingShakeScale` |
+| Strafe roll and bob | velocity against the view; bob off with `bViewBobbing` or reduce motion, scaled by `ViewBobbingAmount` | `StrafeRollDegrees`, `CameraBobCm`, `CameraBobRollDegrees`, `SprintBobMultiplier`, `StepLengthCm` |
+
+**The weapon layer**, applied to the first-person arms mesh the weapon hangs from:
+look inertia (the gun lags a fast turn and overshoots slightly as it settles),
+movement sway and roll scaled by the weapon's `SwayMovementScale`, walking and
+sprinting bob (the same `bViewBobbing` setting), a breathing figure-of-eight scaled
+by `SwayLoopScale` that quickens when hurt, and the recoil kick that
+`UOneBrahamWeaponComponent` has always computed and nothing applied
+(`WeaponKickBackCm`, `WeaponKickUpCm`, `WeaponKickRollDegrees`, `WeaponKickADSScale`).
+Aiming down sights multiplies all sway by `ADSSwayMultiplier`; crouching by
+`CrouchSwayMultiplier`; low health raises it by `LowHealthSwayMultiplier`. There is
+no hold-breath input, so there is no hold-breath.
+
+**The screen.** The component writes the camera's own post-process, and only the
+fields an effect is using, so a healthy player sees exactly the level's grade: a
+vignette and red-tint pulse on each hit scaled by its damage; below
+`LowHealthThreshold`, desaturation, tunnel vision, chromatic aberration (off with the
+player's chromatic aberration setting) and a heartbeat pulse that the HUD's
+crosshair pulse shares (`ComputeHeartbeatPulse`); while downed, a heavier grade and
+a depth-of-field blur. Everything blends back at `ScreenBlendSpeed`. Reduce motion
+scales the punch, sway, landing and death camera to 30% and removes the heartbeat
+throb and bob; screen shake follows `ComputeCameraShakeScale` (off, the 30%
+reduction, or the intensity slider).
+
+**The death camera.** On death the server sends
+`AOneBrahamPlayerController::ClientBeginDeathCam` with the killer's pawn (or, failing
+that, the point the fatal shot came from), and starts spectating `DeathCamSeconds`
+later instead of at once. The camera leaves the body, sags with a roll away from the
+shot, turns slowly to the killer and pushes in while the grade drains; the death
+screen waits `DeathScreenDelaySeconds` so the moment is seen before it is captioned.
+A respawn calls `RestoreFirstPersonView`. A replay killcam is not built: it needs a
+replay driver recording every match, which is a separate project.
+
+**Footsteps.** `AOneBrahamCharacter::TickFootsteps` runs for every pawn on every
+machine with a player at it and steps through the local player's audio manager,
+which owns the stride; the surface is the movement component's cached trace (now
+cached per component — it used to be one function-static shared by every pawn, so
+with two players moving each invalidated the other's cache every frame).
+
+**Explosions** shake each client once: `ClientApplyExplosionShake` drops a second
+delivery of the same detonation (the multicast that sends it runs on every machine),
+and the falloff is squared over `ExplosionShakeRadiusCm`, measured from the camera.
+
+**The damage indicator** keeps the attacker's world position for its lifetime and
+recomputes its bearing against the current view every frame, so it keeps pointing at
+the shooter while the player turns to face them.

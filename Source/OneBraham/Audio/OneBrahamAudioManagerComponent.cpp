@@ -3,6 +3,7 @@
 #include "Audio/OneBrahamAudioManagerComponent.h"
 
 #include "Characters/OneBrahamCharacter.h"
+#include "Characters/OneBrahamHealthComponent.h"
 #include "Data/OneBrahamBuildingLayoutAsset.h"
 
 #include "Audio/OneBrahamAudioTypes.h"
@@ -13,8 +14,12 @@
 #include "Core/OneBrahamPlayerController.h"
 #include "Core/OneBrahamGameUserSettings.h"
 #include "Data/OneBrahamWeaponDataAsset.h"
+#include "Camera/PlayerCameraManager.h"
+#include "CollisionQueryParams.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "PhysicalMaterials/PhysicalMaterial.h"
 #include "Sound/SoundAttenuation.h"
@@ -47,6 +52,82 @@ namespace
 
 	/** Voice duck: how far the beds drop while somebody is talking. */
 	constexpr float OBVoiceDuckVolume = 0.45f;
+
+	/** Speed of sound at 20 C, in cm/s. Every layer of a distant event waits for it. */
+	constexpr float OBSpeedOfSoundCmPerSec = 34300.f;
+
+	/** Below this delay the ear cannot tell; skip the timer. 10 ms is ~3.4 m. */
+	constexpr float OBMinAudibleDelay = 0.012f;
+
+	/** Hermite 0..1 between two edges: the crossfade shape for every layer. */
+	FORCEINLINE float SmoothRange(float Edge0, float Edge1, float Value)
+	{
+		const float T = FMath::Clamp((Value - Edge0) / FMath::Max(KINDA_SMALL_NUMBER, Edge1 - Edge0), 0.f, 1.f);
+		return T * T * (3.f - 2.f * T);
+	}
+
+	/**
+	 * Runs a play after a delay, or now when the delay is inaudible. Weak on
+	 * the manager, so a controller torn down mid-flight drops the pending layer
+	 * rather than calling into a dead component.
+	 */
+	template <typename FuncType>
+	void ScheduleAudio(UObject* Owner, UWorld* World, float DelaySeconds, FuncType&& Func)
+	{
+		if (DelaySeconds < OBMinAudibleDelay || World == nullptr)
+		{
+			Func();
+			return;
+		}
+
+		FTimerHandle Handle;
+		World->GetTimerManager().SetTimer(Handle,
+			FTimerDelegate::CreateWeakLambda(Owner, Forward<FuncType>(Func)), DelaySeconds, false);
+	}
+
+	bool IsExplosionCue(FName SoundId)
+	{
+		static const FName Frag(TEXT("SFX_Frag_Explosion"));
+		static const FName Breach(TEXT("SFX_Breach_Explosion"));
+		static const FName Flash(TEXT("SFX_Flashbang_Bang"));
+		return SoundId == Frag || SoundId == Breach || SoundId == Flash;
+	}
+
+	/** The blast radius a routed explosion assumes when the caller did not say. */
+	float DefaultBlastRadiusCm(FName SoundId)
+	{
+		const FString Id = SoundId.ToString();
+		if (Id.Contains(TEXT("Breach")))
+		{
+			return 650.f;
+		}
+		return Id.Contains(TEXT("Flashbang")) ? 450.f : 500.f;
+	}
+
+	/**
+	 * The impact family for a surface. A round into plasterboard, a desk, a
+	 * server rack and a puddle are four different sounds, because the
+	 * difference tells you what is on the other side.
+	 */
+	const TCHAR* GetImpactSuffix(EOneBrahamFootstepSurface Surface)
+	{
+		switch (Surface)
+		{
+		case EOneBrahamFootstepSurface::Metal:
+		case EOneBrahamFootstepSurface::Grating:
+		case EOneBrahamFootstepSurface::Decking:		return TEXT("Metal");
+		case EOneBrahamFootstepSurface::ServerRack:		return TEXT("ServerRack");
+		case EOneBrahamFootstepSurface::Wood:			return TEXT("Wood");
+		case EOneBrahamFootstepSurface::Plasterboard:	return TEXT("Plaster");
+		case EOneBrahamFootstepSurface::Glass:
+		case EOneBrahamFootstepSurface::BallisticGlass:	return TEXT("Glass");
+		case EOneBrahamFootstepSurface::Carpet:
+		case EOneBrahamFootstepSurface::Fabric:			return TEXT("Carpet");
+		case EOneBrahamFootstepSurface::Flesh:			return TEXT("Flesh");
+		case EOneBrahamFootstepSurface::Puddle:			return TEXT("Water");
+		default:										return TEXT("Concrete");
+		}
+	}
 
 	/** Footsteps: distance travelled per step, cm. Slower = shorter stride. */
 	float StrideForSpeed(float Speed2D, bool bCrouched, bool bSprinting)
@@ -94,8 +175,14 @@ void UOneBrahamAudioManagerComponent::BeginPlay()
 	GetAttenuation(EOneBrahamAudioCategory::Impact, 6000.f);
 	GetAttenuation(EOneBrahamAudioCategory::Objective, 12000.f);
 
-	// The music director starts wherever the match phase says it should.
-	SetMusicState(EOneBrahamMusicState::Lobby);
+	// The music director starts wherever the match phase says it should - on
+	// the machine that is listening. A listen server also holds a controller
+	// (and so a manager) per remote player; those must stay silent, or the host
+	// hears one music bed per connected client.
+	if (IsLocalListener())
+	{
+		SetMusicState(EOneBrahamMusicState::Lobby);
+	}
 }
 
 void UOneBrahamAudioManagerComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -116,6 +203,16 @@ void UOneBrahamAudioManagerComponent::EndPlay(const EEndPlayReason::Type EndPlay
 	ActiveCues.Reset();
 	FootstepDistance.Reset();
 
+	if (HeartbeatComponent != nullptr)
+	{
+		HeartbeatComponent->Stop();
+		HeartbeatComponent = nullptr;
+	}
+	if (HeartbeatControl.IsValid())
+	{
+		HeartbeatControl->Intensity.store(0.f);
+	}
+
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -123,7 +220,22 @@ void UOneBrahamAudioManagerComponent::TickComponent(float DeltaTime, ELevelTick 
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
+	// Directors, beds and the heartbeat are the listener's. A remote player's
+	// controller on a listen server has nothing to say to the host's speakers.
+	if (!IsLocalListener())
+	{
+		return;
+	}
+
+	// One combat cue rendered per frame until they are all cached, so the first
+	// firefight never waits on the synthesiser.
+	if (bPrewarmingCues)
+	{
+		bPrewarmingCues = OneBrahamProceduralAudio::PrewarmNextCombatCue();
+	}
+
 	UpdateLowPass(DeltaTime);
+	UpdateHeartbeat(DeltaTime);
 
 	// Music director runs at 2 Hz: it reacts to phases and survivor counts, not frames.
 	MusicDirectorAccumulator += DeltaTime;
@@ -142,7 +254,16 @@ void UOneBrahamAudioManagerComponent::TickComponent(float DeltaTime, ELevelTick 
 		if (TinnitusRemaining <= 0.f)
 		{
 			StopBed(BedTinnitus, 0.6f);
-			TargetLowPassHz = bDownedAudio ? OBLowPassDowned : (bDeafened ? OBLowPassSpectating : OBLowPassOpen);
+			RecomputeLowPassTarget();
+		}
+	}
+
+	if (BlastDuckRemaining > 0.f)
+	{
+		BlastDuckRemaining = FMath::Max(0.f, BlastDuckRemaining - DeltaTime);
+		if (BlastDuckRemaining <= 0.f)
+		{
+			RecomputeLowPassTarget();
 		}
 	}
 
@@ -568,8 +689,14 @@ UAudioComponent* UOneBrahamAudioManagerComponent::PlaySound2D(FName SoundId, flo
 	UAudioComponent* Component = UGameplayStatics::SpawnSound2D(World, Sound, FinalVolume, Pitch, 0.f, nullptr, false, true);
 	if (Component != nullptr)
 	{
+		// The ringing is inside the listener's head, so it is the one 2D cue the
+		// world's muffle never touches.
+		static const FName FlashRing(TEXT("SFX_Flashbang_Ring"));
+		static const FName DownedRing(TEXT("SFX_Downed_Tinnitus"));
+		const bool bInHead = SoundId == FlashRing || SoundId == DownedRing;
+
 		Component->SetLowPassFilterEnabled(true);
-		Component->SetLowPassFilterFrequency(CurrentLowPassHz);
+		Component->SetLowPassFilterFrequency(bInHead ? OBLowPassOpen : CurrentLowPassHz);
 		RegisterCuePlayed(SoundId, Component);
 	}
 
@@ -577,6 +704,20 @@ UAudioComponent* UOneBrahamAudioManagerComponent::PlaySound2D(FName SoundId, flo
 }
 
 UAudioComponent* UOneBrahamAudioManagerComponent::PlaySoundAtLocation(FName SoundId, const FVector& Location, float Volume, float Pitch, AActor* SourceActor, USoundAttenuation* AttenuationOverride)
+{
+	// An explosion is never one sound. Breach charges and the access-zone
+	// barrier ask for their blast by id through this function, so this is where
+	// every explosion in the game picks up its debris, its distant rumble, its
+	// room and its effect on the listener's ears.
+	if (!bInLayeredPlay && IsExplosionCue(SoundId))
+	{
+		return PlayExplosionLayers(Location, DefaultBlastRadiusCm(SoundId), SoundId, Volume);
+	}
+
+	return PlayCueAtLocation(SoundId, Location, Volume, Pitch, SourceActor, AttenuationOverride);
+}
+
+UAudioComponent* UOneBrahamAudioManagerComponent::PlayCueAtLocation(FName SoundId, const FVector& Location, float Volume, float Pitch, AActor* SourceActor, USoundAttenuation* AttenuationOverride)
 {
 	const FOneBrahamSoundBankEntry* Entry = nullptr;
 	USoundBase* Sound = ResolveSound(SoundId, &Entry);
@@ -666,11 +807,11 @@ void UOneBrahamAudioManagerComponent::PlayWeaponShot(const UOneBrahamWeaponDefin
 {
 	FName SoundId = FName(TEXT("SFX_Gunshot_Rifle"));
 
-	if (bSuppressed)
-	{
-		SoundId = FName(TEXT("SFX_Gunshot_Suppressed"));
-	}
-	else if (Definition != nullptr)
+	// Heavy = a cartridge whose distant report is a boom rather than a pop.
+	bool bHeavy = true;
+	float ShellPitch = 1.f;
+
+	if (Definition != nullptr)
 	{
 		switch (Definition->Category)
 		{
@@ -678,27 +819,52 @@ void UOneBrahamAudioManagerComponent::PlayWeaponShot(const UOneBrahamWeaponDefin
 		case EOneBrahamWeaponCategory::CompactPistol:
 		case EOneBrahamWeaponCategory::SuppressedPistol:
 			SoundId = FName(TEXT("SFX_Gunshot_Pistol"));
+			bHeavy = false;
+			ShellPitch = 1.15f;
 			break;
 		case EOneBrahamWeaponCategory::SMG:
 		case EOneBrahamWeaponCategory::PDW:
 			SoundId = FName(TEXT("SFX_Gunshot_SMG"));
+			bHeavy = false;
+			ShellPitch = 1.12f;
 			break;
 		case EOneBrahamWeaponCategory::PumpShotgun:
 		case EOneBrahamWeaponCategory::SemiAutoShotgun:
+			// A plastic hull: lower and duller than brass.
 			SoundId = FName(TEXT("SFX_Gunshot_Shotgun"));
-			break;
-		case EOneBrahamWeaponCategory::Carbine556:
-		case EOneBrahamWeaponCategory::CompactAssaultRifle:
-			SoundId = FName(TEXT("SFX_Gunshot_Rifle"));
+			ShellPitch = 0.72f;
 			break;
 		case EOneBrahamWeaponCategory::MarksmanRifle:
 			SoundId = FName(TEXT("SFX_Gunshot_Marksman"));
+			ShellPitch = 0.9f;
 			break;
+		case EOneBrahamWeaponCategory::Carbine556:
+		case EOneBrahamWeaponCategory::CompactAssaultRifle:
 		default:
 			SoundId = FName(TEXT("SFX_Gunshot_Rifle"));
 			break;
 		}
 	}
+
+	if (bSuppressed)
+	{
+		SoundId = FName(TEXT("SFX_Gunshot_Suppressed"));
+	}
+
+	// --- where the listener is relative to the shot ------------------------
+	FVector ListenerLocation = MuzzleLocation;
+	const bool bHasListener = GetListenerLocation(ListenerLocation);
+
+	const APlayerController* PC = Cast<APlayerController>(GetOwner());
+	const bool bOwnShot = Shooter != nullptr && PC != nullptr && Shooter == PC->GetPawn();
+
+	const float DistanceCm = bHasListener && !bOwnShot ? FVector::Dist(ListenerLocation, MuzzleLocation) : 0.f;
+	const float DistanceM = DistanceCm / 100.f;
+
+	const bool bOtherFloor = !bOwnShot && IsMuzzleAboveOrBelowListener(MuzzleLocation);
+	const int32 FloorsApart = bOtherFloor
+		? FMath::Max(1, FMath::RoundToInt(FMath::Abs(MuzzleLocation.Z - ListenerLocation.Z) / OneBrahamConstants::FloorHeightCm))
+		: 0;
 
 	// Which attenuation this shot uses is the difference between "somebody is in
 	// this room" and "somebody is two floors up and on the west side", and that
@@ -713,21 +879,128 @@ void UOneBrahamAudioManagerComponent::PlayWeaponShot(const UOneBrahamWeaponDefin
 	{
 		ShotAttenuation = GetAuthoredAttenuation(FName(TEXT("SA_OneBraham_Suppressed")));
 	}
-	else if (IsMuzzleAboveOrBelowListener(MuzzleLocation))
+	else if (bOtherFloor)
 	{
 		ShotAttenuation = GetAuthoredAttenuation(FName(TEXT("SA_OneBraham_WeaponInterior")));
 	}
 
-	// A gunshot is the one cue that must never be dropped for budget reasons: if
-	// the budget is full we still play, because the alternative is a silent shot
-	// in a game whose entire combat loop is built on hearing where shots come from.
-	PlaySoundAtLocation(SoundId, MuzzleLocation, 1.f, FMath::FRandRange(0.97f, 1.03f), Shooter, ShotAttenuation);
+	// A slab of concrete per storey: each one takes the top end off. The
+	// interior attenuation decides how loud; this decides how dull.
+	const float FloorMuffleHz = bOtherFloor ? FMath::Clamp(3200.f / static_cast<float>(FloorsApart), 650.f, 3200.f) : 0.f;
 
-	// Suppressed weapons get their mechanical action as part of the report, which
-	// is what makes a suppressed SMG still identifiable across an open office.
-	if (bSuppressed)
+	// Every layer waits for the sound to arrive. At 40 m that is 117 ms, which
+	// is the gap between seeing a muzzle flash and hearing it - and the gap that
+	// lets a player judge range by ear when a supersonic crack arrives first.
+	const float ArrivalDelay = DistanceCm / OBSpeedOfSoundCmPerSec;
+
+	// Crossfades by range. The close report carries the crack and the blast; it
+	// gives way to the distant report, which is all a shot is from across a
+	// floor plate or the plaza.
+	const float CloseGain = 1.f - 0.8f * SmoothRange(15.f, 60.f, DistanceM);
+	float DistantGain = bSuppressed ? 0.f : SmoothRange(10.f, 40.f, DistanceM);
+	if (bOtherFloor && !bSuppressed)
 	{
-		PlaySoundAtLocation(FName(TEXT("SFX_Shell_Drop")), MuzzleLocation, 0.8f, FMath::FRandRange(0.95f, 1.05f), Shooter);
+		// Through a slab, the boom is what carries.
+		DistantGain = FMath::Max(DistantGain, 0.6f / static_cast<float>(FloorsApart));
+	}
+
+	const float Pitch = FMath::FRandRange(0.97f, 1.03f);
+	const TWeakObjectPtr<AActor> WeakShooter(Shooter);
+	UWorld* World = GetWorld();
+
+	// 1. The close report.
+	ScheduleAudio(this, World, ArrivalDelay, [this, SoundId, MuzzleLocation, CloseGain, Pitch, WeakShooter, ShotAttenuation, FloorMuffleHz]()
+	{
+		// A gunshot is the one cue that must never be dropped for budget reasons
+		// beyond the bank's own limit: the combat loop is built on hearing where
+		// shots come from.
+		if (UAudioComponent* Close = PlayCueAtLocation(SoundId, MuzzleLocation, CloseGain, Pitch, WeakShooter.Get(), ShotAttenuation))
+		{
+			if (FloorMuffleHz > 0.f)
+			{
+				Close->SetLowPassFilterFrequency(FMath::Min(CurrentLowPassHz, FloorMuffleHz));
+			}
+		}
+	});
+
+	// 2. The action. Your own is in your head; anyone else's only within a few
+	//    metres. A suppressed shot has it baked into its report already.
+	if (!bSuppressed && !bOtherFloor && DistanceM < 12.f)
+	{
+		if (bOwnShot)
+		{
+			PlaySound2D(FName(TEXT("SFX_Gunshot_Mech")), 0.5f, FMath::FRandRange(0.96f, 1.04f));
+		}
+		else
+		{
+			const float MechGain = 1.f - SmoothRange(4.f, 12.f, DistanceM);
+			ScheduleAudio(this, World, ArrivalDelay, [this, MuzzleLocation, MechGain, WeakShooter]()
+			{
+				PlayCueAtLocation(FName(TEXT("SFX_Gunshot_Mech")), MuzzleLocation, MechGain,
+					FMath::FRandRange(0.96f, 1.04f), WeakShooter.Get(), nullptr);
+			});
+		}
+	}
+
+	// 3. The distant report.
+	if (DistantGain > 0.02f)
+	{
+		const FName DistantId = bHeavy ? FName(TEXT("SFX_Gunshot_Distant_Heavy")) : FName(TEXT("SFX_Gunshot_Distant_Light"));
+		USoundAttenuation* Distant = GetDistantAttenuation();
+
+		ScheduleAudio(this, World, ArrivalDelay, [this, DistantId, MuzzleLocation, DistantGain, WeakShooter, Distant, FloorMuffleHz]()
+		{
+			if (UAudioComponent* Far = PlayCueAtLocation(DistantId, MuzzleLocation, DistantGain,
+				FMath::FRandRange(0.95f, 1.05f), WeakShooter.Get(), Distant))
+			{
+				if (FloorMuffleHz > 0.f)
+				{
+					Far->SetLowPassFilterFrequency(FMath::Min(CurrentLowPassHz, FloorMuffleHz * 0.6f));
+				}
+			}
+		});
+	}
+
+	// 4. The room. Only for shots on the listener's own storey: a shot through
+	//    the floor already arrives on the interior curve, which is the room above
+	//    heard through concrete. The tail is 2D because a diffuse field has no
+	//    direction; it fades only gently with range, because the room is the
+	//    same room wherever in it you stand.
+	if (!bOtherFloor)
+	{
+		float Wet = 0.f;
+		const FName TailId = GetRoomTailCue(Wet);
+		const float CalibreSend = bHeavy ? 1.1f : 0.85f;
+		const float TailGain = FMath::Clamp(Wet * 1.5f * CalibreSend * (bSuppressed ? 0.25f : 1.f)
+			* FMath::Lerp(1.f, 0.4f, SmoothRange(5.f, 60.f, DistanceM)), 0.f, 1.f);
+
+		if (!TailId.IsNone() && TailGain > 0.02f)
+		{
+			ScheduleAudio(this, World, ArrivalDelay, [this, TailId, TailGain]()
+			{
+				PlaySound2D(TailId, TailGain, FMath::FRandRange(0.97f, 1.03f));
+			});
+		}
+	}
+
+	// 5. The case hitting the floor, half a second later, for anyone close
+	//    enough to hear brass. Pump guns eject on the pump, not the shot.
+	const bool bPump = Definition != nullptr && Definition->Category == EOneBrahamWeaponCategory::PumpShotgun;
+	if (!bOtherFloor && !bPump && DistanceM < 14.f && World != nullptr)
+	{
+		const AActor* ShooterActor = Shooter;
+		const FVector Ejection = MuzzleLocation
+			+ (ShooterActor != nullptr ? ShooterActor->GetActorRightVector() * 55.f - ShooterActor->GetActorForwardVector() * 40.f : FVector::ZeroVector);
+
+		FVector Floor = Ejection;
+		const EOneBrahamFootstepSurface Surface = TraceFloorSurface(Ejection, ShooterActor, Floor);
+		const float FallDelay = FMath::FRandRange(0.38f, 0.6f);
+		const float CasePitch = ShellPitch * FMath::FRandRange(0.95f, 1.05f);
+
+		ScheduleAudio(this, World, ArrivalDelay + FallDelay, [this, Floor, Surface, CasePitch]()
+		{
+			PlayShellDrop(Floor, Surface, CasePitch);
+		});
 	}
 }
 
@@ -952,8 +1225,7 @@ void UOneBrahamAudioManagerComponent::PlayImpact(FName SoundIdPrefix, const FHit
 		return;
 	}
 
-	// Flesh and glass read differently enough that they get their own ids; every
-	// other surface resolves through the physical material of the hit component.
+	// Every surface resolves through the physical material of the hit component.
 	EOneBrahamFootstepSurface Surface = EOneBrahamFootstepSurface::Concrete;
 
 	if (const UPrimitiveComponent* Component = Hit.GetComponent())
@@ -963,36 +1235,7 @@ void UOneBrahamAudioManagerComponent::PlayImpact(FName SoundIdPrefix, const FHit
 			: nullptr);
 	}
 
-	FName Suffix;
-	switch (Surface)
-	{
-	case EOneBrahamFootstepSurface::Metal:
-	case EOneBrahamFootstepSurface::Grating:
-	case EOneBrahamFootstepSurface::ServerRack:
-	case EOneBrahamFootstepSurface::Decking:
-		Suffix = FName(TEXT("Metal"));
-		break;
-	case EOneBrahamFootstepSurface::Wood:
-	case EOneBrahamFootstepSurface::Plasterboard:
-		Suffix = FName(TEXT("Wood"));
-		break;
-	case EOneBrahamFootstepSurface::Glass:
-	case EOneBrahamFootstepSurface::BallisticGlass:
-		Suffix = FName(TEXT("Glass"));
-		break;
-	case EOneBrahamFootstepSurface::Carpet:
-	case EOneBrahamFootstepSurface::Fabric:
-		Suffix = FName(TEXT("Carpet"));
-		break;
-	case EOneBrahamFootstepSurface::Flesh:
-		Suffix = FName(TEXT("Flesh"));
-		break;
-	default:
-		Suffix = FName(TEXT("Concrete"));
-		break;
-	}
-
-	const FName SoundId = FName(*FString::Printf(TEXT("%s_%s"), *SoundIdPrefix.ToString(), *Suffix.ToString()));
+	const FName SoundId = FName(*FString::Printf(TEXT("%s_%s"), *SoundIdPrefix.ToString(), GetImpactSuffix(Surface)));
 	PlaySoundAtLocation(SoundId, Hit.ImpactPoint, VolumeScale, FMath::FRandRange(0.95f, 1.06f), IgnoredActor);
 }
 
@@ -1001,55 +1244,38 @@ void UOneBrahamAudioManagerComponent::PlayImpactSound(const FOneBrahamImpactInfo
 	// One id per material family. A round into a plasterboard partition, a desk
 	// and a server rack should be three different sounds, because in this game
 	// the difference is information: it tells you what is on the other side.
-	FName Suffix = FName(TEXT("Concrete"));
-	switch (Impact.Surface)
-	{
-	case EOneBrahamFootstepSurface::Metal:
-	case EOneBrahamFootstepSurface::Grating:
-	case EOneBrahamFootstepSurface::ServerRack:
-	case EOneBrahamFootstepSurface::Decking:
-		Suffix = FName(TEXT("Metal"));
-		break;
-	case EOneBrahamFootstepSurface::Wood:
-	case EOneBrahamFootstepSurface::Plasterboard:
-		Suffix = FName(TEXT("Wood"));
-		break;
-	case EOneBrahamFootstepSurface::Glass:
-	case EOneBrahamFootstepSurface::BallisticGlass:
-		Suffix = FName(TEXT("Glass"));
-		break;
-	case EOneBrahamFootstepSurface::Carpet:
-	case EOneBrahamFootstepSurface::Fabric:
-		Suffix = FName(TEXT("Carpet"));
-		break;
-	case EOneBrahamFootstepSurface::Flesh:
-		Suffix = FName(TEXT("Flesh"));
-		break;
-	default:
-		break;
-	}
-
 	const bool bFlesh = Impact.bHitCharacter;
 	const FName SoundId = bFlesh
 		? FName(TEXT("SFX_Bullet_Impact_Flesh"))
-		: FName(*FString::Printf(TEXT("SFX_Bullet_Impact_%s"), *Suffix.ToString()));
+		: FName(*FString::Printf(TEXT("SFX_Bullet_Impact_%s"), GetImpactSuffix(Impact.Surface)));
 
 	// A penetrated round arrives duller and quieter: it already went through
 	// something on the way here.
 	const float PenetrationScale = Impact.bPenetrated ? 0.7f : 1.f;
 	const float Pitch = bFlesh ? FMath::FRandRange(0.96f, 1.05f) : FMath::FRandRange(0.94f, 1.08f);
-
-	PlaySoundAtLocation(SoundId, Impact.Location, VolumeScale * PenetrationScale, Pitch, nullptr);
+	const float Volume = VolumeScale * PenetrationScale;
 
 	// Headshots on an enemy helmet ring like a struck bell - the single most
 	// satisfying sound in a serious shooter, and it carries information.
-	if (bFlesh && Impact.HitBoneName == FName(TEXT("head")))
+	const bool bHelmet = bFlesh && Impact.HitBoneName == FName(TEXT("head"));
+	const FVector Location = Impact.Location;
+
+	// An impact across the floor plate is heard after it is seen, like the shot.
+	FVector Listener = Location;
+	const float Delay = GetListenerLocation(Listener) ? FVector::Dist(Listener, Location) / OBSpeedOfSoundCmPerSec : 0.f;
+
+	ScheduleAudio(this, GetWorld(), Delay, [this, SoundId, Location, Volume, Pitch, bHelmet]()
 	{
-		PlaySoundAtLocation(FName(TEXT("SFX_Helmet_Ping")), Impact.Location, 1.f, FMath::FRandRange(0.98f, 1.04f), nullptr);
-	}
+		PlayCueAtLocation(SoundId, Location, Volume, Pitch, nullptr, nullptr);
+
+		if (bHelmet)
+		{
+			PlayCueAtLocation(FName(TEXT("SFX_Helmet_Ping")), Location, 1.f, FMath::FRandRange(0.98f, 1.04f), nullptr, nullptr);
+		}
+	});
 }
 
-void UOneBrahamAudioManagerComponent::PlayNearMissWhizz(const FVector& Location)
+void UOneBrahamAudioManagerComponent::PlayNearMissWhizz(const FVector& Location, bool bSupersonic)
 {
 	// Only for rounds that actually pass close to the listener: a whizz from
 	// forty metres away is a lie, and lies get noticed.
@@ -1072,12 +1298,108 @@ void UOneBrahamAudioManagerComponent::PlayNearMissWhizz(const FVector& Location)
 
 	// Closer = brighter and higher, which is the price of the miss.
 	const float Closeness = FMath::GetMappedRangeValueClamped(FVector2D(320.f, 60.f), FVector2D(0.f, 1.f), Distance);
-	PlaySoundAtLocation(FName(TEXT("SFX_Bullet_Whizz")), Location, FMath::Lerp(0.45f, 1.f, Closeness), FMath::Lerp(0.92f, 1.14f, Closeness), nullptr);
+
+	if (bSupersonic)
+	{
+		// The crack arrives first - the round outruns its own report, so a
+		// listener hears snap, then (distance / 343 m/s later) the shot. That
+		// gap is how a soldier judges range, and it falls out of the layering.
+		PlayCueAtLocation(FName(TEXT("SFX_Bullet_Crack")), Location, FMath::Lerp(0.55f, 1.f, Closeness),
+			FMath::FRandRange(0.95f, 1.06f), nullptr, nullptr);
+	}
+
+	PlayCueAtLocation(FName(TEXT("SFX_Bullet_Whizz")), Location,
+		FMath::Lerp(0.45f, 1.f, Closeness) * (bSupersonic ? 0.55f : 1.f),
+		FMath::Lerp(0.92f, 1.14f, Closeness), nullptr, nullptr);
 }
 
-// ===========================================================================
-//  Local feedback
-// ===========================================================================
+EOneBrahamFootstepSurface UOneBrahamAudioManagerComponent::TraceFloorSurface(const FVector& From, const AActor* IgnoredActor, FVector& OutFloor) const
+{
+	OutFloor = From - FVector(0.f, 0.f, 140.f);
+
+	const UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return EOneBrahamFootstepSurface::Concrete;
+	}
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(OBShellDropFloor), false, IgnoredActor);
+	Params.bReturnPhysicalMaterial = true;
+
+	FHitResult Hit;
+	if (World->LineTraceSingleByChannel(Hit, From, From - FVector(0.f, 0.f, 400.f), ECC_Visibility, Params))
+	{
+		OutFloor = Hit.ImpactPoint;
+		return ClassifyGroundSurface(Hit.PhysMaterial.Get());
+	}
+
+	return EOneBrahamFootstepSurface::Concrete;
+}
+
+void UOneBrahamAudioManagerComponent::PlayShellDrop(const FVector& Location, EOneBrahamFootstepSurface Surface, float Pitch)
+{
+	FName SoundId = FName(TEXT("SFX_Shell_Drop"));
+	float Volume = 1.f;
+
+	switch (Surface)
+	{
+	case EOneBrahamFootstepSurface::Carpet:
+	case EOneBrahamFootstepSurface::Fabric:
+	case EOneBrahamFootstepSurface::Flesh:
+		// Brass on carpet should be almost nothing.
+		SoundId = FName(TEXT("SFX_Shell_Drop_Carpet"));
+		break;
+	case EOneBrahamFootstepSurface::Metal:
+	case EOneBrahamFootstepSurface::Grating:
+	case EOneBrahamFootstepSurface::Decking:
+	case EOneBrahamFootstepSurface::ServerRack:
+		// Brass on a steel deck is a giveaway.
+		SoundId = FName(TEXT("SFX_Shell_Drop_Metal"));
+		break;
+	case EOneBrahamFootstepSurface::Puddle:
+		// It lands in water: a plop rather than a ring.
+		SoundId = FName(TEXT("SFX_Bullet_Impact_Water"));
+		Volume = 0.25f;
+		break;
+	case EOneBrahamFootstepSurface::Wood:
+		Volume = 0.8f;
+		break;
+	default:
+		break;
+	}
+
+	PlayCueAtLocation(SoundId, Location, Volume, Pitch, nullptr, nullptr);
+}
+
+void UOneBrahamAudioManagerComponent::PlayBodyFall(const FVector& Location, float ImpactSpeedCmPerSec, EOneBrahamFootstepSurface Surface)
+{
+	// A collapse from standing is ~400 cm/s at the hips; a fall down a stair
+	// flight or off a ledge is twice that and should sound it.
+	float Volume = FMath::Clamp(ImpactSpeedCmPerSec / 500.f, 0.4f, 1.25f);
+	const float Pitch = FMath::FRandRange(0.92f, 1.04f);
+
+	switch (Surface)
+	{
+	case EOneBrahamFootstepSurface::Carpet:
+	case EOneBrahamFootstepSurface::Fabric:
+		Volume *= 0.7f;
+		break;
+	case EOneBrahamFootstepSurface::Metal:
+	case EOneBrahamFootstepSurface::Grating:
+	case EOneBrahamFootstepSurface::Decking:
+	case EOneBrahamFootstepSurface::ServerRack:
+		// Kit on a steel deck rings out under the body.
+		PlayCueAtLocation(FName(TEXT("SFX_Footstep_Metal")), Location, 0.8f, 0.85f, nullptr, nullptr);
+		break;
+	case EOneBrahamFootstepSurface::Puddle:
+		PlayCueAtLocation(FName(TEXT("SFX_Bullet_Impact_Water")), Location, 0.9f, 0.7f, nullptr, nullptr);
+		break;
+	default:
+		break;
+	}
+
+	PlayCueAtLocation(FName(TEXT("SFX_Body_Fall")), Location, Volume, Pitch, nullptr, nullptr);
+}
 
 void UOneBrahamAudioManagerComponent::PlayHitFeedback(bool bHeadshot, bool bArmourAbsorbed, bool bKill, float DistanceCm)
 {
@@ -1110,7 +1432,28 @@ void UOneBrahamAudioManagerComponent::PlayHitFeedback(bool bHeadshot, bool bArmo
 
 void UOneBrahamAudioManagerComponent::PlayDamageTakenCue(bool bArmourAbsorbed, bool bHeadshot)
 {
-	PlaySound2D(FName(TEXT("UI_Damage_Taken")), bHeadshot ? 1.15f : 1.f, bArmourAbsorbed ? 0.92f : 1.f);
+	// Being hit is two sounds: the thud inside your head, and what hit you. Both
+	// 2D - it happened to the listener - and both low, so it can never be mistaken
+	// for your own hit marker, which is high and bright.
+	PlaySound2D(FName(TEXT("UI_Damage_Taken")), bHeadshot ? 1.15f : 1.f, bArmourAbsorbed ? 1.08f : FMath::FRandRange(0.95f, 1.02f));
+
+	if (bArmourAbsorbed)
+	{
+		// A plate taking the round: a dull metallic smack, pitched up so it
+		// reads as close and small.
+		PlaySound2D(FName(TEXT("SFX_Bullet_Impact_Metal")), 0.35f, FMath::FRandRange(1.15f, 1.25f));
+	}
+	else if (bHeadshot)
+	{
+		// A round off your own helmet: the bell, inside your head, and a short
+		// ring after it.
+		PlaySound2D(FName(TEXT("SFX_Helmet_Ping")), 0.7f, FMath::FRandRange(0.95f, 1.02f));
+		SetTinnitusInternal(0.9f, 2400.f, 0.35f);
+	}
+	else
+	{
+		PlaySound2D(FName(TEXT("SFX_Bullet_Impact_Flesh")), 0.5f, FMath::FRandRange(0.9f, 1.f));
+	}
 }
 
 void UOneBrahamAudioManagerComponent::PlayRadioOpenClose(bool bOpening, bool bSquadChannel)
@@ -1136,32 +1479,163 @@ void UOneBrahamAudioManagerComponent::PlayAnnouncementChime()
 
 void UOneBrahamAudioManagerComponent::PlayExplosion(const FVector& Location, float RadiusCm, FName SoundId)
 {
-	PlaySoundAtLocation(SoundId, Location, 1.f, FMath::FRandRange(0.96f, 1.04f), nullptr);
+	PlayExplosionLayers(Location, RadiusCm, SoundId.IsNone() ? FName(TEXT("SFX_Frag_Explosion")) : SoundId, 1.f);
+}
 
-	// Inside the blast radius the local player gets a temporary ear-ring: the
-	// world muffles for a second and a half, which is the difference between
-	// "a grenade went off nearby" and "a grenade went off next to my head".
-	const APawn* Listener = nullptr;
-	if (const APlayerController* PC = Cast<APlayerController>(GetOwner()))
+UAudioComponent* UOneBrahamAudioManagerComponent::PlayExplosionLayers(const FVector& Location, float RadiusCm, FName SoundId, float VolumeScale)
+{
+	TGuardValue<bool> RoutingGuard(bInLayeredPlay, true);
+
+	const float Radius = FMath::Max(100.f, RadiusCm);
+	const bool bFlash = SoundId == FName(TEXT("SFX_Flashbang_Bang"));
+
+	FVector ListenerLocation = Location;
+	const bool bHasListener = GetListenerLocation(ListenerLocation);
+	const float DistanceCm = bHasListener ? FVector::Dist(ListenerLocation, Location) : 0.f;
+	const float DistanceM = DistanceCm / 100.f;
+
+	const bool bOtherFloor = IsMuzzleAboveOrBelowListener(Location);
+	const int32 FloorsApart = bOtherFloor
+		? FMath::Max(1, FMath::RoundToInt(FMath::Abs(Location.Z - ListenerLocation.Z) / OneBrahamConstants::FloorHeightCm))
+		: 0;
+	const float FloorMuffleHz = bOtherFloor ? FMath::Clamp(2400.f / static_cast<float>(FloorsApart), 450.f, 2400.f) : 0.f;
+
+	const float ArrivalDelay = DistanceCm / OBSpeedOfSoundCmPerSec;
+	const float Pitch = FMath::FRandRange(0.96f, 1.04f);
+	UWorld* World = GetWorld();
+
+	USoundAttenuation* BodyAttenuation = bOtherFloor ? GetAuthoredAttenuation(FName(TEXT("SA_OneBraham_WeaponInterior"))) : nullptr;
+	const float CloseGain = VolumeScale * (1.f - 0.75f * SmoothRange(25.f, 80.f, DistanceM));
+
+	// 1. The blast: crack, body and the long sub tail, in one cue.
+	UAudioComponent* Blast = nullptr;
+	auto PlayBlast = [this, SoundId, Location, CloseGain, Pitch, BodyAttenuation, FloorMuffleHz]() -> UAudioComponent*
 	{
-		Listener = PC->GetPawn();
+		TGuardValue<bool> Guard(bInLayeredPlay, true);
+		UAudioComponent* Component = PlayCueAtLocation(SoundId, Location, CloseGain, Pitch, nullptr, BodyAttenuation);
+		if (Component != nullptr && FloorMuffleHz > 0.f)
+		{
+			Component->SetLowPassFilterFrequency(FMath::Min(CurrentLowPassHz, FloorMuffleHz));
+		}
+		return Component;
+	};
+
+	if (ArrivalDelay < OBMinAudibleDelay)
+	{
+		Blast = PlayBlast();
+	}
+	else
+	{
+		ScheduleAudio(this, World, ArrivalDelay, [PlayBlast]() { PlayBlast(); });
 	}
 
-	if (Listener != nullptr)
+	// 2. Debris: the ceiling coming down a beat after the bang. Close range
+	//    only - nobody hears plaster patter across a floor plate.
+	const float DebrisGain = VolumeScale * (bFlash ? 0.3f : 0.85f) * (1.f - SmoothRange(20.f, 50.f, DistanceM)) * (bOtherFloor ? 0.3f : 1.f);
+	if (DebrisGain > 0.02f)
 	{
-		const float Distance = FVector::Dist(Listener->GetActorLocation(), Location);
-		if (Distance < RadiusCm * 1.35f)
+		ScheduleAudio(this, World, ArrivalDelay + FMath::FRandRange(0.08f, 0.16f), [this, Location, DebrisGain, FloorMuffleHz]()
 		{
-			const float Strength = FMath::GetMappedRangeValueClamped(
-				FVector2D(RadiusCm * 0.35f, RadiusCm * 1.35f), FVector2D(1.f, 0.f), Distance);
+			if (UAudioComponent* Debris = PlayCueAtLocation(FName(TEXT("SFX_Explosion_Debris")), Location, DebrisGain,
+				FMath::FRandRange(0.94f, 1.06f), nullptr, nullptr))
+			{
+				if (FloorMuffleHz > 0.f)
+				{
+					Debris->SetLowPassFilterFrequency(FMath::Min(CurrentLowPassHz, FloorMuffleHz));
+				}
+			}
+		});
+	}
 
-			const float RingSeconds = FMath::Lerp(0.9f, 3.4f, Strength);
-			SetTinnitusState(true, RingSeconds);
+	// 3. The distant rumble, which is all a grenade is from the far side of
+	//    the building, and what comes through the floor slab.
+	float DistantGain = SmoothRange(20.f, 60.f, DistanceM);
+	if (bOtherFloor)
+	{
+		DistantGain = FMath::Max(DistantGain, 0.85f / static_cast<float>(FloorsApart));
+	}
+	DistantGain *= VolumeScale * (bFlash ? 0.6f : 1.f);
 
-			UE_LOG(LogOneBrahamAudio, Verbose, TEXT("[OB.AUDIO] Blast tinnitus: %.2fs at %.0f cm (strength %.2f)"),
-				RingSeconds, Distance, Strength);
+	if (DistantGain > 0.02f)
+	{
+		USoundAttenuation* Distant = GetDistantAttenuation();
+		ScheduleAudio(this, World, ArrivalDelay, [this, Location, DistantGain, Distant, FloorMuffleHz]()
+		{
+			if (UAudioComponent* Far = PlayCueAtLocation(FName(TEXT("SFX_Explosion_Distant")), Location, DistantGain,
+				FMath::FRandRange(0.94f, 1.04f), nullptr, Distant))
+			{
+				if (FloorMuffleHz > 0.f)
+				{
+					Far->SetLowPassFilterFrequency(FMath::Min(CurrentLowPassHz, FloorMuffleHz));
+				}
+			}
+		});
+	}
+
+	// 4. The room. An explosion drives a space far harder than a gunshot.
+	if (!bOtherFloor)
+	{
+		float Wet = 0.f;
+		const FName TailId = GetRoomTailCue(Wet);
+		const float TailGain = FMath::Clamp(Wet * 2.f * VolumeScale * FMath::Lerp(1.f, 0.5f, SmoothRange(5.f, 60.f, DistanceM)), 0.f, 1.f);
+		if (!TailId.IsNone() && TailGain > 0.02f)
+		{
+			ScheduleAudio(this, World, ArrivalDelay, [this, TailId, TailGain]()
+			{
+				PlaySound2D(TailId, TailGain, FMath::FRandRange(0.82f, 0.9f));
+			});
 		}
 	}
+
+	// 5. The listener's ears. Inside 1.35x the radius they ring and the world
+	//    goes behind a wall, harder the closer they were; out to 3.5x the radius
+	//    the mix just ducks for a moment. A wall between you and the blast, or a
+	//    floor slab, takes most of that away.
+	if (bHasListener && !bFlash)
+	{
+		float Exposure = 1.f;
+
+		if (bOtherFloor)
+		{
+			Exposure = 0.35f;
+		}
+		else if (World != nullptr)
+		{
+			FCollisionQueryParams Params(SCENE_QUERY_STAT(OBBlastExposure), false);
+			if (const APlayerController* PC = Cast<APlayerController>(GetOwner()))
+			{
+				Params.AddIgnoredActor(PC->GetPawn());
+			}
+
+			FHitResult Hit;
+			if (World->LineTraceSingleByChannel(Hit, ListenerLocation, Location + FVector(0.f, 0.f, 30.f), ECC_Visibility, Params))
+			{
+				Exposure = 0.6f;
+			}
+		}
+
+		const float Strength = (1.f - SmoothRange(Radius * 0.35f, Radius * 1.35f, DistanceCm)) * Exposure;
+
+		if (Strength > 0.05f)
+		{
+			const float RingSeconds = FMath::Lerp(0.9f, 4.5f, Strength);
+			const float LowPassHz = FMath::Lerp(1800.f, 450.f, Strength);
+			SetTinnitusInternal(RingSeconds, LowPassHz, FMath::Lerp(0.35f, 1.f, Strength));
+
+			UE_LOG(LogOneBrahamAudio, Verbose, TEXT("[OB.AUDIO] Blast tinnitus: %.2fs at %.0f cm (strength %.2f, LP %.0f Hz)"),
+				RingSeconds, DistanceCm, Strength, LowPassHz);
+		}
+		else if (DistanceCm < Radius * 3.5f)
+		{
+			const float Closeness = (1.f - SmoothRange(Radius * 1.35f, Radius * 3.5f, DistanceCm)) * Exposure;
+			const bool bAlreadyDucked = BlastDuckRemaining > 0.f;
+			BlastDuckLowPassHz = FMath::Min(bAlreadyDucked ? BlastDuckLowPassHz : OBLowPassOpen, FMath::Lerp(5000.f, 2200.f, Closeness));
+			BlastDuckRemaining = FMath::Max(BlastDuckRemaining, FMath::Lerp(0.3f, 0.8f, Closeness));
+			RecomputeLowPassTarget();
+		}
+	}
+
+	return Blast;
 }
 
 // ===========================================================================
@@ -1401,12 +1875,23 @@ void UOneBrahamAudioManagerComponent::SetDownedAudioState(bool bDowned)
 
 	bDownedAudio = bDowned;
 
+	// Downed: heartbeat, shallow breathing, and the whole building moved behind
+	// a wall. It should be obvious you are in trouble without reading the HUD.
+	//
+	// The heartbeat itself is the live one UpdateHeartbeat drives, held high
+	// while downed - unless a recorded SFX_Downed_Heartbeat has been assigned in
+	// the bank, in which case that recording is what a designer asked for.
+	EnsureBankLoaded();
+	const FOneBrahamSoundBankEntry* Entry = FindBankEntry(FName(TEXT("SFX_Downed_Heartbeat")));
+	const bool bAuthoredHeartbeat = Entry != nullptr && !Entry->Sound.IsNull();
+
 	if (bDowned)
 	{
-		// Downed: heartbeat, shallow breathing, and the whole building moved behind
-		// a wall. It should be obvious you are in trouble without reading the HUD.
-		AcquireBed(BedDowned, FName(TEXT("SFX_Downed_Heartbeat")), false, FVector::ZeroVector,
-			GetBusVolume(EOneBrahamAudioBus::Gameplay), 0.6f);
+		if (bAuthoredHeartbeat)
+		{
+			AcquireBed(BedDowned, FName(TEXT("SFX_Downed_Heartbeat")), false, FVector::ZeroVector,
+				GetBusVolume(EOneBrahamAudioBus::Gameplay), 0.6f);
+		}
 		SetMusicState(EOneBrahamMusicState::Downed);
 	}
 	else
@@ -1416,7 +1901,7 @@ void UOneBrahamAudioManagerComponent::SetDownedAudioState(bool bDowned)
 
 	// The downed low-pass is the strongest muffle in the game apart from a
 	// flashbang at point blank.
-	TargetLowPassHz = bDowned ? OBLowPassDowned : (bDeafened ? OBLowPassSpectating : OBLowPassOpen);
+	RecomputeLowPassTarget();
 }
 
 void UOneBrahamAudioManagerComponent::SetTinnitusState(bool bActive, float DurationSeconds)
@@ -1425,30 +1910,146 @@ void UOneBrahamAudioManagerComponent::SetTinnitusState(bool bActive, float Durat
 	{
 		TinnitusRemaining = 0.f;
 		StopBed(BedTinnitus, 1.5f);
-		TargetLowPassHz = bDownedAudio ? OBLowPassDowned : (bDeafened ? OBLowPassSpectating : OBLowPassOpen);
+		RecomputeLowPassTarget();
 		return;
 	}
 
+	// The flashbang: everything behind a 400 Hz wall, the ring at full level.
+	SetTinnitusInternal(DurationSeconds, OBLowPassFlashed, 1.f);
+}
+
+void UOneBrahamAudioManagerComponent::SetTinnitusInternal(float DurationSeconds, float LowPassHz, float RingVolume)
+{
+	const bool bAlreadyRinging = TinnitusRemaining > 0.f;
+
 	TinnitusRemaining = FMath::Max(TinnitusRemaining, DurationSeconds);
 
-	AcquireBed(BedTinnitus, FName(TEXT("SFX_Flashbang_Ring")), false, FVector::ZeroVector,
-		GetBusVolume(EOneBrahamAudioBus::Gameplay), 0.15f);
+	// The strongest muffle wins while two overlap: a flashbang inside a grenade's
+	// ring is still a flashbang.
+	TinnitusLowPassHz = bAlreadyRinging ? FMath::Min(TinnitusLowPassHz, LowPassHz) : LowPassHz;
+
+	if (UAudioComponent* Ring = AcquireBed(BedTinnitus, FName(TEXT("SFX_Flashbang_Ring")), false, FVector::ZeroVector,
+		GetBusVolume(EOneBrahamAudioBus::Gameplay) * FMath::Clamp(RingVolume, 0.f, 1.f), 0.15f))
+	{
+		// The ring is inside the head: the muffle is applied to the world, not to
+		// it. Filtered at the world's 400 Hz, a 4 kHz ring is simply not there.
+		Ring->SetLowPassFilterFrequency(OBLowPassOpen);
+	}
 
 	// Ringing pushed to the front, everything else pushed to the back.
-	TargetLowPassHz = OBLowPassFlashed;
+	RecomputeLowPassTarget();
 }
 
 void UOneBrahamAudioManagerComponent::SetDeafened(bool bInDeafened)
 {
 	bDeafened = bInDeafened;
+	RecomputeLowPassTarget();
+}
+
+void UOneBrahamAudioManagerComponent::RecomputeLowPassTarget()
+{
+	// Every muffle the game has is a ceiling on the world's top end; the lowest
+	// ceiling wins. Before this, each state wrote the target directly and the
+	// last writer won, so a blast while downed could open the filter back up.
+	float Target = OBLowPassOpen;
 
 	if (bDeafened)
 	{
-		TargetLowPassHz = OBLowPassSpectating;
+		Target = FMath::Min(Target, OBLowPassSpectating);
 	}
-	else if (!bDownedAudio && TinnitusRemaining <= 0.f)
+	if (bDownedAudio)
 	{
-		TargetLowPassHz = OBLowPassOpen;
+		Target = FMath::Min(Target, OBLowPassDowned);
+	}
+	if (TinnitusRemaining > 0.f)
+	{
+		Target = FMath::Min(Target, TinnitusLowPassHz);
+	}
+	if (BlastDuckRemaining > 0.f)
+	{
+		Target = FMath::Min(Target, BlastDuckLowPassHz);
+	}
+
+	TargetLowPassHz = Target;
+}
+
+void UOneBrahamAudioManagerComponent::SetHeartbeatIntensity(float Intensity01)
+{
+	ExternalHeartbeat = FMath::Clamp(Intensity01, 0.f, 1.f);
+}
+
+void UOneBrahamAudioManagerComponent::UpdateHeartbeat(float DeltaTime)
+{
+	// Health is polled at 10 Hz rather than bound to a delegate: the replicated
+	// health on an owning client arrives by OnRep, and the pawn changes on every
+	// respawn. A poll survives both without bookkeeping.
+	HeartbeatPollAccumulator += DeltaTime;
+	if (HeartbeatPollAccumulator >= 0.1f)
+	{
+		HeartbeatPollAccumulator = 0.f;
+		HealthHeartbeat = 0.f;
+
+		const APlayerController* PC = Cast<APlayerController>(GetOwner());
+		const AOneBrahamCharacter* Character = PC != nullptr ? Cast<AOneBrahamCharacter>(PC->GetPawn()) : nullptr;
+		const UOneBrahamHealthComponent* Health = Character != nullptr ? Character->GetHealthComponent() : nullptr;
+
+		if (Health != nullptr && Health->IsAlive())
+		{
+			// From 40% down to 10%: the zone where a player should start thinking
+			// about a medkit, and then about nothing else.
+			HealthHeartbeat = FMath::Clamp((0.4f - Health->GetHealthFraction()) / 0.3f, 0.f, 1.f);
+		}
+	}
+
+	const FOneBrahamSoundBankEntry* DownedEntry = bDownedAudio ? FindBankEntry(FName(TEXT("SFX_Downed_Heartbeat"))) : nullptr;
+	const bool bDownedUsesLiveHeart = bDownedAudio && (DownedEntry == nullptr || DownedEntry->Sound.IsNull());
+
+	EffectiveHeartbeat = FMath::Max3(ExternalHeartbeat, HealthHeartbeat, bDownedUsesLiveHeart ? 0.85f : 0.f);
+	if (bDeafened)
+	{
+		// Spectating: it is not your body any more.
+		EffectiveHeartbeat = 0.f;
+	}
+
+	if (!HeartbeatControl.IsValid())
+	{
+		HeartbeatControl = MakeShared<FOneBrahamHeartbeatControl, ESPMode::ThreadSafe>();
+	}
+	HeartbeatControl->Intensity.store(EffectiveHeartbeat, std::memory_order_relaxed);
+
+	UWorld* World = GetWorld();
+
+	if (EffectiveHeartbeat > 0.01f)
+	{
+		HeartbeatSilentSeconds = 0.f;
+
+		if ((HeartbeatComponent == nullptr || !HeartbeatComponent->IsPlaying()) && World != nullptr)
+		{
+			if (HeartbeatWave == nullptr)
+			{
+				HeartbeatWave = OneBrahamProceduralAudio::MakeHeartbeatWave(HeartbeatControl);
+			}
+
+			HeartbeatComponent = UGameplayStatics::SpawnSound2D(World, HeartbeatWave,
+				GetBusVolume(EOneBrahamAudioBus::Gameplay), 1.f, 0.f, nullptr, false, false);
+		}
+	}
+	else if (HeartbeatComponent != nullptr)
+	{
+		// The generator fades itself out; release the voice once it has.
+		HeartbeatSilentSeconds += DeltaTime;
+		if (HeartbeatSilentSeconds > 2.f)
+		{
+			HeartbeatComponent->Stop();
+			HeartbeatComponent = nullptr;
+		}
+	}
+
+	if (HeartbeatComponent != nullptr)
+	{
+		// Never low-passed: the muffle is the world going away, and the heart is
+		// what is left.
+		HeartbeatComponent->SetVolumeMultiplier(GetBusVolume(EOneBrahamAudioBus::Gameplay) * 0.9f);
 	}
 }
 
@@ -1482,6 +2083,12 @@ void UOneBrahamAudioManagerComponent::UpdateLowPass(float DeltaTime)
 
 	for (const TPair<FName, TObjectPtr<UAudioComponent>>& Pair : Beds)
 	{
+		// The ring is inside the head and is never muffled with the world.
+		if (Pair.Key == BedTinnitus)
+		{
+			continue;
+		}
+
 		if (Pair.Value != nullptr && Pair.Value->IsPlaying())
 		{
 			Pair.Value->SetLowPassFilterFrequency(CurrentLowPassHz);
@@ -1560,6 +2167,136 @@ void UOneBrahamAudioManagerComponent::UpdateMusicDirector(float DeltaTime)
 //  Queries / debug
 // ===========================================================================
 
+UOneBrahamAudioManagerComponent* UOneBrahamAudioManagerComponent::GetLocal(const UObject* WorldContextObject)
+{
+	const UWorld* World = GEngine != nullptr && WorldContextObject != nullptr
+		? GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::ReturnNull)
+		: nullptr;
+
+	if (World == nullptr || World->GetNetMode() == NM_DedicatedServer)
+	{
+		return nullptr;
+	}
+
+	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+	{
+		const AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(It->Get());
+		if (PC != nullptr && PC->IsLocalController())
+		{
+			return PC->GetAudioManager();
+		}
+	}
+
+	return nullptr;
+}
+
+bool UOneBrahamAudioManagerComponent::IsLocalListener() const
+{
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return false;
+	}
+
+	const APlayerController* PC = Cast<APlayerController>(GetOwner());
+	return PC != nullptr && PC->IsLocalController();
+}
+
+bool UOneBrahamAudioManagerComponent::GetListenerLocation(FVector& OutLocation) const
+{
+	const APlayerController* PC = Cast<APlayerController>(GetOwner());
+	if (PC == nullptr || GetNetMode() == NM_DedicatedServer)
+	{
+		return false;
+	}
+
+	if (const APawn* Pawn = PC->GetPawn())
+	{
+		OutLocation = Pawn->GetActorLocation();
+		return true;
+	}
+
+	// Spectating: the camera is the ears.
+	if (PC->PlayerCameraManager != nullptr)
+	{
+		OutLocation = PC->PlayerCameraManager->GetCameraLocation();
+		return true;
+	}
+
+	return false;
+}
+
+FName UOneBrahamAudioManagerComponent::GetRoomTailCue(float& OutWet) const
+{
+	// The layout's area ids against REVERB_PROFILES in build_audio.py (the wet
+	// column). The tail cue's own decay is the profile's decay.
+	struct FRoomProfile
+	{
+		const TCHAR* Zone;
+		const TCHAR* Cue;
+		float Wet;
+	};
+
+	static const FRoomProfile Profiles[] = {
+		{ TEXT("Ground_Plaza"), TEXT("SFX_Gunshot_Tail_Plaza"),       0.25f },
+		{ TEXT("Lobby"),        TEXT("SFX_Gunshot_Tail_Lobby"),       0.55f },
+		{ TEXT("Mezzanine"),    TEXT("SFX_Gunshot_Tail_Mezzanine"),   0.28f },
+		{ TEXT("OpenPlan"),     TEXT("SFX_Gunshot_Tail_OpenPlan"),    0.18f },
+		{ TEXT("ServerComms"),  TEXT("SFX_Gunshot_Tail_ServerComms"), 0.30f },
+		{ TEXT("Executive"),    TEXT("SFX_Gunshot_Tail_Executive"),   0.22f },
+		{ TEXT("Canteen"),      TEXT("SFX_Gunshot_Tail_Canteen"),     0.45f },
+		{ TEXT("Skydeck"),      TEXT("SFX_Gunshot_Tail_Skydeck"),     0.05f },
+		{ TEXT("Stairwell"),    TEXT("SFX_Gunshot_Tail_Stairwell"),   0.65f }
+	};
+
+	for (const FRoomProfile& Profile : Profiles)
+	{
+		if (CurrentAmbienceZone == FName(Profile.Zone))
+		{
+			OutWet = Profile.Wet;
+			return FName(Profile.Cue);
+		}
+	}
+
+	// An unknown room is an office: the commonest space in the building.
+	OutWet = 0.2f;
+	return FName(TEXT("SFX_Gunshot_Tail_OpenPlan"));
+}
+
+USoundAttenuation* UOneBrahamAudioManagerComponent::GetDistantAttenuation()
+{
+	if (DistantAttenuation != nullptr)
+	{
+		return DistantAttenuation;
+	}
+
+	if (USoundAttenuation* Authored = GetAuthoredAttenuation(FName(TEXT("SA_OneBraham_WeaponDistant"))))
+	{
+		DistantAttenuation = Authored;
+		return DistantAttenuation;
+	}
+
+	// Built like the category chains, but long: a distant report is still
+	// audible across the plaza, and the near-field crossfade lives in the gain
+	// the manager applies, not in the curve.
+	USoundAttenuation* Attenuation = NewObject<USoundAttenuation>(this);
+	FSoundAttenuationSettings& Settings = Attenuation->Attenuation;
+	Settings.bAttenuate = true;
+	Settings.bSpatialize = true;
+	Settings.AttenuationShape = EAttenuationShape::Sphere;
+	Settings.AttenuationShapeExtents = FVector(2500.f, 0.f, 0.f);
+	Settings.FalloffDistance = 45000.f;
+	Settings.DistanceAlgorithm = EAttenuationDistanceModel::Logarithmic;
+	Settings.bEnableListenerFocus = false;
+	Settings.bEnableOcclusion = true;
+	Settings.OcclusionTraceChannel = ECC_Visibility;
+	Settings.OcclusionLowPassFilterFrequency = 600.f;
+	Settings.OcclusionVolumeAttenuation = 0.6f;
+	Settings.OcclusionInterpolationTime = 0.2f;
+
+	DistantAttenuation = Attenuation;
+	return DistantAttenuation;
+}
+
 const FOneBrahamSoundBankEntry* UOneBrahamAudioManagerComponent::FindBankEntry(FName SoundId) const
 {
 	return Bank != nullptr ? Bank->FindEntry(SoundId) : nullptr;
@@ -1613,9 +2350,10 @@ FString UOneBrahamAudioManagerComponent::DumpAudioState() const
 		ExtractionApproach01);
 
 	const FString BankLine = FString::Printf(
-		TEXT("Bank %s | beds %d | plays/s %d | tinnitus %.2f"),
+		TEXT("Bank %s | beds %d | plays/s %d | tinnitus %.2f (%.0f Hz) | blast duck %.2f | heartbeat %.2f | room '%s'"),
 		Bank != nullptr ? TEXT("loaded") : TEXT("FALLBACK ONLY"),
-		GetActiveBedCount(), PlaysThisSecond, TinnitusRemaining);
+		GetActiveBedCount(), PlaysThisSecond, TinnitusRemaining, TinnitusLowPassHz, BlastDuckRemaining,
+		EffectiveHeartbeat, *CurrentAmbienceZone.ToString());
 
 	return FString::Printf(TEXT("%s\n%s\n%s\n%s"), *BusLine, *DuckLine, *StateLine, *BankLine);
 }

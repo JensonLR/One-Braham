@@ -96,12 +96,30 @@ void UOneBrahamAudioBankAsset::EnsureCoreEntries()
 		Row(TEXT("SFX_Gunshot_Rifle"),			EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Weapon, 1.05f, 14000.f, 0.02f, 12),
 		Row(TEXT("SFX_Gunshot_Marksman"),		EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Weapon, 1.15f, 16000.f, 0.02f, 8),
 		Row(TEXT("SFX_Gunshot_Suppressed"),		EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Weapon, 0.45f, 2600.f, 0.02f, 12),
+		// The layers PlayWeaponShot puts around the close report: the action
+		// (close range only), the distant report (dominant past ~40 m), and the
+		// room's answer - one tail per reverb profile, played 2D because a
+		// diffuse tail comes from everywhere at once.
+		Row(TEXT("SFX_Gunshot_Mech"),			EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Mechanical, 0.80f, 2200.f, 0.00f, 10),
+		Row(TEXT("SFX_Gunshot_Distant_Light"),	EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Weapon, 1.0f, 40000.f, 0.02f, 10),
+		Row(TEXT("SFX_Gunshot_Distant_Heavy"),	EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Weapon, 1.0f, 50000.f, 0.02f, 10),
+		Row(TEXT("SFX_Gunshot_Tail_Lobby"),		EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Interface, 1.0f, 0.f, 0.05f, 6),
+		Row(TEXT("SFX_Gunshot_Tail_Mezzanine"),	EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Interface, 1.0f, 0.f, 0.05f, 6),
+		Row(TEXT("SFX_Gunshot_Tail_OpenPlan"),	EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Interface, 1.0f, 0.f, 0.05f, 6),
+		Row(TEXT("SFX_Gunshot_Tail_ServerComms"), EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Interface, 1.0f, 0.f, 0.05f, 6),
+		Row(TEXT("SFX_Gunshot_Tail_Executive"),	EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Interface, 1.0f, 0.f, 0.05f, 6),
+		Row(TEXT("SFX_Gunshot_Tail_Canteen"),	EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Interface, 1.0f, 0.f, 0.05f, 6),
+		Row(TEXT("SFX_Gunshot_Tail_Skydeck"),	EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Interface, 1.0f, 0.f, 0.05f, 6),
+		Row(TEXT("SFX_Gunshot_Tail_Plaza"),		EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Interface, 1.0f, 0.f, 0.05f, 6),
+		Row(TEXT("SFX_Gunshot_Tail_Stairwell"),	EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Interface, 1.0f, 0.f, 0.05f, 6),
 		Row(TEXT("SFX_DryFire"),				EOneBrahamAudioBus::Gameplay, EOneBrahamAudioCategory::Mechanical, 0.55f, 1500.f, 0.10f, 2),
 		Row(TEXT("SFX_Reload_Mag_Out"),			EOneBrahamAudioBus::Gameplay, EOneBrahamAudioCategory::Mechanical, 0.75f, 2600.f, 0.05f, 3),
 		Row(TEXT("SFX_Reload_Mag_In"),			EOneBrahamAudioBus::Gameplay, EOneBrahamAudioCategory::Mechanical, 0.80f, 2600.f, 0.05f, 3),
 		Row(TEXT("SFX_Reload_Bolt"),			EOneBrahamAudioBus::Gameplay, EOneBrahamAudioCategory::Mechanical, 0.78f, 2600.f, 0.05f, 3),
 		Row(TEXT("SFX_Weapon_Draw"),			EOneBrahamAudioBus::Gameplay, EOneBrahamAudioCategory::Foley, 0.60f, 2000.f, 0.15f, 3),
 		Row(TEXT("SFX_Shell_Drop"),				EOneBrahamAudioBus::Gameplay, EOneBrahamAudioCategory::Foley, 0.45f, 1200.f, 0.03f, 6),
+		Row(TEXT("SFX_Shell_Drop_Carpet"),		EOneBrahamAudioBus::Gameplay, EOneBrahamAudioCategory::Foley, 0.35f, 800.f, 0.03f, 6),
+		Row(TEXT("SFX_Shell_Drop_Metal"),		EOneBrahamAudioBus::Gameplay, EOneBrahamAudioCategory::Foley, 0.55f, 1800.f, 0.03f, 6),
 		Row(TEXT("SFX_FireMode_Switch"),		EOneBrahamAudioBus::Gameplay, EOneBrahamAudioCategory::Mechanical, 0.55f, 1400.f, 0.10f, 2),
 		Row(TEXT("SFX_Laser_On"),				EOneBrahamAudioBus::Gameplay, EOneBrahamAudioCategory::Mechanical, 0.40f, 1200.f, 0.10f, 2),
 		Row(TEXT("SFX_Laser_Off"),				EOneBrahamAudioBus::Gameplay, EOneBrahamAudioCategory::Mechanical, 0.40f, 1200.f, 0.10f, 2),
@@ -114,7 +132,12 @@ void UOneBrahamAudioBankAsset::EnsureCoreEntries()
 		Row(TEXT("SFX_Bullet_Impact_Glass"),	EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Impact, 0.90f, 9000.f, 0.02f, 10, false, true),
 		Row(TEXT("SFX_Bullet_Impact_Carpet"),	EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Impact, 0.55f, 3000.f, 0.02f, 10, false, true),
 		Row(TEXT("SFX_Bullet_Impact_Flesh"),	EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Impact, 0.85f, 3600.f, 0.02f, 10, false, true),
+		Row(TEXT("SFX_Bullet_Impact_Plaster"),	EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Impact, 0.70f, 4500.f, 0.02f, 10, false, true),
+		Row(TEXT("SFX_Bullet_Impact_Water"),	EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Impact, 0.70f, 4000.f, 0.02f, 10, false, true),
+		Row(TEXT("SFX_Bullet_Impact_ServerRack"), EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Impact, 0.85f, 7000.f, 0.02f, 10, false, true),
 		Row(TEXT("SFX_Bullet_Whizz"),			EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Impact, 0.70f, 2000.f, 0.08f, 6),
+		Row(TEXT("SFX_Bullet_Crack"),			EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Impact, 0.90f, 2000.f, 0.05f, 6),
+		Row(TEXT("SFX_Body_Fall"),				EOneBrahamAudioBus::Gameplay, EOneBrahamAudioCategory::Foley, 0.85f, 3200.f, 0.05f, 4, false, true),
 		Row(TEXT("SFX_Helmet_Ping"),			EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Impact, 1.0f, 2400.f, 0.10f, 2),
 
 		// --- Utility -----------------------------------------------------
@@ -125,6 +148,9 @@ void UOneBrahamAudioBankAsset::EnsureCoreEntries()
 		Row(TEXT("SFX_Breach_Plant"),			EOneBrahamAudioBus::Gameplay, EOneBrahamAudioCategory::Mechanical, 0.85f, 3600.f, 0.00f, 4),
 		Row(TEXT("SFX_Frag_Explosion"),			EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Impact, 1.15f, 18000.f, 0.00f, 6),
 		Row(TEXT("SFX_Breach_Explosion"),		EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Impact, 1.25f, 22000.f, 0.00f, 4),
+		// PlayExplosion's layers around the blast itself.
+		Row(TEXT("SFX_Explosion_Debris"),		EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Impact, 0.90f, 8000.f, 0.00f, 4),
+		Row(TEXT("SFX_Explosion_Distant"),		EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Impact, 1.10f, 60000.f, 0.00f, 4),
 		Row(TEXT("SFX_Flashbang_Bang"),			EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Impact, 1.20f, 20000.f, 0.00f, 4),
 		Row(TEXT("SFX_Flashbang_Ring"),			EOneBrahamAudioBus::Gameplay, EOneBrahamAudioCategory::Interface, 0.60f, 0.f, 0.f, 1),
 		Row(TEXT("SFX_Smoke_Deploy"),			EOneBrahamAudioBus::SFX, EOneBrahamAudioCategory::Impact, 0.75f, 5000.f, 0.00f, 2),

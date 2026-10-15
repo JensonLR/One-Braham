@@ -101,8 +101,35 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Accel")
 	float GroundAcceleration = 1600.f;
 
+	/**
+	 * Constant part of the stop. Moderate on purpose: with GroundBrakingFriction
+	 * below, a full sprint takes a little under 0.3 s to stop, which is long
+	 * enough to feel the weight of a body and short enough to stop at a doorway.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Accel")
-	float GroundBrakingDeceleration = 2000.f;
+	float GroundBrakingDeceleration = 1400.f;
+
+	/**
+	 * Speed-proportional part of the stop, used instead of GroundFriction while
+	 * braking (bUseSeparateBrakingFriction, factor 1). Ground friction stays at 8
+	 * for turning, so changing direction is crisp while letting go of the stick
+	 * still carries the body forward for a step.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Accel")
+	float GroundBrakingFriction = 3.f;
+
+	/**
+	 * Acceleration when a sprint starts from a standstill. It blends up to
+	 * GroundAcceleration as the speed reaches a jog, so a sprint has to be built
+	 * into - the first steps are heavy - but a jog that becomes a sprint is not
+	 * slowed down at all.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Accel")
+	float SprintStartAcceleration = 950.f;
+
+	/** Acceleration while aiming down sights: a raised weapon is a slower body, not just a slower top speed. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Accel")
+	float AimingAcceleration = 1100.f;
 
 	/**
 	 * Air control is intentionally low: no bunny-hopping.
@@ -274,6 +301,12 @@ protected:
 	FVector MantleTargetLocation = FVector::ZeroVector;
 
 	bool bMovementLocked = false;
+
+	/** Where this component last traced for its surface. Per component: it used
+	 *  to be a function-static shared by every pawn, so with two or more players
+	 *  moving each one invalidated the other's cache and every pawn re-traced
+	 *  every frame. */
+	FVector LastSurfaceProbeLocation = FVector(FLT_MAX);
 
 	/** Set true by the character each tick while the player holds sprint. */
 	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Movement")

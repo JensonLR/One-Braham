@@ -27,6 +27,11 @@ UOneBrahamCharacterMovementComponent::UOneBrahamCharacterMovementComponent()
 	MaxAcceleration = GroundAcceleration;
 	BrakingDecelerationWalking = GroundBrakingDeceleration;
 	GroundFriction = 8.f;
+	// Braking has its own friction (see GroundBrakingFriction), and the engine's
+	// default factor of 2 is taken out so the property means what it says.
+	bUseSeparateBrakingFriction = true;
+	BrakingFriction = GroundBrakingFriction;
+	BrakingFrictionFactor = 1.f;
 	// The engine's AirControl, explicitly: see the note on GroundAirControl in the
 	// header for the year this project spent writing to a member that shadowed it.
 	AirControl = GroundAirControl;
@@ -164,7 +169,33 @@ float UOneBrahamCharacterMovementComponent::GetMaxAcceleration() const
 	{
 		return 0.f;
 	}
-	return Super::GetMaxAcceleration();
+
+	const float Base = Super::GetMaxAcceleration();
+
+	// Air control and the scripted states keep the engine's answer; the weight
+	// lives on the ground, where the feet are doing the work. Both inputs below
+	// are known on the server and the owning client alike (sprint is forwarded,
+	// ADS replicates), so prediction agrees with the authority.
+	if (!IsMovingOnGround() || OBMovementState != EOneBrahamMovementMode::Normal)
+	{
+		return Base;
+	}
+
+	const AOneBrahamCharacter* OBCharacter = Cast<AOneBrahamCharacter>(CharacterOwner);
+	if (OBCharacter != nullptr && OBCharacter->IsAimingDownSights())
+	{
+		return FMath::Min(Base, AimingAcceleration);
+	}
+
+	if (bSprinting)
+	{
+		// Squared, so the heaviness is in the first two steps and the blend into
+		// full acceleration is already done well before a jog.
+		const float SpeedAlpha = FMath::Clamp(Velocity.Size2D() / FMath::Max(1.f, JogSpeed), 0.f, 1.f);
+		return FMath::Lerp(FMath::Min(Base, SprintStartAcceleration), Base, SpeedAlpha * SpeedAlpha);
+	}
+
+	return Base;
 }
 
 bool UOneBrahamCharacterMovementComponent::DoJump(bool bReplayingMoves, float DeltaTime)
@@ -689,13 +720,10 @@ void UOneBrahamCharacterMovementComponent::UpdateSurfaceInteraction(float DeltaT
 	}
 
 	const FVector CurrentLocation = Owner->GetActorLocation();
-	static thread_local TWeakObjectPtr<const AActor> LastProbedOwner;
-	static thread_local FVector LastProbedLocation = FVector(FLT_MAX);
 
-	if (LastProbedOwner.Get() != Owner || FVector::DistSquared(LastProbedLocation, CurrentLocation) > SurfaceProbeDistanceSq)
+	if (FVector::DistSquared(LastSurfaceProbeLocation, CurrentLocation) > SurfaceProbeDistanceSq)
 	{
-		LastProbedOwner = Owner;
-		LastProbedLocation = CurrentLocation;
+		LastSurfaceProbeLocation = CurrentLocation;
 
 		const EOneBrahamFootstepSurface NewSurface = ResolveSurfaceUnderfoot();
 		if (NewSurface != CurrentSurface)

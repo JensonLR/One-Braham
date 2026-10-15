@@ -28,6 +28,8 @@ class UOneBrahamWeaponComponent;
 class UOneBrahamInventoryComponent;
 class UOneBrahamInteractComponent;
 class UOneBrahamVoiceLineSet;
+class UOneBrahamPauseMenuWidget;
+class UOneBrahamScoreboardWidget;
 
 /** Kill feed lines arrive from the game state; this is the HUD's own copy. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOneBrahamHUDKillFeedUpdated, const TArray<FOneBrahamHUDKillFeedEntry>&, Entries);
@@ -87,6 +89,14 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "One Braham|HUD")
 	void SetPauseMenuVisible(bool bVisible);
+
+	/** The in-match menus, created on first use (see EnsureMenuWidgets). Null on a
+	 *  dedicated server and before the first open. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|HUD")
+	UOneBrahamPauseMenuWidget* GetPauseMenuWidget() const { return PauseMenuWidget; }
+
+	UFUNCTION(BlueprintPure, Category = "One Braham|HUD")
+	UOneBrahamScoreboardWidget* GetScoreboardWidget() const { return ScoreboardWidget; }
 
 	// -----------------------------------------------------------------------
 	//  Overlays the player asks for (the IA_ToggleHUD, IA_Map and
@@ -262,6 +272,18 @@ protected:
 	/** Transient feedback timers, seconds remaining. */
 	float HitMarkerRemaining = 0.f;
 	float DamageIndicatorRemaining = 0.f;
+
+	/** Strength of the last hit's indicator (a graze whispers), 0.25..1. */
+	float DamageIndicatorStrength = 1.f;
+
+	/** Where the last hit came from, in the world. The arc's bearing is recomputed
+	 *  from it against the current view every frame, so it keeps pointing at the
+	 *  shooter while the player turns to face them. */
+	FVector DamageInstigatorLocation = FVector::ZeroVector;
+	bool bHasDamageInstigator = false;
+
+	/** Bearing of DamageInstigatorLocation against the local view, degrees clockwise from straight ahead. */
+	void UpdateDamageDirection();
 	float BannerRemaining = 0.f;
 	float SubBannerRemaining = 0.f;
 	float SubtitleRemaining = 0.f;
@@ -305,6 +327,25 @@ protected:
 	/** Creates the two overlay widgets on demand, on the same viewport layer
 	 *  ordering as the HUD: below the HUD's own panels, above the world. */
 	void EnsureOverlayWidgets();
+
+	/**
+	 * The scoreboard and the pause menu. Separate viewport widgets rather than
+	 * panels inside the HUD, because the HUD is hit-test invisible by design (it
+	 * must never take a click from the player) and both of these are clicked.
+	 * Above the HUD and the overlays; the pause menu above the scoreboard.
+	 */
+	UPROPERTY(Transient)
+	TObjectPtr<UOneBrahamScoreboardWidget> ScoreboardWidget = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UOneBrahamPauseMenuWidget> PauseMenuWidget = nullptr;
+
+	/** Viewport layers. The overlays use 1 and 2; the HUD 0. */
+	static constexpr int32 ScoreboardZOrder = 20;
+	static constexpr int32 PauseMenuZOrder = 30;
+
+	/** Creates the scoreboard and pause menu on demand. */
+	void EnsureMenuWidgets();
 
 	/** Forwarded from the wheel: the player chose a line. */
 	UFUNCTION()

@@ -240,6 +240,7 @@ and the only way a match could end was elimination.
 | `AOneBrahamPickupBase` | "Take {weapon}" | `OB.Interaction.Weapon` | tap | 220 cm (`AOneBrahamPickupBase::PickupRangeCm`) | `AM_OB_Interact_Door` |
 | `AOneBrahamExtractionTerminal` | "Hold E - call the winch", or the state of the winch: "Called - helicopter inbound", "Winch live - hold the pad", "Winch aborted - stands by" | `OB.Interaction.Extraction` | 1.4 s (`AOneBrahamExtractionTerminal::CallHoldSeconds`) | 220 cm (`AOneBrahamExtractionTerminal::InteractionRangeCm`) | `AM_OB_Interact_Radio` |
 | `AOneBrahamCharacter` | "Hold E - revive {name}" for a squadmate, "Hold E - finish {name}" for an enemy | `OB.Interaction.Revive`, `OB.Interaction.Execute` | 4.5 s (`OneBrahamConstants::ReviveSeconds`), 2 s (`UOneBrahamDownedComponent::ExecuteSeconds`) | 220 cm (`OneBrahamConstants::InteractRangeCm`) | `AM_OB_Interact_Revive`, `AM_OB_Interact_Execute` |
+| `AOneBrahamLiftPanel` | "Call lift", "Hold the doors", "Lift called - car at floor {n}", "Up/Down - floor {n}: {name}", "Top floor"/"Bottom floor", "Lift out of service - lockdown" | `OB.Interaction.Lift` | tap | 200 cm (`AOneBrahamLiftPanel::OBLiftPanelInteractionRange`) | `AM_OB_Interact_LiftPanel` |
 
 Three rules the table encodes, and the reasons they are rules rather than
 conventions:
@@ -265,7 +266,7 @@ conventions:
 
 **Table 6 — declared, and not yet emitted**
 
-Seven interaction tags are declared in the native registry and mirrored in
+Six interaction tags are declared in the native registry and mirrored in
 `Config/DefaultGame.ini`, and nothing in the game emits them yet. They are listed here rather than deleted because each is
 the designed vocabulary of content that has not been built, and because the
 montage contract in section 7 already reserves an animation family for several of
@@ -275,7 +276,6 @@ which side of the line the tag belongs on.
 
 | Tag | Why nothing emits it | What it is waiting on |
 | --- | --- | --- |
-| `OB.Interaction.Lift` | the two lift cores are access zones, so their doors return `OB.Interaction.Door.*` and the lift-panel montage is unreachable | a lift actor (call panel, car, floor indicator) rather than a door in the core |
 | `OB.Interaction.Ammo` | there are no ammo pickups: resupply is the looted weapon and the magazine in it | an ammo box pickup actor |
 | `OB.Interaction.Utility` | utility is granted by the loadout and found as a floor pickup, not picked up as utility | a utility pickup actor |
 | `OB.Interaction.Medkit` | the meal deal is used from the inventory wheel, never off a surface | a placed consumable |

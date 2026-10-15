@@ -251,7 +251,8 @@ void UOneBrahamWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	}
 
 	// --- Weapon visual kick decay ----------------------------------------
-	WeaponKickOffset = FMath::Vector2DInterpTo(WeaponKickOffset, FVector2D::ZeroVector, DeltaTime, 9.f);
+	WeaponKickOffset = FMath::Vector2DInterpTo(WeaponKickOffset, FVector2D::ZeroVector, DeltaTime, WeaponKickRecoverySpeed);
+	WeaponKickRoll = FMath::FInterpTo(WeaponKickRoll, 0.f, DeltaTime, WeaponKickRecoverySpeed);
 
 	// --- Lag compensation snapshots (server only) -------------------------
 	if (bAuthority)
@@ -1120,8 +1121,30 @@ void UOneBrahamWeaponComponent::ApplyRecoilKick(int32 ShotIndex)
 		PC->AddYawInput(Yaw);
 	}
 
-	// Weapon visual kick: the gun model jumps back and up, the muzzle climbs.
-	WeaponKickOffset += FVector2D(-1.6f, 0.4f);
+	// Weapon visual kick: the gun model jumps back and up, the muzzle climbs. It
+	// scales with the weapon's own recoil (a marksman rifle shoves harder than
+	// an SMG) and shrinks, but does not vanish, at full ADS. The feel component
+	// on the character turns this into the arms mesh transform.
+	const float KickScale = FMath::Clamp(RecoilMultiplier, 0.25f, 2.f) * FMath::Lerp(1.f, WeaponKickADSScale, ADSAlpha);
+	WeaponKickOffset += FVector2D(-WeaponKickBackCm, WeaponKickUpCm) * KickScale;
+	WeaponKickOffset.X = FMath::Max(WeaponKickOffset.X, -WeaponKickMaxBackCm);
+	WeaponKickOffset.Y = FMath::Min(WeaponKickOffset.Y, WeaponKickMaxBackCm * 0.5f);
+	WeaponKickRoll = FMath::Clamp(WeaponKickRoll + FMath::FRandRange(-WeaponKickRollDegrees, WeaponKickRollDegrees) * KickScale,
+		-3.f * WeaponKickRollDegrees, 3.f * WeaponKickRollDegrees);
+}
+
+float UOneBrahamWeaponComponent::GetSwayMovementScale() const
+{
+	return CurrentWeapon != nullptr && CurrentWeapon->Definition != nullptr
+		? FMath::Max(0.f, CurrentWeapon->Definition->SwayMovementScale)
+		: 1.f;
+}
+
+float UOneBrahamWeaponComponent::GetSwayLoopScale() const
+{
+	return CurrentWeapon != nullptr && CurrentWeapon->Definition != nullptr
+		? FMath::Max(0.f, CurrentWeapon->Definition->SwayLoopScale)
+		: 1.f;
 }
 
 void UOneBrahamWeaponComponent::ConsumeRecoil(float DeltaTime)
@@ -1166,6 +1189,7 @@ void UOneBrahamWeaponComponent::ResetRecoilAndSpread()
 	AccumulatedRecoil = FVector2D::ZeroVector;
 	CurrentBloom = 0.f;
 	WeaponKickOffset = FVector2D::ZeroVector;
+	WeaponKickRoll = 0.f;
 }
 
 float UOneBrahamWeaponComponent::ComputeCurrentSpreadDegrees() const

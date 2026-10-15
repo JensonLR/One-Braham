@@ -16,6 +16,7 @@
 
 class UOneBrahamCosmeticDataAsset;
 class AOneBrahamCharacter;
+class UOneBrahamProximityVoiceComponent;
 
 UCLASS(BlueprintType)
 class ONEBRAHAM_API AOneBrahamPlayerState : public APlayerState
@@ -155,6 +156,9 @@ public:
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Voice")
 	bool bSelfMuted = false;
 
+	/** Set by the server from UOneBrahamProximityVoiceComponent::ServerSetTransmitting
+	 *  (push-to-talk held or the voice-activation gate open). Replicated to
+	 *  everyone: it is the squad panel's mic icon. */
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Voice")
 	bool bIsTransmitting = false;
 
@@ -162,7 +166,8 @@ public:
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Voice")
 	TArray<int32> MutedPlayerIds;
 
-	/** Individual players who muted *this* player - used to suppress the outgoing packet early. */
+	/** Individual players who muted *this* player (server-side bookkeeping; the
+	 *  relay routes on the listener's own MutedPlayerIds). */
 	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Voice")
 	TArray<int32> MutedByPlayerIds;
 
@@ -219,9 +224,23 @@ public:
 	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "One Braham|Voice")
 	void ServerSetSelfMuted(bool bMuted);
 
-	/** Client -> server: mute another player for this listener. */
+	/** Client -> server: mute another player for this listener. Called on the
+	 *  LOCAL player's own state; UOneBrahamVoiceSubsystem::SetPlayerMuted wraps
+	 *  it and also silences the speaker locally at once. */
 	UFUNCTION(BlueprintCallable, Server, Reliable, Category = "One Braham|Voice")
 	void ServerSetPlayerMuted(int32 TargetPlayerId, bool bMuted);
+
+	/**
+	 * Live voice chat host. Lives on the PlayerState rather than the pawn because
+	 * a player keeps talking and listening while dead, spectating or between
+	 * respawns, and the connection owns its PlayerState in all of those cases.
+	 */
+	UOneBrahamProximityVoiceComponent* GetVoiceComponent() const { return VoiceComponent; }
+
+	/** The channel this player's voice actually travels on: eliminated players
+	 *  are on squad radio whatever they selected. For the HUD's channel label. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Voice")
+	EOneBrahamVoiceChannel GetEffectiveVoiceChannel() const;
 
 	/** Server -> all: tells clients this player started/stopped talking (UI mic icon). */
 	UFUNCTION(NetMulticast, Unreliable, Category = "One Braham|Voice")
@@ -231,6 +250,9 @@ public:
 	FOneBrahamPlayerSummary MakeSummary() const;
 
 protected:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "One Braham|Voice")
+	TObjectPtr<UOneBrahamProximityVoiceComponent> VoiceComponent;
+
 	UFUNCTION() void OnRep_Team();
 	UFUNCTION() void OnRep_SquadId();
 	UFUNCTION() void OnRep_Archetype();

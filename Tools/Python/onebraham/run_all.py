@@ -105,7 +105,7 @@ STEPS = [
      "generates them, the spawn table that rolls them, the defaults that hand "
      "them out, and Docs/05"),
     ("audio_ids", "onebraham.check_audio_ids", False,
-     "the cue list: the bank's 126 rows, what the synthesiser can make, the "
+     "the cue list: the bank's 147 rows, what the synthesiser can make, the "
      "beds the audio builder declares, the zone table against the building "
      "layout, and the briefs in Docs/12 - every cue is either audible or "
      "written down, and no cue is invented"),

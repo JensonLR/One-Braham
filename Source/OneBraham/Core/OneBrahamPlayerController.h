@@ -153,8 +153,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|UI")
 	void TogglePauseMenu();
 
+	/** Opens or closes the pause menu; a no-op when it is already in that state.
+	 *  The menu's own RESUME and back key call this. */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|UI")
+	void SetPauseMenuOpen(bool bOpen);
+
+	UFUNCTION(BlueprintPure, Category = "One Braham|UI")
+	bool IsPauseMenuOpen() const { return bPauseMenuOpen; }
+
 	UFUNCTION(BlueprintCallable, Category = "One Braham|UI")
 	void SetScoreboardVisible(bool bVisible);
+
+	UFUNCTION(BlueprintPure, Category = "One Braham|UI")
+	bool IsScoreboardVisible() const { return bScoreboardOpen; }
 
 	/**
 	 * Pushed when the player dies; the death screen doubles as the spectate HUD.
@@ -171,6 +182,41 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Client, Reliable, Category = "One Braham|UI")
 	void ClientShowDeathScreen(bool bShow, const FText& CauseText);
+
+	/**
+	 * Starts the death camera on the machine of the player who died: the view
+	 * leaves the body, sags, and turns to the killer with a slow push-in and a
+	 * draining grade, for DeathCamSeconds, before the spectate view takes over.
+	 *
+	 * Reliable: it is once per life, and a death that skipped it would drop the
+	 * player straight into somebody else's eyes, which is the bug it replaces.
+	 * Killer may be null (the building, a fall, a pawn the client cannot
+	 * resolve); FocusLocation is used then, when bHasFocus says it means anything.
+	 */
+	UFUNCTION(Client, Reliable, Category = "One Braham|UI")
+	void ClientBeginDeathCam(AOneBrahamCharacter* Victim, APawn* Killer, FVector_NetQuantize FocusLocation, bool bHasFocus);
+
+	/** Server: begins spectating once the death camera has had its few seconds. */
+	void ScheduleSpectatingAfterDeathCam();
+
+	/** Server: forgets a scheduled spectate (a respawn arrived first). */
+	void CancelScheduledSpectating();
+
+	/** How long the death camera holds before spectating begins. Read on both ends. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Death Cam")
+	float DeathCamSeconds = 3.5f;
+
+	/** The death screen waits this long into the death camera, so the moment is seen before it is captioned. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Death Cam")
+	float DeathScreenDelaySeconds = 1.25f;
+
+	/** Two shakes for the same explosion closer together than this are the same shake. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Effects")
+	float ExplosionShakeDedupeSeconds = 0.4f;
+
+	/** Explosion shakes fade to nothing at this distance. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "One Braham|Effects")
+	float ExplosionShakeRadiusCm = 4000.f;
 
 	/** Shows a transient banner ("THE BUILDING IS NOW IN LOCKDOWN"). */
 	UFUNCTION(BlueprintCallable, Client, Reliable, Category = "One Braham|UI")
@@ -407,6 +453,25 @@ protected:
 	UFUNCTION()
 	void HandleSettingsChanged();
 
+	/**
+	 * Sets the input mode and cursor for whichever menu is up. One function for
+	 * both menus, because they interact: the pause menu wins over the scoreboard,
+	 * and closing either must hand back exactly the mode the other still needs.
+	 *
+	 *   pause menu open  -> UI only, cursor on, focus on the menu. The game gets
+	 *                       no input at all, so nothing fires, reloads or walks
+	 *                       while a player is in Settings; the menu handles its
+	 *                       own back key, so Escape still closes it.
+	 *   scoreboard open  -> game and UI, cursor on, focus left on the viewport,
+	 *                       so the player keeps moving and the Tab release still
+	 *                       reaches Enhanced Input and closes the board.
+	 *   neither          -> game only, cursor off.
+	 */
+	void RefreshMenuInputMode();
+
+	/** An authored pause widget (PauseMenuWidgetClass), removed again on close. */
+	TWeakObjectPtr<UUserWidget> AuthoredPauseMenu;
+
 	UPROPERTY()
 	TObjectPtr<UOneBrahamHUDComponent> HUDComponent = nullptr;
 
@@ -445,4 +510,21 @@ protected:
 	/** Cached global parameter collection used for the flash white-out. */
 	UPROPERTY(Transient)
 	TWeakObjectPtr<UMaterialParameterCollection> CachedFlashCollection;
+
+	/** The last explosion this client shook for, so a duplicate delivery is ignored. */
+	FVector LastExplosionShakeOrigin = FVector::ZeroVector;
+	float LastExplosionShakeTime = -1000.f;
+
+	/** Server: the pending "start spectating" after the death camera. */
+	FTimerHandle DeathCamSpectateTimer;
+
+	/** Client: the death screen waiting for the death camera's opening beat. */
+	FTimerHandle DeathScreenDelayTimer;
+	FText PendingDeathCauseText;
+
+	/** Client: the body whose camera the death camera borrowed. */
+	TWeakObjectPtr<AOneBrahamCharacter> DeathCamCharacter;
+
+	/** Client: puts the deferred death screen up. */
+	void ShowPendingDeathScreen();
 };

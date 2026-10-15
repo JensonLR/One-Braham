@@ -14,11 +14,13 @@
 #include "Characters/OneBrahamCharacter.h"
 #include "Characters/OneBrahamHealthComponent.h"
 #include "Characters/OneBrahamDownedComponent.h"
+#include "Characters/OneBrahamFirstPersonFeelComponent.h"
 #include "Interaction/OneBrahamInteractComponent.h"
 #include "Interaction/OneBrahamInteractionInterface.h"
 #include "Weapons/OneBrahamWeaponComponent.h"
 #include "UI/OneBrahamHUDComponent.h"
 #include "UI/OneBrahamHUDWidget.h"
+#include "UI/OneBrahamPauseMenuWidget.h"
 #include "Audio/OneBrahamAudioManagerComponent.h"
 #include "Voice/OneBrahamVoiceSubsystem.h"
 #include "VFX/OneBrahamCameraShake.h"
@@ -44,6 +46,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "HAL/PlatformFileManager.h"
+#include "TimerManager.h"
 
 AOneBrahamPlayerController::AOneBrahamPlayerController()
 {
@@ -1214,57 +1217,236 @@ void AOneBrahamPlayerController::Input_ClipMarker(const FInputActionValue& Value
 // ==========================================================================
 void AOneBrahamPlayerController::TogglePauseMenu()
 {
-	bPauseMenuOpen = !bPauseMenuOpen;
+	SetPauseMenuOpen(!bPauseMenuOpen);
+}
+
+void AOneBrahamPlayerController::SetPauseMenuOpen(bool bOpen)
+{
+	if (bPauseMenuOpen == bOpen || !IsLocalController())
+	{
+		return;
+	}
+
+	bPauseMenuOpen = bOpen;
 
 	if (bPauseMenuOpen)
 	{
+		// The scoreboard is hold-to-show. Under the pause menu's UI-only input the
+		// Tab release would never arrive, and the board would still be up after
+		// RESUME, so it closes here.
+		if (bScoreboardOpen)
+		{
+			SetScoreboardVisible(false);
+		}
+
 		if (PauseMenuWidgetClass != nullptr)
 		{
 			if (UUserWidget* Widget = CreateWidget<UUserWidget>(this, PauseMenuWidgetClass))
 			{
 				Widget->AddToViewport(50);
-				bShowMouseCursor = true;
-				SetInputMode(FInputModeGameAndUI());
+				AuthoredPauseMenu = Widget;
 			}
 		}
-		else
+		else if (HUDComponent != nullptr)
 		{
-			// No widget authored yet: fall back to the engine pause so QA can at
-			// least halt the game from a code-only checkout.
+			// The C++ menu (UOneBrahamPauseMenuWidget), created by the HUD
+			// component on first use.
+			HUDComponent->SetPauseMenuVisible(true);
+		}
+
+		// Only a standalone game actually pauses. In a networked match the world
+		// belongs to the server, and SetPause from a client either does nothing or
+		// asks the host to freeze eleven other people.
+		if (GetNetMode() == NM_Standalone)
+		{
 			SetPause(true);
 		}
 	}
 	else
 	{
-		// The pause widget removes itself on close; here we only restore input.
-		if (!IsRunningDedicatedServer())
+		if (UUserWidget* Authored = AuthoredPauseMenu.Get())
 		{
-			if (UOneBrahamHUDWidget* HudWidget = Cast<UOneBrahamHUDWidget>(HUDComponent ? HUDComponent->GetRootWidget() : nullptr))
-			{
-				HudWidget->TogglePauseMenu(false);
-			}
+			Authored->RemoveFromParent();
 		}
-		bShowMouseCursor = false;
-		SetInputMode(FInputModeGameOnly());
+		AuthoredPauseMenu = nullptr;
+
+		if (HUDComponent != nullptr)
+		{
+			HUDComponent->SetPauseMenuVisible(false);
+		}
+
 		SetPause(false);
 	}
+
+	RefreshMenuInputMode();
 }
 
 void AOneBrahamPlayerController::SetScoreboardVisible(bool bVisible)
 {
+	// The board is not opened over the pause menu: the menu has the cursor and
+	// the focus, and a board behind it could be seen and not used.
+	if (bVisible && bPauseMenuOpen)
+	{
+		return;
+	}
+
 	bScoreboardOpen = bVisible;
 
 	if (HUDComponent != nullptr)
 	{
 		HUDComponent->SetScoreboardVisible(bVisible);
 	}
+
+	RefreshMenuInputMode();
+}
+
+void AOneBrahamPlayerController::RefreshMenuInputMode()
+{
+	if (!IsLocalController())
+	{
+		return;
+	}
+
+	if (bPauseMenuOpen)
+	{
+		UUserWidget* Menu = AuthoredPauseMenu.Get();
+		if (Menu == nullptr && HUDComponent != nullptr)
+		{
+			Menu = HUDComponent->GetPauseMenuWidget();
+		}
+
+		FInputModeUIOnly Mode;
+		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		if (Menu != nullptr)
+		{
+			Mode.SetWidgetToFocus(Menu->TakeWidget());
+		}
+
+		// Keys held when the menu opened would otherwise stay "down" to the game
+		// until they were pressed again: the player resumes walking forwards.
+		FlushPressedKeys();
+		SetInputMode(Mode);
+		bShowMouseCursor = true;
+		return;
+	}
+
+	if (bScoreboardOpen)
+	{
+		FInputModeGameAndUI Mode;
+		Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		// The cursor is the point of opening the board (the mute buttons); hiding
+		// it during a capture would hide it on the first click.
+		Mode.SetHideCursorDuringCapture(false);
+		SetInputMode(Mode);
+		bShowMouseCursor = true;
+		return;
+	}
+
+	SetInputMode(FInputModeGameOnly());
+	bShowMouseCursor = false;
 }
 
 void AOneBrahamPlayerController::ClientShowDeathScreen_Implementation(bool bShow, const FText& CauseText)
 {
+	UWorld* World = GetWorld();
+
+	if (World != nullptr)
+	{
+		World->GetTimerManager().ClearTimer(DeathScreenDelayTimer);
+	}
+
+	if (!bShow)
+	{
+		// Respawned: the death camera gives the lens back to the body before the
+		// HUD comes back, so the first frame of the new life is a first-person one.
+		if (AOneBrahamCharacter* DeadCharacter = DeathCamCharacter.Get())
+		{
+			if (UOneBrahamFirstPersonFeelComponent* Feel = DeadCharacter->GetFeelComponent())
+			{
+				Feel->EndDeathCam();
+			}
+		}
+		DeathCamCharacter = nullptr;
+
+		if (HUDComponent != nullptr)
+		{
+			HUDComponent->SetDeathScreenVisible(false, CauseText);
+		}
+		return;
+	}
+
+	// The death camera's opening beat is uncaptioned: the player sees who did it
+	// before the screen tells them. The text is the same either way.
+	const AOneBrahamCharacter* DeadCharacter = DeathCamCharacter.Get();
+	const bool bDeathCamRunning = DeadCharacter != nullptr && DeadCharacter->GetFeelComponent() != nullptr
+		&& DeadCharacter->GetFeelComponent()->IsDeathCamActive();
+
+	if (bDeathCamRunning && World != nullptr && DeathScreenDelaySeconds > 0.f)
+	{
+		PendingDeathCauseText = CauseText;
+		World->GetTimerManager().SetTimer(DeathScreenDelayTimer, this,
+			&AOneBrahamPlayerController::ShowPendingDeathScreen, DeathScreenDelaySeconds, false);
+		return;
+	}
+
 	if (HUDComponent != nullptr)
 	{
-		HUDComponent->SetDeathScreenVisible(bShow, CauseText);
+		HUDComponent->SetDeathScreenVisible(true, CauseText);
+	}
+}
+
+void AOneBrahamPlayerController::ShowPendingDeathScreen()
+{
+	if (HUDComponent != nullptr)
+	{
+		HUDComponent->SetDeathScreenVisible(true, PendingDeathCauseText);
+	}
+}
+
+void AOneBrahamPlayerController::ClientBeginDeathCam_Implementation(AOneBrahamCharacter* Victim, APawn* Killer,
+	FVector_NetQuantize FocusLocation, bool bHasFocus)
+{
+	AOneBrahamCharacter* Character = Victim != nullptr ? Victim : GetOneBrahamCharacter();
+	UOneBrahamFirstPersonFeelComponent* Feel = Character != nullptr ? Character->GetFeelComponent() : nullptr;
+	if (Feel == nullptr)
+	{
+		return;
+	}
+
+	DeathCamCharacter = Character;
+	Feel->BeginDeathCam(Killer, FocusLocation, bHasFocus, DeathCamSeconds);
+
+	// The spectate view arrives with a blend, so the death camera must still be
+	// the view target when it does: make sure it is, in case anything moved it.
+	if (GetViewTarget() != Character)
+	{
+		SetViewTarget(Character);
+	}
+}
+
+void AOneBrahamPlayerController::ScheduleSpectatingAfterDeathCam()
+{
+	UWorld* World = GetWorld();
+	if (!HasAuthority() || World == nullptr)
+	{
+		return;
+	}
+
+	// Server-timed rather than client-requested: the hand-off cannot be skipped or
+	// stretched by a client, and a client that never returns still spectates.
+	FTimerDelegate BeginSpectate = FTimerDelegate::CreateWeakLambda(this, [this]()
+	{
+		ServerBeginSpectating(INDEX_NONE);
+	});
+
+	World->GetTimerManager().SetTimer(DeathCamSpectateTimer, BeginSpectate, FMath::Max(0.1f, DeathCamSeconds), false);
+}
+
+void AOneBrahamPlayerController::CancelScheduledSpectating()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(DeathCamSpectateTimer);
 	}
 }
 
@@ -1287,6 +1469,17 @@ void AOneBrahamPlayerController::ClientDamageTaken_Implementation(float Damage, 
 		HUDComponent->NotifyDamageTaken(Damage, InstigatorLocation);
 	}
 
+	// The body: a directional camera punch and the damage pulse on the screen.
+	// This RPC is the only place on the owning client that knows both how much
+	// and from where - the health OnRep carries neither.
+	if (AOneBrahamCharacter* Character = GetOneBrahamCharacter())
+	{
+		if (UOneBrahamFirstPersonFeelComponent* Feel = Character->GetFeelComponent())
+		{
+			Feel->NotifyDamageTaken(Damage, InstigatorLocation);
+		}
+	}
+
 	// The impact, not the report: this is what tells a player they were hit
 	// rather than shot past. Id-based through the audio director, so it obeys the
 	// player's mix, their hearing-damage setting and the impact category's limits
@@ -1294,7 +1487,7 @@ void AOneBrahamPlayerController::ClientDamageTaken_Implementation(float Damage, 
 	// person listening.
 	if (UOneBrahamAudioManagerComponent* Audio = GetAudioManager())
 	{
-		Audio->PlayLocalUISound(TEXT("SFX_Bullet_Impact_Flesh"));
+		Audio->PlayDamageTakenCue(false, false);
 	}
 }
 
@@ -1346,28 +1539,48 @@ void AOneBrahamPlayerController::ApplyFlashLocally(float DurationSeconds, bool b
 
 void AOneBrahamPlayerController::ClientApplyExplosionShake_Implementation(FVector_NetQuantize Origin, float Magnitude)
 {
+	// One explosion, one shake. AOneBrahamProjectileBase::MulticastDetonationFeedback
+	// runs on every machine and calls this RPC on every controller that machine
+	// has: on the server that is a real RPC to each remote player, and on each
+	// remote client it is a call on its own controller, which a client RPC runs
+	// locally. Every remote client was therefore shaken twice per grenade - once
+	// by its own copy of the multicast and once by the server's RPC. The second
+	// delivery of the same detonation is dropped here, whichever arrives first.
+	const UWorld* World = GetWorld();
+	const float Now = World != nullptr ? World->GetTimeSeconds() : 0.f;
+
+	if ((Now - LastExplosionShakeTime) < ExplosionShakeDedupeSeconds &&
+		FVector::DistSquared(LastExplosionShakeOrigin, Origin) < FMath::Square(100.f))
+	{
+		return;
+	}
+
+	LastExplosionShakeTime = Now;
+	LastExplosionShakeOrigin = Origin;
+
 	ApplyExplosionShakeLocally(Origin, Magnitude);
 }
 
 void AOneBrahamPlayerController::ApplyExplosionShakeLocally(const FVector& Origin, float Magnitude)
 {
-	const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings();
-
-	if (Settings == nullptr || !Settings->bCameraShake)
-	{
-		return; // accessibility: screen shake can be switched off entirely
-	}
-
-	APawn* Pawn = GetPawn();
-	if (Pawn == nullptr || PlayerCameraManager == nullptr)
+	if (!IsLocalController() || PlayerCameraManager == nullptr)
 	{
 		return;
 	}
 
-	// Distance falloff over 40 m, then the user's intensity slider. A shake from
-	// the far end of the open-plan office should be a nudge, not a lurch.
-	const float Distance = FVector::Dist(Pawn->GetActorLocation(), Origin);
-	const float Falloff = FMath::Clamp(1.f - (Distance / 4000.f), 0.f, 1.f);
+	// Accessibility: off, the flat 30% reduction, or the intensity slider.
+	const float SettingsScale = UOneBrahamFirstPersonFeelComponent::ComputeCameraShakeScale(
+		UOneBrahamGameUserSettings::GetOneBrahamSettings());
+
+	if (SettingsScale <= 0.f)
+	{
+		return;
+	}
+
+	// Measured from the camera, not the pawn: a player who is dead and watching
+	// the fight still feels the floor go, and has no pawn of their own to ask.
+	const float Distance = FVector::Dist(PlayerCameraManager->GetCameraLocation(), Origin);
+	const float Falloff = UOneBrahamFirstPersonFeelComponent::ComputeExplosionShakeFalloff(Distance, ExplosionShakeRadiusCm);
 
 	if (Falloff <= 0.f)
 	{
@@ -1375,7 +1588,22 @@ void AOneBrahamPlayerController::ApplyExplosionShakeLocally(const FVector& Origi
 	}
 
 	PlayerCameraManager->StartCameraShake(UOneBrahamCameraShake::GetExplosionShakeClass(),
-		Falloff * Magnitude * Settings->CameraShakeIntensity);
+		Falloff * Magnitude * SettingsScale);
+
+	// Close enough to feel it in the chest: a short punch and a pulse of the
+	// screen, which is what separates "near a grenade" from "watching one".
+	if (Falloff > 0.35f)
+	{
+		if (AOneBrahamCharacter* Character = GetOneBrahamCharacter())
+		{
+			if (UOneBrahamFirstPersonFeelComponent* Feel = Character->GetFeelComponent())
+			{
+				const float Strength = (Falloff - 0.35f) / 0.65f * FMath::Min(Magnitude, 1.5f);
+				Feel->AddCameraPunch(FRotator(1.6f * Strength, FMath::FRandRange(-0.8f, 0.8f) * Strength,
+					FMath::FRandRange(-1.4f, 1.4f) * Strength));
+			}
+		}
+	}
 }
 
 void AOneBrahamPlayerController::TickFlash(float DeltaTime)

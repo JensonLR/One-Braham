@@ -36,6 +36,7 @@ class UOneBrahamWeaponComponent;
 class UOneBrahamInventoryComponent;
 class UOneBrahamInteractComponent;
 class UOneBrahamRagdollComponent;
+class UOneBrahamFirstPersonFeelComponent;
 class UOneBrahamCharacterDataAsset;
 class UOneBrahamMatchSettingsAsset;
 class USpotLightComponent;
@@ -106,6 +107,20 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "One Braham|Character")
 	UCameraComponent* GetFirstPersonCamera() const { return FirstPersonCamera; }
+
+	/** Camera punch, sway, bob, landing, screen grade and the death camera (local only). */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Character")
+	UOneBrahamFirstPersonFeelComponent* GetFeelComponent() const { return FeelComponent; }
+
+	/** Degrees of camera roll at full lean; the feel layer applies it. */
+	float GetLeanCameraRoll() const { return LeanCameraRoll; }
+
+	/**
+	 * Puts the first-person camera back on the body at eye height, under pawn
+	 * control rotation, with the arms visible again. The death camera detaches
+	 * the camera; a respawn reuses this pawn, so something has to re-attach it.
+	 */
+	void RestoreFirstPersonView();
 
 	/** The MetaHuman body everyone else sees. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Character")
@@ -338,6 +353,13 @@ protected:
 	/** Updates the lean camera offset + shoulder exposure. */
 	void UpdateLean(float DeltaSeconds);
 
+	/**
+	 * Footsteps, on every machine with a player at it: each pawn steps through the
+	 * local player's audio manager, which owns the stride length and the per-
+	 * surface cue. The surface comes from the movement component's cached trace.
+	 */
+	void TickFootsteps();
+
 	/** Cheap 2 Hz floor detection: floor index from world Z, cached. */
 	void UpdateFloorIndex(float DeltaSeconds);
 
@@ -368,6 +390,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "One Braham|Components")
 	TObjectPtr<UCameraComponent> FirstPersonCamera = nullptr;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "One Braham|Components")
+	TObjectPtr<UOneBrahamFirstPersonFeelComponent> FeelComponent = nullptr;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "One Braham|Components")
 	TObjectPtr<USkeletalMeshComponent> FirstPersonMesh = nullptr;
@@ -437,6 +462,10 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "One Braham|Camera")
 	float LeanCameraSideOffset = 22.f;
+
+	/** Remote footsteps further than this from the listener are not scheduled at all. */
+	UPROPERTY(EditDefaultsOnly, Category = "One Braham|Audio")
+	float FootstepCullDistanceCm = 5000.f;
 
 private:
 	/** Accumulators for the 2 Hz/10 Hz subsystems. */

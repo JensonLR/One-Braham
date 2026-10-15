@@ -7,7 +7,7 @@ Creates every Niagara system, camera shake and decal material the game asks for,
 then writes the authoring sheets for the parts that need an artist's hand inside
 the Niagara editor.
 
-WHY THE SYSTEMS ARE CREATED EMPTY
+WHY THE SYSTEMS ARE CREATED EMPTY - AND WHY THAT IS NOW SAFE
     A Niagara system's emitter stack is a graph of modules with data interfaces;
     it is authorable from Python only through a very small surface
     (unreal.NiagaraEditorAssetLibrary and friends vary by build). What *is*
@@ -16,14 +16,32 @@ WHY THE SYSTEMS ARE CREATED EMPTY
     then writing the exact stack spec next to them, per system, so the FX pass is
     a fill-in job with a checklist rather than a design job.
 
-    The runtime never depends on any of it: UOneBrahamVFXStatics logs the missing
-    asset once and falls back to AOneBrahamImpactFallbackActor, so the game is
-    playable and readable with no Niagara content at all.
+    The runtime never depends on any of it. An empty system is a trap, though:
+    it loads, spawns, activates, reports success and draws nothing, so for a
+    long time every impact above the Low preset was invisible. The C++ now
+    treats a system with no enabled emitters exactly like a missing one
+    (UOneBrahamVFXStatics::IsNiagaraSystemUsable) and plays the procedural
+    stand-in from AOneBrahamImpactFallbackActor instead. The moment an artist
+    adds an emitter to a system, the authored effect takes over - no code
+    change, no flag.
+
+WHAT THE FALLBACK NEEDS FROM THIS SCRIPT
+    Three small materials (build_fx_materials below). Without them the fallback
+    still works on engine materials, just flatter: glows become opaque emissive,
+    dust becomes shrinking grey spheres, and blood decals are switched off
+    (a square red decal is worse than none).
+        /Game/OneBraham/VFX/Materials/M_OB_FX_Glow     unlit additive:  Colour, EmissiveStrength, Opacity
+        /Game/OneBraham/VFX/Materials/M_OB_FX_Haze     lit translucent: Colour, Opacity, EmissiveStrength
+        /Game/OneBraham/VFX/Decals/M_OB_Decal_Blood    deferred decal:  BaseColour, Opacity, Seed, Splatter, Wetness
+    The parameter names are a contract with OneBrahamImpactFallbackActor.cpp
+    and OneBrahamVFXSubsystem.cpp; renaming one here silently disables it there.
 
 WHAT IT CREATES
     /Game/OneBraham/VFX/NS_OB_*                     17 systems (see NAGARA_SYSTEMS)
     /Game/OneBraham/VFX/CameraShakes/BP_OBCameraShake_{Explosion,Landing,Extraction}
     /Game/OneBraham/VFX/Decals/M_OB_Decal_*         decal material instances
+    /Game/OneBraham/VFX/Decals/M_OB_Decal_Blood     procedural blood decal (no texture)
+    /Game/OneBraham/VFX/Materials/M_OB_FX_*         fallback particle materials
     /Game/OneBraham/VFX/T_OB_VFX_*                  texture slot stubs (reported)
     Tools/Python/payloads/vfx_authoring_sheet.txt   the per-system stack spec
 
@@ -150,6 +168,7 @@ DECAL_MATERIALS = [
 ]
 
 DECAL_ROOT = C.VFX + "/Decals"
+FX_MATERIAL_ROOT = C.VFX + "/Materials"
 SHAKE_ROOT = C.VFX + "/CameraShakes"
 TEXTURE_ROOT = C.VFX + "/Textures"
 
@@ -168,7 +187,7 @@ VFX_TEXTURES = [
 
 
 def _ensure_dirs():
-    for path in (C.VFX, DECAL_ROOT, SHAKE_ROOT, TEXTURE_ROOT):
+    for path in (C.VFX, DECAL_ROOT, SHAKE_ROOT, TEXTURE_ROOT, FX_MATERIAL_ROOT):
         if not unreal.EditorAssetLibrary.does_directory_exist(path):
             unreal.EditorAssetLibrary.make_directory(path)
 
@@ -296,6 +315,218 @@ def build_decal_materials(report):
     return created
 
 
+# ---------------------------------------------------------------------------
+#  Fallback FX materials and the blood decal
+# ---------------------------------------------------------------------------
+
+def _mel():
+    return getattr(unreal, "MaterialEditingLibrary", None)
+
+
+def _node(material, cls, x, y, **props):
+    node = _mel().create_material_expression(material, cls, x, y)
+    for key, value in props.items():
+        node.set_editor_property(key, value)
+    return node
+
+
+def _scalar(material, name, default, x, y):
+    return _node(material, unreal.MaterialExpressionScalarParameter, x, y,
+                 parameter_name=name, default_value=default)
+
+
+def _vector(material, name, rgba, x, y):
+    return _node(material, unreal.MaterialExpressionVectorParameter, x, y,
+                 parameter_name=name, default_value=unreal.LinearColor(*rgba))
+
+
+def _const(material, value, x, y):
+    return _node(material, unreal.MaterialExpressionConstant, x, y, r=value)
+
+
+def _link(a, out_name, b, in_name):
+    _mel().connect_material_expressions(a, out_name, b, in_name)
+
+
+def _binary(material, cls, a, b, x, y, a_out="", b_out=""):
+    node = _node(material, cls, x, y)
+    _link(a, a_out, node, "A")
+    _link(b, b_out, node, "B")
+    return node
+
+
+def _to(material, node, prop, out_name=""):
+    _mel().connect_material_property(node, out_name, prop)
+
+
+def _new_material(name, folder, report):
+    """Creates a material, or returns None if it already exists (re-runs do not
+    stack a second graph on top of the first)."""
+    path = u"{0}/{1}".format(folder, name)
+    if unreal.EditorAssetLibrary.does_asset_exist(path):
+        report.updated_asset(path)
+        return None, path
+    asset = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
+        name, folder, unreal.Material, unreal.MaterialFactoryNew())
+    if asset is None:
+        report.failed(name, "could not create material")
+    return asset, path
+
+
+def _save_material(material, path, report):
+    try:
+        _mel().recompile_material(material)
+    except Exception:  # noqa: BLE001
+        pass
+    unreal.EditorAssetLibrary.save_asset(path)
+    report.created_asset(path)
+
+
+def build_glow_material(report):
+    """M_OB_FX_Glow: sparks, flare, tracer, fireball. Unlit additive, so
+    Opacity scales the light it adds rather than covering what is behind it."""
+    material, path = _new_material("M_OB_FX_Glow", FX_MATERIAL_ROOT, report)
+    if material is None:
+        return
+    material.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_ADDITIVE)
+    material.set_editor_property("two_sided", True)
+
+    colour = _vector(material, "Colour", (1.0, 0.7, 0.35, 1.0), -900, -200)
+    strength = _scalar(material, "EmissiveStrength", 20.0, -900, 0)
+    opacity = _scalar(material, "Opacity", 1.0, -900, 160)
+
+    lit = _binary(material, unreal.MaterialExpressionMultiply, colour, strength, -600, -120)
+    faded = _binary(material, unreal.MaterialExpressionMultiply, lit, opacity, -380, -60)
+    _to(material, faded, unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    _save_material(material, path, report)
+
+
+def build_haze_material(report):
+    """M_OB_FX_Haze: dust, smoke, spray mist, water. Lit translucent, with the
+    silhouette softened by a Fresnel term so a sphere reads as a puff rather
+    than a ball."""
+    material, path = _new_material("M_OB_FX_Haze", FX_MATERIAL_ROOT, report)
+    if material is None:
+        return
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+    material.set_editor_property("two_sided", False)
+
+    colour = _vector(material, "Colour", (0.5, 0.5, 0.5, 1.0), -900, -260)
+    opacity = _scalar(material, "Opacity", 0.6, -900, 40)
+    glow = _scalar(material, "EmissiveStrength", 0.0, -900, 200)
+
+    _to(material, colour, unreal.MaterialProperty.MP_BASE_COLOR)
+    _to(material, _const(material, 1.0, -600, -160), unreal.MaterialProperty.MP_ROUGHNESS)
+
+    emissive = _binary(material, unreal.MaterialExpressionMultiply, colour, glow, -600, 220)
+    _to(material, emissive, unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+
+    fresnel = _node(material, unreal.MaterialExpressionFresnel, -900, 120, exponent=1.6)
+    soft = _node(material, unreal.MaterialExpressionOneMinus, -700, 120)
+    _link(fresnel, "", soft, "")
+    edge = _binary(material, unreal.MaterialExpressionMultiply, opacity, soft, -500, 60)
+    _to(material, edge, unreal.MaterialProperty.MP_OPACITY)
+    _save_material(material, path, report)
+
+
+def build_blood_decal(report):
+    """M_OB_Decal_Blood: a procedural splatter. No texture: the shape is a radial
+    falloff broken up by world-space noise, so every mark differs and two marks
+    side by side never tile. Splatter 0 is a round pool with a wobbly rim,
+    Splatter 1 a broken spray; Seed varies the noise; Wetness drives gloss so a
+    fading mark dries rather than just thinning."""
+    material, path = _new_material("M_OB_Decal_Blood", DECAL_ROOT, report)
+    if material is None:
+        return
+    material.set_editor_property("material_domain", unreal.MaterialDomain.MD_DEFERRED_DECAL)
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+
+    tint = _vector(material, "BaseColour", (0.16, 0.008, 0.006, 1.0), -1400, -400)
+    opacity = _scalar(material, "Opacity", 0.9, -1400, 420)
+    seed = _scalar(material, "Seed", 0.0, -1700, 120)
+    splatter = _scalar(material, "Splatter", 1.0, -1400, 260)
+    wetness = _scalar(material, "Wetness", 1.0, -1400, -160)
+
+    # Radial edge: 1 at the centre of the decal, 0 at its rim.
+    uv = _node(material, unreal.MaterialExpressionTextureCoordinate, -1700, -60)
+    centre = _node(material, unreal.MaterialExpressionConstant2Vector, -1700, 20, r=0.5, g=0.5)
+    distance = _binary(material, unreal.MaterialExpressionDistance, uv, centre, -1500, -40)
+    twice = _binary(material, unreal.MaterialExpressionMultiply, distance, _const(material, 2.0, -1500, 40), -1350, -40)
+    edge = _node(material, unreal.MaterialExpressionOneMinus, -1200, -40)
+    _link(twice, "", edge, "")
+
+    # World-space noise, offset by Seed so neighbouring marks differ.
+    world = _node(material, unreal.MaterialExpressionWorldPosition, -1700, 180)
+    seeded = _binary(material, unreal.MaterialExpressionAdd, world,
+                     _binary(material, unreal.MaterialExpressionMultiply, seed,
+                             _const(material, 37.0, -1700, 240), -1550, 200), -1400, 160)
+    noise = _node(material, unreal.MaterialExpressionNoise, -1200, 160,
+                  scale=0.09, output_min=-0.5, output_max=0.5, levels=3)
+    _link(seeded, "", noise, "Position")
+
+    def shaped(bias, roughness, sharpness, y):
+        """saturate((edge - bias + noise * roughness) * sharpness)"""
+        broken = _binary(material, unreal.MaterialExpressionMultiply, noise,
+                         _const(material, roughness, -1050, y + 60), -950, y + 40)
+        moved = _binary(material, unreal.MaterialExpressionSubtract, edge,
+                        _const(material, bias, -1050, y), -950, y)
+        summed = _binary(material, unreal.MaterialExpressionAdd, moved, broken, -800, y)
+        steep = _binary(material, unreal.MaterialExpressionMultiply, summed,
+                        _const(material, sharpness, -800, y + 60), -650, y)
+        clamp = _node(material, unreal.MaterialExpressionSaturate, -500, y)
+        _link(steep, "", clamp, "")
+        return clamp
+
+    pool = shaped(0.12, 0.35, 9.0, 40)
+    spray = shaped(0.38, 1.1, 6.0, 220)
+
+    mask = _node(material, unreal.MaterialExpressionLinearInterpolate, -350, 120)
+    _link(pool, "", mask, "A")
+    _link(spray, "", mask, "B")
+    _link(splatter, "", mask, "Alpha")
+
+    final_opacity = _binary(material, unreal.MaterialExpressionMultiply, mask, opacity, -200, 200)
+    _to(material, final_opacity, unreal.MaterialProperty.MP_OPACITY)
+
+    # Thicker (centre) is darker; the rim catches more light.
+    dark = _vector(material, "CoreColour", (0.05, 0.002, 0.002, 1.0), -1100, -500)
+    colour = _node(material, unreal.MaterialExpressionLinearInterpolate, -400, -400)
+    _link(tint, "", colour, "A")
+    _link(dark, "", colour, "B")
+    _link(edge, "", colour, "Alpha")
+    _to(material, colour, unreal.MaterialProperty.MP_BASE_COLOR)
+
+    # Wet blood is glossy, dry blood is matte.
+    gloss = _node(material, unreal.MaterialExpressionLinearInterpolate, -400, -200)
+    _link(_const(material, 0.7, -600, -260), "", gloss, "A")
+    _link(_const(material, 0.12, -600, -200), "", gloss, "B")
+    _link(wetness, "", gloss, "Alpha")
+    _to(material, gloss, unreal.MaterialProperty.MP_ROUGHNESS)
+
+    _save_material(material, path, report)
+
+
+def build_fx_materials(report):
+    """The three materials the procedural fallback and the blood system use."""
+    if _mel() is None:
+        for name, folder in (("M_OB_FX_Glow", FX_MATERIAL_ROOT), ("M_OB_FX_Haze", FX_MATERIAL_ROOT),
+                             ("M_OB_Decal_Blood", DECAL_ROOT)):
+            report.skipped_asset(u"{0}/{1}".format(folder, name),
+                                 "MaterialEditingLibrary not loaded - the runtime uses engine materials")
+        return
+
+    for label, fn in (("M_OB_FX_Glow", build_glow_material),
+                      ("M_OB_FX_Haze", build_haze_material),
+                      ("M_OB_Decal_Blood", build_blood_decal)):
+        try:
+            fn(report)
+        except Exception as exc:  # noqa: BLE001
+            # One node class renamed in an engine update must not take the
+            # other two materials down with it.
+            report.failed(label, u"material graph: {0}".format(exc))
+
+
 def build_texture_slots(report):
     """Registers the VFX texture list.
 
@@ -332,6 +563,11 @@ def write_authoring_sheet(report):
     lines.append("Fill each one in against its spec. Nothing here is optional for")
     lines.append("the shipped build; the runtime fallback exists so that a build")
     lines.append("without them is still playable, not so that they can be skipped.")
+    lines.append("")
+    lines.append("An empty system counts as missing: until a system has at least one")
+    lines.append("enabled emitter the game plays the procedural fallback in its place")
+    lines.append("(UOneBrahamVFXStatics::IsNiagaraSystemUsable). Adding the first")
+    lines.append("emitter is what switches the authored effect on.")
     lines.append("")
     lines.append("UNIVERSAL USER PARAMETERS (declare these in every system)")
     lines.append("-" * 72)
@@ -391,6 +627,7 @@ def build_all():
     C.guard(report, "niagara systems", build_systems, report)
     C.guard(report, "camera shakes", build_camera_shakes, report)
     C.guard(report, "decal materials", build_decal_materials, report)
+    C.guard(report, "fx materials", build_fx_materials, report)
     C.guard(report, "texture slots", build_texture_slots, report)
     C.guard(report, "authoring sheet", write_authoring_sheet, report)
 

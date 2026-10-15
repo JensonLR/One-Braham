@@ -7,6 +7,7 @@
 #include "OneBraham.h"
 #include "Characters/OneBrahamCharacter.h"
 #include "Characters/OneBrahamDownedComponent.h"
+#include "Characters/OneBrahamFirstPersonFeelComponent.h"
 #include "Characters/OneBrahamHealthComponent.h"
 #include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamGameplayTags.h"
@@ -18,6 +19,8 @@
 #include "Interaction/OneBrahamInteractComponent.h"
 #include "UI/OneBrahamFloorPlanWidget.h"
 #include "UI/OneBrahamHUDWidget.h"
+#include "UI/OneBrahamPauseMenuWidget.h"
+#include "UI/OneBrahamScoreboardWidget.h"
 #include "UI/OneBrahamQuickLineWidget.h"
 #include "UI/OneBrahamUIStyle.h"
 #include "Voice/OneBrahamProximityVoiceComponent.h"
@@ -29,6 +32,7 @@
 #include "Weapons/OneBrahamWeaponBase.h"
 #include "Weapons/OneBrahamWeaponComponent.h"
 #include "Engine/World.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Blueprint/UserWidget.h"
 #include "GameFramework/PlayerState.h"
 
@@ -145,6 +149,21 @@ void UOneBrahamHUDComponent::DestroyHUD()
 	{
 		HUDWidget->RemoveFromParent();
 		HUDWidget = nullptr;
+	}
+
+	// The menus go with the HUD: a pause menu that outlived its controller would
+	// hold focus on a widget nobody can close.
+	if (ScoreboardWidget != nullptr)
+	{
+		ScoreboardWidget->SetScoreboardOpen(false);
+		ScoreboardWidget->RemoveFromParent();
+		ScoreboardWidget = nullptr;
+	}
+
+	if (PauseMenuWidget != nullptr)
+	{
+		PauseMenuWidget->RemoveFromParent();
+		PauseMenuWidget = nullptr;
 	}
 }
 
@@ -290,7 +309,8 @@ void UOneBrahamHUDComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	Data.bShowHitMarker = HitMarkerRemaining > 0.f;
 	Data.bLastHitWasHeadshot = bLastHitHeadshot;
 	Data.bLastHitWasKill = bLastHitWasKill;
-	Data.DamageIndicatorAlpha = DamageIndicatorRemaining / DamageIndicatorSeconds;
+	Data.DamageIndicatorAlpha = DamageIndicatorRemaining / DamageIndicatorSeconds * DamageIndicatorStrength;
+	UpdateDamageDirection();
 	Data.BannerRemaining = BannerRemaining;
 	Data.SubBannerText = SubBannerRemaining > 0.f ? Data.SubBannerText : FText::GetEmpty();
 	Data.SubtitleRemaining = SubtitleRemaining;
@@ -300,11 +320,13 @@ void UOneBrahamHUDComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		Data.SubtitleText = FText::GetEmpty();
 	}
 
-	// Low health pulse: 0.35 Hz, and only below 30%. A permanently pulsing HUD is
-	// the fastest way to make a tense game feel cheap.
+	// Low health pulse: only below 30%, and on the heartbeat - the same function
+	// the first-person feel component drives the screen's vignette with, so the
+	// crosshair and the edge of the screen beat together. A permanently pulsing
+	// HUD is the fastest way to make a tense game feel cheap.
 	const float HealthFraction = Data.MaxHealth > 0.f ? Data.Health / Data.MaxHealth : 1.f;
 	Data.LowHealthPulseAlpha = HealthFraction < 0.3f && Data.LifeState == EOneBrahamLifeState::Alive
-		? (0.55f + 0.45f * FMath::Sin(GetWorld()->GetTimeSeconds() * 2.2f))
+		? (0.4f + 0.6f * UOneBrahamFirstPersonFeelComponent::ComputeHeartbeatPulse(GetWorld()->GetTimeSeconds(), HealthFraction))
 		: 0.f;
 
 	// Prune the kill feed on the same cadence as everything else.
@@ -593,7 +615,8 @@ void UOneBrahamHUDComponent::GatherHUDData()
 		// FIRE DRILL, 0 for NIGHT SHIFT (no armour on the survival ruleset).
 		Data.MaxArmour = FMath::Max(1.f, Data.MaxArmour);
 		Data.LifeState = State->LifeState;
-		Data.VoiceChannel = State->VoiceChannel;
+		// The channel the player can actually use: dead players are on squad radio.
+		Data.VoiceChannel = State->GetEffectiveVoiceChannel();
 		Data.bSelfMuted = State->bSelfMuted;
 		Data.RevivesRemaining = State->RemainingRevives;
 	}
@@ -703,9 +726,13 @@ void UOneBrahamHUDComponent::GatherHUDData()
 
 		if (State != nullptr)
 		{
-			Data.LocalTeamScore = GS->TeamScores.IsValidIndex(static_cast<int32>(State->Team))
-				? GS->TeamScores[static_cast<int32>(State->Team)]
-				: 0;
+			// TeamScores is indexed 0 = Internal Staff, 1 = External Contractors
+			// (AOneBrahamGameMode::AddTeamScoreByIndex), not by the team enum,
+			// whose values for those two are 5 and 6: indexing by the enum read
+			// past the end of a two-entry array and always showed 0.
+			const int32 TeamIndex = State->Team == EOneBrahamTeam::InternalStaff ? 0
+				: State->Team == EOneBrahamTeam::ExternalContractors ? 1 : INDEX_NONE;
+			Data.LocalTeamScore = GS->TeamScores.IsValidIndex(TeamIndex) ? GS->TeamScores[TeamIndex] : 0;
 		}
 
 		// Phase clock: the HUD counts *down* to the phase deadline, which is what
@@ -856,9 +883,17 @@ void UOneBrahamHUDComponent::GatherHUDData()
 // ==========================================================================
 void UOneBrahamHUDComponent::SetScoreboardVisible(bool bVisible)
 {
-	if (HUDWidget != nullptr)
+	// The HUD's own Panel_Scoreboard is no longer shown: the scoreboard is its
+	// own widget (UOneBrahamScoreboardWidget) because it has buttons, and the
+	// HUD is deliberately hit-test invisible. Closing never creates the widget.
+	if (bVisible)
 	{
-		HUDWidget->SetScoreboardVisible(bVisible);
+		EnsureMenuWidgets();
+	}
+
+	if (ScoreboardWidget != nullptr)
+	{
+		ScoreboardWidget->SetScoreboardOpen(bVisible);
 	}
 }
 
@@ -872,9 +907,56 @@ void UOneBrahamHUDComponent::SetDeathScreenVisible(bool bVisible, const FText& C
 
 void UOneBrahamHUDComponent::SetPauseMenuVisible(bool bVisible)
 {
-	if (HUDWidget != nullptr)
+	if (bVisible)
 	{
-		HUDWidget->TogglePauseMenu(bVisible);
+		EnsureMenuWidgets();
+	}
+
+	if (PauseMenuWidget != nullptr)
+	{
+		if (bVisible)
+		{
+			PauseMenuWidget->OpenMenu();
+		}
+		else
+		{
+			PauseMenuWidget->CloseMenu();
+		}
+	}
+}
+
+void UOneBrahamHUDComponent::EnsureMenuWidgets()
+{
+	AOneBrahamPlayerController* Controller = OwningController.Get();
+
+	if (Controller == nullptr || !bHUDEnabled)
+	{
+		return;
+	}
+
+	// Plain C++ classes, no Blueprint lookup: both build their own trees, and the
+	// builder's WBP_OneBrahamScoreboard is parented to the HUD widget class, not
+	// to this one, so loading it here would give a HUD rather than a scoreboard.
+	if (ScoreboardWidget == nullptr)
+	{
+		ScoreboardWidget = CreateWidget<UOneBrahamScoreboardWidget>(Controller, UOneBrahamScoreboardWidget::StaticClass());
+
+		if (ScoreboardWidget != nullptr)
+		{
+			ScoreboardWidget->AddToPlayerScreen(ScoreboardZOrder);
+			ScoreboardWidget->SetScoreboardOpen(false);
+		}
+	}
+
+	if (PauseMenuWidget == nullptr)
+	{
+		PauseMenuWidget = CreateWidget<UOneBrahamPauseMenuWidget>(Controller, UOneBrahamPauseMenuWidget::StaticClass());
+
+		if (PauseMenuWidget != nullptr)
+		{
+			PauseMenuWidget->AddToPlayerScreen(PauseMenuZOrder);
+			PauseMenuWidget->CloseMenu();
+		}
 	}
 }
 
@@ -956,29 +1038,76 @@ void UOneBrahamHUDComponent::NotifyDamageTaken(float Damage, const FVector& Inst
 {
 	DamageIndicatorRemaining = DamageIndicatorSeconds;
 
-	AOneBrahamCharacter* Character = BoundCharacter.Get();
-	if (Character == nullptr)
+	// Damage sets the indicator strength for its whole lifetime: a 3-point graze
+	// should whisper. (This used to be written once here and overwritten by the
+	// tick on the very next frame, so every hit drew at full strength.)
+	DamageIndicatorStrength = FMath::Clamp(Damage / 40.f, 0.25f, 1.f);
+	Data.DamageIndicatorAlpha = DamageIndicatorStrength;
+
+	// Keep the world position, not a bearing. A bearing frozen at the moment of
+	// the hit is wrong the moment the player turns - and turning towards the
+	// shooter is exactly what the indicator asks them to do. The zero vector is
+	// the health component's "no instigator" (a fall, the building): no arc.
+	bHasDamageInstigator = !InstigatorLocation.IsNearlyZero();
+	DamageInstigatorLocation = InstigatorLocation;
+
+	UpdateDamageDirection();
+}
+
+void UOneBrahamHUDComponent::UpdateDamageDirection()
+{
+	if (!bHasDamageInstigator || DamageIndicatorRemaining <= 0.f)
 	{
+		Data.DamageDirectionDegrees = -1000.f;
 		return;
 	}
 
-	// Convert the world-space attacker position into a screen-relative angle for
-	// the indicator, in the horizontal plane only: an indicator that points up or
-	// down tells the player nothing they can act on.
-	const FVector ToInstigator = InstigatorLocation - Character->GetActorLocation();
-	const FVector Flat(ToInstigator.X, ToInstigator.Y, 0.f);
+	// Against the view, not the body: the control rotation is where the player is
+	// looking, and the actor's facing lags it (and is meaningless while downed).
+	// The camera manager has both, and still has them after the pawn has gone.
+	FVector ViewLocation = FVector::ZeroVector;
+	FRotator ViewRotation = FRotator::ZeroRotator;
+	bool bHaveView = false;
 
-	if (!Flat.IsNearlyZero())
+	if (const APlayerController* PC = Cast<APlayerController>(GetOwner()))
 	{
-		const FVector Forward = Character->GetActorForwardVector();
-		const float TargetAngle = FMath::RadiansToDegrees(FMath::Atan2(Flat.Y, Flat.X));
-		const float ForwardAngle = FMath::RadiansToDegrees(FMath::Atan2(Forward.Y, Forward.X));
-
-		Data.DamageDirectionDegrees = FRotator::NormalizeAxis(TargetAngle - ForwardAngle);
+		if (PC->PlayerCameraManager != nullptr)
+		{
+			ViewLocation = PC->PlayerCameraManager->GetCameraLocation();
+			ViewRotation = PC->PlayerCameraManager->GetCameraRotation();
+			bHaveView = true;
+		}
+		else if (const APawn* Pawn = PC->GetPawn())
+		{
+			ViewLocation = Pawn->GetActorLocation();
+			ViewRotation = PC->GetControlRotation();
+			bHaveView = true;
+		}
 	}
 
-	// Damage clamps the indicator strength: a 3-point graze should whisper.
-	Data.DamageIndicatorAlpha = FMath::Clamp(Damage / 40.f, 0.25f, 1.f) * (DamageIndicatorSeconds / DamageIndicatorSeconds);
+	if (!bHaveView)
+	{
+		if (const AOneBrahamCharacter* Character = BoundCharacter.Get())
+		{
+			ViewLocation = Character->GetEyeLocation();
+			ViewRotation = Character->GetEyeRotation();
+			bHaveView = true;
+		}
+	}
+
+	// The horizontal plane only: an indicator that points up or down tells the
+	// player nothing they can act on.
+	const FVector ToInstigator = DamageInstigatorLocation - ViewLocation;
+	const FVector Flat(ToInstigator.X, ToInstigator.Y, 0.f);
+
+	if (!bHaveView || Flat.IsNearlyZero())
+	{
+		Data.DamageDirectionDegrees = -1000.f;
+		return;
+	}
+
+	const float TargetAngle = FMath::RadiansToDegrees(FMath::Atan2(Flat.Y, Flat.X));
+	Data.DamageDirectionDegrees = FRotator::NormalizeAxis(TargetAngle - ViewRotation.Yaw);
 }
 
 void UOneBrahamHUDComponent::NotifyDownedStateChanged(bool bDowned, float BleedOutRemaining)

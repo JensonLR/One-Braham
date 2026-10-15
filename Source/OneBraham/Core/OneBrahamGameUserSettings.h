@@ -85,6 +85,12 @@ public:
 	virtual void SetToDefaults() override;
 	virtual bool IsDirty() const override;
 
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Settings")
+	void SetGoreEnabled(bool bEnabled) { bGoreEnabled = bEnabled; }
+
+	UFUNCTION(BlueprintPure, Category = "One Braham|Settings")
+	bool IsGoreEnabled() const { return bGoreEnabled; }
+
 	/** Picks a sane first-run preset from GPU class + VRAM. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Settings")
 	void ApplyHardwareDefaultPreset(bool bForce = false);
@@ -141,6 +147,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Voice")
 	void SetVoiceInputDevice(const FString& DeviceId);
 
+	/** The microphone voice chat should open. The one place to read it: it folds
+	 *  in the legacy AudioInputDeviceId from older saves. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Voice")
+	FString GetVoiceInputDeviceId() const;
+
 	// --- Controls / accessibility -----------------------------------------
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Controls")
 	void SetMouseSensitivity(float SensitivityX, float SensitivityY, float ADSMultiplier);
@@ -175,6 +186,8 @@ public:
 	UPROPERTY(config) float ResolutionScale = 100.f;
 	UPROPERTY(config) int32 AntiAliasingMethod = 4;
 	UPROPERTY(config) bool bMotionBlur = false;
+	/** Blood decals, pools and spray (drives the ob.Gore console variable). */
+	UPROPERTY(config) bool bGoreEnabled = true;
 	UPROPERTY(config) float MotionBlurAmount = 0.25f;
 	UPROPERTY(config) bool bFilmGrain = true;
 	UPROPERTY(config) float FilmGrainIntensity = 0.02f;
@@ -229,9 +242,14 @@ public:
 	UPROPERTY(config) EOneBrahamVoiceSubmixPreset VoiceSubmixPreset = EOneBrahamVoiceSubmixPreset::Raw;
 	UPROPERTY(config) FString AudioOutputDeviceId;
 
-	/** Preferred microphone. Empty = the system default communications device. */
-	UPROPERTY(config) FString AudioInputDeviceId;
+	/** Preferred microphone. Empty = the system default communications device.
+	 *  Read through GetVoiceInputDeviceId(); written by SetVoiceInputDevice(). */
 	UPROPERTY(config) FString VoiceInputDeviceId;
+
+	/** Legacy duplicate of VoiceInputDeviceId from older saves: the menu wrote one
+	 *  field and capture read the other, so a chosen microphone never applied.
+	 *  Still loaded so an old choice survives; cleared on the next device change. */
+	UPROPERTY(config) FString AudioInputDeviceId;
 	UPROPERTY(config) bool bUsePushToTalk = true;
 	UPROPERTY(config) FKey PushToTalkKey;
 	UPROPERTY(config) FKey PushToTalkGamepadKey;

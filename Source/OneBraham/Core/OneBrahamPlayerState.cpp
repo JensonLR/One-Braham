@@ -7,6 +7,8 @@
 #include "Core/OneBrahamGameState.h"
 #include "Characters/OneBrahamCharacter.h"
 #include "Characters/OneBrahamHealthComponent.h"
+#include "Voice/OneBrahamProximityVoiceComponent.h"
+#include "Voice/OneBrahamVoiceTypes.h"
 #include "Net/UnrealNetwork.h"
 #include "Engine/World.h"
 
@@ -20,6 +22,11 @@ AOneBrahamPlayerState::AOneBrahamPlayerState()
 	// Squad leaders are promoted by the GameMode; a fresh player assumes they
 	// are not a leader until told otherwise.
 	bIsSquadLeader = false;
+
+	// Live voice chat. A replicated default subobject, so its RPCs are routable
+	// from the first frame without replicating its creation, and so it exists for
+	// a player who has no pawn at all.
+	VoiceComponent = CreateDefaultSubobject<UOneBrahamProximityVoiceComponent>(TEXT("VoiceChat"));
 }
 
 void AOneBrahamPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -223,8 +230,18 @@ void AOneBrahamPlayerState::ServerSetVoiceChannel_Implementation(EOneBrahamVoice
 		return;
 	}
 
-	// Spectators and dead players can only use their team channel: a dead squad
-	// must not be able to give live positional intel over proximity chat.
+	// The building's announcement channel is heard by everybody and belongs to
+	// the match director: a client asking for it is asking to broadcast to the
+	// whole server, so it is refused, as is any value outside the enum.
+	if (NewChannel == EOneBrahamVoiceChannel::Announcement
+		|| static_cast<uint8>(NewChannel) > static_cast<uint8>(EOneBrahamVoiceChannel::None))
+	{
+		return;
+	}
+
+	// Dead players cannot select proximity: a dead squad must not be able to
+	// give live positional intel. (Whatever they select, the relay carries their
+	// voice on squad radio only - see OneBrahamVoiceRouting::ResolveSpeakerChannel.)
 	const bool bIsEliminated = IsEliminated();
 	if (bIsEliminated && NewChannel == EOneBrahamVoiceChannel::Proximity)
 	{
@@ -233,6 +250,14 @@ void AOneBrahamPlayerState::ServerSetVoiceChannel_Implementation(EOneBrahamVoice
 
 	VoiceChannel = NewChannel;
 	ForceNetUpdate();
+}
+
+EOneBrahamVoiceChannel AOneBrahamPlayerState::GetEffectiveVoiceChannel() const
+{
+	FOneBrahamVoiceRouteParty Party;
+	Party.Channel = VoiceChannel;
+	Party.bEliminated = IsEliminated();
+	return OneBrahamVoiceRouting::ResolveSpeakerChannel(Party);
 }
 
 void AOneBrahamPlayerState::ServerSetSelfMuted_Implementation(bool bMuted)
@@ -257,6 +282,15 @@ void AOneBrahamPlayerState::ServerSetPlayerMuted_Implementation(int32 TargetPlay
 		return;
 	}
 
+	// Muting yourself is ServerSetSelfMuted; the list is capped so a client
+	// cannot grow replicated state without bound.
+	constexpr int32 MaxMutedPlayers = 64;
+	if (TargetPlayerId == GetPlayerId() || TargetPlayerId == INDEX_NONE
+		|| (bMuted && MutedPlayerIds.Num() >= MaxMutedPlayers && !MutedPlayerIds.Contains(TargetPlayerId)))
+	{
+		return;
+	}
+
 	if (bMuted)
 	{
 		if (!MutedPlayerIds.Contains(TargetPlayerId))
@@ -269,8 +303,8 @@ void AOneBrahamPlayerState::ServerSetPlayerMuted_Implementation(int32 TargetPlay
 		MutedPlayerIds.Remove(TargetPlayerId);
 	}
 
-	// Ask the target to rebuild its suppressed-listener cache so we stop
-	// receiving their packets entirely, rather than discarding them locally.
+	// Keep the target's "muted by" bookkeeping in step. The relay itself routes on
+	// this listener's MutedPlayerIds, so the frames stop at the server.
 	if (const UWorld* World = GetWorld())
 	{
 		if (AOneBrahamGameState* GS = World->GetGameState<AOneBrahamGameState>())
@@ -300,6 +334,9 @@ void AOneBrahamPlayerState::ServerSetPlayerMuted_Implementation(int32 TargetPlay
 
 void AOneBrahamPlayerState::MulticastSetTransmitting_Implementation(bool bTransmitting)
 {
+	// Kept for ServerSetSelfMuted's immediate "stopped talking". The steady-state
+	// flag comes from UOneBrahamProximityVoiceComponent::ServerSetTransmitting and
+	// reaches clients through ordinary replication of bIsTransmitting.
 	bIsTransmitting = bTransmitting;
 }
 

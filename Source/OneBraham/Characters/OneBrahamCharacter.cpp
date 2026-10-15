@@ -14,6 +14,7 @@
 #include "Characters/OneBrahamHealthComponent.h"
 #include "Characters/OneBrahamDownedComponent.h"
 #include "Characters/OneBrahamRagdollComponent.h"
+#include "Characters/OneBrahamFirstPersonFeelComponent.h"
 #include "Interaction/OneBrahamInteractComponent.h"
 #include "Interaction/OneBrahamInteractionInterface.h"
 #include "Weapons/OneBrahamInventoryComponent.h"
@@ -22,6 +23,7 @@
 #include "Audio/OneBrahamAudioManagerComponent.h"
 
 #include "Camera/CameraComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SpotLightComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -99,6 +101,7 @@ AOneBrahamCharacter::AOneBrahamCharacter(const FObjectInitializer& ObjectInitial
 	InventoryComponent = CreateDefaultSubobject<UOneBrahamInventoryComponent>(TEXT("InventoryComponent"));
 	InteractComponent = CreateDefaultSubobject<UOneBrahamInteractComponent>(TEXT("InteractComponent"));
 	RagdollComponent = CreateDefaultSubobject<UOneBrahamRagdollComponent>(TEXT("RagdollComponent"));
+	FeelComponent = CreateDefaultSubobject<UOneBrahamFirstPersonFeelComponent>(TEXT("FirstPersonFeelComponent"));
 	CreateDefaultSubobject<UOneBrahamProximityVoiceComponent>(TEXT("ProximityVoiceComponent"));
 
 	// --- Networking --------------------------------------------------------
@@ -193,6 +196,15 @@ void AOneBrahamCharacter::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 
 	UpdateLean(DeltaSeconds);
+
+	// The feel layer reads the camera the lean has just placed, so it runs
+	// second: punch, bob, sway, the screen grade, the death camera.
+	if (FeelComponent != nullptr)
+	{
+		FeelComponent->TickFeel(DeltaSeconds);
+	}
+
+	TickFootsteps();
 
 	// Floor detection at 2 Hz - it only changes when someone takes the stairs.
 	FloorCheckAccumulator += DeltaSeconds;
@@ -429,19 +441,86 @@ void AOneBrahamCharacter::UpdateLean(float DeltaSeconds)
 		LeanAmount = OBCharacterMovement->GetLeanAmount();
 	}
 
-	if (FirstPersonCamera != nullptr)
+	// While the death camera has the lens, the body does not get to move it.
+	const bool bDeathCam = FeelComponent != nullptr && FeelComponent->IsDeathCamActive();
+
+	if (FirstPersonCamera != nullptr && !bDeathCam)
 	{
 		// The camera slides sideways rather than rotating: a roll-only lean makes
-		// the player feel seasick and gives no actual advantage.
+		// the player feel seasick and gives no actual advantage. The slide stays
+		// on the component because the aim ray starts from it.
 		FVector Offset = bCrouchRequested ? CrouchedCameraOffset : StandingCameraOffset;
 		Offset.Y += LeanAmount * LeanCameraSideOffset;
 		FirstPersonCamera->SetRelativeLocation(FMath::VInterpTo(FirstPersonCamera->GetRelativeLocation(), Offset, DeltaSeconds, 12.f));
 
-		// A tiny roll sells the shoulder movement without tilting the horizon.
-		FRotator CameraRotation = FRotator::ZeroRotator;
-		CameraRotation.Roll = LeanAmount * LeanCameraRoll;
-		FirstPersonCamera->SetRelativeRotation(CameraRotation);
+		// The small roll that sells the shoulder movement is NOT written here. The
+		// camera uses pawn control rotation, so UCameraComponent::GetCameraView
+		// sets its world rotation every frame and a relative roll never reached
+		// the screen. The feel component adds it to the camera's additive offset,
+		// together with every other cosmetic rotation (see GetLeanCameraRoll).
 	}
+}
+
+void AOneBrahamCharacter::RestoreFirstPersonView()
+{
+	if (FirstPersonCamera == nullptr)
+	{
+		return;
+	}
+
+	FirstPersonCamera->AttachToComponent(GetCapsuleComponent(), FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+	FirstPersonCamera->SetRelativeLocationAndRotation(bCrouchRequested ? CrouchedCameraOffset : StandingCameraOffset, FRotator::ZeroRotator);
+	FirstPersonCamera->bUsePawnControlRotation = true;
+	FirstPersonCamera->ClearAdditiveOffset();
+
+	if (FirstPersonMesh != nullptr && IsLocallyControlled())
+	{
+		FirstPersonMesh->SetVisibility(true, true);
+	}
+}
+
+void AOneBrahamCharacter::TickFootsteps()
+{
+	// The server has no ears; a client hears every pawn near it, its own included.
+	UWorld* World = GetWorld();
+	if (World == nullptr || GetNetMode() == NM_DedicatedServer || OBCharacterMovement == nullptr)
+	{
+		return;
+	}
+
+	// The dead do not walk. The downed crawl, and a crawl is audible on marble.
+	if (LifeState != EOneBrahamLifeState::Alive && LifeState != EOneBrahamLifeState::Downed)
+	{
+		return;
+	}
+
+	// The audio manager lives on the local player's controller - the only one a
+	// client has - so every pawn on this machine steps through it.
+	AOneBrahamPlayerController* LocalPC = Cast<AOneBrahamPlayerController>(World->GetFirstPlayerController());
+	UOneBrahamAudioManagerComponent* Audio = LocalPC != nullptr && LocalPC->IsLocalController() ? LocalPC->GetAudioManager() : nullptr;
+	if (Audio == nullptr)
+	{
+		return;
+	}
+
+	const bool bLocalPlayer = IsLocallyControlled() && IsPlayerControlled();
+
+	// Distance cull before any work: sixteen pawns stepping through a map lookup
+	// every frame is cheap, but fifteen of them on other floors is pointless.
+	if (!bLocalPlayer && LocalPC->PlayerCameraManager != nullptr &&
+		FVector::DistSquared(LocalPC->PlayerCameraManager->GetCameraLocation(), GetActorLocation()) > FMath::Square(FootstepCullDistanceCm))
+	{
+		return;
+	}
+
+	const float Speed2D = GetVelocity().Size2D();
+	const bool bInAir = !OBCharacterMovement->IsMovingOnGround();
+
+	// Sprint is a local flag on the movement component; a remote pawn only has
+	// its speed, which is the thing a sprint actually changes.
+	const bool bSprinting = OBCharacterMovement->IsSprinting() || Speed2D > OBCharacterMovement->JogSpeed * 1.1f;
+
+	Audio->TickFootstepAudio(this, OBCharacterMovement->GetCurrentSurface(), Speed2D, bIsCrouched, bSprinting, bInAir, bLocalPlayer);
 }
 
 void AOneBrahamCharacter::TryStartMantle()
@@ -975,13 +1054,11 @@ void AOneBrahamCharacter::HandleHealthChanged(float NewHealth, float MaxHealth, 
 		State->MaxHealth = MaxHealth;
 	}
 
-	// The camera dips when hurt: a purely cosmetic "flinch" that also gives the
-	// player a readable (and audible) cue that they are losing the fight.
-	if (FirstPersonCamera != nullptr && Delta < 0.f && IsLocallyControlled())
-	{
-		const float FlinchStrength = FMath::Clamp(-Delta / 40.f, 0.05f, 0.35f);
-		FirstPersonCamera->SetRelativeRotation(FirstPersonCamera->GetRelativeRotation() + FRotator(-FlinchStrength * 2.f, 0.f, 0.f));
-	}
+	// The hit flinch used to live here, and never worked: on a client this fires
+	// from the health OnRep with Delta = 0, and the rotation it wrote was erased
+	// by UpdateLean and by pawn control rotation within the frame. It is now
+	// driven from AOneBrahamPlayerController::ClientDamageTaken, which carries the
+	// amount and the attacker's position, into the feel component's punch spring.
 }
 
 FText AOneBrahamCharacter::BuildDeathCauseText(const FOneBrahamKillFeedEntry& Entry)
@@ -1089,13 +1166,37 @@ void AOneBrahamCharacter::ServerOnDied(AController* Killer, const FOneBrahamDama
 		KillEntry = GameMode->RegisterKill(this, Killer, Report);
 	}
 
-	// Notify the controller so the death screen + spectate flow starts. This is a
-	// Client RPC: the death was detected here, on the server, and the player who
-	// died is usually on another machine.
+	// Notify the controller so the death camera, the death screen and then the
+	// spectate flow start. Client RPCs: the death was detected here, on the
+	// server, and the player who died is usually on another machine.
+	//
+	// The death camera comes first and spectating waits for it: a few seconds of
+	// looking at the person who did it, from where you fell, is the beat that
+	// makes a death land. The killer's pawn is sent so the camera can follow it
+	// if it moves; the position is the fallback for a killer the client cannot
+	// resolve, and for a death with no killer at all the camera simply sinks.
 	if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(GetController()))
 	{
+		APawn* KillerPawn = Killer != nullptr ? Killer->GetPawn() : nullptr;
+		if (KillerPawn == this)
+		{
+			KillerPawn = nullptr;
+		}
+
+		bool bHasFocus = KillerPawn != nullptr;
+		FVector Focus = KillerPawn != nullptr ? KillerPawn->GetActorLocation() + FVector(0.f, 0.f, 55.f) : FVector::ZeroVector;
+
+		if (!bHasFocus && Killer != nullptr && Report.Distance > 100.f)
+		{
+			// A killer whose pawn has gone (died in the same exchange, left):
+			// walk back along the shot to where it came from.
+			Focus = FVector(Report.HitLocation) - FVector(Report.ShotDirection) * Report.Distance;
+			bHasFocus = true;
+		}
+
+		PC->ClientBeginDeathCam(this, KillerPawn, Focus, bHasFocus);
 		PC->ClientShowDeathScreen(true, BuildDeathCauseText(KillEntry));
-		PC->ServerBeginSpectating(INDEX_NONE);
+		PC->ScheduleSpectatingAfterDeathCam();
 	}
 
 	OnDamageReported.Broadcast(Killer, Report);
@@ -1169,6 +1270,9 @@ void AOneBrahamCharacter::ServerOnRespawned()
 
 	if (AOneBrahamPlayerController* PC = Cast<AOneBrahamPlayerController>(GetController()))
 	{
+		// A respawn inside the death camera's window must not be followed by a
+		// spectate that was queued for the life that just ended.
+		PC->CancelScheduledSpectating();
 		PC->ClientShowDeathScreen(false, FText::GetEmpty());
 		PC->bIsSpectating = false;
 	}
@@ -1205,6 +1309,14 @@ void AOneBrahamCharacter::Landed(const FHitResult& Hit)
 
 	static constexpr float SafeFallSpeed = 1150.f;      // ~4 m fall: fine
 	static constexpr float LethalFallSpeed = 2100.f;    // ~12 m fall: fatal
+
+	// The landing is felt before it is scored: a dip, a nod and a shake on the
+	// machine of the player who landed, scaled by how fast they came down. This
+	// runs on the owning client's own movement simulation, so it is immediate.
+	if (FeelComponent != nullptr && IsLocallyControlled() && IsPlayerControlled())
+	{
+		FeelComponent->NotifyLanded(EffectiveFallSpeed);
+	}
 
 	if (EffectiveFallSpeed <= SafeFallSpeed || HealthComponent == nullptr || !HealthComponent->IsAlive())
 	{

@@ -457,25 +457,12 @@ void UOneBrahamHUDWidget::BuildDefaultLayout()
 		}
 	}
 
-	// The scoreboard and the pause menu are authored screens in the shipped build
-	// (WBP_Scoreboard and WBP_PauseMenu, documented in Docs/07_UI.md). The code
-	// fallback keeps the toggles working with an empty panel so no input is lost.
-	UTextBlock* ScoreboardTitle = nullptr;
-	Panel_Scoreboard = BuildOverlayPanel(TEXT("Panel_Scoreboard"), ScoreboardTitle);
-
-	UTextBlock* PauseTitle = nullptr;
-	Panel_PauseMenu = BuildOverlayPanel(TEXT("Panel_PauseMenu"), PauseTitle);
-
-	if (Panel_Scoreboard != nullptr && ScoreboardTitle != nullptr)
-	{
-		ScoreboardTitle->SetText(NSLOCTEXT("OneBraham", "HUD_ScoreboardPlaceholder",
-			"SCOREBOARD"));
-	}
-	if (Panel_PauseMenu != nullptr && PauseTitle != nullptr)
-	{
-		PauseTitle->SetText(NSLOCTEXT("OneBraham", "HUD_PausePlaceholder",
-			"PAUSED - press Escape to resume"));
-	}
+	// The scoreboard and the pause menu are not panels of this widget any more:
+	// both have buttons, and this widget is hit-test invisible by design, so a
+	// button inside it could be seen and never clicked. They are their own
+	// widgets (UOneBrahamScoreboardWidget, UOneBrahamPauseMenuWidget), created
+	// by UOneBrahamHUDComponent. Panel_Scoreboard and Panel_PauseMenu remain as
+	// optional bindings for an authored HUD that wants to decorate them.
 	if (Panel_DeathScreen != nullptr && DeathTitle != nullptr)
 	{
 		DeathTitle->SetText(NSLOCTEXT("OneBraham", "HUD_DeathTitle", "ELIMINATED"));

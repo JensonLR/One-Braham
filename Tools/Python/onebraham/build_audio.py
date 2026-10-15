@@ -25,7 +25,7 @@ WHAT IT CREATES
     /Game/OneBraham/Audio/Mix/SM_OneBraham_VoiceDuck  (ref-counted duck)
     /Game/OneBraham/Audio/Mix/SM_OneBraham_FlashMuffle
     /Game/OneBraham/Audio/Mix/SM_OneBraham_DownedMuffle
-    /Game/OneBraham/Audio/Attenuation/SA_OneBraham_*  (12 objects, see Docstring table)
+    /Game/OneBraham/Audio/Attenuation/SA_OneBraham_*  (13 objects, see Docstring table)
     /Game/OneBraham/Audio/Banks/DA_AudioBank          (populated by EnsureCoreEntries)
 
 USAGE
@@ -74,10 +74,18 @@ SUBMIXES = [
     ("SS_OneBraham_Voice",   0.05, 0.15),   # gentle: human speech compresses badly
 ]
 
-# Reverb sends, as (submix, wet level). The building's acoustic language:
+# Reverb sends, as (wet level, decay seconds). The building's acoustic language:
 # a marble lobby is a hall, a carpeted office is dead, a stairwell is a tube.
+#
+# These are also the room tails every gunshot and explosion excites: the
+# synthesiser renders one SFX_Gunshot_Tail_<Profile> per row at this decay
+# (OneBrahamProceduralAudio.cpp, GetRoomRecipe), and the audio manager plays it
+# at this wet level for the area the listener is standing in
+# (UOneBrahamAudioManagerComponent::GetRoomTailCue). Change a number here and
+# change it in both of those.
 REVERB_PROFILES = {
     "Lobby":        (0.55, 2.6),   # wet, decay seconds
+    "Mezzanine":    (0.28, 1.8),   # carpet and soft furnishing over the lift lobby
     "OpenPlan":     (0.18, 0.9),
     "ServerComms":  (0.30, 1.4),
     "Executive":    (0.22, 1.1),
@@ -108,6 +116,9 @@ ATTENUATION = [
     ("SA_OneBraham_WeaponClose",  "Weapon",      150.0,   9000.0,   True,  True,  True),
     ("SA_OneBraham_WeaponInterior", "Weapon",    150.0,  14000.0,   True,  True,  True),
     ("SA_OneBraham_Suppressed",   "Weapon",       80.0,   2600.0,   True,  True,  True),
+    # The distant layer of a gunshot or a blast: long, unfocused, and dark when
+    # occluded. The near-field crossfade is in the manager's gain, not here.
+    ("SA_OneBraham_WeaponDistant", "Weapon",    2500.0,  45000.0,   True,  True,  False),
     ("SA_OneBraham_Impact",       "Impact",       60.0,   6000.0,   True,  True,  True),
     ("SA_OneBraham_Objective",    "Objective",  1500.0,  12000.0,   True,  True,  False),
     ("SA_OneBraham_Utility",      "Objective",   120.0,  12000.0,   True,  True,  False),

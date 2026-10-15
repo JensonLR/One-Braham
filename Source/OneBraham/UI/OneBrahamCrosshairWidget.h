@@ -58,7 +58,11 @@ public:
 		bHitMarkerKill = bKill;
 	}
 
-	/** Radians clockwise from forward; negative = no indicator. */
+	/**
+	 * Degrees clockwise from where the player is looking; below -999 = no
+	 * indicator. Recomputed by the HUD component every frame from the attacker's
+	 * world position and the current view, so it tracks a turn.
+	 */
 	void SetDamageDirection(float Degrees)
 	{
 		DamageDirectionDegrees = Degrees;

@@ -7,12 +7,19 @@
 // on a machine that cannot afford Niagara.
 //
 // TIERS
-//   1. Authored Niagara system at the conventional path, if it exists
-//      (/Game/OneBraham/VFX/NS_OB_<Effect>). This is what ships.
-//   2. Runtime fallback: a pooled light + decal + geometry-less spark actor built
-//      in C++ (VFX/OneBrahamImpactFallbackActor.h). This is what makes a clean
+//   1. Authored Niagara system at the conventional path, if it exists *and has
+//      at least one emitter* (/Game/OneBraham/VFX/NS_OB_<Effect>). This is
+//      what ships. build_vfx.py creates the seventeen systems empty, so an
+//      empty system is treated exactly like a missing one.
+//   2. Runtime fallback: a pooled procedural effect built from engine shapes
+//      (VFX/OneBrahamImpactFallbackActor.h). This is what makes a clean
 //      checkout look intentional rather than broken, and it is also the low
 //      scalability path on the minimum spec.
+//
+// GORE
+//   Blood (spray, decals, pools, wound shading) is gated by the console
+//   variable ob.Gore (1 = on, the default; 0 = off). With gore off a character
+//   hit still produces a grey fabric puff, because hit feedback is gameplay.
 //
 // Nothing here allocates per frame, and every spawn is distance-culled against
 // the local camera before it is created.
@@ -66,14 +73,65 @@ public:
 	 * Spawns the impact effect for a batch of hits. Called on every machine from
 	 * AOneBrahamWeaponBase::MulticastPlayImpactFX, so it must be cheap: the local
 	 * camera distance gate rejects anything the player cannot plausibly see.
+	 *
+	 * ShotOrigin is where the shot came from (the weapon's muzzle). Knowing the
+	 * direction lets debris and blood spray *along* the shot and lets grazing
+	 * hits on metal and concrete ricochet. Zero means "unknown" and disables both.
 	 */
-	static void SpawnImpactsForHits(UObject* WorldContextObject, const TArray<FOneBrahamImpactInfo>& Impacts);
+	static void SpawnImpactsForHits(UObject* WorldContextObject, const TArray<FOneBrahamImpactInfo>& Impacts, const FVector& ShotOrigin = FVector::ZeroVector);
 
-	static void SpawnImpact(UObject* WorldContextObject, const FOneBrahamImpactInfo& Impact);
+	static void SpawnImpact(UObject* WorldContextObject, const FOneBrahamImpactInfo& Impact, const FVector& ShotOrigin = FVector::ZeroVector);
+
+	/** Sparks and a short streak along the reflected path. Cosmetic only. */
+	static void SpawnRicochet(UObject* WorldContextObject, const FVector& Location, const FVector& Normal, const FVector& OutDirection);
+
+	/**
+	 * Cosmetic chance that a round arriving at this angle on this surface
+	 * glances off. 0 for anything soft, and 0 above about 22 degrees of grazing.
+	 * @param IncomingDirection direction of travel (normalised)
+	 */
+	static float RicochetChance(EOneBrahamFootstepSurface Surface, const FVector& IncomingDirection, const FVector& Normal);
 
 	/** Rounds snapping past the local player's head. Purely information: it tells
-	 *  you that you are being shot at and roughly from where. */
+	 *  you that you are being shot at and roughly from where. Plays the whizz and
+	 *  a very small camera flinch on the machine that calls it. */
 	static void PlayNearMiss(UObject* WorldContextObject, const FVector& Location);
+
+	/** A small camera flinch on this machine (being hit, being shot at),
+	 *  scaled by the player's camera-shake settings and off when they are off. */
+	static void PlayLocalCameraFlinch(UObject* WorldContextObject, float Scale);
+
+	// ======================================================================
+	//  Blood
+	// ======================================================================
+	/** ob.Gore: false when the player (or the platform) has switched blood off. */
+	static bool IsGoreEnabled();
+
+	/**
+	 * Blood for a character hit, played on every machine from the weapon's hit
+	 * multicast: splatter on whatever is up to ~2.5 m behind the victim along
+	 * the shot, drips on the floor beneath, scaled by damage (headshots larger).
+	 */
+	static void SpawnBloodForHit(UObject* WorldContextObject, const AActor* Victim, const FVector& Location, const FVector& ShotDirection,
+		float Damage, bool bHeadshot);
+
+	/** A pool spreading under a body: radius in cm, grows over GrowSeconds. */
+	static void SpawnBloodPool(UObject* WorldContextObject, const FVector& FloorLocation, float RadiusCm, float GrowSeconds, float HoldSeconds);
+
+	/** A single round drip on the floor below a point (downed players leave a trail). */
+	static void SpawnBloodDrip(UObject* WorldContextObject, const AActor* IgnoreActor, const FVector& Above, float RadiusCm);
+
+	// ======================================================================
+	//  Weapon effects with a procedural fallback
+	// ======================================================================
+	/** Muzzle flash fallback: only call when the weapon has no usable Niagara system. */
+	static void SpawnMuzzleFlashFallback(UObject* WorldContextObject, const FTransform& Muzzle, float Scale);
+
+	/** Tracer fallback: a thin emissive streak that travels the path. */
+	static void SpawnTracerFallback(UObject* WorldContextObject, const FVector& Start, const FVector& End, float SpeedCmPerSecond);
+
+	/** Brass fallback: a casing with a physics arc. */
+	static void SpawnShellEjectFallback(UObject* WorldContextObject, const FTransform& EjectPort, const FVector& InheritedVelocity, float CalibreScale);
 
 	// ======================================================================
 	//  Explosions and utility
@@ -101,9 +159,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|VFX", meta = (WorldContext = "WorldContextObject"))
 	static UNiagaraComponent* SpawnEffect(UObject* WorldContextObject, EOneBrahamVFXEffect Effect, const FVector& Location, const FRotator& Rotation = FRotator::ZeroRotator, const FVector& Scale = FVector(1.f));
 
-	/** Loads and caches a Niagara system by conventional effect name. */
+	/** Loads and caches a Niagara system by conventional effect name. Returns
+	 *  null for a missing system *and* for one with no emitters, which is what
+	 *  the content build creates (see IsNiagaraSystemUsable). */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|VFX")
 	static UNiagaraSystem* LoadEffectSystem(EOneBrahamVFXEffect Effect);
+
+	/**
+	 * True when a system will draw something: it exists and has at least one
+	 * enabled emitter. An empty system spawns, activates, reports success and
+	 * draws nothing, which is the worst kind of missing asset - this is the
+	 * check that sends those to the procedural fallback instead.
+	 */
+	static bool IsNiagaraSystemUsable(const UNiagaraSystem* System);
 
 	/** Conventional asset path for an effect: /Game/OneBraham/VFX/NS_OB_<Name>. */
 	static FString GetEffectAssetPath(EOneBrahamVFXEffect Effect);

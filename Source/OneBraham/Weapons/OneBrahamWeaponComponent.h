@@ -491,8 +491,39 @@ protected:
 	/** The lag-compensation snapshot currently applied for a trace. */
 	struct FOneBrahamHitboxSnapshot ActiveRewindSnapshot;
 
-	/** Screen-shake-less "kick" applied to the first person weapon mesh. */
+	/** Screen-shake-less "kick" applied to the first person weapon mesh: X back
+	 *  along the barrel (negative), Y up, both in cm. Read by the first-person
+	 *  feel component, which is what finally puts it on the screen. */
 	FVector2D WeaponKickOffset = FVector2D::ZeroVector;
+
+	/** Random cant added per shot, in degrees, decaying with the kick. */
+	float WeaponKickRoll = 0.f;
+
+public:
+	// --- Visual kick tuning (cosmetic, local only) -------------------------
+	/** How far the gun jumps back into the shoulder per shot, in cm. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Weapons|Kick")
+	float WeaponKickBackCm = 1.6f;
+
+	/** How far the muzzle end rises per shot, in cm (the feel layer turns it into climb too). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Weapons|Kick")
+	float WeaponKickUpCm = 0.4f;
+
+	/** Random cant per shot, either way, in degrees. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Weapons|Kick")
+	float WeaponKickRollDegrees = 0.7f;
+
+	/** Kick at full ADS, as a fraction of the hip kick: braced, but still a rifle going off. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Weapons|Kick")
+	float WeaponKickADSScale = 0.55f;
+
+	/** Return speed of the kick (interp speed, per second). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Weapons|Kick")
+	float WeaponKickRecoverySpeed = 9.f;
+
+	/** Ceiling on the accumulated rearward kick so sustained fire never puts the gun in the lens. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Weapons|Kick")
+	float WeaponKickMaxBackCm = 5.f;
 
 public:
 	/** Called by the weapon when it finishes drawing. */
@@ -501,6 +532,18 @@ public:
 	/** The visual kick currently applied to the 1P weapon mesh, in cm. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Weapons")
 	FVector2D GetWeaponKickOffset() const { return WeaponKickOffset; }
+
+	/** The random cant currently applied to the 1P weapon mesh, in degrees. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Weapons")
+	float GetWeaponKickRoll() const { return WeaponKickRoll; }
+
+	/** The current weapon's movement sway multiplier (UOneBrahamWeaponDefinition::SwayMovementScale), 1 with none. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Weapons")
+	float GetSwayMovementScale() const;
+
+	/** The current weapon's idle/breathing sway multiplier (UOneBrahamWeaponDefinition::SwayLoopScale), 1 with none. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Weapons")
+	float GetSwayLoopScale() const;
 
 	/** Server: number of shots this client has had rejected this match (QA reads it). */
 	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Weapons")

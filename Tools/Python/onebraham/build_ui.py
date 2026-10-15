@@ -47,7 +47,7 @@ WIDGETS = [
     ("WBP_OneBrahamHUD",    C.UI_HUD, "OneBrahamHUDWidget",
      "The in-match HUD. Subclasses the C++ widget; empty by default so the "
      "code-drawn layout is used until a designer starts overriding elements."),
-    ("WBP_OneBrahamScoreboard", C.UI_HUD, "OneBrahamHUDWidget",
+    ("WBP_OneBrahamScoreboard", C.UI_HUD, "OneBrahamScoreboardWidget",
      "Hold-Tab scoreboard. Optional: the C++ widget already draws one."),
     ("WBP_MainMenu",        C.UI + "/Menus", None,
      "Play / Settings / Wardrobe / Quit. Steam overlay aware."),

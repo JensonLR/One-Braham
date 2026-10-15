@@ -131,13 +131,13 @@ AREAS = [
     # curtain wall, column-free around the core - and differ only in their room
     # programmes. The ground floor and floor 15 are the two that are different:
     # the plaza and reception below, the canteen and the Skydeck balcony on top.
-    ("Ground_Plaza",     (0, 0),        -2600, -2200, 5200,  4400),
+    ("Ground_Plaza",     (0, 0),        -2200, -1800, 4400,  3600),
     ("Lobby",            (1, 1),        -2200, -1800, 4400,  3600),
     ("Mezzanine",        (2, 2),        -2200, -1800, 4400,  3600),
     ("OpenPlan",         (3, 8),        -2200, -1800, 4400,  3600),
     ("ServerComms",      (9, 11),       -2200, -1800, 4400,  3600),
     ("Executive",        (12, 14),      -2200, -1800, 4400,  3600),
-    ("Skydeck",          (15, 15),      -2400, -2000, 4800,  4000),
+    ("Skydeck",          (15, 15),      -2200, -1800, 4400,  3600),
 ]
 
 AREA_NAMES = [a[0] for a in AREAS]
@@ -170,7 +170,9 @@ SPAWN_MIN_ENEMY_DISTANCE_CM = 2000.0
 SPAWN_MIN_SAME_TEAM_DISTANCE_CM = 600.0
 
 # Gameplay anchors.
-EXTRACTION_PAD_LOCATION = (0.0, 0.0, 15.0 * FLOOR_HEIGHT_CM)
+# On the Skydeck balcony's east wing, clear of the roof core. Floor 15's
+# finished level is 14 storeys above the lobby (Z = 0): 5600 cm.
+EXTRACTION_PAD_LOCATION = (1650.0, 900.0, 14.0 * FLOOR_HEIGHT_CM)
 EXTRACTION_HOLD_RADIUS_CM = 900.0
 CANTEEN_SKYDECK_STAIR_XY = (900.0, -700.0)
 

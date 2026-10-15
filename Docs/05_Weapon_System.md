@@ -79,6 +79,15 @@ weapon's spread cone, it loses its listed damage, and every surface beyond the
 first stops it. What it does is make cover honest — a plasterboard partition is
 cover, and it is not safety.
 
+Power is the thickness in centimetres the round can get through
+(`MaxPenetrationThickness`): `AOneBrahamWeaponBase::TraceBullet` finds the far
+face of the penetrable surface and stops the round if it is further than that.
+Both faces are reported as impacts (the entry hole on your side, spall on the
+far side), the surface beyond is resolved from its physical material, and a
+character hit through cover gives the shooter a hit marker and the victim a
+flinch exactly as a clean hit does. Rounds are traced to
+`max(200 m, 1.5 × MinDamageRange)`; the falloff band sets damage, not reach.
+
 ### Spread — hip standing / crouching / moving / sprinting, ADS
 
 | Weapon | Stand | Crouch | Move | Sprint | ADS | ADS move | Bloom/shot | Max bloom | Decay/s |

@@ -303,3 +303,17 @@ Sources: [Severfield](https://www.severfield.com/projects/one-braham),
 [AGC](https://www.agc-yourglass.com/en/project-case-studies/one-braham),
 [NLA](https://nla.london/projects/one-braham),
 [Buildington](https://www.buildington.co.uk/buildings/4813/england/london-e1/1-braham-street/one-braham).
+
+### The ground floor, from photographs
+
+* **Revolving doors**: three tall all-glass drums in the frontage, slim
+  stainless frames, opening onto the plaza.
+* **Reception**: a long desk in front of a dark feature wall; a pale speckled
+  terrazzo floor throughout; planters along the glass.
+* **Gate line**: black glass speed gates with lit lanes, set against warm timber
+  panelling, the lifts beyond them.
+* **Escalators**: behind the gates, in an enclosure lit in a deep violet - the
+  one saturated colour in a monochrome floor. In the game the enclosure is dark
+  metal and its light is the floor's accent.
+* **Lift lobby**: timber-lined walls, metal lift doors, the glass lift at the
+  back catching the light from above.

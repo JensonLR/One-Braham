@@ -6,6 +6,7 @@
 #include "VoiceModule.h"
 #include "VoicePackage.h"
 #include "Interfaces/VoiceInterface.h"
+#include "Voice/OneBrahamMicrophonePermission.h"
 
 // ===========================================================================
 //  FOneBrahamVoiceCodec
@@ -15,42 +16,68 @@ FOneBrahamVoiceCodec::~FOneBrahamVoiceCodec()
 	Shutdown();
 }
 
+void FOneBrahamVoiceCodec::CheckFrameBudget()
+{
+	// 640 raw bytes is comfortably inside the 1024 byte budget from the build
+	// configuration; the assertion exists so that changing the sample rate cannot
+	// silently overflow it.
+	checkf(RawFrameBytes + 2 <= MaxTransportFrameBytes,
+		TEXT("Voice frame (%d bytes + header) exceeds MAX_VOICE_FRAME_BYTES (%d)."),
+		RawFrameBytes, MaxTransportFrameBytes);
+}
+
 bool FOneBrahamVoiceCodec::Initialise()
 {
-	if (IsUsingEngineCodec())
+	const bool bEncoder = InitialiseEncoder();
+	const bool bDecoder = InitialiseDecoder();
+	return bEncoder && bDecoder;
+}
+
+bool FOneBrahamVoiceCodec::InitialiseEncoder()
+{
+	if (Encoder.IsValid())
 	{
 		return true;
 	}
 
 	// The Voice module owns the platform codec. If it is not present (dedicated
-	// server, or a platform without an Opus plugin) we stay on raw PCM - voice
-	// must never be the reason a build cannot talk to itself.
-	if (!FVoiceModule::IsAvailable())
+	// server, [Voice] bEnabled=false, or a platform without Opus) we stay on raw
+	// PCM - voice must never be the reason a build cannot talk to itself.
+	if (!FVoiceModule::IsAvailable() || !FVoiceModule::Get().IsVoiceEnabled())
 	{
 		UE_LOG(LogOneBrahamVoice, Log,
-			TEXT("[OB.VOICE] Voice module unavailable - using uncompressed 16 kHz PCM frames."));
+			TEXT("[OB.VOICE] Voice module unavailable or disabled ([Voice] bEnabled) - sending uncompressed 16 kHz PCM frames."));
 		return false;
 	}
 
-	FVoiceModule& VoiceModule = FVoiceModule::Get();
+	CheckFrameBudget();
 
-	// The module initialises the codec objects itself and returns null when that
-	// fails, so a valid pointer here is a ready-to-use encoder/decoder.
-	Encoder = VoiceModule.CreateVoiceEncoder(SampleRate, NumChannels, EAudioEncodeHint::VoiceEncode_Voice);
-	Decoder = VoiceModule.CreateVoiceDecoder(SampleRate, NumChannels);
+	// The module initialises the codec object itself and returns null when that
+	// fails, so a valid pointer here is a ready-to-use encoder.
+	Encoder = FVoiceModule::Get().CreateVoiceEncoder(SampleRate, NumChannels, EAudioEncodeHint::VoiceEncode_Voice);
 
-	// Log the frame cap relationship once at startup: 640 raw bytes is comfortably
-	// inside the 1024 byte budget from the build configuration, and the assertion
-	// exists so that changing the sample rate cannot silently overflow it.
-	checkf(RawFrameBytes + 2 <= MaxTransportFrameBytes,
-		TEXT("Voice frame (%d bytes + header) exceeds MAX_VOICE_FRAME_BYTES (%d)."),
-		RawFrameBytes, MaxTransportFrameBytes);
+	UE_LOG(LogOneBrahamVoice, Log, TEXT("[OB.VOICE] Encoder ready - %s frames at %d Hz, %d ms."),
+		Encoder.IsValid() ? TEXT("Opus") : TEXT("raw PCM"), SampleRate, 1000 * FrameSamples / SampleRate);
 
-	UE_LOG(LogOneBrahamVoice, Log, TEXT("[OB.VOICE] Codec ready - %s frames at %d Hz, %d ms."),
-		IsUsingEngineCodec() ? TEXT("compressed") : TEXT("raw PCM"),
-		SampleRate, 1000 * FrameSamples / SampleRate);
+	return Encoder.IsValid();
+}
 
-	return IsUsingEngineCodec();
+bool FOneBrahamVoiceCodec::InitialiseDecoder()
+{
+	if (Decoder.IsValid())
+	{
+		return true;
+	}
+
+	if (!FVoiceModule::IsAvailable() || !FVoiceModule::Get().IsVoiceEnabled())
+	{
+		return false;
+	}
+
+	CheckFrameBudget();
+	Decoder = FVoiceModule::Get().CreateVoiceDecoder(SampleRate, NumChannels);
+
+	return Decoder.IsValid();
 }
 
 void FOneBrahamVoiceCodec::Shutdown()
@@ -76,7 +103,7 @@ bool FOneBrahamVoiceCodec::EncodeFrame(const TArray<uint8>& RawPcm, TArray<uint8
 		return false;
 	}
 
-	const bool bCompressed = IsUsingEngineCodec();
+	const bool bCompressed = Encoder.IsValid();
 
 	OutFrame.Reset();
 	OutFrame.Reserve(bCompressed ? (RawPcm.Num() / 8 + 2) : (RawPcm.Num() + 2));
@@ -132,7 +159,7 @@ bool FOneBrahamVoiceCodec::DecodeFrame(const TArray<uint8>& Frame, TArray<uint8>
 
 	OutRawPcm.Reset();
 
-	if (CodecFlag == 1 && IsUsingEngineCodec())
+	if (CodecFlag == 1 && Decoder.IsValid())
 	{
 		// Size the output for the announced length with headroom; the decoder
 		// reports the real decoded size back through RawSize.
@@ -183,7 +210,7 @@ bool FOneBrahamVoiceCodec::DecodeFrame(const TArray<uint8>& Frame, TArray<uint8>
 // ===========================================================================
 FOneBrahamVoiceCapture::~FOneBrahamVoiceCapture()
 {
-	Stop();
+	Shutdown();
 }
 
 bool FOneBrahamVoiceCapture::Start(const FString& DeviceName)
@@ -193,24 +220,46 @@ bool FOneBrahamVoiceCapture::Start(const FString& DeviceName)
 		return true;
 	}
 
-	if (!FVoiceModule::IsAvailable())
+	if (!FVoiceModule::IsAvailable() || !FVoiceModule::Get().IsVoiceEnabled())
 	{
 		UE_LOG(LogOneBrahamVoice, Warning,
-			TEXT("[OB.VOICE] Cannot start capture: the Voice module is unavailable."));
+			TEXT("[OB.VOICE] Cannot start capture: the Voice module is unavailable or [Voice] bEnabled is false."));
 		return false;
 	}
 
-	// The module initialises the capture object for the requested device/format
-	// and returns null when that fails.
-	Capture = FVoiceModule::Get().CreateVoiceCapture(DeviceName,
-		FOneBrahamVoiceCodec::SampleRate,
-		FOneBrahamVoiceCodec::NumChannels);
+	// Never touch the device without the OS's permission: on macOS that is either
+	// a TCC termination (no usage string) or a capture of pure silence (denied).
+	const EOneBrahamMicrophonePermission Permission = OneBrahamMicrophonePermission::GetStatus();
+	if (!OneBrahamMicrophonePermission::IsUsable(Permission))
+	{
+		UE_LOG(LogOneBrahamVoice, Log, TEXT("[OB.VOICE] Cannot start capture: microphone permission is %s."),
+			OneBrahamMicrophonePermission::ToString(Permission));
+		return false;
+	}
+
+	// A different device asks for a new object; the same one is reused.
+	if (Capture.IsValid() && CreatedForDevice != DeviceName)
+	{
+		Shutdown();
+	}
 
 	if (!Capture.IsValid())
 	{
-		UE_LOG(LogOneBrahamVoice, Warning,
-			TEXT("[OB.VOICE] No voice capture device could be created."));
-		return false;
+		// The module initialises the capture object for the requested device and
+		// format, and returns null when that fails. Note that the macOS backend
+		// always records from the system default input device, whatever is named.
+		Capture = FVoiceModule::Get().CreateVoiceCapture(DeviceName,
+			FOneBrahamVoiceCodec::SampleRate,
+			FOneBrahamVoiceCodec::NumChannels);
+
+		if (!Capture.IsValid())
+		{
+			UE_LOG(LogOneBrahamVoice, Warning,
+				TEXT("[OB.VOICE] No voice capture device could be created."));
+			return false;
+		}
+
+		CreatedForDevice = DeviceName;
 	}
 
 	if (!Capture->Start())
@@ -220,8 +269,7 @@ bool FOneBrahamVoiceCapture::Start(const FString& DeviceName)
 		UE_LOG(LogOneBrahamVoice, Warning,
 			TEXT("[OB.VOICE] Starting capture failed (state %s). Check the microphone in Settings -> Audio."),
 			EVoiceCaptureState::ToString(CaptureState));
-		Capture->Shutdown();
-		Capture.Reset();
+		Shutdown();
 		return false;
 	}
 
@@ -229,7 +277,7 @@ bool FOneBrahamVoiceCapture::Start(const FString& DeviceName)
 	PendingBytes.Reset();
 	bCapturing = true;
 
-	UE_LOG(LogOneBrahamVoice, Log, TEXT("[OB.VOICE] Capture started on '%s' (%d Hz mono)."),
+	UE_LOG(LogOneBrahamVoice, Verbose, TEXT("[OB.VOICE] Capture started on '%s' (%d Hz mono)."),
 		*ActiveDeviceName, FOneBrahamVoiceCodec::SampleRate);
 
 	return true;
@@ -242,15 +290,28 @@ void FOneBrahamVoiceCapture::Stop()
 		return;
 	}
 
-	if (Capture.IsValid())
+	// The macOS backend asserts if Stop is called on a unit that is not running
+	// (it can drop out of capturing on a device error), so ask first.
+	if (Capture.IsValid() && Capture->IsCapturing())
 	{
 		Capture->Stop();
-		Capture->Shutdown();
-		Capture.Reset();
 	}
 
 	PendingBytes.Reset();
 	bCapturing = false;
+}
+
+void FOneBrahamVoiceCapture::Shutdown()
+{
+	Stop();
+
+	if (Capture.IsValid())
+	{
+		Capture->Shutdown();
+		Capture.Reset();
+	}
+
+	CreatedForDevice.Reset();
 }
 
 bool FOneBrahamVoiceCapture::PullFrames(TArray<TArray<uint8>>& OutFrames)
@@ -278,10 +339,10 @@ bool FOneBrahamVoiceCapture::PullFrames(TArray<TArray<uint8>>& OutFrames)
 
 	if (State == EVoiceCaptureState::NotCapturing)
 	{
-		// The device went away (a headset was unplugged). Stop cleanly rather than
-		// spamming Warnings every tick.
-		UE_LOG(LogOneBrahamVoice, Log, TEXT("[OB.VOICE] Capture device stopped; voice chat disabled until re-enabled."));
-		Stop();
+		// The device went away (a headset was unplugged). Release the object so the
+		// next attempt opens whatever the system default is now.
+		UE_LOG(LogOneBrahamVoice, Log, TEXT("[OB.VOICE] Capture device stopped; will retry on the next transmission."));
+		Shutdown();
 		return false;
 	}
 
