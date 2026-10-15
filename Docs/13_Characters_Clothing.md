@@ -290,3 +290,15 @@ them. They are kept for now because they are in the copy the HUD's Blueprint
 layer was briefed with (`Docs/08` section 3), and deleting a tag a widget author
 was told to use is a conversation, not a commit.
 
+## Stand-in bodies
+
+Until the cast's own bodies are authored, every archetype uses one of Epic's
+UE5 mannequins - Manny and Quinn alternate down the cast - with the mannequin
+locomotion animation blueprint (`ABP_Unarmed`). `fetch_open_assets.py` copies
+them from the engine install into `/Game/Characters/Mannequins`;
+`build_characters.py` writes the paths into the cast payload and
+`apply_cast_payload.py` sets them on the registry. The hit-zone mapping is
+tested against the mannequin's bone names (`OneBraham.Damage.Zone`), so the
+damage model is correct on the stand-ins today and on any UE5-skeleton body
+later.
+

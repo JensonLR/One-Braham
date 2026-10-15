@@ -34,6 +34,13 @@ from onebraham import common as C
 if C.IN_EDITOR:
     import unreal
 
+# Epic's UE5 mannequins, the stand-in bodies (free for Unreal Engine projects).
+MANNEQUIN_BODIES = (
+    "/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple.SKM_Manny_Simple",
+    "/Game/Characters/Mannequins/Meshes/SKM_Quinn_Simple.SKM_Quinn_Simple",
+)
+MANNEQUIN_ANIM_BLUEPRINT = "/Game/Characters/Mannequins/Anims/Unarmed/ABP_Unarmed"
+
 # ---------------------------------------------------------------------------
 #  The cast
 # ---------------------------------------------------------------------------
@@ -233,7 +240,7 @@ def build_registry(report):
     # The archetype entries are written through Python properties. The struct
     # field names mirror FOneBrahamArchetypeDefinition exactly.
     archetypes = []
-    for entry in ARCHETYPES:
+    for index, entry in enumerate(ARCHETYPES):
         C.log(u"  archetype {0} (floor {1}, {2})".format(
             entry["name"], entry["home_floor"], entry["voice_set"]))
 
@@ -249,6 +256,12 @@ def build_registry(report):
             "unlock_rule_id": "Default",
             "required_level": 0,
             "default_cosmetics": entry["cosmetics"],
+            # Until the cast's own bodies exist (Docs/13), Epic's UE5 mannequins
+            # stand in - Manny and Quinn alternating - with their locomotion
+            # animation blueprint. fetch_open_assets.py copies them in from the
+            # installed engine; the paths are the ones that content expects.
+            "body_mesh_path": MANNEQUIN_BODIES[index % 2],
+            "anim_class_path": MANNEQUIN_ANIM_BLUEPRINT,
             "personality": {
                 "walk_rate_scale": entry["personality"]["walk"],
                 "arm_swing_scale": entry["personality"]["arms"],

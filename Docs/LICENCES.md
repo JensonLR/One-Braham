@@ -157,3 +157,12 @@ DirectX normal and roughness maps are extracted). All CC0.
 | [Planks037A](https://ambientcg.com/view?id=Planks037A) | terrace decking |
 
 Poly Haven's [rubber_tiles](https://polyhaven.com/a/rubber_tiles) (CC0) is the canteen floor.
+
+## Epic Games (UE5 mannequins)
+
+Manny and Quinn, their materials, the locomotion animation blueprint and the
+rifle, pistol, hit-react and death animations - Epic's own template content
+from the engine install, copied to `Content/Characters/Mannequins` by
+`fetch_open_assets.py` (not committed). Free for use in Unreal Engine projects
+under the Unreal Engine EULA. They stand in for the cast's bodies until those
+are made (Docs/13).

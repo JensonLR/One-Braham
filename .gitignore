@@ -68,3 +68,6 @@ __pycache__/
 # machine that has run one has its own.
 Tools/Python/onebraham_build_manifest.json
 SourceArt/
+
+# Epic's UE5 mannequins: copied from the engine by fetch_open_assets.py.
+Content/Characters/Mannequins/

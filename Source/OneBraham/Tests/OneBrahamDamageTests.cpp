@@ -19,6 +19,7 @@
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
+#include "Weapons/OneBrahamWeaponBase.h"
 #include "UObject/Package.h"
 
 #include "Characters/OneBrahamDownedComponent.h"
@@ -198,6 +199,28 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamDamageCombinationTest, "OneBraham.Dam
 
 bool FOneBrahamDamageCombinationTest::RunTest(const FString& Parameters)
 {
+	// The stand-in bodies are Epic's UE5 mannequins: their bone names have to
+	// land in the right zones, or every headshot reads as a body shot.
+	{
+		const TPair<const TCHAR*, EOneBrahamHitZone> Bones[] = {
+			{ TEXT("head"), EOneBrahamHitZone::Head },
+			{ TEXT("neck_01"), EOneBrahamHitZone::Neck },
+			{ TEXT("spine_03"), EOneBrahamHitZone::Torso },
+			{ TEXT("pelvis"), EOneBrahamHitZone::Torso },
+			{ TEXT("upperarm_l"), EOneBrahamHitZone::UpperArm },
+			{ TEXT("lowerarm_r"), EOneBrahamHitZone::LowerArm },
+			{ TEXT("hand_l"), EOneBrahamHitZone::Hand },
+			{ TEXT("thigh_r"), EOneBrahamHitZone::UpperLeg },
+			{ TEXT("calf_l"), EOneBrahamHitZone::LowerLeg },
+			{ TEXT("foot_r"), EOneBrahamHitZone::Foot },
+		};
+		for (const TPair<const TCHAR*, EOneBrahamHitZone>& Bone : Bones)
+		{
+			TestEqual(*FString::Printf(TEXT("mannequin bone %s"), Bone.Key),
+				AOneBrahamWeaponBase::ResolveHitZone(FName(Bone.Key)), Bone.Value);
+		}
+	}
+
 	UOneBrahamHealthComponent* Health = NewObject<UOneBrahamHealthComponent>(
 		GetTransientPackage(), NAME_None, RF_Transient);
 

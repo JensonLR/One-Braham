@@ -199,6 +199,40 @@ def sun_of(path):
     return round(x / float(width) * 360.0, 2), round(90.0 - y / float(height) * 180.0, 2), peak
 
 
+def _engine_root():
+    """The installed engine: UE_ROOT, or the usual install folders."""
+    candidates = [os.environ.get("UE_ROOT", "")] + [os.path.expanduser(p) for p in (
+        "~/UE_5.8", "/Users/Shared/Epic Games/UE_5.8", "C:/Program Files/Epic Games/UE_5.8")]
+    for path in candidates:
+        if path and os.path.isdir(os.path.join(path, "Templates")):
+            return path
+    return None
+
+
+def copy_engine_mannequins():
+    """Copies Epic's UE5 mannequins (meshes, materials, locomotion, rifle and
+    pistol animation, hit reacts, deaths) from the engine's own template content
+    to /Game/Characters/Mannequins, where their references point. They stand in
+    for the cast's bodies until those are made. Not committed: every engine
+    install has them."""
+    import shutil
+    root = _engine_root()
+    if root is None:
+        print("no engine install found - set UE_ROOT to copy the mannequins")
+        return False
+    source = os.path.join(root, "Templates", "TemplateResources", "High", "Characters", "Content", "Mannequins")
+    target = os.path.join(ROOT, "Content", "Characters", "Mannequins")
+    if not os.path.isdir(source):
+        print("mannequin content not found in {0}".format(root))
+        return False
+    if not os.path.isdir(target):
+        shutil.copytree(source, target)
+        print("copied the UE5 mannequins to {0}".format(target))
+    else:
+        print("ok  UE5 mannequins already in the project")
+    return True
+
+
 def fetch():
     if not os.path.isdir(SOURCE_ART):
         os.makedirs(SOURCE_ART)
@@ -249,6 +283,11 @@ def fetch():
                     "kind": "texture", "path": os.path.relpath(target, ROOT),
                     "licence": "CC0 (ambientCG)", "page": page}
         print("ok  {0}".format(set_id))
+    copied = copy_engine_mannequins()
+    if copied:
+        manifest["epic:mannequins"] = {"kind": "engine-content", "path": "Content/Characters/Mannequins",
+                                       "licence": "Epic Games content, free for Unreal Engine projects",
+                                       "page": "Engine Templates/TemplateResources/High/Characters"}
     with open(MANIFEST, "w") as handle:
         json.dump(manifest, handle, indent=2, sort_keys=True)
     print("wrote {0}".format(MANIFEST))

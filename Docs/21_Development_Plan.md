@@ -94,6 +94,11 @@ Replace flat colours with physically based textures, and boxes with props.
 
 - [ ] Characters on the UE5 mannequin skeleton with the free Game Animation
       Sample motion-matching set; the six archetypes' clothing from Docs/13.
+      *Done:* the cast stands on Epic's Manny and Quinn (alternating) with
+      the mannequin locomotion blueprint, hit zones tested against the
+      mannequin skeleton. *Next:* rifle/pistol upper-body layers from the
+      mannequin set, the archetypes' clothing, the Game Animation Sample
+      (a Fab download - needs the account holder).
 - [ ] Ten weapons with proper meshes, sounds and first-person animation.
 - [ ] Recorded or licensed audio replacing the procedural placeholders:
       weapons, footsteps per surface, ambience per floor, the voice script.

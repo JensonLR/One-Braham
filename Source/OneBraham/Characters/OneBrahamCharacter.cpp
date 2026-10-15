@@ -720,7 +720,9 @@ void AOneBrahamCharacter::ApplyArchetype(FGameplayTag ArchetypeTag)
 	Appearance.BodyVariant = Definition->BodyVariant;
 	Appearance.SquadColorIndex = GetPlayerState<AOneBrahamPlayerState>() ? FMath::Abs(GetPlayerState<AOneBrahamPlayerState>()->GetPlayerId()) % 4 : 0;
 
-	if (Definition->BodyMesh.IsValid() && GetMesh() != nullptr)
+	// IsNull, not IsValid: IsValid is "already loaded", and a body that had not
+	// been loaded by anything else yet was never applied.
+	if (!Definition->BodyMesh.IsNull() && GetMesh() != nullptr)
 	{
 		if (USkeletalMesh* Mesh = Definition->BodyMesh.LoadSynchronous())
 		{
@@ -733,7 +735,7 @@ void AOneBrahamCharacter::ApplyArchetype(FGameplayTag ArchetypeTag)
 		GetMesh()->SetAnimInstanceClass(Definition->AnimInstanceClass);
 	}
 
-	if (Definition->FirstPersonMesh.IsValid() && FirstPersonMesh != nullptr)
+	if (!Definition->FirstPersonMesh.IsNull() && FirstPersonMesh != nullptr)
 	{
 		if (USkeletalMesh* ArmsMesh = Definition->FirstPersonMesh.LoadSynchronous())
 		{

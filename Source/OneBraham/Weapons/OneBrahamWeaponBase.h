@@ -401,7 +401,10 @@ protected:
 	int32 LocalTracerCounter = 0;
 
 	/** Server: converts a bone name into a hit zone. */
+public:
+	/** Bone name to hit zone: pure, and tested against the stand-in skeleton. */
 	static EOneBrahamHitZone ResolveHitZone(FName BoneName);
+protected:
 
 	/** Server: resolves a physical material surface into our surface enum. */
 	static EOneBrahamFootstepSurface ResolveSurface(const UPhysicalMaterial* PhysicalMaterial);

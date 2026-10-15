@@ -201,10 +201,27 @@ def build_archetype_struct(report, registry, entry):
                       ("hair_material", "hair_material_path")):
         path = entry.get(key)
         if path:
+            # A soft reference is set from the loaded asset; a path the content
+            # has not reached yet is reported, not swallowed.
+            asset = unreal.load_asset(path)
+            if asset is None:
+                report.skipped_asset(path, "not in the project yet")
+                continue
             try:
-                archetype.set_editor_property(prop, unreal.SoftObjectPath(path))
-            except Exception:  # noqa: BLE001
-                pass
+                archetype.set_editor_property(prop, asset)
+            except Exception as exc:  # noqa: BLE001
+                report.failed(entry.get("id", "?"), u"{0}: {1}".format(prop, exc))
+
+    anim_path = entry.get("anim_class_path")
+    if anim_path:
+        anim_class = unreal.EditorAssetLibrary.load_blueprint_class(anim_path)
+        if anim_class is None:
+            report.skipped_asset(anim_path, "animation blueprint not in the project yet")
+        else:
+            try:
+                archetype.set_editor_property("anim_instance_class", anim_class)
+            except Exception as exc:  # noqa: BLE001
+                report.failed(entry.get("id", "?"), u"anim_instance_class: {0}".format(exc))
 
     return archetype
 
