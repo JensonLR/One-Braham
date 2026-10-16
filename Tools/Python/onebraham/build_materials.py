@@ -22,6 +22,8 @@ WHAT IT CREATES
     /Game/OneBraham/Materials/M_OB_SurfaceTextured master, world-aligned CC0 texture sets
     /Game/OneBraham/Materials/M_OB_GlassGrimed     master, glass with a world-aligned grime mask
     /Game/OneBraham/Materials/M_OB_DecalTextured   master, deferred decal from a CC0 set
+    /Game/OneBraham/Materials/MPC_OneBraham_Global the global parameter collection the C++ drives
+    /Game/OneBraham/Materials/M_OB_PP_Accessibility post-process: flash-bang white-out, colour-blind modes
     /Game/OneBraham/Materials/Instances/MI_<Surface>       14 surface instances
     /Game/OneBraham/Materials/Instances/MI_OB_Brand_*      brand + alarm instances
 
@@ -124,6 +126,16 @@ def _create_asset(name, folder, asset_class, factory):
     path = u"{0}/{1}".format(folder, name)
     existing = unreal.EditorAssetLibrary.load_asset(path)
     if existing is not None:
+        # A master is re-authored from scratch: the builders only ever add
+        # nodes, so reusing the old graph stacked a full copy of it on every
+        # build (M_OB_Surface had reached 324 expressions, four graphs deep).
+        # One delete_all pass removes only every other node in this engine
+        # (it walks the array it deletes from), so it repeats until empty.
+        if isinstance(existing, unreal.Material) and _mel():
+            for _ in range(16):
+                if _mel().get_num_material_expressions(existing) == 0:
+                    break
+                _mel().delete_all_material_expressions(existing)
         return existing, False
     asset = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
         name, folder, asset_class, factory)
@@ -514,7 +526,42 @@ def build_master_decal(report):
     return material
 
 
+# Usage flags per master. A cooked build cannot add one at runtime: a material
+# drawn on a component kind it was not flagged for is swapped for the engine's
+# default material ("missing usage flag InstancedStaticMeshes! Default
+# Material will be used in game" - MI_Metal on the lift's ISM landing doors,
+# the gate glass). The editor sets them silently on first use and never saves
+# them, which is why the editor never showed it. What draws where (read from
+# the maps and the mesh assets):
+#   ISM          the lift's landing doors and glass frame, the kit's repeats
+#   skeletal     the general-purpose masters, for anything a cosmetic or prop
+#                attaches to a character or a weapon's skeletal mesh
+#   Nanite       the opaque masters, so enabling Nanite on a kit mesh does not
+#                quietly turn it into the default material in a package
+# build_district.py's masters (Facade, AdScreen) finish through _finish too.
+MASTER_USAGE = {
+    "M_OB_Surface":         ("instanced_static_meshes", "skeletal_mesh", "nanite"),
+    "M_OB_SurfaceTextured": ("instanced_static_meshes", "skeletal_mesh", "nanite"),
+    "M_OB_Glass":           ("instanced_static_meshes", "skeletal_mesh"),
+    "M_OB_GlassGrimed":     ("instanced_static_meshes", "skeletal_mesh"),
+    "M_OB_Emissive":        ("instanced_static_meshes", "skeletal_mesh", "nanite"),
+    "M_OB_Screen":          ("instanced_static_meshes", "nanite"),
+    "M_OB_Facade":          ("instanced_static_meshes", "nanite"),
+    "M_OB_AdScreen":        ("instanced_static_meshes", "nanite"),
+    "M_OB_SkyDome":         ("instanced_static_meshes",),
+}
+
+
+def _set_usage(material, name):
+    for usage in MASTER_USAGE.get(name, ()):
+        try:
+            material.set_editor_property("used_with_" + usage, True)
+        except Exception as exc:  # noqa: BLE001
+            C.warn(u"  {0}: usage {1} not settable: {2}".format(name, usage, exc))
+
+
 def _finish(material, created, name, report):
+    _set_usage(material, name)
     try:
         _mel().recompile_material(material)
     except Exception:  # noqa: BLE001
@@ -642,6 +689,194 @@ def build_brand_instances(report, masters):
     return instances
 
 
+# ---------------------------------------------------------------------------
+#  Global parameter collection and the accessibility post-process
+# ---------------------------------------------------------------------------
+# MPC_OneBraham_Global: every parameter the C++ writes with
+# UKismetMaterialLibrary::Set*ParameterValue. The names are the contract:
+#   FlashAlpha       AOneBrahamPlayerController::TickFlash, 0 .. 1 white-out
+#   ColourBlindMode  UOneBrahamGameUserSettings::SetColourBlindMode, the
+#                    EOneBrahamColourBlindMode value (0 off, 1 protanopia,
+#                    2 deuteranopia, 3 tritanopia)
+GLOBAL_COLLECTION = "MPC_OneBraham_Global"
+GLOBAL_SCALARS = (
+    ("FlashAlpha", 0.0),
+    ("ColourBlindMode", 0.0),
+)
+
+# Colour-blind correction, one 3x3 per EOneBrahamColourBlindMode, in linear
+# RGB: daltonisation, c' = c + E (c - S c) = (I + E (I - S)) c. S simulates
+# the deficiency (Machado, Oliveira & Fernandes 2009, severity 1.0); E moves
+# the colour the player cannot see into channels they can. Red-green types
+# push the lost red/green difference into green and blue (Fidaner et al.);
+# tritanopia pushes the lost blue into red and green. Precomputed here so the
+# shader carries one matrix per mode, not the simulation and the shift.
+_CVD_SIMULATION = (
+    ((0.152286, 1.052583, -0.204868), (0.114503, 0.786281, 0.099216), (-0.003882, -0.048116, 1.051998)),
+    ((0.367322, 0.860646, -0.227968), (0.280085, 0.672501, 0.047413), (-0.011820, 0.042940, 0.968881)),
+    ((1.255528, -0.076749, -0.178779), (-0.078411, 0.930809, 0.147602), (0.004733, 0.691367, 0.303900)),
+)
+_CVD_SHIFT = (
+    ((0.0, 0.0, 0.0), (0.7, 1.0, 0.0), (0.7, 0.0, 1.0)),
+    ((0.0, 0.0, 0.0), (0.7, 1.0, 0.0), (0.7, 0.0, 1.0)),
+    ((1.0, 0.0, 0.7), (0.0, 1.0, 0.7), (0.0, 0.0, 0.0)),
+)
+
+
+def _cvd_delta(mode_index):
+    """(I + E(I - S)) - I = E(I - S): the rows added to identity for one mode."""
+    sim, shift = _CVD_SIMULATION[mode_index], _CVD_SHIFT[mode_index]
+    lost = [[(1.0 if r == c else 0.0) - sim[r][c] for c in range(3)] for r in range(3)]
+    return [tuple(sum(shift[r][k] * lost[k][c] for k in range(3)) for c in range(3))
+            for r in range(3)]
+
+
+def build_global_collection(report):
+    """MPC_OneBraham_Global, with GLOBAL_SCALARS. An existing collection keeps
+    its parameters (and their ids: a material's collection node finds its
+    parameter by id, so recreating them would orphan every reader) and only
+    gains the missing ones."""
+    path = u"{0}/{1}".format(C.MATERIALS, GLOBAL_COLLECTION)
+    collection, created = _create_asset(
+        GLOBAL_COLLECTION, C.MATERIALS, unreal.MaterialParameterCollection,
+        unreal.MaterialParameterCollectionFactoryNew())
+    if collection is None:
+        report.failed(GLOBAL_COLLECTION, "could not create the parameter collection")
+        return None
+
+    scalars = list(collection.get_editor_property("scalar_parameters"))
+    by_name = dict((str(p.get_editor_property("parameter_name")), p) for p in scalars)
+    for name, default in GLOBAL_SCALARS:
+        parameter = by_name.get(name)
+        if parameter is None:
+            parameter = unreal.CollectionScalarParameter()
+            parameter.set_editor_property("parameter_name", name)
+            scalars.append(parameter)
+        parameter.set_editor_property("default_value", default)
+    collection.set_editor_property("scalar_parameters", scalars)
+
+    unreal.EditorAssetLibrary.save_asset(path)
+    report.created_asset(path) if created else report.updated_asset(path)
+    C.log(u"  {0}: {1}".format(GLOBAL_COLLECTION, ", ".join(n for n, _ in GLOBAL_SCALARS)))
+    return collection
+
+
+def build_master_accessibility(report):
+    """M_OB_PP_Accessibility: the flash-bang white-out and the colour-blind
+    modes, as one post-process material on the global volume.
+
+        c      = PostProcessInput0.rgb                (after tonemapping)
+        lin    = c * c                                (display -> ~linear)
+        w_m    = saturate(1 - |ColourBlindMode - m|)  m = 1, 2, 3
+        row_i  = I_i + sum_m w_m * delta_m,i          (_cvd_delta)
+        cvd    = sqrt(saturate(dot(row_i, lin)))
+        graded = lerp(c, cvd, saturate(ColourBlindMode))
+        out    = lerp(graded, FlashColour, FlashAlpha)
+
+    After tonemapping, so the white-out is the white of the screen whatever the
+    exposure, and the matrices act on the colours the player actually sees.
+    Both lerps start from c itself: with FlashAlpha and ColourBlindMode at 0
+    (the collection's defaults) the frame is passed through untouched."""
+    name = "M_OB_PP_Accessibility"
+    material, created = _create_asset(name, C.MATERIALS, unreal.Material,
+                                      unreal.MaterialFactoryNew())
+    if material is None or not _mel():
+        report.failed(name, "could not author the accessibility post-process")
+        return material
+    collection = unreal.EditorAssetLibrary.load_asset(
+        u"{0}/{1}".format(C.MATERIALS, GLOBAL_COLLECTION))
+    if collection is None:
+        report.failed(name, GLOBAL_COLLECTION + " missing - the collection step failed")
+        return None
+
+    try:
+        material.set_editor_property("material_domain", unreal.MaterialDomain.MD_POST_PROCESS)
+        material.set_editor_property("blendable_location",
+                                     unreal.BlendableLocation.BL_SCENE_COLOR_AFTER_TONEMAPPING)
+        # Last in the chain. Same-priority blendables run in volume order, and
+        # the global volume (priority -1) is blended first, so at 0 each floor's
+        # M_OB_Highlight would draw after this: an interaction outline over a
+        # full white-out, and outline colours the daltonisation never saw.
+        material.set_editor_property("blendable_priority", 100)
+    except Exception as exc:  # noqa: BLE001
+        report.failed(name, u"post-process domain not settable: {0}".format(exc))
+        return material
+    _set_shading(material, "MSM_UNLIT")
+    _set_blend(material, "BLEND_OPAQUE")
+
+    def op(cls, a, b, x, y):
+        node = _expr(material, cls, x, y)
+        _connect(material, a, "", node, "A")
+        _connect(material, b, "", node, "B")
+        return node
+
+    def one(cls, a, x, y):
+        node = _expr(material, cls, x, y)
+        _connect(material, a, "", node, "")
+        return node
+
+    def collection_param(parameter, x, y):
+        node = _expr(material, unreal.MaterialExpressionCollectionParameter, x, y)
+        node.set_editor_property("collection", collection)
+        node.set_editor_property("parameter_name", parameter)
+        return node
+
+    scene = _expr(material, unreal.MaterialExpressionSceneTexture, -1900, -400)
+    scene.set_editor_property("scene_texture_id", unreal.SceneTextureId.PPI_POST_PROCESS_INPUT0)
+    colour = _expr(material, unreal.MaterialExpressionComponentMask, -1700, -400)
+    for channel, keep in (("r", True), ("g", True), ("b", True), ("a", False)):
+        colour.set_editor_property(channel, keep)
+    _connect(material, scene, "Color", colour, "")
+    linear = op(unreal.MaterialExpressionMultiply, colour, colour, -1500, -300)
+
+    # One weight per deficiency: 1 on its mode, 0 on the others.
+    mode = collection_param("ColourBlindMode", -1900, 200)
+    weights = []
+    for index in range(3):
+        y = 100 + index * 160
+        offset = op(unreal.MaterialExpressionSubtract, mode,
+                    _scalar_constant(material, float(index + 1), -1700, y + 60), -1500, y)
+        weights.append(one(unreal.MaterialExpressionSaturate,
+                           one(unreal.MaterialExpressionOneMinus,
+                               one(unreal.MaterialExpressionAbs, offset, -1350, y), -1200, y),
+                           -1050, y))
+
+    deltas = [_cvd_delta(index) for index in range(3)]
+    channels = []
+    for row in range(3):
+        y = -700 + row * 420
+        identity = tuple(1.0 if column == row else 0.0 for column in range(3))
+        total = _constant3(material, identity, -900, y)
+        for index in range(3):
+            scaled = op(unreal.MaterialExpressionMultiply,
+                        _constant3(material, deltas[index][row], -900, y + 90 * (index + 1)),
+                        weights[index], -700, y + 90 * (index + 1))
+            total = op(unreal.MaterialExpressionAdd, total, scaled, -500, y + 90 * (index + 1))
+        dot = op(unreal.MaterialExpressionDotProduct, total, linear, -300, y)
+        channels.append(dot)
+    rg = op(unreal.MaterialExpressionAppendVector, channels[0], channels[1], -120, -500)
+    rgb = op(unreal.MaterialExpressionAppendVector, rg, channels[2], 40, -400)
+    corrected = one(unreal.MaterialExpressionSquareRoot,
+                    one(unreal.MaterialExpressionSaturate, rgb, 200, -400), 360, -400)
+
+    graded = _expr(material, unreal.MaterialExpressionLinearInterpolate, 560, -300)
+    _connect(material, colour, "", graded, "A")
+    _connect(material, corrected, "", graded, "B")
+    _connect(material, one(unreal.MaterialExpressionSaturate, mode, 360, -160), "", graded, "Alpha")
+
+    # The white-out. A touch warm, as a retina reads a magnesium flash.
+    flash = collection_param("FlashAlpha", 360, 0)
+    out = _expr(material, unreal.MaterialExpressionLinearInterpolate, 760, -200)
+    _connect(material, graded, "", out, "A")
+    _connect(material, _vector_param(material, "FlashColour", (1.0, 0.98, 0.94, 1.0), 560, -60),
+             "", out, "B")
+    _connect(material, flash, "", out, "Alpha")
+    _connect_property(material, out, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+
+    _finish(material, created, name, report)
+    return material
+
+
 def build_all():
     if not C.IN_EDITOR:
         raise RuntimeError("build_materials must run inside the Unreal Editor.")
@@ -652,13 +887,15 @@ def build_all():
     C.guard(report, "directories", _ensure_dirs)
 
     physicals = C.guard(report, "physical materials", build_physical_materials, report) or {}
+    C.guard(report, "parameter collection", build_global_collection, report)
 
     masters = {}
 
     def _masters(report):
         for key, fn in (("Surface", build_master_surface), ("Glass", build_master_glass),
                         ("Emissive", build_master_emissive), ("Screen", build_master_screen),
-                        ("Decal", build_master_decal), ("Highlight", build_master_highlight)):
+                        ("Decal", build_master_decal), ("Highlight", build_master_highlight),
+                        ("Accessibility", build_master_accessibility)):
             asset = fn(report)
             if asset is not None:
                 masters[key] = asset

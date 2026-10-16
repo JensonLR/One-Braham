@@ -3940,6 +3940,24 @@ def build_skydeck_climate(report):
         except Exception as exc:  # noqa: BLE001
             report.failed("Post-process volume", str(exc))
 
+        # The flash-bang white-out and the colour-blind modes. The controller and
+        # the settings write MPC_OneBraham_Global; this material is what reads
+        # it, and it rides on the one volume that covers the whole map. Floor
+        # volumes carry their own blendables (the outline) and the engine adds
+        # every volume's together, so it is not overridden on any floor. At the
+        # collection's defaults it passes the frame through untouched.
+        try:
+            accessibility = unreal.EditorAssetLibrary.load_asset(C.MATERIALS + "/M_OB_PP_Accessibility")
+            if accessibility is None:
+                C.warn(u"  M_OB_PP_Accessibility not built yet - no flash-bang or colour-blind "
+                       u"post-process (run build_materials.py first)")
+            else:
+                blendables = unreal.WeightedBlendables()
+                blendables.set_editor_property("array", [unreal.WeightedBlendable(1.0, accessibility)])
+                settings.set_editor_property("WeightedBlendables", blendables)
+        except Exception as exc:  # noqa: BLE001
+            C.warn(u"  accessibility blendable not attachable on PPS_OneBraham_Global: {0}".format(exc))
+
 
 # ===========================================================================
 #  Levels
