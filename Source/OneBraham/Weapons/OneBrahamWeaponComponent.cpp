@@ -30,6 +30,50 @@
 #include "TimerManager.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
+#include "HAL/IConsoleManager.h"
+
+#if !UE_BUILD_SHIPPING
+namespace OneBrahamWeaponDev
+{
+	/** The slot `ob.weapon.equip` asked for, until a local player can draw it. */
+	int32 PendingEquipSlot = INDEX_NONE;
+
+	/**
+	 * Dev: draws a loadout slot on the local player. It waits for one rather than
+	 * failing without it, so `-ExecCmds="ob.weapon.equip sidearm"` (which runs
+	 * before the pawn spawns) can put the pistol in a smoke run's screenshots.
+	 */
+	FAutoConsoleCommandWithWorldAndArgs EquipSlotCommand(
+		TEXT("ob.weapon.equip"),
+		TEXT("Dev: equip a slot on the local player, now or once it has one. Args: primary | sidearm | <slot number>."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* /*World*/)
+		{
+			const FString Arg = Args.Num() > 0 ? Args[0].ToLower() : FString(TEXT("primary"));
+			int32 Slot = INDEX_NONE;
+			if (Arg == TEXT("primary"))
+			{
+				Slot = static_cast<int32>(EOneBrahamWeaponSlot::Primary);
+			}
+			else if (Arg == TEXT("sidearm") || Arg == TEXT("pistol"))
+			{
+				Slot = static_cast<int32>(EOneBrahamWeaponSlot::Sidearm);
+			}
+			else if (Arg.IsNumeric())
+			{
+				Slot = FCString::Atoi(*Arg);
+			}
+
+			if (Slot < 0 || Slot > static_cast<int32>(EOneBrahamWeaponSlot::Melee))
+			{
+				OB_WARN("ob.weapon.equip: unknown slot '%s'.", *Arg);
+				return;
+			}
+
+			PendingEquipSlot = Slot;
+			OB_LOG("ob.weapon.equip: slot %d requested.", Slot);
+		}));
+}
+#endif // !UE_BUILD_SHIPPING
 
 UOneBrahamWeaponComponent::UOneBrahamWeaponComponent()
 {
@@ -160,6 +204,22 @@ void UOneBrahamWeaponComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 
 	const bool bLocallyControlled = Character->IsLocallyControlled();
 	const bool bAuthority = GetOwner()->HasAuthority();
+
+#if !UE_BUILD_SHIPPING
+	// --- Dev slot request (ob.weapon.equip) -------------------------------
+	// A player's own pawn only, and only once the loadout has the slot filled.
+	if (OneBrahamWeaponDev::PendingEquipSlot != INDEX_NONE && bLocallyControlled && Character->IsPlayerControlled())
+	{
+		const EOneBrahamWeaponSlot Requested = static_cast<EOneBrahamWeaponSlot>(OneBrahamWeaponDev::PendingEquipSlot);
+		if (OwnedWeapons.FindRef(Requested) != nullptr)
+		{
+			OneBrahamWeaponDev::PendingEquipSlot = INDEX_NONE;
+			EquipSlot(Requested);
+			OB_LOG("ob.weapon.equip: '%s' drew slot %d ('%s').", *Character->GetName(), static_cast<int32>(Requested),
+				CurrentWeapon != nullptr && CurrentWeapon->Definition != nullptr ? *CurrentWeapon->Definition->WeaponId.ToString() : TEXT("none"));
+		}
+	}
+#endif
 
 	// --- ADS blend --------------------------------------------------------
 	const float TargetADS = bAimingDownSights ? 1.f : 0.f;

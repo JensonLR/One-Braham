@@ -17,7 +17,7 @@
 // ended by the server when the limit runs out - see DecideTimeOutOutcome.
 //
 // The GameMode owns: squad assignment, spawn selection, respawn logic, scoring,
-// match phase transitions, seamless travel and the bot-practice roster.
+// match phase transitions, seamless travel and the bots that fill empty slots.
 
 #pragma once
 
@@ -32,6 +32,7 @@ class AOneBrahamPlayerController;
 class AOneBrahamPlayerState;
 class AOneBrahamCharacter;
 class AOneBrahamSpawnPoint;
+class AOneBrahamBotController;
 
 /** One squad's score in FIRE DRILL, cached on the GameMode for fast scoring. */
 USTRUCT()
@@ -78,6 +79,8 @@ public:
 	virtual void PostLogin(APlayerController* NewPlayer) override;
 	virtual void Logout(AController* Exiting) override;
 	virtual void HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer) override;
+	virtual void HandleSeamlessTravelPlayer(AController*& C) override;
+	virtual void GetSeamlessTravelActorList(bool bToTransition, TArray<AActor*>& ActorList) override;
 	virtual bool ShouldSpawnAtStartSpot(AController* Player) override { return false; }
 	virtual bool PlayerCanRestart_Implementation(APlayerController* Player) override;
 	virtual void RestartPlayer(AController* NewPlayer) override;
@@ -202,13 +205,41 @@ public:
 	void RebuildSpawnPointRegistry();
 
 	// ======================================================================
-	//  Bots (practice mode only - ASCENT ships with no AI opponents)
+	//  Bots - fill the squad slots no human holds (OneBrahamBotRules)
 	// ======================================================================
+	/**
+	 * Server: puts a bot in every empty squad slot, up to MaxBots in total
+	 * (OneBrahamBotRules::FillAllSlots = no cap). Each bot is given its squad
+	 * now and its pawn as soon as the mode lets anyone spawn: in ASCENT that is
+	 * the end of the warmup, on the plaza, like every player.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Bots")
-	void PopulateWithBots(int32 BotsPerTeam);
+	void PopulateWithBots(int32 MaxBots = -1);
 
+	/** True once the match has any bots in it. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Bots")
 	bool IsBotPracticeMode() const { return bBotPracticeMode; }
+
+	/** The bot limit this match resolved in InitGame: -1 fill every slot, 0 none, N a cap. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Bots")
+	int32 GetBotLimit() const { return BotLimit; }
+
+	/** The bots currently in the match. */
+	int32 GetBotCount() const;
+
+	/**
+	 * Where a bot of this squad heads when nobody needs shooting: the Skydeck
+	 * pad in ASCENT, one of the control points in FIRE DRILL. False when the
+	 * mode or the map has none.
+	 */
+	bool FindBotObjective(int32 SquadId, int32 OrdinalInSquad, FVector& OutLocation, int32& OutFloor) const;
+
+	/**
+	 * Where a bot standing at From should walk to now: its objective when the
+	 * navmesh joins the two, else the floor of its own walkable group nearest
+	 * the objective (BuildBotFloorGraph). False when there is no objective.
+	 */
+	bool FindBotTravelTarget(int32 SquadId, int32 OrdinalInSquad, const FVector& From, FVector& OutLocation, int32& OutFloor) const;
 
 	// ======================================================================
 	//  Delegates
@@ -262,6 +293,35 @@ protected:
 	/** Fires the "extraction available" objective once the Skydeck is reachable. */
 	void UpdateObjectiveState();
 
+	/** Server: spawns a bot's pawn through RestartPlayer if the mode allows it now. */
+	void SpawnBotPawn(AOneBrahamBotController* Bot);
+
+	/**
+	 * True when bots may take the field: a human is in the match to play
+	 * against them, and the mode lets anyone spawn (ASCENT: once the warmup
+	 * ends). A dedicated server with nobody on it does not run a bot match.
+	 */
+	bool CanBotsSpawnNow() const;
+
+	/**
+	 * A human is taking a squad slot: when every slot is held, a bot gives one
+	 * up - from PreferredSquad when that squad has a bot (a player arriving with
+	 * a squad from the last map), else by OneBrahamBotRules::PickSquadToYieldBot.
+	 */
+	void MakeRoomForHuman(int32 PreferredSquad = INDEX_NONE);
+
+	/** Humans holding a squad slot, how many of them are still in the fight (alive or downed), and the bots still in it. */
+	void CountInFight(int32& HumansInSquads, int32& HumansInFight, int32& BotsInFight) const;
+
+	/** Humans and bots per squad, from the PlayerStates. */
+	void CountSquadMembers(TArray<int32>& OutHumans, TArray<int32>& OutBots) const;
+
+	/** A human needs a slot and every squad is full: one bot leaves. True if one did. */
+	bool RemoveBotToMakeRoom(int32 PreferredSquad = INDEX_NONE);
+
+	/** Works out which floors the navmesh joins (BotFloorGroup), and logs it. */
+	void BuildBotFloorGraph();
+
 	UPROPERTY()
 	TObjectPtr<UOneBrahamMatchSettingsAsset> MatchSettings = nullptr;
 
@@ -302,6 +362,28 @@ protected:
 
 	bool bBotPracticeMode = false;
 	bool bMatchFinished = false;
+
+	/** -1 fill every empty slot, 0 no bots, N at most N (`?Bots=N`, match settings). */
+	int32 BotLimit = 0;
+
+	/** Every bot this match created, for spawning at match start and giving way to humans. */
+	UPROPERTY()
+	TArray<TObjectPtr<AOneBrahamBotController>> BotControllers;
+
+	/** Hands out unique bot names across the match. */
+	int32 NextBotOrdinal = 0;
+
+	/** Floor -> a point on it the bots can path to (its first spawn point). */
+	TMap<int32, FVector> BotFloorAnchors;
+
+	/** Floor -> walkable group: floors in one group are joined by navmesh. */
+	TMap<int32, int32> BotFloorGroup;
+
+	/** The floor graph waits for a navmesh build in progress (a packaged build's first frames). */
+	bool bBotFloorGraphPending = false;
+
+	/** Clock for re-trying bots that could not spawn (a crowded start). */
+	float BotSpawnRetryAccumulator = 0.f;
 
 	/** Parsed from the travel options. */
 	FString PendingModeString;

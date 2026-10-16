@@ -18,6 +18,10 @@
 //       OneBraham -OBSmoke -windowed -log                 4 shots, 120 s budget
 //       OneBraham -OBSmoke -OBSmokeShots=6 -OBSmokeTimeout=180
 //
+//   Multiplayer (Scripts/SmokeLAN.sh runs both halves):
+//       OneBraham L_Persistent_OneBraham?listen -OBSmoke -OBSmokeExpectPlayers=2 -OBSmokeHold=60
+//       OneBraham 127.0.0.1 -OBSmoke -OBSmokeExpectPlayers=2
+//
 // THE CHECKS (each one a line, each failure a reason on the FAIL line)
 //   map          the loaded map's name; FAIL when no game world is loaded
 //   pawn         class and location of the possessed pawn; FAIL on the timeout
@@ -30,6 +34,33 @@
 //                never failed on: the number depends on the machine
 //   shot N       absolute path of each screenshot; FAIL when the file was not
 //                written by the end of the run
+//
+// THE MULTIPLAYER CHECKS (only with -OBSmokeExpectPlayers=N, N >= 1)
+//   players      waits, after the checks above, until the game state holds at
+//                least N human player states (bots are not counted) and each
+//                has a pawn, or PawnGraceSeconds after the count is reached;
+//                then one "player" line each: name, team, squad, pawn and its
+//                location, ping. FAIL on the timeout ("waiting for 2 players,
+//                have 1")
+//   net          the net driver and its connections: on a client the server
+//                connection's address, state and lag (FAIL with no open server
+//                connection); on a listen server every client connection
+//   standalone   FAIL when the game is not networked at all: a client whose
+//                connection failed falls back to the default map, which is
+//                the tower, and would otherwise pass there on its own
+//   net failure  any network or travel failure the engine reports (a host
+//                that cannot be reached, a connection lost mid-run) is logged
+//                when it happens and FAILs the run
+//   facing       the screenshots start facing the nearest other human's pawn,
+//                so a shot from either side shows the other one when nothing
+//                stands between them; the line logs the distance and whether
+//                a visibility trace reaches them (and what blocks it if not)
+//
+// HOLDING (-OBSmokeHold=S)
+//   After the verdict, stay up for at most S more seconds instead of quitting,
+//   and quit as soon as a server has no client connections left. A listen host
+//   that quit on its own PASS would pull the match out from under a client
+//   still taking its screenshots; with a hold it leaves after the client does.
 //
 // WHY A GAME-INSTANCE SUBSYSTEM
 //   It outlives map loads, so a build that boots into a loading map and then
@@ -47,10 +78,12 @@
 
 #include "CoreMinimal.h"
 #include "Containers/Ticker.h"
+#include "Engine/EngineBaseTypes.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "OneBrahamSmokeTest.generated.h"
 
 class APlayerController;
+class UNetDriver;
 class UWorld;
 
 /** What the command line asked for. Parsed once, at Initialize. */
@@ -66,7 +99,16 @@ struct ONEBRAHAM_API FOneBrahamSmokeOptions
 	 *  [MinTimeoutSeconds, MaxTimeoutSeconds]. */
 	float TimeoutSeconds = 120.f;
 
+	/** -OBSmokeExpectPlayers=N, clamped to [0, MaxExpectPlayers]. 0 skips the
+	 *  multiplayer checks. */
+	int32 ExpectPlayers = 0;
+
+	/** -OBSmokeHold=S, clamped to [0, MaxTimeoutSeconds]: how long to stay up
+	 *  after the verdict while clients are still connected. */
+	float HoldSeconds = 0.f;
+
 	static constexpr int32 MaxShots = 16;
+	static constexpr int32 MaxExpectPlayers = 32;
 	static constexpr float MinTimeoutSeconds = 15.f;
 	static constexpr float MaxTimeoutSeconds = 900.f;
 
@@ -97,9 +139,11 @@ private:
 	enum class EPhase : uint8
 	{
 		WaitingForPawn,
+		WaitingForPlayers,
 		Measuring,
 		Shooting,
 		Flushing,
+		Holding,
 		Done
 	};
 
@@ -108,6 +152,16 @@ private:
 
 	/** The pawn is in: logs the static checks, then starts the frame sample. */
 	void RunChecks(UWorld* World, APlayerController* PC);
+
+	/** -OBSmokeExpectPlayers: true once enough players are in (and have pawns,
+	 *  or the grace period ran out). */
+	bool ArePlayersReady(UWorld* World);
+
+	/** Logs every player, the net connection(s), and fails what is missing. */
+	void RunPlayerChecks(UWorld* World, APlayerController* PC);
+
+	/** The nearest pawn of another human player (not a bot), or null. */
+	const APawn* FindNearestOtherPawn(UWorld* World, APlayerController* PC) const;
 
 	/** One frame of the frame-time sample. */
 	void TickMeasuring();
@@ -118,14 +172,31 @@ private:
 	/** Gives the last screenshot time to land, then checks the files. */
 	void TickFlushing();
 
-	/** Logs the verdict and asks the game to quit. */
+	/** Logs the verdict, then holds (-OBSmokeHold) or quits. */
 	void Finish();
+
+	/** After the verdict: true while the hold should go on. */
+	bool TickHolding();
+
+	/** Asks the game to quit with the verdict as the exit code. */
+	void Quit();
 
 	/** The game world the local player is in, or null. */
 	UWorld* GetPlayerWorld() const;
 
 	/** Records a failed check. */
 	void Fail(const FString& Reason);
+
+	/** The engine dropped a connection or could not travel (a client that
+	 *  could not reach its host, a host that went away mid-run). Recorded apart
+	 *  from Failures: a client that fails to connect falls back to the default
+	 *  map, possesses a pawn there and would otherwise start the run afresh. */
+	void HandleNetworkFailure(UWorld* World, UNetDriver* Driver, ENetworkFailure::Type FailureType, const FString& Error);
+	void HandleTravelFailure(UWorld* World, ETravelFailure::Type FailureType, const FString& Error);
+
+	/** One line on where this game stands on the network, for a timeout
+	 *  reason: "client of 127.0.0.1:7777 (Open), 3 player state(s)". */
+	FString DescribeNet(UWorld* World) const;
 
 	FOneBrahamSmokeOptions Options;
 	FTSTicker::FDelegateHandle TickHandle;
@@ -144,12 +215,26 @@ private:
 	/** Absolute paths of the screenshots requested so far. */
 	TArray<FString> ShotPaths;
 
-	/** The yaw the player was facing when shooting began. */
+	/** The view the first screenshot is taken from: where the player was
+	 *  facing when shooting began, or towards the nearest other player. */
 	float BaseYaw = 0.f;
+	float BasePitch = 0.f;
+
+	/** -OBSmokeExpectPlayers: the player checks have run for this pawn. */
+	bool bPlayersChecked = false;
+
+	/** When the player count first reached ExpectPlayers (0 = not yet). */
+	double PlayersReachedSeconds = 0.0;
 
 	/** The shot the camera has been turned for; the turn is made once per shot
 	 *  so a controller that adjusts its rotation cannot stall the run. */
 	int32 TurnedForShot = INDEX_NONE;
 
 	TArray<FString> Failures;
+
+	/** Network and travel failures, kept across re-possession (see above). */
+	TArray<FString> NetFailures;
+
+	FDelegateHandle NetworkFailureHandle;
+	FDelegateHandle TravelFailureHandle;
 };

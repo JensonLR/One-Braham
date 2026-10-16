@@ -59,6 +59,7 @@ A dedicated server needs 7777/udp for game traffic and 7778/udp for voice.
 | `RunTests.bat OneBraham.Weapons` | One category. Categories are listed in `Docs/18_Testing_Performance.md`. |
 | `RunTests.bat smoke` | The smoke category on a dedicated server: the match-boot composition check. The bot-driven twelve-player run is in `Docs/18_Testing_Performance.md` §3. |
 | `SmokePackaged.sh [--shots N] [--timeout S] [-- <game args>]` | macOS: runs the staged Mac Development/Test build with `-OBSmoke`, prints the `[OB.SMOKE]` checks and screenshot paths, and exits non-zero on FAIL, timeout, or no verdict. `OB_SMOKE_APP` overrides the binary. The game's own exit code is always 0 on Mac, so the PASS/FAIL line is the verdict. Details in `Docs/18_Testing_Performance.md` §3. |
+| `SmokeLAN.sh` | macOS: a listen host and a 127.0.0.1 client, both with `-OBSmoke -OBSmokeExpectPlayers=2`; exits 0 only when both PASS. Uncooked by default, `--staged` for the staged app; `--bots N`, `--late S`, `--shots N`, `--timeout S`, `--port P`, `--steam` (default is `-nosteam`), `-- <game args>`. Logs in `Saved/Smoke/lan_<stamp>_{host,client}.log`. |
 
 ## Release
 

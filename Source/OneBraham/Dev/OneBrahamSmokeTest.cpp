@@ -2,6 +2,7 @@
 
 #include "Dev/OneBrahamSmokeTest.h"
 
+#include "Misc/AutomationTest.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 
@@ -9,6 +10,7 @@
 #include "Core/OneBrahamGameSettings.h"
 #include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamPlayerController.h"
+#include "Core/OneBrahamPlayerState.h"
 #include "Core/OneBrahamTypes.h"
 #include "Data/OneBrahamMatchSettingsAsset.h"
 #include "EnhancedInputSubsystems.h"
@@ -16,10 +18,14 @@
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/NetConnection.h"
+#include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerState.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformMisc.h"
 #include "HAL/PlatformTime.h"
@@ -71,6 +77,75 @@ namespace
 	/** How long the last screenshot gets to reach the disk. */
 	constexpr double FlushSeconds = 6.0;
 
+	/** -OBSmokeExpectPlayers: once the player count is reached, how long to
+	 *  wait for every player's pawn to turn up as well. A client only sees the
+	 *  pawns relevant to it, and a player between lives has none, so missing
+	 *  pawns after this are logged rather than waited on for ever. */
+	constexpr double PawnGraceSeconds = 10.0;
+
+	/** The first screenshot's pitch towards another player is clamped to this,
+	 *  so a player on the floor above does not make a shot of the ceiling. */
+	constexpr float MaxFacingPitchDegrees = 30.f;
+
+	/** Human players in the game state: bots are not who a LAN test waits for. */
+	int32 SmokeCountHumanPlayers(const UWorld* World)
+	{
+		const AGameStateBase* GameState = World ? World->GetGameState() : nullptr;
+
+		if (GameState == nullptr)
+		{
+			return 0;
+		}
+
+		int32 Humans = 0;
+		for (const APlayerState* PlayerState : GameState->PlayerArray)
+		{
+			if (PlayerState != nullptr && !PlayerState->IsABot())
+			{
+				++Humans;
+			}
+		}
+
+		return Humans;
+	}
+
+	/** A player's pawn. APlayerState::GetPawn is set on a client when the pawn's
+	 *  PlayerState replicates; the iterator covers a pawn that arrived first. */
+	APawn* SmokeFindPawnFor(UWorld* World, const APlayerState* PlayerState)
+	{
+		if (PlayerState == nullptr)
+		{
+			return nullptr;
+		}
+
+		if (APawn* Pawn = PlayerState->GetPawn())
+		{
+			return Pawn;
+		}
+
+		for (TActorIterator<APawn> It(World); It; ++It)
+		{
+			if (It->GetPlayerState() == PlayerState)
+			{
+				return *It;
+			}
+		}
+
+		return nullptr;
+	}
+
+	const TCHAR* SmokeNetModeName(ENetMode NetMode)
+	{
+		switch (NetMode)
+		{
+		case NM_Standalone: return TEXT("standalone");
+		case NM_DedicatedServer: return TEXT("dedicated server");
+		case NM_ListenServer: return TEXT("listen server");
+		case NM_Client: return TEXT("client");
+		default: return TEXT("unknown");
+		}
+	}
+
 	float SmokePercentile(const TArray<float>& Sorted, float Fraction)
 	{
 		if (Sorted.Num() == 0)
@@ -107,6 +182,18 @@ FOneBrahamSmokeOptions FOneBrahamSmokeOptions::Parse(const TCHAR* CommandLine)
 	if (FParse::Value(CommandLine, TEXT("OBSmokeTimeout="), Timeout))
 	{
 		Out.TimeoutSeconds = FMath::Clamp(Timeout, MinTimeoutSeconds, MaxTimeoutSeconds);
+	}
+
+	int32 ExpectPlayers = Out.ExpectPlayers;
+	if (FParse::Value(CommandLine, TEXT("OBSmokeExpectPlayers="), ExpectPlayers))
+	{
+		Out.ExpectPlayers = FMath::Clamp(ExpectPlayers, 0, MaxExpectPlayers);
+	}
+
+	float Hold = Out.HoldSeconds;
+	if (FParse::Value(CommandLine, TEXT("OBSmokeHold="), Hold))
+	{
+		Out.HoldSeconds = FMath::Clamp(Hold, 0.f, MaxTimeoutSeconds);
 	}
 
 	return Out;
@@ -156,7 +243,16 @@ void UOneBrahamSmokeTestSubsystem::Initialize(FSubsystemCollectionBase& Collecti
 	TickHandle = FTSTicker::GetCoreTicker().AddTicker(
 		FTickerDelegate::CreateUObject(this, &UOneBrahamSmokeTestSubsystem::Tick));
 
-	OB_SMOKE_LOG("start: %d shot(s), %.0fs budget, build %s", Options.Shots, Options.TimeoutSeconds,
+	// A client that cannot reach its host only says so through these: the
+	// engine then loads the default map standalone and the run carries on.
+	if (GEngine != nullptr)
+	{
+		NetworkFailureHandle = GEngine->OnNetworkFailure().AddUObject(this, &UOneBrahamSmokeTestSubsystem::HandleNetworkFailure);
+		TravelFailureHandle = GEngine->OnTravelFailure().AddUObject(this, &UOneBrahamSmokeTestSubsystem::HandleTravelFailure);
+	}
+
+	OB_SMOKE_LOG("start: %d shot(s), %.0fs budget, %d player(s) expected, %.0fs hold, build %s",
+		Options.Shots, Options.TimeoutSeconds, Options.ExpectPlayers, Options.HoldSeconds,
 		LexToString(FApp::GetBuildConfiguration()));
 #endif
 }
@@ -168,6 +264,14 @@ void UOneBrahamSmokeTestSubsystem::Deinitialize()
 		FTSTicker::GetCoreTicker().RemoveTicker(TickHandle);
 		TickHandle.Reset();
 	}
+
+	if (GEngine != nullptr)
+	{
+		GEngine->OnNetworkFailure().Remove(NetworkFailureHandle);
+		GEngine->OnTravelFailure().Remove(TravelFailureHandle);
+	}
+	NetworkFailureHandle.Reset();
+	TravelFailureHandle.Reset();
 
 	Super::Deinitialize();
 }
@@ -182,23 +286,41 @@ bool UOneBrahamSmokeTestSubsystem::Tick(float DeltaTime)
 		return false;
 	}
 
+	// The verdict is in; only the hold is left, and it has its own limit.
+	if (Phase == EPhase::Holding)
+	{
+		return TickHolding();
+	}
+
 	const double Now = FPlatformTime::Seconds();
+
+	UWorld* World = GetPlayerWorld();
+	APlayerController* PC = GetGameInstance() ? GetGameInstance()->GetFirstLocalPlayerController(World) : nullptr;
 
 	// The one budget for the whole run, load included. Whatever phase it ends
 	// in is the reason: "timeout waiting for a pawn" is the useful bug report.
 	if (Now - StartSeconds > Options.TimeoutSeconds)
 	{
-		static const TCHAR* PhaseNames[] = { TEXT("a pawn"), TEXT("the frame sample"),
-			TEXT("the screenshots"), TEXT("the screenshots to be written"), TEXT("nothing") };
+		static const TCHAR* PhaseNames[] = { TEXT("a pawn"), TEXT("the players"), TEXT("the frame sample"),
+			TEXT("the screenshots"), TEXT("the screenshots to be written"), TEXT("nothing"), TEXT("nothing") };
 
-		Fail(FString::Printf(TEXT("timeout after %.0fs waiting for %s"),
-			Options.TimeoutSeconds, PhaseNames[static_cast<uint8>(Phase)]));
+		FString Waiting = PhaseNames[static_cast<uint8>(Phase)];
+
+		if (Phase == EPhase::WaitingForPlayers)
+		{
+			Waiting = FString::Printf(TEXT("%d players, have %d"), Options.ExpectPlayers, SmokeCountHumanPlayers(World));
+		}
+		else if (Phase == EPhase::WaitingForPawn && Options.ExpectPlayers > 0)
+		{
+			// In a shared match "no pawn" has two very different causes: never
+			// connected, or connected and never spawned. Say which.
+			Waiting += FString::Printf(TEXT(" (%s)"), *DescribeNet(World));
+		}
+
+		Fail(FString::Printf(TEXT("timeout after %.0fs waiting for %s"), Options.TimeoutSeconds, *Waiting));
 		Finish();
-		return false;
+		return Phase != EPhase::Done;
 	}
-
-	UWorld* World = GetPlayerWorld();
-	APlayerController* PC = GetGameInstance() ? GetGameInstance()->GetFirstLocalPlayerController(World) : nullptr;
 
 	switch (Phase)
 	{
@@ -213,6 +335,28 @@ bool UOneBrahamSmokeTestSubsystem::Tick(float DeltaTime)
 
 			// A second possession re-runs the checks; only the last pawn counts.
 			Failures.Reset();
+			bPlayersChecked = false;
+		}
+		break;
+
+	case EPhase::WaitingForPlayers:
+		if (World == nullptr || PC == nullptr || PC->GetPawn() == nullptr)
+		{
+			OB_SMOKE_LOG("lost the pawn after %.1fs - waiting again", Now - StartSeconds);
+			Phase = EPhase::WaitingForPawn;
+			PhaseStartSeconds = Now;
+			break;
+		}
+
+		if (ArePlayersReady(World))
+		{
+			RunPlayerChecks(World, PC);
+			bPlayersChecked = true;
+
+			// Straight back into the frame sample: the settle has been had.
+			Phase = EPhase::Measuring;
+			PhaseStartSeconds = Now - SettleSeconds;
+			LastFrameSeconds = Now;
 		}
 		break;
 
@@ -237,6 +381,14 @@ bool UOneBrahamSmokeTestSubsystem::Tick(float DeltaTime)
 		{
 			RunChecks(World, PC);
 			LastFrameSeconds = Now;
+
+			if (Options.ExpectPlayers > 0 && !bPlayersChecked)
+			{
+				OB_SMOKE_LOG("players: waiting for %d (have %d)", Options.ExpectPlayers, SmokeCountHumanPlayers(World));
+				Phase = EPhase::WaitingForPlayers;
+				PhaseStartSeconds = Now;
+				PlayersReachedSeconds = 0.0;
+			}
 			break;
 		}
 
@@ -248,7 +400,7 @@ bool UOneBrahamSmokeTestSubsystem::Tick(float DeltaTime)
 		{
 			Fail(TEXT("lost the player controller while taking screenshots"));
 			Finish();
-			return false;
+			return Phase != EPhase::Done;
 		}
 
 		TickShooting(PC);
@@ -403,6 +555,232 @@ void UOneBrahamSmokeTestSubsystem::RunChecks(UWorld* World, APlayerController* P
 	}
 }
 
+bool UOneBrahamSmokeTestSubsystem::ArePlayersReady(UWorld* World)
+{
+	const AGameStateBase* GameState = World->GetGameState();
+	const int32 Humans = SmokeCountHumanPlayers(World);
+
+	if (GameState == nullptr || Humans < Options.ExpectPlayers)
+	{
+		PlayersReachedSeconds = 0.0;
+		return false;
+	}
+
+	const double Now = FPlatformTime::Seconds();
+
+	if (PlayersReachedSeconds == 0.0)
+	{
+		PlayersReachedSeconds = Now;
+		OB_SMOKE_LOG("players: %d in after %.1fs", Humans, Now - StartSeconds);
+	}
+
+	for (const APlayerState* PlayerState : GameState->PlayerArray)
+	{
+		if (PlayerState != nullptr && !PlayerState->IsABot() && SmokeFindPawnFor(World, PlayerState) == nullptr)
+		{
+			return Now - PlayersReachedSeconds >= PawnGraceSeconds;
+		}
+	}
+
+	return true;
+}
+
+void UOneBrahamSmokeTestSubsystem::RunPlayerChecks(UWorld* World, APlayerController* PC)
+{
+	const ENetMode NetMode = World->GetNetMode();
+	const bool bAuthority = NetMode != NM_Client;
+	const AGameStateBase* GameState = World->GetGameState();
+	const int32 Humans = SmokeCountHumanPlayers(World);
+
+	OB_SMOKE_LOG("players: %d human(s) of %d expected, %d player state(s), as %s", Humans, Options.ExpectPlayers,
+		GameState ? GameState->PlayerArray.Num() : 0, SmokeNetModeName(NetMode));
+
+	if (Humans < Options.ExpectPlayers)
+	{
+		Fail(FString::Printf(TEXT("%d of %d players"), Humans, Options.ExpectPlayers));
+	}
+
+	// players -------------------------------------------------------------
+	if (GameState != nullptr)
+	{
+		for (const APlayerState* PlayerState : GameState->PlayerArray)
+		{
+			if (PlayerState == nullptr)
+			{
+				continue;
+			}
+
+			const AOneBrahamPlayerState* OBState = Cast<AOneBrahamPlayerState>(PlayerState);
+			const FString Team = OBState
+				? StaticEnum<EOneBrahamTeam>()->GetNameStringByValue(static_cast<int64>(OBState->Team))
+				: FString(TEXT("n/a"));
+			const int32 Squad = OBState ? OBState->SquadId : INDEX_NONE;
+			const APawn* Pawn = SmokeFindPawnFor(World, PlayerState);
+
+			OB_SMOKE_LOG("player: '%s'%s%s team %s, squad %d, pawn %s at %s, ping %.0f ms",
+				*PlayerState->GetPlayerName(),
+				PlayerState == PC->PlayerState ? TEXT(" (local)") : TEXT(""),
+				PlayerState->IsABot() ? TEXT(" (bot)") : TEXT(""),
+				*Team, Squad,
+				Pawn ? *Pawn->GetName() : TEXT("none"),
+				Pawn ? *Pawn->GetActorLocation().ToCompactString() : TEXT("-"),
+				PlayerState->GetPingInMilliseconds());
+
+			// The server spawns everyone, so a human without a pawn there is a
+			// real fault. A client only replicates the pawns relevant to it.
+			if (Pawn == nullptr && bAuthority && !PlayerState->IsABot() && !PlayerState->IsOnlyASpectator())
+			{
+				Fail(FString::Printf(TEXT("player '%s' has no pawn on the server"), *PlayerState->GetPlayerName()));
+			}
+		}
+	}
+
+	// net -----------------------------------------------------------------
+	const UNetDriver* Driver = World->GetNetDriver();
+
+	if (NetMode == NM_Client)
+	{
+		UNetConnection* Connection = Driver ? Driver->ServerConnection.Get() : nullptr;
+
+		if (Connection == nullptr)
+		{
+			OB_SMOKE_LOG("net: client with no server connection");
+			Fail(TEXT("no server connection"));
+		}
+		else
+		{
+			OB_SMOKE_LOG("net: client via %s to %s, %s, avg lag %.0f ms, ping %.0f ms",
+				*Driver->GetClass()->GetName(), *Connection->LowLevelGetRemoteAddress(/*bAppendPort=*/true),
+				LexToString(Connection->GetConnectionState()), Connection->AvgLag * 1000.f,
+				PC->PlayerState ? PC->PlayerState->GetPingInMilliseconds() : -1.f);
+
+			if (Connection->GetConnectionState() != USOCK_Open)
+			{
+				Fail(FString::Printf(TEXT("server connection is %s"), LexToString(Connection->GetConnectionState())));
+			}
+		}
+	}
+	else if (Driver != nullptr)
+	{
+		OB_SMOKE_LOG("net: %s via %s, %d client connection(s)", SmokeNetModeName(NetMode),
+			*Driver->GetClass()->GetName(), Driver->ClientConnections.Num());
+
+		for (UNetConnection* Connection : Driver->ClientConnections)
+		{
+			if (Connection != nullptr)
+			{
+				OB_SMOKE_LOG("net: client %s, %s, avg lag %.0f ms",
+					*Connection->LowLevelGetRemoteAddress(/*bAppendPort=*/true),
+					LexToString(Connection->GetConnectionState()), Connection->AvgLag * 1000.f);
+			}
+		}
+
+		// A listen server is one of the players itself; a dedicated one is not.
+		const int32 RemoteExpected = Options.ExpectPlayers - (NetMode == NM_ListenServer ? 1 : 0);
+
+		if (Driver->ClientConnections.Num() < RemoteExpected)
+		{
+			Fail(FString::Printf(TEXT("%d client connection(s), expected %d"), Driver->ClientConnections.Num(), RemoteExpected));
+		}
+	}
+	else
+	{
+		// Every multiplayer run needs a driver, a one-player one included: a
+		// client whose connection failed lands on the default map (the tower)
+		// standalone, possesses a pawn there, and counts one human - itself.
+		OB_SMOKE_LOG("net: %s, no net driver", SmokeNetModeName(NetMode));
+		Fail(FString::Printf(TEXT("%s with no net driver - a host needs ?listen, and a client that could not connect falls back to the default map"),
+			SmokeNetModeName(NetMode)));
+	}
+}
+
+FString UOneBrahamSmokeTestSubsystem::DescribeNet(UWorld* World) const
+{
+	if (World == nullptr)
+	{
+		return TEXT("no game world yet");
+	}
+
+	const ENetMode NetMode = World->GetNetMode();
+	const UNetDriver* Driver = World->GetNetDriver();
+	const AGameStateBase* GameState = World->GetGameState();
+	const int32 PlayerStates = GameState ? GameState->PlayerArray.Num() : 0;
+
+	if (NetMode == NM_Client)
+	{
+		UNetConnection* Connection = Driver ? Driver->ServerConnection.Get() : nullptr;
+
+		if (Connection == nullptr)
+		{
+			return TEXT("client with no server connection");
+		}
+
+		return FString::Printf(TEXT("client of %s (%s), %d player state(s)"),
+			*Connection->LowLevelGetRemoteAddress(/*bAppendPort=*/true),
+			LexToString(Connection->GetConnectionState()), PlayerStates);
+	}
+
+	return FString::Printf(TEXT("%s, %d client connection(s), %d player state(s)"), SmokeNetModeName(NetMode),
+		Driver ? Driver->ClientConnections.Num() : 0, PlayerStates);
+}
+
+void UOneBrahamSmokeTestSubsystem::HandleNetworkFailure(UWorld* World, UNetDriver* Driver, ENetworkFailure::Type FailureType, const FString& Error)
+{
+	// After the verdict a dropped connection is the other side leaving.
+	if (Phase == EPhase::Done || Phase == EPhase::Holding)
+	{
+		return;
+	}
+
+	// The full engine text on the line; the type alone on the FAIL line (the
+	// text runs to a whole connection dump).
+	OB_SMOKE_LOG("net: network failure %s: %s", ENetworkFailure::ToString(FailureType), *Error);
+	NetFailures.AddUnique(FString::Printf(TEXT("network failure %s"), ENetworkFailure::ToString(FailureType)));
+}
+
+void UOneBrahamSmokeTestSubsystem::HandleTravelFailure(UWorld* World, ETravelFailure::Type FailureType, const FString& Error)
+{
+	if (Phase == EPhase::Done || Phase == EPhase::Holding)
+	{
+		return;
+	}
+
+	OB_SMOKE_LOG("net: travel failure %s: %s", ETravelFailure::ToString(FailureType), *Error);
+	NetFailures.AddUnique(FString::Printf(TEXT("travel failure %s"), ETravelFailure::ToString(FailureType)));
+}
+
+const APawn* UOneBrahamSmokeTestSubsystem::FindNearestOtherPawn(UWorld* World, APlayerController* PC) const
+{
+	const APawn* Own = PC->GetPawn();
+	const FVector From = Own ? Own->GetActorLocation() : PC->GetFocalLocation();
+
+	const APawn* Nearest = nullptr;
+	double NearestDistSq = TNumericLimits<double>::Max();
+
+	for (TActorIterator<APawn> It(World); It; ++It)
+	{
+		const APawn* Pawn = *It;
+
+		// Other humans only: a bot's pawn carries a player state too, and the
+		// shot is meant to show the other process's player.
+		const APlayerState* PlayerState = Pawn->GetPlayerState();
+		if (Pawn == Own || PlayerState == nullptr || PlayerState->IsABot())
+		{
+			continue;
+		}
+
+		const double DistSq = FVector::DistSquared(From, Pawn->GetActorLocation());
+
+		if (DistSq < NearestDistSq)
+		{
+			NearestDistSq = DistSq;
+			Nearest = Pawn;
+		}
+	}
+
+	return Nearest;
+}
+
 void UOneBrahamSmokeTestSubsystem::TickMeasuring()
 {
 	// Wall clock between core ticks, which is one per frame: the tick's own
@@ -444,11 +822,52 @@ void UOneBrahamSmokeTestSubsystem::TickMeasuring()
 	LastShotSeconds = Now;
 	TurnedForShot = INDEX_NONE;
 
+	BasePitch = 0.f;
+
 	if (UWorld* World = GetPlayerWorld())
 	{
 		if (APlayerController* PC = GetGameInstance()->GetFirstLocalPlayerController(World))
 		{
 			BaseYaw = PC->GetControlRotation().Yaw;
+
+			// In a shared match the first shot is of the other player: a shot
+			// from each side is the proof a log line cannot give that the two
+			// games render the same match.
+			if (Options.ExpectPlayers > 1)
+			{
+				if (const APawn* Other = FindNearestOtherPawn(World, PC))
+				{
+					FVector EyeLocation;
+					FRotator EyeRotation;
+					PC->GetPlayerViewPoint(EyeLocation, EyeRotation);
+
+					const FVector ToOther = Other->GetActorLocation() - EyeLocation;
+					const FRotator Towards = ToOther.Rotation();
+
+					BaseYaw = Towards.Yaw;
+					BasePitch = FMath::Clamp(FRotator::NormalizeAxis(Towards.Pitch), -MaxFacingPitchDegrees, MaxFacingPitchDegrees);
+
+					// Whether the shot can show them at all: squads spawn apart,
+					// so a wall between the two is the usual reason it does not.
+					FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(OBSmokeFacing), /*bTraceComplex=*/false, PC->GetPawn());
+					TraceParams.AddIgnoredActor(Other);
+					FHitResult Hit;
+					const bool bBlocked = World->LineTraceSingleByChannel(
+						Hit, EyeLocation, Other->GetActorLocation(), ECC_Visibility, TraceParams);
+					const AActor* Blocker = Hit.GetActor();
+
+					const APlayerState* OtherState = Other->GetPlayerState();
+					OB_SMOKE_LOG("facing: '%s' %.1f m away, yaw %.0f pitch %.0f, line of sight %s",
+						OtherState ? *OtherState->GetPlayerName() : TEXT("?"), ToOther.Size() / 100.f, BaseYaw, BasePitch,
+						bBlocked
+							? *FString::Printf(TEXT("blocked by %s at %.1f m"), Blocker ? *Blocker->GetName() : TEXT("world geometry"), Hit.Distance / 100.f)
+							: TEXT("clear"));
+				}
+				else
+				{
+					OB_SMOKE_LOG("facing: no other human player's pawn is known here - shots keep the spawn facing");
+				}
+			}
 		}
 	}
 }
@@ -474,7 +893,8 @@ void UOneBrahamSmokeTestSubsystem::TickShooting(APlayerController* PC)
 
 	// Turn first, then wait the interval, then shoot: the turn for shot N is
 	// made after shot N-1 has been captured.
-	const FRotator Facing(0.f, FRotator::NormalizeAxis(BaseYaw + ShotYawStepDegrees * Taken), 0.f);
+	// Only the first shot keeps the pitch: it is the one aimed at a player.
+	const FRotator Facing(Taken == 0 ? BasePitch : 0.f, FRotator::NormalizeAxis(BaseYaw + ShotYawStepDegrees * Taken), 0.f);
 
 	if (TurnedForShot != Taken)
 	{
@@ -489,9 +909,13 @@ void UOneBrahamSmokeTestSubsystem::TickShooting(APlayerController* PC)
 		return;
 	}
 
+	// A host and a client on one machine share the screenshot folder, and can
+	// start shooting in the same second: the side goes in the name.
 	static const FString Stamp = FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S"));
+	const ENetMode NetMode = PC->GetWorld() ? PC->GetWorld()->GetNetMode() : NM_Standalone;
+	const TCHAR* Side = NetMode == NM_Client ? TEXT("_client") : NetMode == NM_ListenServer ? TEXT("_host") : TEXT("");
 	const FString Path = FPaths::ConvertRelativePathToFull(
-		FPaths::ScreenShotDir() / FString::Printf(TEXT("OBSmoke_%s_%02d.png"), *Stamp, Taken + 1));
+		FPaths::ScreenShotDir() / FString::Printf(TEXT("OBSmoke_%s%s_%02d.png"), *Stamp, Side, Taken + 1));
 
 	IFileManager::Get().MakeDirectory(*FPaths::GetPath(Path), /*Tree=*/true);
 
@@ -542,12 +966,17 @@ void UOneBrahamSmokeTestSubsystem::TickFlushing()
 
 void UOneBrahamSmokeTestSubsystem::Finish()
 {
-	if (Phase == EPhase::Done)
+	if (Phase == EPhase::Done || Phase == EPhase::Holding)
 	{
 		return;
 	}
 
 	Phase = EPhase::Done;
+
+	for (const FString& NetFailure : NetFailures)
+	{
+		Failures.AddUnique(NetFailure);
+	}
 
 	if (Failures.Num() == 0)
 	{
@@ -557,6 +986,45 @@ void UOneBrahamSmokeTestSubsystem::Finish()
 	{
 		OB_SMOKE_LOG("FAIL: %s", *FString::Join(Failures, TEXT("; ")));
 	}
+
+	if (Options.HoldSeconds > 0.f)
+	{
+		OB_SMOKE_LOG("holding for up to %.0fs while clients are connected", Options.HoldSeconds);
+		Phase = EPhase::Holding;
+		PhaseStartSeconds = FPlatformTime::Seconds();
+		return;
+	}
+
+	Quit();
+}
+
+bool UOneBrahamSmokeTestSubsystem::TickHolding()
+{
+	const double Held = FPlatformTime::Seconds() - PhaseStartSeconds;
+
+	// A server leaves once nobody is connected to it; anything else (a client,
+	// a standalone game, a server whose clients never came) just waits out the
+	// hold. The short floor gives a client that is still mid-handshake a chance
+	// to show up as a connection before an empty driver ends the hold.
+	const UWorld* World = GetPlayerWorld();
+	const UNetDriver* Driver = World ? World->GetNetDriver() : nullptr;
+	const bool bServing = Driver != nullptr && Driver->IsServer();
+	const bool bNobodyLeft = bServing && Driver->ClientConnections.Num() == 0 && Held > 2.0;
+
+	if (Held < Options.HoldSeconds && !bNobodyLeft)
+	{
+		return true;
+	}
+
+	OB_SMOKE_LOG("hold over after %.1fs (%s)", Held, bNobodyLeft ? TEXT("no clients left") : TEXT("time"));
+	Phase = EPhase::Done;
+	Quit();
+	return false;
+}
+
+void UOneBrahamSmokeTestSubsystem::Quit()
+{
+	Phase = EPhase::Done;
 
 	// Not forced: the engine shuts down in order and the log is flushed, which
 	// the script reading it depends on. The exit code carries the verdict on
@@ -568,3 +1036,40 @@ void UOneBrahamSmokeTestSubsystem::Finish()
 }
 
 #endif // !UE_BUILD_SHIPPING
+
+// ==========================================================================
+//  OneBraham.Dev.SmokeOptions - the command-line switches, parsed in isolation
+// ==========================================================================
+#if WITH_DEV_AUTOMATION_TESTS
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamSmokeOptionsTest, "OneBraham.Dev.SmokeOptions",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamSmokeOptionsTest::RunTest(const FString& Parameters)
+{
+	const FOneBrahamSmokeOptions Off = FOneBrahamSmokeOptions::Parse(TEXT("-windowed -log"));
+	TestFalse(TEXT("no -OBSmoke, not enabled"), Off.bEnabled);
+	TestEqual(TEXT("no players expected by default"), Off.ExpectPlayers, 0);
+	TestEqual(TEXT("no hold by default"), Off.HoldSeconds, 0.f);
+
+	const FOneBrahamSmokeOptions Host = FOneBrahamSmokeOptions::Parse(
+		TEXT("L_Persistent_OneBraham?listen -OBSmoke -OBSmokeShots=3 -OBSmokeTimeout=240 -OBSmokeExpectPlayers=2 -OBSmokeHold=60"));
+	TestTrue(TEXT("host: enabled"), Host.bEnabled);
+	TestEqual(TEXT("host: shots"), Host.Shots, 3);
+	TestEqual(TEXT("host: timeout"), Host.TimeoutSeconds, 240.f);
+	TestEqual(TEXT("host: players"), Host.ExpectPlayers, 2);
+	TestEqual(TEXT("host: hold"), Host.HoldSeconds, 60.f);
+
+	const FOneBrahamSmokeOptions Wild = FOneBrahamSmokeOptions::Parse(
+		TEXT("-OBSmoke -OBSmokeExpectPlayers=500 -OBSmokeHold=-5 -OBSmokeShots=99 -OBSmokeTimeout=1"));
+	TestEqual(TEXT("players clamp high"), Wild.ExpectPlayers, FOneBrahamSmokeOptions::MaxExpectPlayers);
+	TestEqual(TEXT("hold clamps at zero"), Wild.HoldSeconds, 0.f);
+	TestEqual(TEXT("shots clamp high"), Wild.Shots, FOneBrahamSmokeOptions::MaxShots);
+	TestEqual(TEXT("timeout clamps low"), Wild.TimeoutSeconds, FOneBrahamSmokeOptions::MinTimeoutSeconds);
+
+	TestFalse(TEXT("null command line"), FOneBrahamSmokeOptions::Parse(nullptr).bEnabled);
+
+	return true;
+}
+
+#endif // WITH_DEV_AUTOMATION_TESTS

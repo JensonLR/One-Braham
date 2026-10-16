@@ -197,6 +197,11 @@ protected:
 	void HandleJoinSessionComplete(FName InSessionName, EOnJoinSessionCompleteResult::Type Result);
 	void HandleDestroySessionComplete(FName InSessionName, bool bWasSuccessful);
 
+	/** Logs which online subsystem actually started (Steam, or the NULL fallback
+	 *  a dev machine without the Steam client gets) and why it differs from the
+	 *  configured default. Called once from Init. */
+	void LogOnlineSubsystemInUse() const;
+
 	/** Builds the option string the GameMode reads for mode/roster config. */
 	FString BuildTravelOptions() const;
 

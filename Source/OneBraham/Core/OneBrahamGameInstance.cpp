@@ -19,6 +19,7 @@
 #include "Online.h"
 #include "MoviePlayer.h"
 #include "Misc/CommandLine.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Misc/Parse.h"
 #include "Misc/App.h"
 
@@ -34,6 +35,8 @@ void UOneBrahamGameInstance::Init()
 
 	UE_LOG(LogOneBraham, Log, TEXT("[OB] GameInstance::Init on %s"),
 		IsDedicatedServerInstance() ? TEXT("dedicated server") : TEXT("client"));
+
+	LogOnlineSubsystemInUse();
 
 	if (!IsDedicatedServerInstance())
 	{
@@ -78,6 +81,39 @@ void UOneBrahamGameInstance::Init()
 	// Match settings are resolved lazily by GetMatchSettings(), but pre-loading
 	// the default mode avoids a hitch on the first mode-select click.
 	GetMatchSettings(UOneBrahamGameSettings::Get().DefaultMode);
+}
+
+void UOneBrahamGameInstance::LogOnlineSubsystemInUse() const
+{
+	// Steam is configured as the default, and the online subsystem module drops
+	// to NULL on its own when Steam cannot start (no client running, no
+	// steamclient library, -nosteam). Nothing else says so in our log, and a
+	// NULL subsystem changes what works: LAN sessions and direct IP only, no
+	// server browser beyond the LAN, no persona name. One line, so a "can't
+	// find any servers" report shows which one it was.
+	const IOnlineSubsystem* OnlineSubsystem = IOnlineSubsystem::Get();
+	const FName InUse = OnlineSubsystem ? OnlineSubsystem->GetSubsystemName() : NAME_None;
+
+	FString Configured;
+	GConfig->GetString(TEXT("OnlineSubsystem"), TEXT("DefaultPlatformService"), Configured, GEngineIni);
+
+	const bool bSteamDisabled = FParse::Param(FCommandLine::Get(), TEXT("nosteam"));
+
+	if (OnlineSubsystem == nullptr)
+	{
+		UE_LOG(LogOneBraham, Warning, TEXT("[OB] Online subsystem: none (configured %s) - offline only; direct IP still works"),
+			*Configured);
+	}
+	else if (!Configured.IsEmpty() && InUse != FName(*Configured))
+	{
+		UE_LOG(LogOneBraham, Log, TEXT("[OB] Online subsystem: %s (configured %s %s) - LAN sessions and direct IP only"),
+			*InUse.ToString(), *Configured,
+			bSteamDisabled ? TEXT("disabled by -nosteam") : TEXT("could not start"));
+	}
+	else
+	{
+		UE_LOG(LogOneBraham, Log, TEXT("[OB] Online subsystem: %s"), *InUse.ToString());
+	}
 }
 
 void UOneBrahamGameInstance::OnStart()

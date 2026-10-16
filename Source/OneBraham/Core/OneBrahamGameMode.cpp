@@ -20,6 +20,8 @@
 #include "Lockdown/OneBrahamLockdownComponent.h"
 #include "Audio/OneBrahamAudioManagerComponent.h"
 #include "Bots/OneBrahamBotController.h"
+#include "AI/OneBrahamBotRules.h"
+#include "Extraction/OneBrahamExtractionPad.h"
 #include "Data/OneBrahamMatchSettingsAsset.h"
 #include "Data/OneBrahamWeaponDataAsset.h"
 
@@ -28,7 +30,10 @@
 #include "GameFramework/GameSession.h"
 #include "GameFramework/PlayerStart.h"
 #include "Kismet/GameplayStatics.h"
+#include "HAL/IConsoleManager.h"
 #include "Misc/CommandLine.h"
+#include "NavigationPath.h"
+#include "NavigationSystem.h"
 #include "Misc/Parse.h"
 #include "TimerManager.h"
 #include "Engine/Engine.h"
@@ -100,16 +105,37 @@ void AOneBrahamGameMode::InitGame(const FString& MapName, const FString& Options
 		}
 	}
 
-	// Bot practice: `?Bots=6` fills the roster on a listen server for testing.
-	int32 BotCount = 0;
-	bBotPracticeMode = FParse::Value(*Options, TEXT("Bots="), BotCount) && BotCount > 0;
+	// Bots fill the slots no human holds (OneBrahamBotRules). The mode decides
+	// whether that happens by default - ASCENT and FIRE DRILL do, so a solo or
+	// half-full lobby still has three squads - and the match settings asset can
+	// say otherwise (bFillWithBots / MaxBots, read by name so an asset built
+	// before those fields existed still loads). `?Bots=N` on the travel URL, or
+	// `-Bots=N` on a server's command line, caps the total; `?Bots=0` is none.
+	bool bSettingsFill = OneBrahamBotRules::ModeFillsWithBotsByDefault(MatchSettings->Mode);
+	int32 SettingsMaxBots = OneBrahamBotRules::FillAllSlots;
+	OneBrahamBotRules::ReadSettingsBotFill(MatchSettings, bSettingsFill, SettingsMaxBots);
 
-	OB_MATCH_LOG("InitGame map='%s' mode=%s teams=%d teamSize=%d bots=%d dedicated=%s",
+	int32 BotOption = 0;
+	bool bBotOptionGiven = UGameplayStatics::HasOption(Options, TEXT("Bots"));
+	if (bBotOptionGiven)
+	{
+		BotOption = UGameplayStatics::GetIntOption(Options, TEXT("Bots"), 0);
+	}
+	else
+	{
+		// "-Bots=" with its dash: a bare "Bots=" also matched inside other
+		// switches (anything ending in "...Bots=").
+		bBotOptionGiven = FParse::Value(FCommandLine::Get(), TEXT("-Bots="), BotOption);
+	}
+
+	BotLimit = OneBrahamBotRules::ResolveBotLimit(bBotOptionGiven, BotOption, bSettingsFill, SettingsMaxBots);
+
+	OB_MATCH_LOG("InitGame map='%s' mode=%s teams=%d teamSize=%d bots=%s dedicated=%s",
 		*MapName,
 		*UEnum::GetValueAsString(MatchSettings->Mode),
 		SquadToTeamMap.Num(),
 		MatchSettings->PlayersPerTeam,
-		bBotPracticeMode ? BotCount : 0,
+		BotLimit < 0 ? TEXT("fill") : *FString::FromInt(BotLimit),
 		IsRunningDedicatedServer() ? TEXT("yes") : TEXT("no"));
 }
 
@@ -167,14 +193,13 @@ void AOneBrahamGameMode::StartPlay()
 
 	StartWarmup();
 
-	// Night Shift and bot practice use the AI director; ASCENT explicitly does not.
-	if (bBotPracticeMode)
+	// Bots take the empty squad slots now, so the roster (and the scoreboard)
+	// is whole from the first frame; their pawns follow when the mode lets
+	// anyone spawn. Local players have already logged in by this point, so
+	// they keep their slots; anyone who joins later takes a bot's.
+	if (BotLimit != 0)
 	{
-		PopulateWithBots(MatchSettings->PlayersPerTeam - 1);
-	}
-	else if (MatchSettings->Mode == EOneBrahamMatchMode::NightShift)
-	{
-		PopulateWithBots(8);
+		PopulateWithBots(BotLimit);
 	}
 }
 
@@ -224,6 +249,49 @@ void AOneBrahamGameMode::Tick(float DeltaSeconds)
 			{
 				// No spawn point free yet: keep the entry and try again shortly.
 				PendingRespawns.Add(Controller, RespawnRetrySeconds);
+			}
+		}
+	}
+
+#if !UE_BUILD_SHIPPING
+	// ob.Bots.Watch N: the first local player watches through bot N's eyes, so a
+	// screenshot (the -OBSmoke run's, or F9) shows what the bot is doing.
+	if (const IConsoleVariable* WatchVar = IConsoleManager::Get().FindConsoleVariable(TEXT("ob.Bots.Watch")))
+	{
+		const int32 WatchIndex = WatchVar->GetInt();
+		APlayerController* Local = GetWorld() != nullptr ? GetWorld()->GetFirstPlayerController() : nullptr;
+		if (WatchIndex >= 0 && Local != nullptr && BotControllers.IsValidIndex(WatchIndex)
+			&& IsValid(BotControllers[WatchIndex]) && BotControllers[WatchIndex]->GetPawn() != nullptr
+			&& Local->GetViewTarget() != BotControllers[WatchIndex]->GetPawn())
+		{
+			Local->SetViewTarget(BotControllers[WatchIndex]->GetPawn());
+		}
+	}
+#endif
+
+	if (bBotFloorGraphPending)
+	{
+		UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld());
+		if (Nav == nullptr || !Nav->IsNavigationBuildInProgress())
+		{
+			BuildBotFloorGraph();
+		}
+	}
+
+	// Bots without a pawn try again once a second: a start that was crowded
+	// (every plaza point resting after the opening wave) frees up shortly.
+	BotSpawnRetryAccumulator += DeltaSeconds;
+	if (BotSpawnRetryAccumulator >= RespawnRetrySeconds && BotControllers.Num() > 0 && CanBotsSpawnNow())
+	{
+		BotSpawnRetryAccumulator = 0.f;
+		for (AOneBrahamBotController* Bot : BotControllers)
+		{
+			// One life in a mode without respawns; a respawning mode's dead go
+			// through the respawn queue, which keeps their corpse possessed.
+			const bool bLifeLeft = Bot != nullptr && (Bot->LivesStarted == 0 || (MatchSettings != nullptr && MatchSettings->bRespawnEnabled));
+			if (bLifeLeft && Bot->GetPawn() == nullptr && !PendingRespawns.Contains(Bot))
+			{
+				SpawnBotPawn(Bot);
 			}
 		}
 	}
@@ -302,6 +370,12 @@ void AOneBrahamGameMode::StartActiveMatch()
 			State->LifeState = EOneBrahamLifeState::Alive;
 		}
 		RestartPlayer(PlayerController);
+	}
+
+	// The bots walk in off the plaza with everybody else.
+	for (AOneBrahamBotController* Bot : BotControllers)
+	{
+		SpawnBotPawn(Bot);
 	}
 
 	BindGameStateComponents();
@@ -913,9 +987,38 @@ void AOneBrahamGameMode::EvaluateMatchEndConditions()
 		return;
 	}
 
+	// Only a match in progress ends. In the warmup everyone is parked as a
+	// spectator, so a player leaving the lobby read as "every squad wiped".
+	const EOneBrahamMatchPhase Phase = GetMatchPhase();
+	if (Phase != EOneBrahamMatchPhase::Active && Phase != EOneBrahamMatchPhase::Extraction)
+	{
+		return;
+	}
+
 	const AOneBrahamGameState* GS = GetOBGameState();
 	if (GS == nullptr || GS->Squads.Num() == 0)
 	{
+		return;
+	}
+
+	const bool bExtractionActive = GS->GetExtractionComponent() != nullptr &&
+		GS->GetExtractionComponent()->IsExtractionActive();
+
+	// The match is for its humans. With bots filling the squads, a solo player
+	// who died used to watch the bots until the purge or the 35-minute clock
+	// (they cannot extract, so neither came soon), and a server whose players
+	// had all died ran on for nobody. When no human is left in the fight, the
+	// extraction has failed for everyone who mattered to it. (A player who
+	// leaves is still in the array while Logout evaluates, so leaving does not
+	// end the match for the others.)
+	int32 HumansInSquads = 0;
+	int32 HumansInFight = 0;
+	int32 BotsInFight = 0;
+	CountInFight(HumansInSquads, HumansInFight, BotsInFight);
+	if (OneBrahamBotRules::ShouldEndWithNoHumansLeft(HumansInSquads, HumansInFight, BotsInFight, bExtractionActive))
+	{
+		OB_MATCH_LOG("Every human in a squad is out with %d bot(s) still in the fight: the match ends.", BotsInFight);
+		FinishMatch(EOneBrahamTeam::None, FString(), /*bNoSurvivors*/ false, 0, EOneBrahamExtractionFailReason::CallersEliminated);
 		return;
 	}
 
@@ -929,10 +1032,7 @@ void AOneBrahamGameMode::EvaluateMatchEndConditions()
 		}
 	}
 
-	const bool bExtractionInProgress = GS->GetExtractionComponent() != nullptr &&
-		GS->GetExtractionComponent()->IsExtractionActive();
-
-	if (!bAnySquadAlive && !bExtractionInProgress)
+	if (!bAnySquadAlive && !bExtractionActive)
 	{
 		CompleteMatchNoSurvivors();
 	}
@@ -1234,9 +1334,11 @@ AOneBrahamSpawnPoint* AOneBrahamGameMode::SelectSpawnPointFor(AController* Contr
 			LastKiller = Found->Get();
 		}
 
-		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		// Every controller, bots included: a bot squad on the plaza is as much a
+		// spawn threat as a human one.
+		for (FConstControllerIterator It = World->GetControllerIterator(); It; ++It)
 		{
-			const AOneBrahamPlayerController* OtherPC = Cast<AOneBrahamPlayerController>(It->Get());
+			const AController* OtherPC = It->Get();
 			if (OtherPC == nullptr || OtherPC == Controller)
 			{
 				continue;
@@ -1428,9 +1530,68 @@ AActor* AOneBrahamGameMode::ChoosePlayerStart_Implementation(AController* Player
 	// the street. A full plaza falls through to the general rule below.
 	if (MatchSettings != nullptr && MatchSettings->Mode == EOneBrahamMatchMode::Ascent)
 	{
+		// A squad walks in together from its own corner of the plaza: the
+		// cluster is the squad (Docs/06, "round-robins players onto clusters").
+		// The opening wave puts four people on one point at the same instant,
+		// so the point's rest timer is not a reason to send three of them to
+		// another squad's corner - which is what the weighted pick did, and the
+		// first seconds of every full match were a fight on one spawn point.
+		// RestartPlayerAtPlayerStart stands the later arrivals beside the point.
+		const AOneBrahamPlayerState* State = Player != nullptr ? Player->GetPlayerState<AOneBrahamPlayerState>() : nullptr;
+		if (State != nullptr && State->SquadId != INDEX_NONE)
+		{
+			TArray<AOneBrahamSpawnPoint*> Plaza;
+			for (AOneBrahamSpawnPoint* Spawn : SpawnPoints)
+			{
+				if (Spawn != nullptr && Spawn->bEnabled && Spawn->FloorIndex == OneBrahamConstants::FloorPlaza)
+				{
+					Plaza.Add(Spawn);
+				}
+			}
+
+			for (AOneBrahamSpawnPoint* Spawn : Plaza)
+			{
+				if (Spawn->SquadClusterId == State->SquadId % FMath::Max(1, Plaza.Num()))
+				{
+					return Spawn;
+				}
+			}
+		}
+
 		if (AOneBrahamSpawnPoint* Spawn = SelectSpawnPointFor(Player, OneBrahamConstants::FloorPlaza))
 		{
 			return Spawn;
+		}
+	}
+
+	// FIRE DRILL is a fight over three control points, so it is fought on their
+	// floors: a spawn anywhere in the tower put the twelve players on twelve
+	// floors the navmesh does not join, and a match could run its ten minutes
+	// without two enemies meeting (bots or people). Each spawn goes to one of
+	// the point floors, in a random order, under the usual safety rules on
+	// that floor; a map with no spawn on any point floor falls through.
+	if (MatchSettings != nullptr && MatchSettings->Mode == EOneBrahamMatchMode::FireDrill)
+	{
+		TArray<int32> PointFloors;
+		for (const FOneBrahamControlPointDef& Point : MatchSettings->ControlPoints)
+		{
+			if (Point.FloorIndex >= 0)
+			{
+				PointFloors.AddUnique(Point.FloorIndex);
+			}
+		}
+
+		for (int32 Index = PointFloors.Num() - 1; Index > 0; --Index)
+		{
+			PointFloors.Swap(Index, FMath::RandRange(0, Index));
+		}
+
+		for (const int32 Floor : PointFloors)
+		{
+			if (AOneBrahamSpawnPoint* Spawn = SelectSpawnPointFor(Player, Floor))
+			{
+				return Spawn;
+			}
 		}
 	}
 
@@ -1469,6 +1630,50 @@ void AOneBrahamGameMode::RestartPlayerAtPlayerStart(AController* NewPlayer, AAct
 	if (StartSpot == nullptr)
 	{
 		return;
+	}
+
+	// The spot was occupied. ASCENT puts all twelve players on the plaza at the
+	// same moment and the plaza has fewer points than that, so the second
+	// player sent to a point found the first one standing on it and the spawn
+	// failed outright (most of a full lobby - or of the bots filling it - never
+	// entered the building). Same spawn point, a free patch of navmesh beside it.
+	if (NewPlayer != nullptr && NewPlayer->GetPawn() == nullptr)
+	{
+		if (const UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
+		{
+			const FVector Spot = StartSpot->GetActorLocation();
+			FNavLocation SpotOnNav;
+			const float FeetToSpawnZ = Nav->ProjectPointToNavigation(Spot, SpotOnNav, FVector(100.f, 100.f, 300.f))
+				? Spot.Z - SpotOnNav.Location.Z : 90.f;
+
+			// Beside means in the open with the spot: a point that is merely
+			// reachable can be through a wall (the long way round, by the
+			// navmesh), and a player stood outside the building is not "beside"
+			// the spawn the squad was sent to.
+			FCollisionQueryParams Params(SCENE_QUERY_STAT(OneBrahamSpawnBeside), false);
+			for (int32 Attempt = 0; Attempt < 16 && NewPlayer->GetPawn() == nullptr; ++Attempt)
+			{
+				FNavLocation Beside;
+				if (!Nav->GetRandomReachablePointInRadius(Spot, 150.f + 30.f * Attempt, Beside))
+				{
+					continue;
+				}
+
+				const FVector Candidate = Beside.Location + FVector(0.f, 0.f, FeetToSpawnZ + 5.f);
+				if (FMath::Abs(Candidate.Z - Spot.Z) > 60.f
+					|| GetWorld()->LineTraceTestByChannel(Spot, Candidate, ECC_Pawn, Params))
+				{
+					continue;
+				}
+
+				Super::RestartPlayerAtTransform(NewPlayer, FTransform(StartSpot->GetActorRotation(), Candidate));
+			}
+		}
+
+		if (NewPlayer->GetPawn() == nullptr)
+		{
+			return;
+		}
 	}
 
 	const UWorld* World = GetWorld();
@@ -1567,6 +1772,11 @@ void AOneBrahamGameMode::PostLogin(APlayerController* NewPlayer)
 
 	State->RemainingRevives = MatchSettings ? MatchSettings->MaxRevivesPerPlayerPerRound : 2;
 
+	// A human takes a bot's slot rather than spectating a squad of bots. This
+	// player's own state is already in the array but has no squad yet, so it
+	// is not counted.
+	MakeRoomForHuman();
+
 	AssignPlayerToSquad(State);
 
 	// Late joiners during a bot-practice or FIRE DRILL match spawn immediately.
@@ -1600,6 +1810,60 @@ void AOneBrahamGameMode::HandleStartingNewPlayer_Implementation(APlayerControlle
 	}
 
 	Super::HandleStartingNewPlayer_Implementation(NewPlayer);
+}
+
+void AOneBrahamGameMode::HandleSeamlessTravelPlayer(AController*& C)
+{
+	Super::HandleSeamlessTravelPlayer(C);
+
+	// A player carried over by seamless travel (a dedicated server moving to
+	// the match map) never goes through PostLogin, and most of them arrive
+	// after StartPlay has already filled the empty slots with bots. Without
+	// this they kept the squad their PlayerState copied from the last map on
+	// top of a full squad of bots (five in a squad of four), or, with no squad
+	// to copy, had none at all.
+	APlayerController* PlayerController = Cast<APlayerController>(C);
+	AOneBrahamPlayerState* State = PlayerController != nullptr ? PlayerController->GetPlayerState<AOneBrahamPlayerState>() : nullptr;
+	if (State == nullptr || MatchSettings == nullptr || State->Team == EOneBrahamTeam::Spectator)
+	{
+		return;
+	}
+
+	if (SquadToTeamMap.IsValidIndex(State->SquadId))
+	{
+		// Keep the squad (premade parties stay together across maps); a bot in
+		// it makes way if it is now over-full.
+		TArray<int32> Humans;
+		TArray<int32> Bots;
+		CountSquadMembers(Humans, Bots);
+		if (Humans[State->SquadId] + Bots[State->SquadId] > MatchSettings->PlayersPerTeam && Bots[State->SquadId] > 0)
+		{
+			RemoveBotToMakeRoom(State->SquadId);
+		}
+		State->Team = GetTeamForSquad(State->SquadId);
+		RebuildSquadInfo();
+		return;
+	}
+
+	State->SquadId = INDEX_NONE;
+	MakeRoomForHuman();
+	AssignPlayerToSquad(State);
+}
+
+void AOneBrahamGameMode::GetSeamlessTravelActorList(bool bToTransition, TArray<AActor*>& ActorList)
+{
+	Super::GetSeamlessTravelActorList(bToTransition, ActorList);
+
+	// The engine keeps every PlayerState through seamless travel, bots' too,
+	// but not the bot controllers (they are transient). A bot's PlayerState
+	// would arrive in the next match owned by nobody, the new GameState would
+	// pick it up from the world, and CountSquadMembers would count a squad
+	// slot held by a bot that no longer exists. The next match makes its own.
+	ActorList.RemoveAll([](const AActor* Actor)
+	{
+		const APlayerState* State = Cast<APlayerState>(Actor);
+		return State != nullptr && (State->IsABot() || Cast<AOneBrahamBotController>(State->GetOwner()) != nullptr);
+	});
 }
 
 void AOneBrahamGameMode::Logout(AController* Exiting)
@@ -1664,44 +1928,560 @@ void AOneBrahamGameMode::Announce(const FText& Text, bool bTannoy)
 // ==========================================================================
 //  Bots
 // ==========================================================================
-void AOneBrahamGameMode::PopulateWithBots(int32 BotsPerTeam)
+void AOneBrahamGameMode::PopulateWithBots(int32 MaxBots)
 {
-	// Bot practice is explicitly NOT the shipping ASCENT experience: ASCENT has
-	// no AI manager. Bots exist so QA can test the map, the weapon balance and
-	// the extraction flow without 11 other people.
 	UWorld* World = GetWorld();
-	if (World == nullptr || BotsPerTeam <= 0)
+	if (World == nullptr || MatchSettings == nullptr || MaxBots == 0 || SquadToTeamMap.Num() == 0)
 	{
 		return;
 	}
 
-	bBotPracticeMode = true;
+	TArray<int32> Humans;
+	TArray<int32> ExistingBots;
+	CountSquadMembers(Humans, ExistingBots);
+
+	// Existing bots occupy slots like anyone: count them in, and take them off
+	// the cap, so calling this twice tops up rather than doubling the roster.
+	TArray<int32> Occupied = Humans;
+	int32 BotsAlready = 0;
+	for (int32 Squad = 0; Squad < Occupied.Num(); ++Squad)
+	{
+		Occupied[Squad] += ExistingBots[Squad];
+		BotsAlready += ExistingBots[Squad];
+	}
+
+	const int32 Remaining = MaxBots < 0 ? OneBrahamBotRules::FillAllSlots : FMath::Max(0, MaxBots - BotsAlready);
+	if (Remaining == 0)
+	{
+		return;
+	}
+
+	const TArray<int32> Plan = OneBrahamBotRules::ComputeBotsPerSquad(
+		SquadToTeamMap.Num(), MatchSettings->PlayersPerTeam, Occupied, Remaining);
 
 	int32 BotsSpawned = 0;
-	const int32 TeamsToFill = SquadToTeamMap.Num();
-
-	for (int32 TeamIndex = 0; TeamIndex < TeamsToFill; ++TeamIndex)
+	for (int32 Squad = 0; Squad < Plan.Num(); ++Squad)
 	{
-		for (int32 Index = 0; Index < BotsPerTeam; ++Index)
+		for (int32 Index = 0; Index < Plan[Squad]; ++Index)
 		{
 			FActorSpawnParameters SpawnParams;
-			SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+			SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			// Transient: a bot is never saved with the level or carried through travel.
+			SpawnParams.ObjectFlags |= RF_Transient;
 
 			AOneBrahamBotController* Bot = World->SpawnActor<AOneBrahamBotController>(
 				AOneBrahamBotController::StaticClass(), FTransform::Identity, SpawnParams);
-
 			if (Bot == nullptr)
+			{
+				OB_WARN("Could not spawn a bot controller for squad %d.", Squad);
+				continue;
+			}
+
+			const int32 Ordinal = Occupied[Squad] + Index;
+			Bot->InitBot(GetTeamForSquad(Squad), Squad, Ordinal, OneBrahamBotRules::SkillForBot(Ordinal),
+				OneBrahamBotRules::MakeBotName(NextBotOrdinal++), MatchSettings->Mode);
+
+			BotControllers.Add(Bot);
+			++BotsSpawned;
+
+			OB_MATCH_LOG("Bot '%s' joins squad %d (%s), skill %.2f.",
+				Bot->PlayerState != nullptr ? *Bot->PlayerState->GetPlayerName() : *Bot->GetName(),
+				Squad, *UEnum::GetValueAsString(GetTeamForSquad(Squad)), Bot->BotSkill);
+		}
+	}
+
+	bBotPracticeMode = BotControllers.Num() > 0;
+	RebuildSquadInfo();
+
+	if (bBotPracticeMode && BotFloorGroup.Num() == 0 && !bBotFloorGraphPending)
+	{
+		BuildBotFloorGraph();
+	}
+
+	// Into the building now if the mode allows it; ASCENT holds everyone on the
+	// plaza until the warmup ends and StartActiveMatch spawns the bots then.
+	if (CanBotsSpawnNow())
+	{
+		for (AOneBrahamBotController* Bot : BotControllers)
+		{
+			SpawnBotPawn(Bot);
+		}
+	}
+
+	FString PerSquad;
+	for (int32 Squad = 0; Squad < Plan.Num(); ++Squad)
+	{
+		PerSquad += FString::Printf(TEXT("%s%d+%d"), Squad > 0 ? TEXT(" ") : TEXT(""), Humans[Squad], Plan[Squad] + ExistingBots[Squad]);
+	}
+	OB_MATCH_LOG("Bots: %d added (%d in the match) across %d squads [humans+bots per squad: %s], limit %s, pawns %s.",
+		BotsSpawned, GetBotCount(), Plan.Num(), *PerSquad,
+		MaxBots < 0 ? TEXT("fill") : *FString::FromInt(MaxBots),
+		CanBotsSpawnNow() ? TEXT("now") : TEXT("when the match starts"));
+}
+
+void AOneBrahamGameMode::BuildBotFloorGraph()
+{
+	// Which floors the navmesh actually joins. A bot sent at an objective it has
+	// no path to gets the search's "closest" partial path, which changes from one
+	// re-plan to the next and ends wherever the node budget ran out - against
+	// the frontage, in a revolving door - and the bot dithers between them. So
+	// the match works out once which floors are connected, and a bot travels to
+	// the highest floor it can really reach on the way to its objective.
+	BotFloorAnchors.Reset();
+	BotFloorGroup.Reset();
+	bBotFloorGraphPending = false;
+
+	UWorld* World = GetWorld();
+	UNavigationSystemV1* Nav = World != nullptr ? FNavigationSystem::GetCurrent<UNavigationSystemV1>(World) : nullptr;
+	if (Nav == nullptr)
+	{
+		return;
+	}
+
+	// A navmesh still building (dynamic generation rebuilding dirty tiles in a
+	// packaged build's first frames) answers "no path" for floors it will join
+	// a second later, and the graph is built once: every bot would be held on
+	// the floor it spawned on for the whole match. Ask again when it is done;
+	// until then FindBotTravelTarget sends bots straight at their objective.
+	if (Nav->IsNavigationBuildInProgress())
+	{
+		bBotFloorGraphPending = true;
+		OB_MATCH_LOG("Bots: the navmesh is still building; the floor graph waits for it.");
+		return;
+	}
+
+	// One anchor per floor: its first spawn point (placed on walkable floor).
+	for (const AOneBrahamSpawnPoint* Spawn : SpawnPoints)
+	{
+		if (Spawn != nullptr && !BotFloorAnchors.Contains(Spawn->FloorIndex))
+		{
+			BotFloorAnchors.Add(Spawn->FloorIndex, Spawn->GetActorLocation());
+		}
+	}
+
+	TArray<int32> Floors;
+	BotFloorAnchors.GetKeys(Floors);
+	Floors.Sort();
+
+	// Union-find over floors, joined by complete paths between floors up to two
+	// apart (a flight of stairs, or an escalator over a double-height space).
+	TMap<int32, int32> Parent;
+	for (const int32 Floor : Floors)
+	{
+		Parent.Add(Floor, Floor);
+	}
+	auto Find = [&Parent](int32 Floor)
+	{
+		while (Parent[Floor] != Floor)
+		{
+			Floor = Parent[Floor];
+		}
+		return Floor;
+	};
+
+	FString Steps;
+	for (int32 I = 0; I < Floors.Num(); ++I)
+	{
+		for (int32 J = I + 1; J < Floors.Num() && Floors[J] - Floors[I] <= 2; ++J)
+		{
+			if (Find(Floors[I]) == Find(Floors[J]))
 			{
 				continue;
 			}
 
-			// Bot difficulty scales with the match: practice bots are deliberately
-			// mediocre so the map, not the AI, is what is being tested.
-			Bot->BotSkill = FMath::Clamp(0.35f + 0.05f * Index, 0.f, 1.f);
-			Bot->PreferredTeam = GetTeamForSquad(TeamIndex);
-			++BotsSpawned;
+			const UNavigationPath* Path = UNavigationSystemV1::FindPathToLocationSynchronously(
+				World, BotFloorAnchors[Floors[I]], BotFloorAnchors[Floors[J]]);
+			const bool bJoined = Path != nullptr && Path->IsValid() && !Path->IsPartial() && Path->PathPoints.Num() > 0;
+			Steps += FString::Printf(TEXT(" %d-%d:%s"), Floors[I], Floors[J], bJoined ? TEXT("yes") : TEXT("no"));
+			if (bJoined)
+			{
+				Parent[Find(Floors[J])] = Find(Floors[I]);
+			}
 		}
 	}
 
-	OB_MATCH_LOG("Bot practice mode: spawned %d bots across %d teams.", BotsSpawned, TeamsToFill);
+	FString Groups;
+	int32 LastGroup = INDEX_NONE;
+	for (const int32 Floor : Floors)
+	{
+		const int32 Group = Find(Floor);
+		BotFloorGroup.Add(Floor, Group);
+		Groups += FString::Printf(TEXT("%s%d"), Group == LastGroup ? TEXT(",") : TEXT(" | "), Floor);
+		LastGroup = Group;
+	}
+
+	UE_LOG(LogOneBrahamBots, Log, TEXT("[OB.BOTS] nav floor links:%s"), *Steps);
+	OB_MATCH_LOG("Bots: the navmesh joins floors%s%s", *Groups,
+		Floors.Num() > 0 && Find(Floors[0]) != Find(Floors.Last())
+			? TEXT(" - bots climb as far as their group goes (the floors are not joined by walkable navmesh)") : TEXT(""));
+}
+
+bool AOneBrahamGameMode::FindBotTravelTarget(int32 SquadId, int32 OrdinalInSquad, const FVector& From,
+	FVector& OutLocation, int32& OutFloor) const
+{
+	FVector Objective;
+	int32 ObjectiveFloor = INDEX_NONE;
+	if (!FindBotObjective(SquadId, OrdinalInSquad, Objective, ObjectiveFloor))
+	{
+		return false;
+	}
+
+	OutLocation = Objective;
+	OutFloor = ObjectiveFloor;
+
+	const int32 FromFloor = OneBrahamConstants::FloorIndexForZ(From.Z);
+	const int32* FromGroup = BotFloorGroup.Find(FromFloor);
+	const int32* GoalGroup = BotFloorGroup.Find(ObjectiveFloor);
+	if (FromGroup == nullptr || GoalGroup == nullptr || *FromGroup == *GoalGroup)
+	{
+		// Same walkable piece of the tower (or nothing known): straight there.
+		return true;
+	}
+
+	// Otherwise the floor of this group nearest the objective's, which for a
+	// climb is the highest one the stairs reach.
+	int32 Best = INDEX_NONE;
+	for (const TPair<int32, int32>& Pair : BotFloorGroup)
+	{
+		if (Pair.Value == *FromGroup
+			&& (Best == INDEX_NONE || FMath::Abs(Pair.Key - ObjectiveFloor) < FMath::Abs(Best - ObjectiveFloor)))
+		{
+			Best = Pair.Key;
+		}
+	}
+
+	if (Best == INDEX_NONE)
+	{
+		return true;
+	}
+
+	// Spread a squad over that floor's spawn points rather than one spot.
+	TArray<FVector> OnFloor;
+	for (const AOneBrahamSpawnPoint* Spawn : SpawnPoints)
+	{
+		if (Spawn != nullptr && Spawn->FloorIndex == Best)
+		{
+			OnFloor.Add(Spawn->GetActorLocation());
+		}
+	}
+
+	OutLocation = OnFloor.Num() > 0
+		? OnFloor[(FMath::Abs(SquadId) + FMath::Abs(OrdinalInSquad)) % OnFloor.Num()]
+		: BotFloorAnchors.FindRef(Best);
+	OutFloor = Best;
+	return true;
+}
+
+#if !UE_BUILD_SHIPPING
+namespace
+{
+	TAutoConsoleVariable<int32> CVarBotWatch(
+		TEXT("ob.Bots.Watch"),
+		-1,
+		TEXT("Dev: the first local player views through the eyes of bot N (index into the match's bots). -1 = off."),
+		ECVF_Cheat);
+}
+#endif
+
+int32 AOneBrahamGameMode::GetBotCount() const
+{
+	int32 Count = 0;
+	for (const AOneBrahamBotController* Bot : BotControllers)
+	{
+		Count += IsValid(Bot) ? 1 : 0;
+	}
+	return Count;
+}
+
+void AOneBrahamGameMode::CountInFight(int32& HumansInSquads, int32& HumansInFight, int32& BotsInFight) const
+{
+	HumansInSquads = 0;
+	HumansInFight = 0;
+	BotsInFight = 0;
+
+	const AOneBrahamGameState* GS = GetOBGameState();
+	if (GS == nullptr)
+	{
+		return;
+	}
+	for (const APlayerState* BaseState : GS->PlayerArray)
+	{
+		const AOneBrahamPlayerState* State = Cast<AOneBrahamPlayerState>(BaseState);
+		if (State == nullptr || State->SquadId == INDEX_NONE)
+		{
+			continue;
+		}
+
+		if (State->IsABot() || Cast<AOneBrahamBotController>(State->GetOwner()) != nullptr)
+		{
+			BotsInFight += State->IsEliminated() ? 0 : 1;
+			continue;
+		}
+
+		++HumansInSquads;
+		HumansInFight += State->IsEliminated() ? 0 : 1;
+	}
+}
+
+bool AOneBrahamGameMode::CanBotsSpawnNow() const
+{
+	if (bMatchFinished)
+	{
+		return false;
+	}
+
+	// Nobody to play against: a dedicated server that boots into a match fills
+	// the roster, but does not stage a bot match before its first player
+	// arrives (the warmup does not wait for players, so a server left alone
+	// ran twelve bots through the lockdown and the purge to "no survivors").
+	// The pawns follow the first human in: the once-a-second retry in Tick.
+	bool bAnyHuman = false;
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It && !bAnyHuman; ++It)
+	{
+		const APlayerController* PlayerController = It->Get();
+		bAnyHuman = PlayerController != nullptr && PlayerController->PlayerState != nullptr
+			&& !PlayerController->PlayerState->IsOnlyASpectator();
+	}
+	if (!bAnyHuman)
+	{
+		return false;
+	}
+
+	const EOneBrahamMatchPhase Phase = GetMatchPhase();
+	if (Phase == EOneBrahamMatchPhase::Active || Phase == EOneBrahamMatchPhase::Extraction)
+	{
+		return true;
+	}
+
+	// The warmup is a spawned phase everywhere but ASCENT, which parks players
+	// above the plaza (HandleStartingNewPlayer); bots wait with them.
+	return Phase == EOneBrahamMatchPhase::Warmup && MatchSettings != nullptr
+		&& MatchSettings->Mode != EOneBrahamMatchMode::Ascent;
+}
+
+void AOneBrahamGameMode::SpawnBotPawn(AOneBrahamBotController* Bot)
+{
+	if (!IsValid(Bot) || !CanBotsSpawnNow())
+	{
+		return;
+	}
+
+	// One pawn per life. A dead bot's corpse is the respawn queue's business
+	// (FIRE DRILL), and in ASCENT a dead bot stays dead like anyone.
+	if (Bot->GetPawn() != nullptr)
+	{
+		return;
+	}
+
+	const AOneBrahamPlayerState* State = Bot->GetPlayerState<AOneBrahamPlayerState>();
+	const bool bRespawns = MatchSettings != nullptr && MatchSettings->bRespawnEnabled;
+	if (!bRespawns && State != nullptr && State->LifeState == EOneBrahamLifeState::Dead)
+	{
+		return;
+	}
+
+	// The same spawn rules as a player: the plaza in ASCENT, squad clusters and
+	// the threat rules everywhere.
+	RestartPlayer(Bot);
+
+	if (Bot->GetPawn() == nullptr)
+	{
+		OB_WARN("Bot '%s' failed to spawn a pawn (no free spawn point?).",
+			Bot->PlayerState != nullptr ? *Bot->PlayerState->GetPlayerName() : *Bot->GetName());
+	}
+}
+
+void AOneBrahamGameMode::CountSquadMembers(TArray<int32>& OutHumans, TArray<int32>& OutBots) const
+{
+	OutHumans.Init(0, SquadToTeamMap.Num());
+	OutBots.Init(0, SquadToTeamMap.Num());
+
+	const AOneBrahamGameState* GS = GetOBGameState();
+	if (GS == nullptr)
+	{
+		return;
+	}
+
+	for (APlayerState* BaseState : GS->PlayerArray)
+	{
+		const AOneBrahamPlayerState* State = Cast<AOneBrahamPlayerState>(BaseState);
+		if (State == nullptr || !OutHumans.IsValidIndex(State->SquadId))
+		{
+			continue;
+		}
+
+		const bool bBot = State->IsABot() || Cast<AOneBrahamBotController>(State->GetOwner()) != nullptr;
+		++(bBot ? OutBots : OutHumans)[State->SquadId];
+	}
+}
+
+void AOneBrahamGameMode::MakeRoomForHuman(int32 PreferredSquad)
+{
+	if (BotControllers.Num() == 0 || MatchSettings == nullptr)
+	{
+		return;
+	}
+
+	TArray<int32> Humans;
+	TArray<int32> Bots;
+	CountSquadMembers(Humans, Bots);
+
+	for (int32 Squad = 0; Squad < Humans.Num(); ++Squad)
+	{
+		if (Humans[Squad] + Bots[Squad] < MatchSettings->PlayersPerTeam)
+		{
+			return;
+		}
+	}
+
+	RemoveBotToMakeRoom(PreferredSquad);
+}
+
+bool AOneBrahamGameMode::RemoveBotToMakeRoom(int32 PreferredSquad)
+{
+	TArray<int32> Humans;
+	TArray<int32> Bots;
+	CountSquadMembers(Humans, Bots);
+
+	const int32 Squad = Bots.IsValidIndex(PreferredSquad) && Bots[PreferredSquad] > 0
+		? PreferredSquad
+		: OneBrahamBotRules::PickSquadToYieldBot(Humans, Bots);
+	if (Squad == INDEX_NONE)
+	{
+		return false;
+	}
+
+	// The squad's newest bot goes: the longest-serving ones keep their places.
+	AOneBrahamBotController* Leaving = nullptr;
+	for (AOneBrahamBotController* Bot : BotControllers)
+	{
+		if (IsValid(Bot) && Bot->PreferredSquadId == Squad && (Leaving == nullptr || Bot->SquadOrdinal > Leaving->SquadOrdinal))
+		{
+			Leaving = Bot;
+		}
+	}
+
+	if (Leaving == nullptr)
+	{
+		return false;
+	}
+
+	OB_MATCH_LOG("Bot '%s' leaves squad %d to make room for a player.",
+		Leaving->PlayerState != nullptr ? *Leaving->PlayerState->GetPlayerName() : *Leaving->GetName(), Squad);
+
+	BotControllers.Remove(Leaving);
+	PendingRespawns.Remove(Leaving);
+
+	if (APawn* Pawn = Leaving->GetPawn())
+	{
+		Leaving->UnPossess();
+		Pawn->Destroy();
+	}
+
+	// Destroying the controller logs it out (kill feed "left", squad rebuild)
+	// and takes its PlayerState with it.
+	Leaving->Destroy();
+	bBotPracticeMode = GetBotCount() > 0;
+	RebuildSquadInfo();
+	return true;
+}
+
+bool AOneBrahamGameMode::FindBotObjective(int32 SquadId, int32 OrdinalInSquad, FVector& OutLocation, int32& OutFloor) const
+{
+	const UWorld* World = GetWorld();
+	if (World == nullptr || MatchSettings == nullptr)
+	{
+		return false;
+	}
+
+	// The fallback anchor for any floor: a spawn point on it. Spawn points are
+	// placed on walkable floor by the map builder, so they are on the navmesh.
+	auto SpawnOnFloor = [this, OrdinalInSquad, SquadId](int32 Floor, FVector& Out) -> bool
+	{
+		TArray<const AOneBrahamSpawnPoint*> OnFloor;
+		for (const AOneBrahamSpawnPoint* Spawn : SpawnPoints)
+		{
+			if (Spawn != nullptr && Spawn->FloorIndex == Floor)
+			{
+				OnFloor.Add(Spawn);
+			}
+		}
+		if (OnFloor.Num() == 0)
+		{
+			return false;
+		}
+		Out = OnFloor[(FMath::Abs(SquadId) * 3 + FMath::Abs(OrdinalInSquad)) % OnFloor.Num()]->GetActorLocation();
+		return true;
+	};
+
+	switch (MatchSettings->Mode)
+	{
+	case EOneBrahamMatchMode::Ascent:
+	{
+		// The climb ends on the Skydeck pad.
+		TActorIterator<AOneBrahamExtractionPad> Pad(World);
+		if (Pad)
+		{
+			OutLocation = Pad->GetActorLocation();
+			OutFloor = OneBrahamConstants::FloorIndexForZ(OutLocation.Z);
+			return true;
+		}
+
+		if (SpawnOnFloor(OneBrahamConstants::FloorSkydeck, OutLocation))
+		{
+			OutFloor = OneBrahamConstants::FloorSkydeck;
+			return true;
+		}
+		return false;
+	}
+
+	case EOneBrahamMatchMode::FireDrill:
+	{
+		const TArray<FOneBrahamControlPointDef>& Points = MatchSettings->ControlPoints;
+		const int32 Index = OneBrahamBotRules::PickObjectiveIndex(Points.Num(), SquadId, OrdinalInSquad);
+		if (!Points.IsValidIndex(Index))
+		{
+			return false;
+		}
+
+		const FOneBrahamControlPointDef& Point = Points[Index];
+
+		// The point's volume when the map has one, its floor otherwise.
+		if (!Point.VolumeActorTag.IsNone())
+		{
+			for (TActorIterator<AActor> It(World); It; ++It)
+			{
+				if (It->ActorHasTag(Point.VolumeActorTag))
+				{
+					OutLocation = It->GetActorLocation();
+					OutFloor = OneBrahamConstants::FloorIndexForZ(OutLocation.Z);
+
+					// The point's floor is the definition's, not the volume's
+					// middle: the Reception volume fills the double-height lobby
+					// and its centre is a storey up, so bots were sent to the
+					// floor-2 gallery above the point (or, from the floors the
+					// navmesh does not join to 2, to a spawn on floor 1 that was
+					// not the point at all). Standing height on the point's slab.
+					if (Point.FloorIndex >= 0)
+					{
+						OutFloor = Point.FloorIndex;
+						OutLocation.Z = OneBrahamConstants::GroundFloorZ
+							+ Point.FloorIndex * OneBrahamConstants::FloorHeightCm + 90.f;
+					}
+					return true;
+				}
+			}
+		}
+
+		if (SpawnOnFloor(Point.FloorIndex, OutLocation))
+		{
+			OutFloor = Point.FloorIndex;
+			return true;
+		}
+		return false;
+	}
+
+	default:
+		return false;
+	}
 }

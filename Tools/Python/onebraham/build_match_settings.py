@@ -31,6 +31,15 @@ WHERE THE NUMBERS COME FROM
     FIRE DRILL respawn 12 s) contradict the constants the automation tests hold
     the class to (OneBraham.Core.AscentRules / FireDrillRules).
 
+BOTS (OPTIONAL FIELDS)
+    "bots" in a row is the bot fill: bFillWithBots (empty squad slots get a
+    bot when the match starts) and max_bots (-1 = every empty slot). They are
+    written only when UOneBrahamMatchSettingsAsset has the properties; until
+    then the game mode reads them by name and falls back to the same per-mode
+    default (OneBrahamBotRules::ModeFillsWithBotsByDefault), so an asset built
+    either side of that header change plays the same. `?Bots=N` on the travel
+    URL overrides both.
+
 WHAT IS LEFT TO THE CODE
     WeaponSpawnTable, FloorLootProfiles and ControlPoints stay empty here.
     The GameMode calls EnsureDefaults() on whatever asset it loads, and that
@@ -80,7 +89,8 @@ MODES = [
         display_name="ASCENT",                      # enum DisplayName
         description="Twelve players in three squads of four. Climb from the plaza "
                     "to the Skydeck, call the winch, hold the pad for thirty "
-                    "seconds and get out. No respawns, no AI, one extraction.",
+                    "seconds and get out. No respawns, one extraction; bots take "
+                    "the squad slots nobody is in.",
         briefing="Reach the Skydeck. Hold the pad. Extract. The building closes "
                  "behind you, and only one squad leaves.",
         values=dict(
@@ -109,6 +119,8 @@ MODES = [
             bScoreByTimeLimit=True,
             time_limit_seconds=2100,                # Docs/06 s1 "hard end at 35"
         ),
+        # A solo or part-full lobby still has three squads (OneBrahamBotRules).
+        bots=dict(bFillWithBots=True, max_bots=-1),
     ),
     dict(
         asset="FireDrill", mode="FireDrill",
@@ -135,6 +147,8 @@ MODES = [
             bScoreByTimeLimit=True,
             time_limit_seconds=600,                 # Docs/06 s1 "10 minutes"
         ),
+        # Filled to 6v6 (Docs/06 s6 "BotsEnabled: filled").
+        bots=dict(bFillWithBots=True, max_bots=-1),
     ),
     dict(
         asset="NightShift", mode="NightShift",
@@ -154,6 +168,8 @@ MODES = [
             # loss. Off until the mode is designed past its beta.
             bScoreByTimeLimit=False,
         ),
+        # Co-op against the building: no bot team-mates unless ?Bots=N asks.
+        bots=dict(bFillWithBots=False, max_bots=-1),
     ),
 ]
 
@@ -185,6 +201,15 @@ def _set(obj, prop, value, report, context):
         return True
     except Exception as exc:  # noqa: BLE001
         report.failed(context, u"{0}: {1}".format(prop, exc))
+        return False
+
+
+def _has_property(obj, prop):
+    """True when obj has the editor property (by either spelling)."""
+    try:
+        obj.get_editor_property(prop)
+        return True
+    except Exception:  # noqa: BLE001
         return False
 
 
@@ -224,6 +249,14 @@ def _apply(report, asset, row):
 
     for prop, value in sorted(row["values"].items()):
         _set(asset, prop, value, report, context)
+
+    # The bot fill is optional: written when the class has the fields, and a
+    # skip (not a failure) when it does not - the game mode reads them by name.
+    for prop, value in sorted(row.get("bots", {}).items()):
+        if _has_property(asset, prop):
+            _set(asset, prop, value, report, context)
+        else:
+            C.log(u"  {0}: no '{1}' on the class yet - the per-mode bot default applies".format(context, prop))
 
     # Read every field back: a clamp in the header (TeamCount 1-4, PlayersPerTeam
     # 1-8) or a mistyped value is caught here, not by the first lobby.

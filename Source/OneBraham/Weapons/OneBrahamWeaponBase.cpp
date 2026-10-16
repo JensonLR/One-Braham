@@ -111,12 +111,15 @@ AOneBrahamWeaponBase::AOneBrahamWeaponBase()
 	PickupMesh->SetVisibility(false);
 
 	// --- Muzzle FX --------------------------------------------------------
+	// On the bare mesh, not its sockets: the weapon is spawned with no model and
+	// gets one from its definition, so the sockets are applied then (see
+	// AttachEffectsToMeshSockets).
 	MuzzleFlashComponent = CreateDefaultSubobject<UNiagaraComponent>(TEXT("MuzzleFlash"));
-	MuzzleFlashComponent->SetupAttachment(WeaponMesh, TEXT("Muzzle"));
+	MuzzleFlashComponent->SetupAttachment(WeaponMesh);
 	MuzzleFlashComponent->SetAutoActivate(false);
 
 	MuzzleLight = CreateDefaultSubobject<USpotLightComponent>(TEXT("MuzzleLight"));
-	MuzzleLight->SetupAttachment(WeaponMesh, TEXT("Muzzle"));
+	MuzzleLight->SetupAttachment(WeaponMesh);
 	MuzzleLight->Intensity = 0.f;
 	MuzzleLight->AttenuationRadius = 800.f;
 	MuzzleLight->OuterConeAngle = 45.f;
@@ -125,7 +128,7 @@ AOneBrahamWeaponBase::AOneBrahamWeaponBase()
 
 	// --- Weapon light (flashlight attachment) ----------------------------
 	WeaponLight = CreateDefaultSubobject<USpotLightComponent>(TEXT("WeaponLight"));
-	WeaponLight->SetupAttachment(WeaponMesh, TEXT("FlashlightMount"));
+	WeaponLight->SetupAttachment(WeaponMesh);
 	WeaponLight->Intensity = 5200.f;
 	WeaponLight->AttenuationRadius = 3200.f;
 	WeaponLight->InnerConeAngle = 14.f;
@@ -134,7 +137,7 @@ AOneBrahamWeaponBase::AOneBrahamWeaponBase()
 	WeaponLight->SetVisibility(false);
 
 	FireAudioComponent = CreateDefaultSubobject<UAudioComponent>(TEXT("FireAudio"));
-	FireAudioComponent->SetupAttachment(WeaponMesh, TEXT("Muzzle"));
+	FireAudioComponent->SetupAttachment(WeaponMesh);
 	FireAudioComponent->bAutoActivate = false;
 	FireAudioComponent->bAllowSpatialization = true;
 	FireAudioComponent->bOverrideAttenuation = false;
@@ -225,6 +228,17 @@ void AOneBrahamWeaponBase::InitialiseFromDefinition(UOneBrahamWeaponDefinition* 
 		{
 			WeaponMesh->SetSkeletalMesh(Mesh);
 		}
+	}
+
+	// The model is in: the effects can go onto its sockets now, and not before.
+	AttachEffectsToMeshSockets();
+
+	// Attachment meshes built before the model (a client whose attachments
+	// replicated ahead of the definition) sat on the mesh origin, since a socket
+	// is only used once the model has it: rebuild them onto the real sockets.
+	if (Attachments.Num() > 0)
+	{
+		RebuildAttachmentMeshes();
 	}
 
 	if (!InDefinition->WorldPickupMesh.IsNull() && PickupMesh != nullptr)
@@ -467,6 +481,46 @@ void AOneBrahamWeaponBase::AttachToOwnerMesh(AOneBrahamCharacter* HolderCharacte
 		const bool bSidearm = Definition != nullptr && Definition->DefaultSlot == EOneBrahamWeaponSlot::Sidearm;
 		GetRootComponent()->SetRelativeTransform(GetMannequinGripOffset(bSidearm));
 	}
+}
+
+FName AOneBrahamWeaponBase::ResolveWeaponMeshSocket(const USkeletalMeshComponent* Mesh, FName Socket)
+{
+	// DoesSocketExist is the one socket query that does not warn on a mesh with
+	// no model: it answers "no" instead.
+	if (Mesh == nullptr || Socket.IsNone() || Mesh->GetSkinnedAsset() == nullptr || !Mesh->DoesSocketExist(Socket))
+	{
+		return NAME_None;
+	}
+
+	return Socket;
+}
+
+void AOneBrahamWeaponBase::AttachEffectsToMeshSockets()
+{
+	if (WeaponMesh == nullptr)
+	{
+		return;
+	}
+
+	const FName MuzzleSocket = ResolveWeaponMeshSocket(WeaponMesh,
+		Definition != nullptr && !Definition->MuzzleSocket.IsNone() ? Definition->MuzzleSocket : FName(TEXT("Muzzle")));
+	const FName FlashlightSocket = ResolveWeaponMeshSocket(WeaponMesh, TEXT("FlashlightMount"));
+
+	// Snap, as SetupAttachment's zero offset did: the socket is the whole answer.
+	// A model without the socket keeps the effect at its origin, which is where
+	// the engine put it anyway when the named socket was missing.
+	const auto AttachTo = [this](USceneComponent* Component, FName Socket)
+	{
+		if (Component != nullptr && (Component->GetAttachParent() != WeaponMesh || Component->GetAttachSocketName() != Socket))
+		{
+			Component->AttachToComponent(WeaponMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, Socket);
+		}
+	};
+
+	AttachTo(MuzzleFlashComponent, MuzzleSocket);
+	AttachTo(MuzzleLight, MuzzleSocket);
+	AttachTo(FireAudioComponent, MuzzleSocket);
+	AttachTo(WeaponLight, FlashlightSocket);
 }
 
 void AOneBrahamWeaponBase::UpdateHeldVisibility()
@@ -1381,7 +1435,7 @@ void AOneBrahamWeaponBase::RebuildAttachmentMeshes()
 			UStaticMeshComponent* MeshComponent = NewObject<UStaticMeshComponent>(this);
 			MeshComponent->SetStaticMesh(Mesh);
 			MeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-			MeshComponent->SetupAttachment(WeaponMesh, GetAttachmentSocketName(Pair.Key));
+			MeshComponent->SetupAttachment(WeaponMesh, ResolveWeaponMeshSocket(WeaponMesh, GetAttachmentSocketName(Pair.Key)));
 			MeshComponent->RegisterComponent();
 
 			// The laser and flashlight attachments drive the weapon lights rather

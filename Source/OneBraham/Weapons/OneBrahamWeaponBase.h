@@ -150,6 +150,14 @@ public:
 	 */
 	static FTransform GetMannequinGripOffset(bool bSidearm);
 
+	/**
+	 * Socket on the gun's own mesh to attach to: Socket when Mesh has a model
+	 * and the model has that socket, NAME_None (the mesh origin) otherwise. A
+	 * socket on a component with no model yet is not a no-op: every transform
+	 * update asks the engine for it and logs "No SkeletalMesh" each time.
+	 */
+	static FName ResolveWeaponMeshSocket(const USkeletalMeshComponent* Mesh, FName Socket);
+
 	/** The server's attachment arrives here too; a held weapon keeps the local answer instead. */
 	virtual void OnRep_AttachmentReplication() override;
 
@@ -401,6 +409,14 @@ protected:
 
 	/** Places attachment meshes on their sockets. */
 	void RebuildAttachmentMeshes();
+
+	/**
+	 * Moves the muzzle flash, muzzle light, fire audio and weapon light onto the
+	 * model's sockets. The constructor leaves them on the bare mesh: a weapon is
+	 * spawned (and its components registered) before its definition gives it a
+	 * model, so constructor-time sockets were queried on an empty mesh.
+	 */
+	void AttachEffectsToMeshSockets();
 
 	/** Socket name for an attachment slot, from the weapon definition. */
 	FName GetAttachmentSocketName(EOneBrahamAttachmentSlot Slot) const;
