@@ -25,7 +25,9 @@
 #include "Data/OneBrahamMatchSettingsAsset.h"
 #include "Data/OneBrahamWeaponDataAsset.h"
 
+#include "Components/CapsuleComponent.h"
 #include "Engine/World.h"
+#include "GameFramework/Character.h"
 #include "EngineUtils.h"
 #include "GameFramework/GameSession.h"
 #include "GameFramework/PlayerStart.h"
@@ -1281,10 +1283,19 @@ void AOneBrahamGameMode::RebuildSpawnPointRegistry()
 
 AOneBrahamSpawnPoint* AOneBrahamGameMode::SelectSpawnPointFor(AController* Controller, int32 FloorIndex) const
 {
+	TArray<AOneBrahamSpawnPoint*> Ranked;
+	RankSpawnPointsFor(Controller, FloorIndex, Ranked);
+	return Ranked.Num() > 0 ? Ranked[0] : nullptr;
+}
+
+void AOneBrahamGameMode::RankSpawnPointsFor(AController* Controller, int32 FloorIndex, TArray<AOneBrahamSpawnPoint*>& OutRanked) const
+{
+	OutRanked.Reset();
+
 	const UWorld* World = GetWorld();
 	if (World == nullptr || SpawnPoints.Num() == 0)
 	{
-		return nullptr;
+		return;
 	}
 
 	const float Now = World->GetTimeSeconds();
@@ -1293,15 +1304,21 @@ AOneBrahamSpawnPoint* AOneBrahamGameMode::SelectSpawnPointFor(AController* Contr
 	const int32 RequestingSquad = RequestingState ? RequestingState->SquadId : INDEX_NONE;
 
 	// --- Gather candidates ------------------------------------------------
-	TArray<AOneBrahamSpawnPoint*> Candidates;
-	AOneBrahamSpawnPoint* BestFallback = nullptr;
-	float BestFallbackSafety = -1.f;
-	TArray<float> Weights;
-	float TotalWeight = 0.f;
+	// Each passing point gets a key FRand^(1/weight); sorting by it is a
+	// weighted random order (Efraimidis-Spirakis), so the first point is the
+	// same weighted pick this always made and the rest are its runners-up.
+	struct FKeyed
+	{
+		AOneBrahamSpawnPoint* Spawn = nullptr;
+		float Key = 0.f;
+	};
+	TArray<FKeyed> Candidates;
+	TArray<FKeyed> Vetoed;
+	TArray<FKeyed> Resting;
 
 	for (AOneBrahamSpawnPoint* Spawn : SpawnPoints)
 	{
-		if (Spawn == nullptr || !Spawn->IsAvailable(Now))
+		if (Spawn == nullptr || !Spawn->bEnabled)
 		{
 			continue;
 		}
@@ -1316,6 +1333,13 @@ AOneBrahamSpawnPoint* AOneBrahamGameMode::SelectSpawnPointFor(AController* Contr
 		// upper floors rather than a 15-floor climb in the last 40 seconds.
 		if (FloorIndex != INDEX_NONE && Spawn->FloorIndex != FloorIndex)
 		{
+			continue;
+		}
+
+		// Resting after use: a last resort, the longest-rested first.
+		if (!Spawn->IsAvailable(Now))
+		{
+			Resting.Add({ Spawn, -Spawn->LastUsedTime });
 			continue;
 		}
 
@@ -1412,12 +1436,7 @@ AOneBrahamSpawnPoint* AOneBrahamGameMode::SelectSpawnPointFor(AController* Contr
 		{
 			// Vetoed, but remembered: if every spawn is vetoed, the safest of
 			// them is still better than none.
-			const float Safety = OneBrahamSpawnRules::FallbackSafety(Threat);
-			if (Safety > BestFallbackSafety)
-			{
-				BestFallbackSafety = Safety;
-				BestFallback = Spawn;
-			}
+			Vetoed.Add({ Spawn, OneBrahamSpawnRules::FallbackSafety(Threat) });
 			continue;
 		}
 		Weight *= ThreatMultiplier;
@@ -1433,44 +1452,26 @@ AOneBrahamSpawnPoint* AOneBrahamGameMode::SelectSpawnPointFor(AController* Contr
 			continue;
 		}
 
-		Candidates.Add(Spawn);
-		Weights.Add(Weight);
-		TotalWeight += Weight;
+		Candidates.Add({ Spawn, FMath::Pow(FMath::Max(FMath::FRand(), UE_KINDA_SMALL_NUMBER), 1.f / Weight) });
 	}
 
-	if (Candidates.Num() == 0)
+	// --- Order -----------------------------------------------------------
+	// Passing points first. If every spawn is threatened, the safest of the
+	// vetoed ones rather than a random one - a random pick is how a camped
+	// spawn gets chosen. A point still resting beats no spawn at all.
+	auto ByKey = [](const FKeyed& A, const FKeyed& B) { return A.Key > B.Key; };
+	Candidates.StableSort(ByKey);
+	Vetoed.StableSort(ByKey);
+	Resting.StableSort(ByKey);
+
+	OutRanked.Reserve(Candidates.Num() + Vetoed.Num() + Resting.Num());
+	for (const TArray<FKeyed>* Tier : { &Candidates, &Vetoed, &Resting })
 	{
-		// Every spawn is threatened. Take the safest of the vetoed ones rather
-		// than a random one - a random pick is how a camped spawn gets chosen.
-		if (BestFallback != nullptr)
+		for (const FKeyed& Keyed : *Tier)
 		{
-			return BestFallback;
-		}
-
-		// Nothing was even considered (every spawn on cooldown or filtered):
-		// ignore the cooldowns rather than leave a player unable to spawn.
-		for (AOneBrahamSpawnPoint* Spawn : SpawnPoints)
-		{
-			if (Spawn != nullptr && Spawn->bEnabled)
-			{
-				return Spawn;
-			}
-		}
-		return nullptr;
-	}
-
-	// --- Weighted pick ----------------------------------------------------
-	float Roll = FMath::FRandRange(0.f, TotalWeight);
-	for (int32 Index = 0; Index < Candidates.Num(); ++Index)
-	{
-		Roll -= Weights[Index];
-		if (Roll <= 0.f)
-		{
-			return Candidates[Index];
+			OutRanked.Add(Keyed.Spawn);
 		}
 	}
-
-	return Candidates.Last();
 }
 
 bool AOneBrahamGameMode::IsPawnDeadForRespawn(const APawn* Pawn)
@@ -1524,21 +1525,78 @@ bool AOneBrahamGameMode::PlayerCanRestart_Implementation(APlayerController* Play
 
 AActor* AOneBrahamGameMode::ChoosePlayerStart_Implementation(AController* Player)
 {
-	// ASCENT is the climb: everyone walks in off the plaza (Docs/09, floor 0
-	// is the spawn; Docs/06, "the lobby start"). Asking for any floor dropped
-	// squads straight onto 12 with the induction telling them to walk in from
-	// the street. A full plaza falls through to the general rule below.
+	// The same list RestartPlayer walks; its head is the one choice the engine
+	// asks for. Prefer our own spawn points; only fall back to a legacy
+	// APlayerStart if a level has not been authored yet (early greyblock,
+	// tutorial map).
+	TArray<AOneBrahamSpawnPoint*> Points;
+	TArray<bool> Clear;
+	GatherSpawnAttemptsFor(Player, Points, Clear);
+	if (Points.Num() > 0)
+	{
+		return Points[0];
+	}
+
+	return Super::ChoosePlayerStart_Implementation(Player);
+}
+
+int32 AOneBrahamGameMode::GetAscentEntryFloor() const
+{
+	TArray<int32> Floors;
+	for (const AOneBrahamSpawnPoint* Spawn : SpawnPoints)
+	{
+		if (Spawn != nullptr && Spawn->bEnabled)
+		{
+			Floors.AddUnique(Spawn->FloorIndex);
+		}
+	}
+	Floors.Sort();
+
+	const AOneBrahamGameState* GS = GetOBGameState();
+	const UOneBrahamLockdownComponent* Lockdown = GS != nullptr ? GS->GetLockdownComponent() : nullptr;
+	return OneBrahamSpawnRules::LateJoinFloor(Floors, [Lockdown](int32 Floor)
+	{
+		return Lockdown != nullptr && (Lockdown->IsFloorBeingPurged(Floor) || Lockdown->IsFloorSealed(Floor));
+	});
+}
+
+void AOneBrahamGameMode::GatherSpawnAttemptsFor(AController* Controller, TArray<AOneBrahamSpawnPoint*>& OutPoints, TArray<bool>& OutClear) const
+{
+	OutPoints.Reset();
+	OutClear.Reset();
+
+	// Preferred[0, PrimaryCount) are on the mode's own floors; the rest are
+	// fallbacks (OneBrahamSpawnRules::FSpawnAttempt::bFallback).
+	TArray<AOneBrahamSpawnPoint*> Preferred;
+	int32 PrimaryCount = INDEX_NONE;
+	TSet<AOneBrahamSpawnPoint*> SquadPoints;
+	TArray<AOneBrahamSpawnPoint*> Ranked;
+	auto AppendRanked = [this, Controller, &Preferred, &Ranked](int32 Floor)
+	{
+		RankSpawnPointsFor(Controller, Floor, Ranked);
+		for (AOneBrahamSpawnPoint* Spawn : Ranked)
+		{
+			Preferred.AddUnique(Spawn);
+		}
+	};
+
 	if (MatchSettings != nullptr && MatchSettings->Mode == EOneBrahamMatchMode::Ascent)
 	{
+		// ASCENT is the climb: everyone walks in off the plaza (Docs/09, floor 0
+		// is the spawn; Docs/06, "the lobby start"), and so does a late joiner
+		// while the plaza is open; after that, the lowest floor the lockdown has
+		// not closed (GetAscentEntryFloor, OneBrahamSpawnRules::LateJoinFloor).
+		const int32 EntryFloor = GetAscentEntryFloor();
+
 		// A squad walks in together from its own corner of the plaza: the
 		// cluster is the squad (Docs/06, "round-robins players onto clusters").
 		// The opening wave puts four people on one point at the same instant,
 		// so the point's rest timer is not a reason to send three of them to
 		// another squad's corner - which is what the weighted pick did, and the
 		// first seconds of every full match were a fight on one spawn point.
-		// RestartPlayerAtPlayerStart stands the later arrivals beside the point.
-		const AOneBrahamPlayerState* State = Player != nullptr ? Player->GetPlayerState<AOneBrahamPlayerState>() : nullptr;
-		if (State != nullptr && State->SquadId != INDEX_NONE)
+		// The later arrivals stand beside the point (SpawnPawnAtOrBeside).
+		const AOneBrahamPlayerState* State = Controller != nullptr ? Controller->GetPlayerState<AOneBrahamPlayerState>() : nullptr;
+		if (EntryFloor == OneBrahamConstants::FloorPlaza && State != nullptr && State->SquadId != INDEX_NONE)
 		{
 			TArray<AOneBrahamSpawnPoint*> Plaza;
 			for (AOneBrahamSpawnPoint* Spawn : SpawnPoints)
@@ -1553,25 +1611,52 @@ AActor* AOneBrahamGameMode::ChoosePlayerStart_Implementation(AController* Player
 			{
 				if (Spawn->SquadClusterId == State->SquadId % FMath::Max(1, Plaza.Num()))
 				{
-					return Spawn;
+					Preferred.Add(Spawn);
+					SquadPoints.Add(Spawn);
 				}
 			}
 		}
 
-		if (AOneBrahamSpawnPoint* Spawn = SelectSpawnPointFor(Player, OneBrahamConstants::FloorPlaza))
+		if (EntryFloor != INDEX_NONE)
 		{
-			return Spawn;
+			AppendRanked(EntryFloor);
+		}
+		PrimaryCount = Preferred.Num();
+
+		// Blocked on the way in: the next floor up that is still open, never
+		// one behind a shutter or in the gas.
+		const AOneBrahamGameState* GS = GetOBGameState();
+		const UOneBrahamLockdownComponent* Lockdown = GS != nullptr ? GS->GetLockdownComponent() : nullptr;
+		TArray<int32> Above;
+		for (const AOneBrahamSpawnPoint* Spawn : SpawnPoints)
+		{
+			if (Spawn != nullptr && EntryFloor != INDEX_NONE && Spawn->FloorIndex > EntryFloor
+				&& (Lockdown == nullptr || (!Lockdown->IsFloorBeingPurged(Spawn->FloorIndex) && !Lockdown->IsFloorSealed(Spawn->FloorIndex))))
+			{
+				Above.AddUnique(Spawn->FloorIndex);
+			}
+		}
+		Above.Sort();
+		for (const int32 Floor : Above)
+		{
+			if (Preferred.Num() >= MaxSpawnAttemptsPerRestart)
+			{
+				break;
+			}
+			AppendRanked(Floor);
 		}
 	}
-
-	// FIRE DRILL is a fight over three control points, so it is fought on their
-	// floors: a spawn anywhere in the tower put the twelve players on twelve
-	// floors the navmesh does not join, and a match could run its ten minutes
-	// without two enemies meeting (bots or people). Each spawn goes to one of
-	// the point floors, in a random order, under the usual safety rules on
-	// that floor; a map with no spawn on any point floor falls through.
-	if (MatchSettings != nullptr && MatchSettings->Mode == EOneBrahamMatchMode::FireDrill)
+	else if (MatchSettings != nullptr && MatchSettings->Mode == EOneBrahamMatchMode::FireDrill)
 	{
+		// FIRE DRILL is a fight over three control points, so it is fought on
+		// their floors: a spawn anywhere in the tower put the twelve players on
+		// twelve floors the navmesh does not join, and a match could run its ten
+		// minutes without two enemies meeting (bots or people). Each spawn goes
+		// to one of the point floors under the usual safety rules, ranked across
+		// all three at once: ranking floor by floor in a random order put a
+		// point in an enemy's sight (vetoed) or one used a second ago (resting)
+		// on the first floor ahead of a safe, rested one on the next. The rest
+		// of the tower is the last resort.
 		TArray<int32> PointFloors;
 		for (const FOneBrahamControlPointDef& Point : MatchSettings->ControlPoints)
 		{
@@ -1581,101 +1666,271 @@ AActor* AOneBrahamGameMode::ChoosePlayerStart_Implementation(AController* Player
 			}
 		}
 
-		for (int32 Index = PointFloors.Num() - 1; Index > 0; --Index)
+		RankSpawnPointsFor(Controller, INDEX_NONE, Ranked);
+		for (AOneBrahamSpawnPoint* Spawn : Ranked)
 		{
-			PointFloors.Swap(Index, FMath::RandRange(0, Index));
-		}
-
-		for (const int32 Floor : PointFloors)
-		{
-			if (AOneBrahamSpawnPoint* Spawn = SelectSpawnPointFor(Player, Floor))
+			if (PointFloors.Num() == 0 || PointFloors.Contains(Spawn->FloorIndex))
 			{
-				return Spawn;
+				Preferred.Add(Spawn);
 			}
 		}
+		PrimaryCount = Preferred.Num();
+		for (AOneBrahamSpawnPoint* Spawn : Ranked)
+		{
+			Preferred.AddUnique(Spawn);
+		}
 	}
-
-	// Prefer our own spawn points; only fall back to a legacy APlayerStart if a
-	// level has not been authored yet (early greyblock, tutorial map).
-	if (AOneBrahamSpawnPoint* Spawn = SelectSpawnPointFor(Player))
+	else
 	{
-		return Spawn;
+		AppendRanked(INDEX_NONE);
 	}
 
-	return Super::ChoosePlayerStart_Implementation(Player);
+	if (Preferred.Num() == 0)
+	{
+		return;
+	}
+
+	// Who is standing where, and what has already failed this controller.
+	float Radius = 0.f;
+	float HalfHeight = 0.f;
+	GetPawnCapsuleFor(Controller, Radius, HalfHeight);
+	const APawn* OwnPawn = Controller != nullptr ? Controller->GetPawn() : nullptr;
+	const TArray<TWeakObjectPtr<AOneBrahamSpawnPoint>>* Failed = FailedSpawnsOf.Find(Controller);
+
+	TArray<OneBrahamSpawnRules::FSpawnAttempt> Attempts;
+	Attempts.Reserve(Preferred.Num());
+	for (AOneBrahamSpawnPoint* Spawn : Preferred)
+	{
+		OneBrahamSpawnRules::FSpawnAttempt& Attempt = Attempts.AddDefaulted_GetRef();
+		Attempt.bClearNow = Spawn->IsClearForPawn(Radius, HalfHeight, OwnPawn);
+		Attempt.bSquadPoint = SquadPoints.Contains(Spawn);
+		Attempt.FailedSerial = Failed != nullptr ? Failed->IndexOfByKey(Spawn) : INDEX_NONE;
+		Attempt.bFallback = PrimaryCount != INDEX_NONE && Attempts.Num() - 1 >= PrimaryCount;
+	}
+
+	TArray<int32> Order;
+	OneBrahamSpawnRules::OrderSpawnAttempts(Attempts, Order);
+	for (const int32 Index : Order)
+	{
+		OutPoints.Add(Preferred[Index]);
+		OutClear.Add(Attempts[Index].bClearNow);
+	}
 }
 
-void AOneBrahamGameMode::RestartPlayer(AController* NewPlayer)
+void AOneBrahamGameMode::GetPawnCapsuleFor(AController* Controller, float& OutRadius, float& OutHalfHeight) const
 {
-	if (NewPlayer == nullptr)
-	{
-		return;
-	}
+	// The engine's character capsule, unless the pawn class says otherwise.
+	OutRadius = 34.f;
+	OutHalfHeight = 88.f;
 
-	AActor* StartSpot = ChoosePlayerStart(NewPlayer);
-	if (StartSpot == nullptr)
+	const UClass* PawnClass = const_cast<AOneBrahamGameMode*>(this)->GetDefaultPawnClassForController(Controller);
+	const ACharacter* Character = PawnClass != nullptr ? Cast<ACharacter>(PawnClass->GetDefaultObject()) : nullptr;
+	if (Character != nullptr && Character->GetCapsuleComponent() != nullptr)
 	{
-		OB_ERROR("No spawn point available for '%s' - the match cannot continue for that player.",
-			*NewPlayer->GetName());
-		return;
+		OutRadius = Character->GetCapsuleComponent()->GetScaledCapsuleRadius();
+		OutHalfHeight = Character->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
 	}
-
-	RestartPlayerAtPlayerStart(NewPlayer, StartSpot);
 }
 
-void AOneBrahamGameMode::RestartPlayerAtPlayerStart(AController* NewPlayer, AActor* StartSpot)
+APawn* AOneBrahamGameMode::SpawnDefaultPawnAtTransform_Implementation(AController* NewPlayer, const FTransform& SpawnTransform)
 {
-	Super::RestartPlayerAtPlayerStart(NewPlayer, StartSpot);
+	// The engine spawns with the pawn class's own collision handling. Nudging a
+	// capsule out of a doorframe is fine; spawning one inside another player
+	// (AlwaysSpawn) or a wall is not, so a blocked spot fails and the caller
+	// moves on to the next point.
+	FActorSpawnParameters SpawnInfo;
+	SpawnInfo.Instigator = GetInstigator();
+	SpawnInfo.ObjectFlags |= RF_Transient;
+	SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButDontSpawnIfColliding;
+	UClass* PawnClass = GetDefaultPawnClassForController(NewPlayer);
+	return PawnClass != nullptr ? GetWorld()->SpawnActor<APawn>(PawnClass, SpawnTransform, SpawnInfo) : nullptr;
+}
 
-	if (StartSpot == nullptr)
+APawn* AOneBrahamGameMode::SpawnPawnAtOrBeside(AController* Controller, AActor* Spot, bool bTrySpot)
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr || Controller == nullptr || Spot == nullptr || GetDefaultPawnClassForController(Controller) == nullptr)
 	{
-		return;
+		return nullptr;
 	}
 
-	// The spot was occupied. ASCENT puts all twelve players on the plaza at the
+	// Never any pitch or roll, as the engine's SpawnDefaultPawnFor.
+	const FRotator Facing(0.f, Spot->GetActorRotation().Yaw, 0.f);
+	const FVector Spot3D = Spot->GetActorLocation();
+	if (bTrySpot)
+	{
+		if (APawn* Pawn = SpawnDefaultPawnAtTransform(Controller, FTransform(Facing, Spot3D)))
+		{
+			return Pawn;
+		}
+	}
+
+	// The spot is occupied. ASCENT puts all twelve players on the plaza at the
 	// same moment and the plaza has fewer points than that, so the second
 	// player sent to a point found the first one standing on it and the spawn
 	// failed outright (most of a full lobby - or of the bots filling it - never
 	// entered the building). Same spawn point, a free patch of navmesh beside it.
-	if (NewPlayer != nullptr && NewPlayer->GetPawn() == nullptr)
+	const UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World);
+	if (Nav == nullptr)
 	{
-		if (const UNavigationSystemV1* Nav = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
+		return nullptr;
+	}
+
+	float Radius = 0.f;
+	float HalfHeight = 0.f;
+	GetPawnCapsuleFor(Controller, Radius, HalfHeight);
+
+	FNavLocation SpotOnNav;
+	const float FeetToSpawnZ = Nav->ProjectPointToNavigation(Spot3D, SpotOnNav, FVector(100.f, 100.f, 300.f))
+		? Spot3D.Z - SpotOnNav.Location.Z : HalfHeight + 2.f;
+
+	// Beside means in the open with the spot: a point that is merely
+	// reachable can be through a wall (the long way round, by the navmesh),
+	// and a player stood outside the building is not "beside" the spawn the
+	// squad was sent to - so a wall (world static) between the two rules a
+	// candidate out; the squadmate standing on the spot does not. Each
+	// candidate is checked for a free capsule first, so a crowded spot costs
+	// queries, not failed spawns.
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(OneBrahamSpawnBeside), false);
+	const FCollisionShape Capsule = FCollisionShape::MakeCapsule(Radius, HalfHeight);
+	for (int32 Attempt = 0; Attempt < 16; ++Attempt)
+	{
+		FNavLocation Beside;
+		if (!Nav->GetRandomReachablePointInRadius(Spot3D, 150.f + 30.f * Attempt, Beside))
 		{
-			const FVector Spot = StartSpot->GetActorLocation();
-			FNavLocation SpotOnNav;
-			const float FeetToSpawnZ = Nav->ProjectPointToNavigation(Spot, SpotOnNav, FVector(100.f, 100.f, 300.f))
-				? Spot.Z - SpotOnNav.Location.Z : 90.f;
-
-			// Beside means in the open with the spot: a point that is merely
-			// reachable can be through a wall (the long way round, by the
-			// navmesh), and a player stood outside the building is not "beside"
-			// the spawn the squad was sent to.
-			FCollisionQueryParams Params(SCENE_QUERY_STAT(OneBrahamSpawnBeside), false);
-			for (int32 Attempt = 0; Attempt < 16 && NewPlayer->GetPawn() == nullptr; ++Attempt)
-			{
-				FNavLocation Beside;
-				if (!Nav->GetRandomReachablePointInRadius(Spot, 150.f + 30.f * Attempt, Beside))
-				{
-					continue;
-				}
-
-				const FVector Candidate = Beside.Location + FVector(0.f, 0.f, FeetToSpawnZ + 5.f);
-				if (FMath::Abs(Candidate.Z - Spot.Z) > 60.f
-					|| GetWorld()->LineTraceTestByChannel(Spot, Candidate, ECC_Pawn, Params))
-				{
-					continue;
-				}
-
-				Super::RestartPlayerAtTransform(NewPlayer, FTransform(StartSpot->GetActorRotation(), Candidate));
-			}
+			continue;
 		}
 
-		if (NewPlayer->GetPawn() == nullptr)
+		const FVector Candidate = Beside.Location + FVector(0.f, 0.f, FeetToSpawnZ + 5.f);
+		if (FMath::Abs(Candidate.Z - Spot3D.Z) > 60.f
+			|| World->LineTraceTestByObjectType(Spot3D, Candidate, FCollisionObjectQueryParams(ECC_WorldStatic), Params)
+			|| World->OverlapBlockingTestByChannel(Candidate, FQuat::Identity, ECC_Pawn, Capsule, Params))
 		{
-			return;
+			continue;
+		}
+
+		if (APawn* Pawn = SpawnDefaultPawnAtTransform(Controller, FTransform(Facing, Candidate)))
+		{
+			return Pawn;
 		}
 	}
 
+	return nullptr;
+}
+
+void AOneBrahamGameMode::RestartPlayer(AController* NewPlayer)
+{
+	if (NewPlayer == nullptr || NewPlayer->IsPendingKillPending())
+	{
+		return;
+	}
+
+	// A listen host logs in while the map loads, before StartPlay has built
+	// the registry: an empty list there was "No spawn point available".
+	if (SpawnPoints.Num() == 0)
+	{
+		RebuildSpawnPointRegistry();
+	}
+
+	APlayerController* PlayerController = Cast<APlayerController>(NewPlayer);
+	if (PlayerController != nullptr && MustSpectate(PlayerController))
+	{
+		return;
+	}
+
+	// ASCENT with every floor closed (the Purge seals the whole tower up to the
+	// Skydeck): there is no legal way in for a late joiner, and a fallback
+	// PlayerStart is on the plaza, in the gas. They watch - Spectating, so they
+	// are not counted as a survivor who has no pawn - and are not retried.
+	if (NewPlayer->GetPawn() == nullptr && SpawnPoints.Num() > 0 && MatchSettings != nullptr
+		&& MatchSettings->Mode == EOneBrahamMatchMode::Ascent && GetAscentEntryFloor() == INDEX_NONE)
+	{
+		if (AOneBrahamPlayerState* State = NewPlayer->GetPlayerState<AOneBrahamPlayerState>())
+		{
+			if (State->LifeState != EOneBrahamLifeState::Spectating)
+			{
+				State->LifeState = EOneBrahamLifeState::Spectating;
+				RebuildSquadInfo();
+				OB_MATCH_LOG("'%s' joined with every floor sealed or purged: spectating.", *State->GetPlayerName());
+			}
+		}
+		PendingRespawns.Remove(NewPlayer);
+		return;
+	}
+
+	TArray<AOneBrahamSpawnPoint*> Points;
+	TArray<bool> Clear;
+	GatherSpawnAttemptsFor(NewPlayer, Points, Clear);
+
+	// A living pawn is re-possessed where it stands; an unauthored level uses
+	// the engine's PlayerStart.
+	if (NewPlayer->GetPawn() != nullptr || Points.Num() == 0)
+	{
+		AActor* StartSpot = Points.Num() > 0 ? Points[0] : ChoosePlayerStart(NewPlayer);
+		if (StartSpot == nullptr)
+		{
+			OB_ERROR("No spawn point available for '%s' - the match cannot continue for that player.",
+				*NewPlayer->GetName());
+			return;
+		}
+		RestartPlayerAtPlayerStart(NewPlayer, StartSpot);
+		return;
+	}
+
+	// Walk the list. The pawn is spawned here and handed to the engine's
+	// restart already set, so a blocked point costs nothing: the engine's own
+	// path would have called FailedToSpawnPawn (the controller goes Inactive,
+	// and the client is told so) on every point that did not fit.
+	const int32 Tries = FMath::Min(Points.Num(), MaxSpawnAttemptsPerRestart);
+	for (int32 Index = 0; Index < Tries; ++Index)
+	{
+		AOneBrahamSpawnPoint* Spawn = Points[Index];
+		if (APawn* Pawn = SpawnPawnAtOrBeside(NewPlayer, Spawn, Clear[Index]))
+		{
+			FailedSpawnsOf.Remove(NewPlayer);
+			NewPlayer->SetPawn(Pawn);
+			RestartPlayerAtPlayerStart(NewPlayer, Spawn);
+			return;
+		}
+
+		// To the back of this controller's list (OrderSpawnAttempts).
+		TArray<TWeakObjectPtr<AOneBrahamSpawnPoint>>& Failed = FailedSpawnsOf.FindOrAdd(NewPlayer);
+		Failed.Remove(Spawn);
+		Failed.Add(Spawn);
+	}
+
+	OB_WARN("'%s' found no free spawn point in %d tries; trying again in %.0f s.",
+		NewPlayer->PlayerState != nullptr ? *NewPlayer->PlayerState->GetPlayerName() : *NewPlayer->GetName(),
+		Tries, RespawnRetrySeconds);
+
+	// A human never waits on a spawn that nothing will retry: the respawn
+	// queue tries again (and the next point) in a second. Bots have their own
+	// once-a-second retry in Tick.
+	if (PlayerController != nullptr && !bMatchFinished && !PendingRespawns.Contains(NewPlayer)
+		&& PlayerCanRestart(PlayerController))
+	{
+		PendingRespawns.Add(NewPlayer, RespawnRetrySeconds);
+	}
+}
+
+void AOneBrahamGameMode::RestartPlayerAtPlayerStart(AController* NewPlayer, AActor* StartSpot)
+{
+	// Called directly (not through RestartPlayer) with no pawn yet: the same
+	// at-or-beside spawn, so the engine's path never stacks two capsules.
+	if (NewPlayer != nullptr && NewPlayer->GetPawn() == nullptr && StartSpot != nullptr)
+	{
+		if (APawn* Pawn = SpawnPawnAtOrBeside(NewPlayer, StartSpot, true))
+		{
+			NewPlayer->SetPawn(Pawn);
+		}
+	}
+
+	Super::RestartPlayerAtPlayerStart(NewPlayer, StartSpot);
+
+	if (StartSpot == nullptr || NewPlayer == nullptr || NewPlayer->GetPawn() == nullptr)
+	{
+		return;
+	}
 	const UWorld* World = GetWorld();
 	const float Now = World ? World->GetTimeSeconds() : 0.f;
 
@@ -1779,11 +2034,9 @@ void AOneBrahamGameMode::PostLogin(APlayerController* NewPlayer)
 
 	AssignPlayerToSquad(State);
 
-	// Late joiners during a bot-practice or FIRE DRILL match spawn immediately.
-	if (MatchSettings != nullptr && MatchSettings->Mode != EOneBrahamMatchMode::Ascent)
-	{
-		RestartPlayer(NewPlayer);
-	}
+	// Now that the player has a squad, they get a pawn if the mode allows one
+	// now - a late joiner included (HandleStartingNewPlayer waited for this).
+	StartNewPlayerIfAllowed(NewPlayer);
 
 	Announce(FText::Format(
 		FText::FromString(TEXT("{0} has entered the building.")),
@@ -1809,7 +2062,45 @@ void AOneBrahamGameMode::HandleStartingNewPlayer_Implementation(APlayerControlle
 		return;
 	}
 
+	// The engine calls this from inside Super::PostLogin, before PostLogin has
+	// given the player a squad: a pawn spawned now was teamless (the spawn
+	// rules took every bot for an enemy, the squad corner was nobody's) and,
+	// on a failed spawn, nothing tried again. PostLogin and seamless travel
+	// start the player once the squad is settled (StartNewPlayerIfAllowed).
+	if (State != nullptr && State->SquadId == INDEX_NONE && State->Team != EOneBrahamTeam::Spectator)
+	{
+		return;
+	}
+
 	Super::HandleStartingNewPlayer_Implementation(NewPlayer);
+}
+
+void AOneBrahamGameMode::StartNewPlayerIfAllowed(APlayerController* NewPlayer)
+{
+	if (NewPlayer == nullptr || NewPlayer->GetPawn() != nullptr || bMatchFinished)
+	{
+		return;
+	}
+
+	AOneBrahamPlayerState* State = NewPlayer->GetPlayerState<AOneBrahamPlayerState>();
+	if (State == nullptr || State->Team == EOneBrahamTeam::Spectator)
+	{
+		// A full ASCENT lobby: they watch.
+		return;
+	}
+
+	if (MatchSettings != nullptr && MatchSettings->Mode == EOneBrahamMatchMode::Ascent
+		&& GetMatchPhase() == EOneBrahamMatchPhase::Warmup)
+	{
+		// Parked over the plaza until StartActiveMatch brings everyone in.
+		State->LifeState = EOneBrahamLifeState::Spectating;
+		return;
+	}
+
+	if (!bStartPlayersAsSpectators && !MustSpectate(NewPlayer) && PlayerCanRestart(NewPlayer))
+	{
+		RestartPlayer(NewPlayer);
+	}
 }
 
 void AOneBrahamGameMode::HandleSeamlessTravelPlayer(AController*& C)
@@ -1848,6 +2139,9 @@ void AOneBrahamGameMode::HandleSeamlessTravelPlayer(AController*& C)
 	State->SquadId = INDEX_NONE;
 	MakeRoomForHuman();
 	AssignPlayerToSquad(State);
+
+	// HandleStartingNewPlayer waited for the squad; start them now.
+	StartNewPlayerIfAllowed(PlayerController);
 }
 
 void AOneBrahamGameMode::GetSeamlessTravelActorList(bool bToTransition, TArray<AActor*>& ActorList)
@@ -1874,6 +2168,7 @@ void AOneBrahamGameMode::Logout(AController* Exiting)
 	const bool bWasLeader = State ? State->bIsSquadLeader : false;
 
 	PendingRespawns.Remove(Exiting);
+	FailedSpawnsOf.Remove(Exiting);
 
 	Super::Logout(Exiting);
 
@@ -2276,6 +2571,13 @@ void AOneBrahamGameMode::SpawnBotPawn(AOneBrahamBotController* Bot)
 	const AOneBrahamPlayerState* State = Bot->GetPlayerState<AOneBrahamPlayerState>();
 	const bool bRespawns = MatchSettings != nullptr && MatchSettings->bRespawnEnabled;
 	if (!bRespawns && State != nullptr && State->LifeState == EOneBrahamLifeState::Dead)
+	{
+		return;
+	}
+
+	// Signed out by RestartPlayer (ASCENT with every floor sealed or purged):
+	// there is no way in, so the once-a-second retry has nothing to try.
+	if (State != nullptr && State->LifeState == EOneBrahamLifeState::Spectating)
 	{
 		return;
 	}

@@ -104,6 +104,16 @@ WHAT IT CHECKS, AND WHY EACH ONE HAS BITTEN SOMEONE
                                                         produces: a stale number
                                                         in a document reads as
                                                         verification.
+    28. Floor-to-floor navigation                     - a path from the plaza
+                                                        up both stairs to every
+                                                        floor and to every
+                                                        floor's spawn anchors,
+                                                        and from every plaza
+                                                        spawn into the lobby: a
+                                                        stair the nav mesh does
+                                                        not join is a tower the
+                                                        bots never climb, and
+                                                        nothing else says so.
 
     It writes Saved/Validation/ob_validation_<timestamp>.md and exits non-zero on
     any FAIL. Warnings do not fail the build; failures do.
@@ -695,6 +705,64 @@ def check_manifest(v, config_only):
     if len(areas) == expected_areas and len(floors) >= expected_floors:
         v.pass_("manifest", u"{0} areas, {1} floors, {2} spawn anchors".format(
             len(areas), len(floors), len(spawns)))
+
+
+# ---------------------------------------------------------------------------
+#  28. Floor-to-floor navigation
+# ---------------------------------------------------------------------------
+
+def check_navigation(v, config_only):
+    """The baked nav mesh joins the plaza to every floor.
+
+    In the editor the open persistent level is queried directly (one short
+    path per stair storey and per anchor, build_environment.floor_connectivity).
+    Outside it, the content build's record of the same queries in the manifest
+    is read, so CI and the engine-free run fail on a bake that left a floor
+    cut off. Anchors behind a floor's locked access zones are noted, not
+    failed: ASCENT locks some stair doors, and the bake is taken locked. Not on
+    FIRE DRILL's respawn floors (1, 9, 15), where a locked-in anchor is a
+    respawn nobody can leave.
+    """
+    from onebraham import build_environment as env
+    locked_floors = env.nav_locked_floors()
+
+    if C.IN_EDITOR and not config_only:
+        world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
+        if world is None or unreal.NavigationSystemV1.get_navigation_system(world) is None:
+            v.fail("navigation", "the persistent level has no navigation system to query")
+            return
+        anchors = env.nav_spawn_anchors(unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors())
+        if not anchors:
+            v.fail("navigation", "no spawn anchors in the level to measure from")
+            return
+        connectivity = env.floor_connectivity(world, anchors)
+        source = "the level's nav mesh"
+    else:
+        manifest = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                 "..", "onebraham_build_manifest.json"))
+        if not os.path.isfile(manifest):
+            v.warn("navigation", "no build manifest yet: floor connectivity is measured by the content build")
+            return
+        import json
+        with io.open(manifest, "r", encoding="utf-8") as handle:
+            connectivity = json.loads(handle.read()).get("navigation")
+        if not connectivity:
+            v.warn("navigation", "the build manifest has no navigation record",
+                   "rebuild with Scripts/BuildContent.sh --only environment")
+            return
+        source = "the content build's manifest"
+
+    failures, notes = env.connectivity_problems(connectivity, locked_floors)
+    floors = connectivity.get("floors", {})
+    if failures:
+        v.fail("navigation", u"{0} floor connectivity problem(s) in {1}".format(len(failures), source),
+               u"; ".join(failures[:12]))
+        return
+    if len(floors) < C.FLOOR_COUNT + 1:
+        v.fail("navigation", u"connectivity covers {0} floors, expected {1}".format(len(floors), C.FLOOR_COUNT + 1))
+        return
+    v.pass_("navigation", u"the plaza reaches all {0} floors by both stairs, and every plaza spawn the lobby "
+            u"({1})".format(len(floors), source), u"; ".join(notes))
 
 
 # ---------------------------------------------------------------------------
@@ -1896,6 +1964,7 @@ def build_all(config_only=False):
         ("breachables", check_breachables),
         ("manifest", check_manifest),
         ("spawn safety", check_spawn_safety),
+        ("navigation", check_navigation),
         ("audio", check_audio),
         ("cosmetics", check_cosmetics),
         ("performance", check_performance),

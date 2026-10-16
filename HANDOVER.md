@@ -66,7 +66,7 @@ does.
 | `python3 Tools/Python/onebraham/validate_project.py` | `31 pass, 2 warn, 0 fail` | the two warnings are the fresh-clone manifest and surface coverage; anything else is a regression |
 | `python3 Tools/Python/onebraham/check_doc_numbers.py` | `89 numbers checked. agree. OK` | every count quoted in `Docs/17` and the README against the count the tooling produces |
 | `python3 Tools/Python/onebraham/check_interaction.py` | `checks: 222` | the interaction surface: classes, tables, tags, montage chain, interface conformance |
-| `python3 Tools/Python/onebraham/check_cpp_symbols.py` | `987 declarations`, `317 hygiene checks`, `OK` | declared-but-undefined members, scoped enums, shadowed engine properties, duplicate definitions |
+| `python3 Tools/Python/onebraham/check_cpp_symbols.py` | `999 declarations`, `317 hygiene checks`, `OK` | declared-but-undefined members, scoped enums, shadowed engine properties, duplicate definitions |
 | `python3 Tools/Python/onebraham/report_uncalled.py` | `83 member(s) with no call site` | the triage list in §4.2. **This is a report, not a gate** |
 
 Each checker also runs standalone with the import root, which is the only thing

@@ -719,9 +719,14 @@ void AOneBrahamCharacter::UpdateFloorIndex(float DeltaSeconds)
 
 		// Clients tell the server so blind/deaf HUD state stays correct without
 		// the server tracing every pawn's feet.
+		// Only the owning client can send a server RPC; every client also sees
+		// other players and bots change floor, and the server tracks those itself.
 		if (!HasAuthority())
 		{
-			ServerReportFloor(CurrentFloorIndex);
+			if (IsLocallyControlled())
+			{
+				ServerReportFloor(CurrentFloorIndex);
+			}
 		}
 		else if (AOneBrahamPlayerState* State = GetPlayerState<AOneBrahamPlayerState>())
 		{

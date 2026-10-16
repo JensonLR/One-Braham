@@ -85,6 +85,9 @@ public:
 	virtual bool PlayerCanRestart_Implementation(APlayerController* Player) override;
 	virtual void RestartPlayer(AController* NewPlayer) override;
 	virtual void RestartPlayerAtPlayerStart(AController* NewPlayer, AActor* StartSpot) override;
+	/** Spawns with AdjustIfPossibleButDontSpawnIfColliding: nudged out of a
+	 *  wall's skin if it can be, never stacked inside somebody. */
+	virtual APawn* SpawnDefaultPawnAtTransform_Implementation(AController* NewPlayer, const FTransform& SpawnTransform) override;
 
 	// ======================================================================
 	//  Accessors
@@ -201,6 +204,30 @@ public:
 	/** Picks the best spawn point for a controller, honouring squad spread and enemy distance. */
 	AOneBrahamSpawnPoint* SelectSpawnPointFor(AController* Controller, int32 FloorIndex = INDEX_NONE) const;
 
+	/**
+	 * Every spawn point the threat rules allow a controller, best first: the
+	 * ones that pass in a weighted random order (the first is what
+	 * SelectSpawnPointFor returns), then the vetoed ones safest first, then the
+	 * ones still resting after use. FloorIndex INDEX_NONE = any floor.
+	 */
+	void RankSpawnPointsFor(AController* Controller, int32 FloorIndex, TArray<AOneBrahamSpawnPoint*>& OutRanked) const;
+
+	/**
+	 * The spawn points to try for a controller, in the order RestartPlayer
+	 * tries them: the mode's rules (ASCENT's plaza or late-join floor, FIRE
+	 * DRILL's control point floors) ranked by RankSpawnPointsFor, then put in
+	 * OneBrahamSpawnRules::OrderSpawnAttempts order - clear points first, the
+	 * points that just failed this controller last. OutClear says, per point,
+	 * whether a capsule fits on it now (if not, only beside it is tried).
+	 */
+	void GatherSpawnAttemptsFor(AController* Controller, TArray<AOneBrahamSpawnPoint*>& OutPoints, TArray<bool>& OutClear) const;
+
+	/** ASCENT: the floor a player entering now walks in on (OneBrahamSpawnRules::LateJoinFloor). */
+	int32 GetAscentEntryFloor() const;
+
+	/** Spawn points RestartPlayer tries per call before it gives up and queues a retry. */
+	static constexpr int32 MaxSpawnAttemptsPerRestart = 6;
+
 	/** Server: gets (or creates) the spawn point registry for the loaded level. */
 	void RebuildSpawnPointRegistry();
 
@@ -293,6 +320,23 @@ protected:
 	/** Fires the "extraction available" objective once the Skydeck is reachable. */
 	void UpdateObjectiveState();
 
+	/**
+	 * Spawns (does not possess) a pawn for Controller at Spot, or on a clear
+	 * patch of navmesh beside it in the open. bTrySpot false skips the spot
+	 * itself (somebody is standing on it). Null when neither fits.
+	 */
+	APawn* SpawnPawnAtOrBeside(AController* Controller, AActor* Spot, bool bTrySpot);
+
+	/** The capsule a pawn of this controller's class occupies. */
+	void GetPawnCapsuleFor(AController* Controller, float& OutRadius, float& OutHalfHeight) const;
+
+	/**
+	 * A human whose squad has just been settled gets a pawn if the mode lets
+	 * them have one now: ASCENT's warmup parks them over the plaza, a full
+	 * ASCENT lobby makes them a spectator, everything else spawns at once.
+	 */
+	void StartNewPlayerIfAllowed(APlayerController* NewPlayer);
+
 	/** Server: spawns a bot's pawn through RestartPlayer if the mode allows it now. */
 	void SpawnBotPawn(AOneBrahamBotController* Bot);
 
@@ -353,6 +397,10 @@ protected:
 
 	/** Each player's last killer, so a respawn is never handed back to them. */
 	TMap<TWeakObjectPtr<AController>, TWeakObjectPtr<AController>> LastKillerOf;
+
+	/** The spawn points that just failed each controller, oldest first, so the
+	 *  next try goes somewhere else (OrderSpawnAttempts). Cleared on a spawn. */
+	TMap<TWeakObjectPtr<AController>, TArray<TWeakObjectPtr<AOneBrahamSpawnPoint>>> FailedSpawnsOf;
 
 	FTimerHandle MatchPhaseTimerHandle;
 	FTimerHandle RespawnTimerHandle;

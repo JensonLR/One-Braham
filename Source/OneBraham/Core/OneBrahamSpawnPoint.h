@@ -84,6 +84,14 @@ public:
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "Spawn")
 	bool ValidateClearance() const;
 
+	/**
+	 * True when a pawn capsule of this size fits where the game mode spawns one
+	 * (the actor's location) right now: no player, bot, corpse or prop is in
+	 * the way. ValidateClearance is the level-design test; this is the "is
+	 * somebody standing on it" test the game mode runs before every spawn.
+	 */
+	bool IsClearForPawn(float CapsuleRadius, float CapsuleHalfHeight, const AActor* IgnoreActor = nullptr) const;
+
 	/** Called by the GameMode when this point is used. */
 	void MarkUsed(float CurrentTime) { LastUsedTime = CurrentTime; }
 

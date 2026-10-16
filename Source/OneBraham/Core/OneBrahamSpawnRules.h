@@ -12,10 +12,15 @@
 //
 // Distances are only counted for enemies within one floor of the spawn: a
 // concrete slab stops rounds, and a stair is the only way through it.
+//
+// It also holds the order blocked spawns are retried in (OrderSpawnAttempts)
+// and where an ASCENT late joiner enters (LateJoinFloor); the test
+// OneBraham.Core.SpawnFallback pins those.
 
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Templates/Function.h"
 
 namespace OneBrahamSpawnRules
 {
@@ -93,5 +98,99 @@ namespace OneBrahamSpawnRules
 	inline bool IsInFloorBand(int32 SpawnFloor, int32 EnemyFloor)
 	{
 		return FMath::Abs(SpawnFloor - EnemyFloor) <= FloorBand;
+	}
+
+	// ----------------------------------------------------------------------
+	//  Attempt order: what happens when the chosen spawn is blocked
+	// ----------------------------------------------------------------------
+	// A spawn can be the right choice by every rule above and still fail: a bot
+	// is standing on it, or a player who spawned there a moment ago has not
+	// moved. Retrying the same point is how a respawn waited forever behind one
+	// idle bot, so the game mode ranks every point the mode allows and walks
+	// the list, and a point that failed a player goes to the back of that
+	// player's list until something else has been tried.
+
+	/** One spawn point as the attempt order sees it. The array the game mode
+	 *  passes in is already in the mode's order of preference. */
+	struct FSpawnAttempt
+	{
+		/** Nothing stands in a pawn's capsule there right now. */
+		bool bClearNow = true;
+		/** The requester's own squad point (ASCENT's plaza corner): standing
+		 *  beside a squadmate on it beats a clear point in another squad's corner. */
+		bool bSquadPoint = false;
+		/** How recently this point failed this requester (higher = more recent),
+		 *  or INDEX_NONE if it has not. */
+		int32 FailedSerial = INDEX_NONE;
+		/** Outside the mode's own floors (ASCENT's floors above the way in,
+		 *  FIRE DRILL's floors without a control point): only once standing
+		 *  beside a point on the mode's floors has been tried. */
+		bool bFallback = false;
+	};
+
+	/**
+	 * The order to try spawn points in, as indices into Attempts. Five tiers,
+	 * the mode's preference kept within each:
+	 *   1. on the mode's floors, not failed recently, and clear now (or the
+	 *      requester's squad point);
+	 *   2. on the mode's floors, not failed recently, but occupied - tried
+	 *      beside the point, not on it;
+	 *   3. and 4. the same two for the fallback floors - a clear point on
+	 *      another floor is not better than a spot beside the right one;
+	 *   5. failed recently - the oldest failure first, so a player whose every
+	 *      point is blocked rotates through them rather than hammering one.
+	 */
+	inline void OrderSpawnAttempts(const TArray<FSpawnAttempt>& Attempts, TArray<int32>& OutOrder)
+	{
+		OutOrder.Reset(Attempts.Num());
+		for (int32 Index = 0; Index < Attempts.Num(); ++Index)
+		{
+			OutOrder.Add(Index);
+		}
+
+		auto Tier = [&Attempts](int32 Index)
+		{
+			const FSpawnAttempt& Attempt = Attempts[Index];
+			if (Attempt.FailedSerial != INDEX_NONE)
+			{
+				return 4;
+			}
+			return (Attempt.bFallback ? 2 : 0) + ((Attempt.bClearNow || Attempt.bSquadPoint) ? 0 : 1);
+		};
+
+		OutOrder.StableSort([&Attempts, &Tier](int32 A, int32 B)
+		{
+			const int32 TierA = Tier(A);
+			const int32 TierB = Tier(B);
+			if (TierA != TierB)
+			{
+				return TierA < TierB;
+			}
+			return TierA == 4 && Attempts[A].FailedSerial < Attempts[B].FailedSerial;
+		});
+	}
+
+	/**
+	 * ASCENT's floor for a player who joins a match already under way.
+	 *
+	 * ASCENT is a lobby start (Docs/06): everybody walks in off the plaza, and a
+	 * late joiner does too while the plaza is still open - they are behind, as
+	 * the last one through the door should be. Once the lockdown has sealed the
+	 * plaza or the purge is gassing it, a spawn there is a death or a cage, so
+	 * the joiner gets the lowest floor that is neither sealed nor purged: still
+	 * the back of the climb, never inside the lockdown.
+	 *
+	 * FloorsWithSpawns is ascending. INDEX_NONE when every floor is closed.
+	 */
+	inline int32 LateJoinFloor(const TArray<int32>& FloorsWithSpawns, TFunctionRef<bool(int32)> IsFloorClosed)
+	{
+		for (const int32 Floor : FloorsWithSpawns)
+		{
+			if (!IsFloorClosed(Floor))
+			{
+				return Floor;
+			}
+		}
+		return INDEX_NONE;
 	}
 }

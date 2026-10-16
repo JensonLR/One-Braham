@@ -312,8 +312,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "One Braham|Weapon")
 	bool IsGroundPickup() const { return bIsGroundPickup; }
 
-	/** Server: flags the weapon as on the ground (pickable) or held. */
-	void SetIsGroundPickup(bool bOnGround) { bIsGroundPickup = bOnGround; }
+	/** Server: flags the weapon as on the ground (pickable) or held, and applies its collision. */
+	void SetIsGroundPickup(bool bOnGround) { bIsGroundPickup = bOnGround; RefreshCarriedCollision(); }
+
+	/**
+	 * Gives the weapon mesh the collision its state calls for, on this machine:
+	 * none at all while carried (drawn or holstered), the mesh's authored
+	 * collision while it lies on the floor as a pickup. Idempotent and cheap;
+	 * called on equip, unequip, the ground flag's rep notify and every tick.
+	 */
+	void RefreshCarriedCollision();
+
+	/** Whether a weapon that is (not) a ground pickup has any collision. Carried weapons have none. */
+	static bool ShouldCollide(bool bOnGround) { return bOnGround; }
 
 	UFUNCTION(NetMulticast, Unreliable, Category = "One Braham|Weapon")
 	void MulticastPlayDryFire();
@@ -354,7 +365,7 @@ protected:
 	bool bLaserEnabled = false;
 
 	/** True while this weapon is on the ground and can be picked up. */
-	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Weapon")
+	UPROPERTY(ReplicatedUsing = OnRep_IsGroundPickup, BlueprintReadOnly, Category = "One Braham|Weapon")
 	bool bIsGroundPickup = false;
 
 	UPROPERTY(BlueprintAssignable, Category = "One Braham|Weapon") FOneBrahamWeaponFired OnWeaponFired;
@@ -406,6 +417,7 @@ protected:
 	UFUNCTION() void OnRep_SkinId();
 	UFUNCTION() void OnRep_Ammo();
 	UFUNCTION() void OnRep_Attachments();
+	UFUNCTION() void OnRep_IsGroundPickup();
 
 	/** Places attachment meshes on their sockets. */
 	void RebuildAttachmentMeshes();
@@ -479,6 +491,13 @@ protected:
 
 	/** What UpdateHeldVisibility last applied. */
 	bool bHiddenWhilePutAway = false;
+
+	/** What RefreshCarriedCollision last applied: -1 nothing yet, 0 none (carried), 1 the authored collision (ground). */
+	int8 AppliedCollisionState = -1;
+
+	/** The weapon mesh's authored collision, captured before the first switch so the ground state can restore it. */
+	FName AuthoredCollisionProfile = NAME_None;
+	TEnumAsByte<ECollisionEnabled::Type> AuthoredCollisionEnabled = ECollisionEnabled::QueryOnly;
 
 	TWeakObjectPtr<class AOneBrahamCharacter> OwningCharacter;
 

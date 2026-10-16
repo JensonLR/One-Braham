@@ -156,13 +156,19 @@ void AOneBrahamWeaponBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 	DOREPLIFETIME(AOneBrahamWeaponBase, SkinId);
 	DOREPLIFETIME(AOneBrahamWeaponBase, bFlashlightEnabled);
 	DOREPLIFETIME(AOneBrahamWeaponBase, bLaserEnabled);
-	DOREPLIFETIME(AOneBrahamWeaponBase, bIsGroundPickup);
+	// Always: a client whose pickup actor already copied its own ground flag
+	// into this one must still run the notify, or its collision is stale.
+	DOREPLIFETIME_CONDITION_NOTIFY(AOneBrahamWeaponBase, bIsGroundPickup, COND_None, REPNOTIFY_Always);
 	DOREPLIFETIME(AOneBrahamWeaponBase, bSuppressorFitted);
 }
 
 void AOneBrahamWeaponBase::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// A loadout gun is carried from the moment it spawns: no window in which it
+	// stands at the spawn point answering the Pawn channel.
+	RefreshCarriedCollision();
 
 	if (Definition != nullptr)
 	{
@@ -280,6 +286,7 @@ void AOneBrahamWeaponBase::Tick(float DeltaSeconds)
 	// Cheap, and the only place that sees every way a weapon is put away, picked
 	// up or dropped (some of them are rep notifies on other actors).
 	UpdateHeldVisibility();
+	RefreshCarriedCollision();
 
 	// Muzzle light decay: a one-frame flash reads as a strobe; a short decay reads
 	// as an actual muzzle flash.
@@ -355,6 +362,7 @@ void AOneBrahamWeaponBase::OnEquippedBy(AOneBrahamCharacter* NewOwnerCharacter)
 {
 	OwningCharacter = NewOwnerCharacter;
 	bIsGroundPickup = false;
+	RefreshCarriedCollision();
 
 	// The draw owns a timer from the moment it starts. See AdvanceStateTimer for
 	// what happens when it is missing.
@@ -570,12 +578,69 @@ void AOneBrahamWeaponBase::OnRep_AttachmentReplication()
 	Super::OnRep_AttachmentReplication();
 }
 
+void AOneBrahamWeaponBase::RefreshCarriedCollision()
+{
+	if (WeaponMesh == nullptr)
+	{
+		return;
+	}
+
+	const int8 Wanted = ShouldCollide(bIsGroundPickup) ? 1 : 0;
+	if (Wanted == AppliedCollisionState)
+	{
+		return;
+	}
+
+	if (AppliedCollisionState < 0)
+	{
+		// Whatever the mesh was authored with (the OneBrahamWeapon profile, or a
+		// Blueprint's override of it) is what the floor state gets back.
+		AuthoredCollisionProfile = WeaponMesh->GetCollisionProfileName();
+		AuthoredCollisionEnabled = WeaponMesh->GetCollisionEnabled();
+	}
+	AppliedCollisionState = Wanted;
+
+	if (Wanted == 0)
+	{
+		// Carried: no collision at all, drawn or holstered. A gun in someone's
+		// hand sits in front of their capsule; with the mesh answering the Pawn
+		// channel two bots shoulder to shoulder held each other in place by their
+		// rifles, and a holstered sidearm (attached to nothing, left at the spawn
+		// point) was a box the next player spawned into. Shots trace the hitboxes
+		// and the capsule, never the gun, so nothing that matters is lost.
+		WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+	else
+	{
+		// On the floor: the authored collision back, for whatever the interact
+		// trace and the drop settling need of it.
+		if (!AuthoredCollisionProfile.IsNone())
+		{
+			WeaponMesh->SetCollisionProfileName(AuthoredCollisionProfile);
+		}
+		WeaponMesh->SetCollisionEnabled(AuthoredCollisionEnabled);
+	}
+
+	UE_LOG(LogOneBrahamWeapons, Log, TEXT("[OB.WPN] Weapon '%s' collision: %s (%s)."), *GetName(),
+		Wanted == 0 ? TEXT("none, carried") : TEXT("authored, on the ground"),
+		HasAuthority() ? TEXT("server") : TEXT("client"));
+}
+
+void AOneBrahamWeaponBase::OnRep_IsGroundPickup()
+{
+	RefreshCarriedCollision();
+}
+
 void AOneBrahamWeaponBase::OnUnequipped()
 {
 	if (WeaponMesh != nullptr)
 	{
 		WeaponMesh->SetGenerateOverlapEvents(false);
 	}
+
+	// Holstered or about to be dropped: still carried until something says it
+	// is on the ground (SetIsGroundPickup, or the pickup's own ground flag).
+	RefreshCarriedCollision();
 
 	OwningCharacter = nullptr;
 	StateSecondsRemaining = Definition != nullptr ? FMath::Max(0.05f, Definition->HolsterTime) : 0.25f;

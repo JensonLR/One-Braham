@@ -352,6 +352,7 @@ SPIRAL_R_IN = 22.0
 SPIRAL_STEPS = 20                 # per storey: 20 cm rise, 18 degrees each
 SPIRAL_HOLE = (SPIRAL_CENTRE[0] - 215.0, SPIRAL_CENTRE[0] + 215.0,
                SPIRAL_CENTRE[1] - 215.0, SPIRAL_CENTRE[1] + 215.0)
+SPIRAL_LANDING_REACH = 30.0       # tread 20's overlap onto the slab past the opening
 
 # The reception's feature stair: an open steel stair with timber treads along
 # the east glazing, from the public foyer up to the floor-1 gallery.
@@ -435,6 +436,11 @@ ANCHORS = {
         # and an anchor at 1450 stood among a pod's chairs, against its door.
         ("Office_Spawn_C", -1250, 1250),
         ("Office_Spawn_D", 1250, 1250),
+        # One per office floor, 3-8: with four, 7 and 8 had none, and a floor
+        # with no anchor is a floor the bots' floor graph cannot see - it joins
+        # floors up to two apart, so 6 and 9 were never joined at all.
+        ("Office_Spawn_E", -1800, -1450),
+        ("Office_Spawn_F", 1850, -1450),
     ],
     "ServerComms": [
         ("Server_Spawn_A", -1225, -1000),
@@ -454,7 +460,12 @@ ANCHORS = {
         ("Deck_Spawn_West", -1800, 200),
         ("Deck_Spawn_East", 1900, -300),
         ("Deck_Spawn_North", 0, 1550),
-        ("Deck_Spawn_South", 200, -1700),
+        # West of the core, outside the canteen: at 200, -1700 it stood in the
+        # canteen kitchen, behind the floor's locked doors, and FIRE DRILL
+        # (which respawns on 15 and sends bots to its anchors) put players and
+        # bots in a room none of them could leave. Here it is 20 m and more
+        # from the other clusters' anchors on the floor.
+        ("Deck_Spawn_South", -1100, -300),
     ],
 }
 
@@ -763,6 +774,8 @@ STAIR_FLIGHT_Y = (720.0, 1028.0)
 STAIR_TOP_Y = 1230.0
 STAIR_DOOR_X = 440.0                     # the stair door's centre, mirrored
 STAIR_DOOR_WIDTH = 150.0
+FIRE_STAIR_WAIST_CM = 40.0               # step depth under each tread, and the landing slab
+FIRE_STAIR_TURN_CM = 56.0                # two goings of open flight before the spine
 TOILET_X = (700.0, 1100.0)               # mirrored
 CORE_NORTH_Y = 1240.0
 # The public side of the ground floor is -x. Facing north from the revolving
@@ -774,12 +787,19 @@ CORE_NORTH_Y = 1240.0
 # gate line: through the main gates you turn right along the passage at their
 # foot, then left up them; their own card gates face that passage from the
 # public side.
-ESCALATOR_X = (-1430.0, -890.0)          # floor 0 to floor 1, rising north
+# Each lane is 150 cm between its decks. At 120 the nav mesh's agent (35 cm
+# radius, eroded off both 40 cm decks in 19 cm cells) kept a polygon up one
+# lane in four, by where the cell grid happened to fall.
+ESCALATOR_X = (-1430.0, -770.0)          # floor 0 to floor 1, rising north
 ESCALATOR_Y = (-900.0, -200.0)
 ESCALATOR_LANES = 4
 MAIN_GATES_END_X = -680.0                # the main gate line stops at the lift hall
 COFFEE_WALL_X = -1450.0
 GATE_LINE_Y = -1150.0
+# Wide enough to walk through for the nav mesh as well as for a player: at
+# 110 cm the 84 cm lanes eroded shut, the gate line was a wall to the bots, and
+# the plaza's public side reached the core only by the feature stair.
+GATE_PITCH_CM = 140.0
 
 # The lift actors (AOneBrahamLift) bring their own doors; until a build has
 # the class, closed landing doors keep the shafts from being open drops.
@@ -795,17 +815,22 @@ def _slab_holes(floor_index):
                 cx = CORE_SHAFT_X * side
                 holes.append((cx - 125.0, cx + 125.0, y - 135.0, y + 135.0))
         holes.append((-150.0, 150.0, GLASS_LIFT_Y[0], GLASS_LIFT_Y[1]))
-        holes.append(SPIRAL_HOLE)
-        for side in (-1.0,):
-            if floor_index < C.FLOOR_COUNT:
-                # The whole flight area: the upper floor's first flight sits in it.
-                x0, x1 = STAIR_X
-            else:
-                # The top floor only needs headroom over the arriving flight.
-                x0, x1 = STAIR_X[0], STAIR_DOOR_X
-            if side < 0:
-                x0, x1 = -x1, -x0
-            holes.append((x0, x1, STAIR_FLIGHT_Y[0], STAIR_TOP_Y if floor_index < C.FLOOR_COUNT else STAIR_FLIGHT_Y[1]))
+        if floor_index < C.FLOOR_COUNT:
+            holes.append(SPIRAL_HOLE)
+        else:
+            # The top floor has no turn of its own to climb, so the slab closes
+            # over the quarter where the last turn below begins (treads 1-5,
+            # under 2.8 m of headroom and more): the landing then arrives
+            # beside floor, not along a drop the nav mesh erodes to nothing.
+            x0, x1, y0, y1 = SPIRAL_HOLE
+            ox, oy = SPIRAL_CENTRE
+            holes.append((x0, ox, y0, y1))
+            holes.append((ox, x1, oy, y1))
+        # The fire stair's whole flight area, the top floor's too: the storey
+        # below's landing needs the headroom (a slab over it left 1.6 m, which
+        # neither a player nor the nav mesh's agent stands up in).
+        x0, x1 = -STAIR_X[1], -STAIR_X[0]
+        holes.append((x0, x1, STAIR_FLIGHT_Y[0], STAIR_TOP_Y))
     if floor_index == 1:
         holes.append((ESCALATOR_X[0] - 10.0, ESCALATOR_X[1] + 10.0, ESCALATOR_Y[0] - 10.0, ESCALATOR_Y[1] + 10.0))
         holes.append(RECEPTION_VOID)
@@ -879,20 +904,35 @@ def _wall_with_door(cx, cy, z, x0, y0, x1, y1, door_at, door_width, material, la
             _box((cx + x0, cy + door_at, z + C.DOOR_HEIGHT_CM + head / 2.0), (20.0, door_width, head), material, label + "_Head")
 
 
-def _flight(cx, cy, z, x0, x1, y_start, y_end, rise_from, rise_to, steps, material, label):
-    """A solid flight of stairs between two heights, along y."""
+def _flight(cx, cy, z, x0, x1, y_start, y_end, rise_from, rise_to, steps, material, label, waist=None):
+    """A flight of stairs between two heights, along y.
+
+    Solid to the floor by default (an escalator's truss, which nobody walks
+    under). With waist, each step is only that deep below its tread - a
+    concrete stair's waist - so the flight one storey up leaves headroom over
+    this one. A switchback built of solid flights stacked its storeys' return
+    flights on top of each other: the arriving flight ran into the underside of
+    the next one, and the nav mesh never joined a floor above 0-1.
+    """
     run = (y_end - y_start) / steps
     rise = (rise_to - rise_from) / steps
     for i in range(steps):
         top = rise_from + rise * (i + 1)
+        bottom = 0.0 if waist is None else max(rise_from, top - waist)
         y_mid = y_start + run * (i + 0.5)
-        _box((cx + (x0 + x1) / 2.0, cy + y_mid, z + top / 2.0), (x1 - x0, abs(run), top), material,
+        _box((cx + (x0 + x1) / 2.0, cy + y_mid, z + (top + bottom) / 2.0), (x1 - x0, abs(run), top - bottom), material,
              "{0}_{1:02d}".format(label, i + 1))
 
 
 def build_spiral_stair(cx, cy, z, materials, label):
     """One storey of the spiral: treads 1-19 round the column, rising from this
-    floor's stair lobby to the next floor's, which is tread 20."""
+    floor's stair lobby to the next floor's, and tread 20, the landing.
+
+    Tread 20 is level with the next floor and runs out past the slab opening's
+    edge: the opening is square and the treads round, so without it the last
+    tread stopped 20 cm short of the floor above, across a drop to the floor
+    below, and the first tread 20 cm short of the slab it starts from - steps a
+    player takes without noticing and a gap the nav mesh will not cross."""
     concrete = materials.get("Concrete")
     steel = _district_material("BlackCladding") or materials.get("Metal")
     rise = C.FLOOR_HEIGHT_CM / SPIRAL_STEPS
@@ -912,6 +952,13 @@ def build_spiral_stair(cx, cy, z, materials, label):
         post_r = SPIRAL_R_OUT - 6.0
         _box((cx + ox + post_r * math.cos(angle), cy + oy + post_r * math.sin(angle), z + top + 50.0),
              (4.0, 4.0, 100.0), steel, "{0}_Baluster_{1:02d}".format(label, i))
+    # Tread 20: due south of the column, flush with the next floor, reaching
+    # SPIRAL_LANDING_REACH past the opening's edge onto its slab. No baluster:
+    # this is the way on and off.
+    outer = (SPIRAL_HOLE[3] - SPIRAL_HOLE[2]) / 2.0 + SPIRAL_LANDING_REACH
+    # Half a centimetre proud of the slab it overlaps, so the two never z-fight.
+    _box((cx + ox, cy + oy - (SPIRAL_R_IN + outer) / 2.0, z + C.FLOOR_HEIGHT_CM - 2.5),
+         (width, outer - SPIRAL_R_IN, 6.0), concrete, "{0}_Tread_{1:02d}".format(label, SPIRAL_STEPS))
 
 
 def _sign(cx, cy, x, y, zc, yaw, text, size, colour, label, align="center"):
@@ -1034,22 +1081,47 @@ def build_core(floor_index, area_name, cx, cy, z, materials, prefix):
         if side == SPIRAL_SIDE:
             if floor_index < C.FLOOR_COUNT:
                 build_spiral_stair(cx, cy, z, materials, "{0}_Stair_{1}".format(prefix, tag))
+            else:
+                # The top of the spiral: rails where the opening meets the
+                # floor, either side of the landing.
+                hx0, hx1, hy0, _hy1 = SPIRAL_HOLE
+                ox, oy = SPIRAL_CENTRE
+                tread = 2.0 * math.pi * SPIRAL_R_OUT / SPIRAL_STEPS - 2.0
+                _balustrade(cx, cy, z, hx0, hy0, ox - tread / 2.0, hy0, materials,
+                            "{0}_Stair_{1}_TopRail_S".format(prefix, tag))
+                _balustrade(cx, cy, z, ox, oy, hx1, oy, materials, "{0}_Stair_{1}_TopRail_N".format(prefix, tag))
         elif floor_index < C.FLOOR_COUNT:
             half = C.FLOOR_HEIGHT_CM / 2.0
-            # Up-flight on the outer lane, landing at the back, return flight inner.
-            up_x0, up_x1 = sorted((outer, (STAIR_DOOR_X + 20.0) * side))
-            back_x0, back_x1 = sorted((inner, (STAIR_DOOR_X - 20.0) * side))
+            # Up-flight on the outer lane, landing at the back, return flight
+            # inner. The lanes meet under the spine, so where the spine stops
+            # short at the foot there is no slot between them.
+            up_x0, up_x1 = sorted((outer, STAIR_DOOR_X * side))
+            back_x0, back_x1 = sorted((inner, STAIR_DOOR_X * side))
+            # Waisted flights and a slab landing, not solid blocks: each storey's
+            # flights stand in the same plan as the ones below, a storey up.
             _flight(cx, cy, z, up_x0, up_x1, STAIR_FLIGHT_Y[0], STAIR_FLIGHT_Y[1], 0.0, half, 11, concrete,
-                    "{0}_Stair_{1}_Up".format(prefix, tag))
+                    "{0}_Stair_{1}_Up".format(prefix, tag), waist=FIRE_STAIR_WAIST_CM)
             land_x0, land_x1 = sorted((inner, outer))
-            _box((cx + (land_x0 + land_x1) / 2.0, cy + (STAIR_FLIGHT_Y[1] + STAIR_TOP_Y) / 2.0, z + half / 2.0),
-                 (land_x1 - land_x0, STAIR_TOP_Y - STAIR_FLIGHT_Y[1], half), concrete, "{0}_Stair_{1}_Landing".format(prefix, tag))
+            _box((cx + (land_x0 + land_x1) / 2.0, cy + (STAIR_FLIGHT_Y[1] + STAIR_TOP_Y) / 2.0,
+                  z + half - FIRE_STAIR_WAIST_CM / 2.0),
+                 (land_x1 - land_x0, STAIR_TOP_Y - STAIR_FLIGHT_Y[1], FIRE_STAIR_WAIST_CM), concrete,
+                 "{0}_Stair_{1}_Landing".format(prefix, tag))
             _flight(cx, cy, z, back_x0, back_x1, STAIR_FLIGHT_Y[1], STAIR_FLIGHT_Y[0], half, C.FLOOR_HEIGHT_CM, 11, concrete,
-                    "{0}_Stair_{1}_Return".format(prefix, tag))
-            # The wall between the flights: a stair you can't see down.
+                    "{0}_Stair_{1}_Return".format(prefix, tag), waist=FIRE_STAIR_WAIST_CM)
+            # The wall between the flights: a stair you can't see down. It
+            # starts FIRE_STAIR_TURN_CM up the flights, not at their foot: the
+            # turn from the arriving flight to the next one is made in the
+            # lobby, and with the spine to the lobby's edge that was a 40 cm
+            # strip - closed outright by a locked stair door or a sealed
+            # shutter, so the stair stopped climbing at that floor.
             div_x = STAIR_DOOR_X * side
-            _wall(cx, cy, z, div_x, STAIR_FLIGHT_Y[0], div_x, STAIR_FLIGHT_Y[1], concrete,
+            _wall(cx, cy, z, div_x, STAIR_FLIGHT_Y[0] + FIRE_STAIR_TURN_CM, div_x, STAIR_FLIGHT_Y[1], concrete,
                   "{0}_Stair_{1}_Spine".format(prefix, tag), height=C.FLOOR_HEIGHT_CM)
+        else:
+            # The top of the fire stair: a rail across the up-flight's lane,
+            # which on this floor is an opening over the storey below.
+            _balustrade(cx, cy, z, outer, STAIR_FLIGHT_Y[0], STAIR_DOOR_X * side, STAIR_FLIGHT_Y[0], materials,
+                        "{0}_Stair_{1}_TopRail".format(prefix, tag))
 
         # Stair lighting: the ceiling grid never lands inside the core, so each
         # stair gets its own bulkheads - one over the lobby, one over the mid
@@ -1169,14 +1241,16 @@ def build_ground_floor(cx, cy, z, half_x, half_y, materials, prefix):
     _wall(cx, cy, z, 1400.0, GATE_LINE_Y, 1400.0, -950.0, plaster, prefix + "_Reception_Return_E")
     _wall(cx, cy, z, 400.0, GATE_LINE_Y, 400.0, -950.0, plaster, prefix + "_Reception_Return_W")
 
-    # --- The gate lines. Pedestals every 110 cm, lanes between, each with its
-    # own glass wings held open (folded flat against its sides, inside its
-    # length, standing above it - never in the lane). The main line runs from
-    # reception's corner to the lift hall; then a short wall; then the
-    # escalators' own line, right in front of them.
+    # --- The gate lines. Pedestals at least GATE_PITCH_CM apart, evenly from
+    # end to end, lanes between, each with its own glass wings held open
+    # (folded flat against its sides, inside its length, standing above it -
+    # never in the lane). The main line runs from reception's corner to the
+    # lift hall; then a short wall; then the escalators' own line, right in
+    # front of them.
     def gate_line(x_from, x_to, label):
         index = 0
-        step = 110.0 if x_to > x_from else -110.0
+        lanes = max(1, int(abs(x_to - x_from) // GATE_PITCH_CM))
+        step = (x_to - x_from) / lanes
         x = x_from
         while (x <= x_to + 1.0) if step > 0 else (x >= x_to - 1.0):
             index += 1
@@ -3093,7 +3167,166 @@ def _on_navmesh(world, point, extent):
     return hit
 
 
-def build_navigation(report, level_path, floor_indices=None, points=None):
+# Floor-to-floor connectivity. Each stair is followed a storey at a time from
+# its lobby (inside the stair door) to the lobby above, and every spawn anchor
+# is joined to its own floor's lobbies and to the anchors a floor either side
+# (the escalators and the feature stair). A bot reaches whatever the plaza's
+# anchors reach in that graph; a short query per edge rather than one long one,
+# because a fifteen-storey search runs out of nodes and answers "partial" for a
+# climb that is there.
+NAV_STAIR_LOBBY_Y = (STAIR_LOBBY_Y[0] + STAIR_LOBBY_Y[1]) / 2.0
+NAV_PATH_END_TOLERANCE_CM = 120.0       # how near the goal a complete path must end, in plan
+NAV_POINT_LIFT_CM = 90.0                # query points stand where a capsule's centre would
+# FIRE DRILL's control-point floors (UOneBrahamMatchSettingsAsset's defaults):
+# it respawns players on them and sends bots to their anchors, with every door
+# as baked, so no anchor on them may be behind a lock.
+NAV_RESPAWN_FLOORS = (1, 9, 15)
+
+
+def _nav_path_complete(world, start, goal):
+    """True when the nav mesh has a complete path from start to goal (unreal.Vector)."""
+    path = unreal.NavigationSystemV1.find_path_to_location_synchronously(world, start, goal)
+    if path is None or not path.is_valid() or path.is_partial():
+        return False
+    points = path.get_editor_property("path_points")
+    if not points:
+        return False
+    end = points[-1]
+    return (math.hypot(end.x - goal.x, end.y - goal.y) < NAV_PATH_END_TOLERANCE_CM
+            and abs(end.z - goal.z) < C.FLOOR_HEIGHT_CM / 2.0)
+
+
+def nav_spawn_anchors(actors):
+    """(name, floor, unreal.Vector) for every spawn anchor among actors."""
+    spawn_class = getattr(unreal, "OneBrahamSpawnPoint", None)
+    anchors = []
+    for actor in actors:
+        if spawn_class is not None and isinstance(actor, spawn_class):
+            anchors.append((actor.get_actor_label(), int(actor.get_editor_property("FloorIndex")),
+                            actor.get_actor_location()))
+    return sorted(anchors, key=lambda a: (a[1], a[0]))
+
+
+def floor_connectivity(world, anchors):
+    """What the nav mesh joins: from the plaza's anchors to every floor.
+
+    anchors is nav_spawn_anchors(). Returns a dict, JSON-ready for the manifest:
+        floors[str(f)] = {"stairs": {"A": bool, "B": bool}, "anchors": {name: bool}}
+            whether the plaza reaches each stair's lobby and each anchor on f
+        plaza_to_lobby[name] = bool   each plaza anchor has a path to a floor-1 anchor
+        stair_links = ["A 3-4", ...]  the storeys of each stair that do NOT join
+    """
+    parent = {}
+
+    def find(node):
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    def join(a, b):
+        parent[find(a)] = find(b)
+
+    points = {}
+    for floor_index in range(0, C.FLOOR_COUNT + 1):
+        z = _floor_z(floor_index) + NAV_POINT_LIFT_CM
+        for tag, side in (("A", -1.0), ("B", 1.0)):
+            points[("stair", tag, floor_index)] = unreal.Vector(STAIR_DOOR_X * side, NAV_STAIR_LOBBY_Y, z)
+    for name, floor_index, location in anchors:
+        points[("anchor", name, floor_index)] = location
+    for node in points:
+        parent[node] = node
+
+    by_floor = {}
+    for node in points:
+        by_floor.setdefault(node[2], []).append(node)
+
+    broken_stairs = []
+    for floor_index in sorted(by_floor):
+        nodes = sorted(by_floor[floor_index])
+        # On the floor: everything to the first node it reaches.
+        for i, a in enumerate(nodes):
+            for b in nodes[i + 1:]:
+                if find(a) != find(b) and _nav_path_complete(world, points[a], points[b]):
+                    join(a, b)
+        # Up a storey: each stair, and anchor to anchor (escalators, feature stair).
+        for tag in ("A", "B"):
+            below, above = ("stair", tag, floor_index), ("stair", tag, floor_index + 1)
+            if above not in points:
+                continue
+            if _nav_path_complete(world, points[below], points[above]):
+                join(below, above)
+            else:
+                broken_stairs.append(u"{0} {1}-{2}".format(tag, floor_index, floor_index + 1))
+        upper = [n for n in by_floor.get(floor_index + 1, []) if n[0] == "anchor"]
+        for a in (n for n in nodes if n[0] == "anchor"):
+            for b in upper:
+                if find(a) != find(b) and _nav_path_complete(world, points[a], points[b]):
+                    join(a, b)
+
+    plaza = [n for n in by_floor.get(0, []) if n[0] == "anchor"]
+    roots = set(find(n) for n in plaza)
+    floors = {}
+    for floor_index in sorted(by_floor):
+        entry = {"stairs": {}, "anchors": {}}
+        for node in by_floor[floor_index]:
+            reached = find(node) in roots
+            if node[0] == "stair":
+                entry["stairs"][node[1]] = reached
+            else:
+                entry["anchors"][node[1]] = reached
+        floors[str(floor_index)] = entry
+
+    lobby = [points[n] for n in by_floor.get(1, []) if n[0] == "anchor"]
+    plaza_to_lobby = {}
+    for node in plaza:
+        plaza_to_lobby[node[1]] = any(_nav_path_complete(world, points[node], goal) for goal in lobby)
+
+    return {"floors": floors, "plaza_to_lobby": plaza_to_lobby, "stair_links": broken_stairs}
+
+
+def nav_locked_floors():
+    """Floors where an anchor may be cut off by ASCENT's locked doors.
+
+    Every access zone's floor except the lift lobbies' (Core_Lift_*): those
+    lock the lifts, not a room, so an anchor on floors 1-2 that the plaza does
+    not reach is a broken lobby, not a locked one.
+    """
+    return set(zone[1] for zone in ACCESS_ZONES if not zone[0].startswith("Core_Lift"))
+
+
+def connectivity_problems(connectivity, locked_floors=(), respawn_floors=NAV_RESPAWN_FLOORS):
+    """(failures, notes) from a floor_connectivity() result.
+
+    A floor's stair lobbies must be reached from the plaza - that is the
+    climb. An anchor that is not reached is a failure too, unless its floor has
+    a locked access zone (locked_floors): ASCENT's progression puts keycard
+    doors on some floors' stair doors, and the bake is taken locked. A respawn
+    floor (respawn_floors) gets no such pass: a player or bot respawned behind
+    a lock there is shut in for the match.
+    """
+    failures, notes = [], []
+    for name, reached in sorted(connectivity.get("plaza_to_lobby", {}).items()):
+        if not reached:
+            failures.append(u"plaza anchor {0} has no path into the lobby (floor 1)".format(name))
+    if not connectivity.get("plaza_to_lobby"):
+        failures.append(u"no plaza anchors to start from")
+    for key, entry in sorted(connectivity.get("floors", {}).items(), key=lambda kv: int(kv[0])):
+        floor_index = int(key)
+        for tag, reached in sorted(entry.get("stairs", {}).items()):
+            if not reached:
+                failures.append(u"floor {0}: the plaza does not reach stair {1}'s lobby".format(floor_index, tag))
+        for name, reached in sorted(entry.get("anchors", {}).items()):
+            if reached:
+                continue
+            if floor_index in locked_floors and floor_index not in respawn_floors:
+                notes.append(u"floor {0}: {1} is behind the floor's locked doors".format(floor_index, name))
+            else:
+                failures.append(u"floor {0}: the plaza does not reach {1}".format(floor_index, name))
+    return failures, notes
+
+
+def build_navigation(report, level_path, floor_indices=None, points=None, connectivity=None):
     """Bakes the nav mesh for level_path (and every level it streams in) and saves it.
 
     Runs last, after everything that moves geometry - the district, the kitchen
@@ -3108,6 +3341,8 @@ def build_navigation(report, level_path, floor_indices=None, points=None):
     floor_indices, when given, are checked by projecting a grid on each floor
     plate onto the result; a floor that comes back mostly bare is a failure.
     points, when given, are (name, x, y, z) spots that must each be on it.
+    connectivity, when given, is a dict filled with floor_connectivity() for
+    the manifest; a floor the plaza cannot reach is a failure.
     """
     level_subsystem = _level_subsystem()
 
@@ -3174,6 +3409,21 @@ def build_navigation(report, level_path, floor_indices=None, points=None):
         hit = _on_navmesh(world, unreal.Vector(x, y, z + 50.0), unreal.Vector(100.0, 100.0, 100.0))
         if hit is None or abs(hit.z - z) >= 120.0:
             report.failed(u"navigation {0}".format(name), u"is not on the nav mesh")
+
+    # Floor to floor: the plaza has to reach every storey, or bots never climb.
+    if connectivity is not None:
+        result = floor_connectivity(world, nav_spawn_anchors(_actor_subsystem().get_all_level_actors()))
+        connectivity.update(result)
+        failures, notes = connectivity_problems(result, nav_locked_floors())
+        for problem in failures:
+            report.failed(u"navigation connectivity", problem)
+        for note in notes:
+            C.log(u"    nav: " + note)
+        if result["stair_links"]:
+            C.log(u"    nav: stair storeys that do not join: " + u", ".join(result["stair_links"]))
+        C.log(u"  navigation: {0} floors reached from the plaza, {1} connectivity problem(s)".format(
+            sum(1 for entry in result["floors"].values()
+                if any(entry["stairs"].values()) or any(entry["anchors"].values())), len(failures)))
 
     try:
         if not level_subsystem.save_all_dirty_levels():
@@ -3409,6 +3659,14 @@ def build_shutters(report):
                     if steel is not None:
                         for part in shutter.get_components_by_class(unreal.StaticMeshComponent):
                             part.set_material(0, steel)
+                    # Baked open. The seal volume is born blocking (query
+                    # collision, navigation-relevant) and only BeginPlay opens
+                    # it, so the bake - which never plays - cut every stair
+                    # door out of the nav mesh. The shutter sets its own
+                    # collision from its state at BeginPlay and dirties the
+                    # tile whenever it closes, so open is the right bake.
+                    for seal in shutter.get_components_by_class(unreal.BoxComponent):
+                        seal.set_collision_enabled(unreal.CollisionEnabled.NO_COLLISION)
                     try:
                         shutter.set_editor_property("FloorIndex", floor)
                         shutter.set_editor_property("ShutterId", unreal.Name(
@@ -4382,8 +4640,10 @@ def build_all(write_manifest=True):
     C.guard(report, "spawn clearance", settle_spawn_points, report, manifest["spawn_anchors"])
 
     # Last of all on the tower: nothing after this may move its geometry.
+    connectivity = {}
     C.guard(report, "navigation", build_navigation, report, "{0}/{1}".format(C.MAPS, C.MAP_PERSISTENT),
-            [f["index"] for f in floors])
+            [f["index"] for f in floors], connectivity=connectivity)
+    manifest["navigation"] = connectivity
 
     C.step(5, 6, "fire drill arena")
     C.guard(report, "fire drill arena", build_fire_drill_arena, report, materials)

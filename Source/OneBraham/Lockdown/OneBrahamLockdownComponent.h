@@ -22,9 +22,16 @@
 //                 Skydeck so the final fight is never decided by gas.
 //
 // AUTHORITY
-//   Stage progression is server-only. The stage, the seconds to the next change
-//   and the "warning active" flag are replicated so the HUD, the audio director
-//   and the map's lighting all read the same truth.
+//   Stage progression is server-only. The stage, the server time the stage ends
+//   at and the "warning active" flag are replicated so the HUD, the audio
+//   director and the map's lighting all read the same truth.
+//
+//   The countdown is a deadline, not a duration: a replicated "seconds left"
+//   is only right at the instant it was sent, and a client that joined late (or
+//   missed the stage's start) had nothing to count it down from but its own
+//   clock. Every machine subtracts the game state's server world time from the
+//   one replicated end time instead, so a player who joins mid-Purge reads the
+//   same number as the host.
 
 #pragma once
 
@@ -117,9 +124,26 @@ public:
 	UFUNCTION(BlueprintPure, Category = "One Braham|Lockdown")
 	bool IsWarningActive() const { return bWarningActive; }
 
-	/** Seconds until the next stage change. 0 when the Purge has been reached. */
+	/**
+	 * Seconds until the next stage change, on the server's clock (the game
+	 * state's server world time), so every machine - a late joiner included -
+	 * reads the same number. 0 when the director is not running and once the
+	 * Purge has been reached: the Purge is the last stage and has no "next".
+	 */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Lockdown")
-	float GetSecondsToNextStage() const { return SecondsToNextStage; }
+	float GetSecondsToNextStage() const;
+
+	/** Server world time the current stage ends at; 0 when nothing is counting down. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Lockdown")
+	double GetStageEndServerTime() const { return StageEndServerTime; }
+
+	/**
+	 * The countdown arithmetic, pure so it can be tested without a world:
+	 * seconds from ServerNow to StageEnd, 0 when the director is stopped, the
+	 * stage is the Purge or no end is set.
+	 */
+	static float ComputeSecondsToNextStage(EOneBrahamLockdownStage InStage, bool bRunning,
+		double InStageEndServerTime, double ServerNow);
 
 	/** Highest floor currently occupied by a living player. Drives which floors seal. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Lockdown")
@@ -190,9 +214,14 @@ protected:
 	UPROPERTY(ReplicatedUsing = OnRep_Stage, BlueprintReadOnly, Category = "One Braham|Lockdown")
 	EOneBrahamLockdownStage Stage = EOneBrahamLockdownStage::Normal;
 
-	/** Replicated at 2 Hz so every HUD counts down identically. */
-	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Lockdown")
-	float SecondsToNextStage = 0.f;
+	/**
+	 * Server world time (AGameStateBase::GetServerWorldTimeSeconds) at which the
+	 * current stage ends. Sent once per stage, not ticked: it is a deadline, and
+	 * a deadline is the same number for a player who joined a minute ago. 0 when
+	 * nothing is counting down (director stopped, or the Purge).
+	 */
+	UPROPERTY(Replicated)
+	double StageEndServerTime = 0.0;
 
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Lockdown")
 	bool bWarningActive = false;
@@ -216,10 +245,17 @@ protected:
 	/** Throttles the 4 Hz occupancy rescan. */
 	float OccupancyAccumulator = 0.f;
 
-	/** Time in the current stage, used for the warning boundary. */
-	float TimeInStage = 0.f;
+	/** Server: (re)starts the current stage's clock from now. */
+	void ServerRestartStageClock();
 
-	float ReplicationAccumulator = 0.f;
+	/** Server: the stage length from the match settings (or the fallback). */
+	float GetStageSeconds() const;
+
+	/** Server: last value of ob.Lockdown.ForceStage acted on (edge-triggered). */
+	int32 LastForcedStageCVar = -1;
+
+	/** Throttles the Verbose clock log. */
+	float ClockLogAccumulator = 0.f;
 
 	/** Purge bookkeeping. */
 	int32 PurgeKillCount = 0;

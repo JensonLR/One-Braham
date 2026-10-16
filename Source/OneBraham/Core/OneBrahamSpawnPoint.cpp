@@ -130,3 +130,27 @@ bool AOneBrahamSpawnPoint::ValidateClearance() const
 
 	return !World->OverlapBlockingTestByChannel(TestLocation, FQuat::Identity, ECC_Pawn, Capsule, Params);
 }
+
+bool AOneBrahamSpawnPoint::IsClearForPawn(float CapsuleRadius, float CapsuleHalfHeight, const AActor* IgnoreActor) const
+{
+	const UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return true;
+	}
+
+	// The game mode spawns the pawn centred on the actor. Lift the test a few
+	// centimetres and shorten it to match, so the floor slab under the feet is
+	// not mistaken for an obstruction; anything a player could stand in is.
+	constexpr float FloorSlackCm = 8.f;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(OBSpawnOccupied), false, this);
+	if (IgnoreActor != nullptr)
+	{
+		Params.AddIgnoredActor(IgnoreActor);
+	}
+
+	const FCollisionShape Capsule = FCollisionShape::MakeCapsule(CapsuleRadius,
+		FMath::Max(CapsuleRadius, CapsuleHalfHeight - FloorSlackCm * 0.5f));
+	return !World->OverlapBlockingTestByChannel(GetActorLocation() + FVector(0.f, 0.f, FloorSlackCm * 0.5f),
+		FQuat::Identity, ECC_Pawn, Capsule, Params);
+}

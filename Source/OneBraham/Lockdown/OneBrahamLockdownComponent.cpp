@@ -12,6 +12,7 @@
 #include "Core/OneBrahamPlayerState.h"
 #include "Data/OneBrahamMatchSettingsAsset.h"
 #include "Engine/World.h"
+#include "HAL/IConsoleManager.h"
 #include "GameFramework/PlayerState.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
@@ -44,19 +45,12 @@ void UOneBrahamLockdownComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// Nothing else to set up: in particular no countdown of its own. A client's
+	// BeginPlay comes after the initial bunch, so a full stage length written
+	// here overwrote the server's replicated clock on every late joiner. (The
+	// other half of "73s TO NEXT STAGE" mid-Purge: the server kept sending a
+	// stage-length countdown during the Purge, which has no next stage.)
 	CachedGameState = Cast<AOneBrahamGameState>(GetOwner());
-
-	if (const AOneBrahamGameState* GS = CachedGameState.Get())
-	{
-		if (const UOneBrahamMatchSettingsAsset* Settings = GS->GetMatchSettings())
-		{
-			SecondsToNextStage = Settings->LockdownStageSeconds;
-		}
-		else
-		{
-			SecondsToNextStage = OBFallbackStageSeconds;
-		}
-	}
 }
 
 void UOneBrahamLockdownComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -64,7 +58,7 @@ void UOneBrahamLockdownComponent::GetLifetimeReplicatedProps(TArray<FLifetimePro
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(UOneBrahamLockdownComponent, Stage);
-	DOREPLIFETIME(UOneBrahamLockdownComponent, SecondsToNextStage);
+	DOREPLIFETIME(UOneBrahamLockdownComponent, StageEndServerTime);
 	DOREPLIFETIME(UOneBrahamLockdownComponent, bWarningActive);
 	DOREPLIFETIME(UOneBrahamLockdownComponent, HighestOccupiedFloor);
 	DOREPLIFETIME(UOneBrahamLockdownComponent, bDirectorRunning);
@@ -86,14 +80,42 @@ void UOneBrahamLockdownComponent::TickComponent(float DeltaTime, ELevelTick Tick
 		return;
 	}
 
+	// Every machine, Verbose: the clock as this machine reads it, so a host's and
+	// a late joiner's logs can be laid side by side (-LogCmds="LogOneBrahamMatch Verbose").
+	ClockLogAccumulator += DeltaTime;
+	if (ClockLogAccumulator >= 5.f)
+	{
+		ClockLogAccumulator = 0.f;
+		UE_LOG(LogOneBrahamMatch, Verbose, TEXT("[OB.MATCH] Lockdown clock (%s): %s, %.1f s to next stage at server time %.1f"),
+			GetOwnerRole() == ROLE_Authority ? TEXT("server") : TEXT("client"), *UEnum::GetValueAsString(Stage),
+			GetSecondsToNextStage(), GS->GetServerWorldTimeSeconds());
+	}
+
 	if (GetOwnerRole() != ROLE_Authority)
 	{
-		// Clients count the clock down between the 2 Hz replication beats.
-		if (bDirectorRunning && Stage != EOneBrahamLockdownStage::Purge)
-		{
-			SecondsToNextStage = FMath::Max(0.f, SecondsToNextStage - DeltaTime);
-		}
+		// Clients have nothing to tick: the countdown is the replicated end time
+		// minus the server's clock, read when asked (GetSecondsToNextStage).
 		return;
+	}
+
+	// QA: ob.Lockdown.ForceStage N (settable from -ExecCmds, which the console's
+	// ob.lockdown verb is not). Acted on when the value changes, so the normal
+	// flow carries on from the forced stage; -1 leaves the director alone.
+	// Looked up once: the variable is registered by the module and lives as long
+	// as it does, and the engine warns about a by-name lookup every tick.
+	static const IConsoleVariable* const ForceStageCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("ob.Lockdown.ForceStage"));
+	if (ForceStageCVar != nullptr)
+	{
+		const int32 Forced = ForceStageCVar->GetInt();
+		if (Forced != LastForcedStageCVar)
+		{
+			LastForcedStageCVar = Forced;
+			if (Forced >= 0)
+			{
+				OB_MATCH_LOG("ob.Lockdown.ForceStage %d", Forced);
+				ServerForceStage(static_cast<EOneBrahamLockdownStage>(FMath::Clamp(Forced, 0, 3)));
+			}
+		}
 	}
 
 	if (!bDirectorRunning)
@@ -102,11 +124,7 @@ void UOneBrahamLockdownComponent::TickComponent(float DeltaTime, ELevelTick Tick
 	}
 
 	const UOneBrahamMatchSettingsAsset* Settings = GS->GetMatchSettings();
-	const float StageSeconds = Settings ? FMath::Max(5.f, Settings->LockdownStageSeconds) : OBFallbackStageSeconds;
 	const float WarningSeconds = Settings ? FMath::Max(1.f, Settings->LockdownWarningSeconds) : OBFallbackWarningSeconds;
-
-	TimeInStage += DeltaTime;
-	ReplicationAccumulator += DeltaTime;
 
 	// Rescan occupancy four times a second: it changes when someone takes a lift.
 	OccupancyAccumulator += DeltaTime;
@@ -116,7 +134,9 @@ void UOneBrahamLockdownComponent::TickComponent(float DeltaTime, ELevelTick Tick
 		UpdateHighestOccupiedFloor();
 	}
 
-	const float Remaining = FMath::Max(0.f, StageSeconds - TimeInStage);
+	// The server reads its own deadline the way every client does, so the stage
+	// changes when the HUDs say it will.
+	const float Remaining = GetSecondsToNextStage();
 
 	const bool bShouldWarn = Stage != EOneBrahamLockdownStage::Purge
 		&& Remaining <= WarningSeconds
@@ -135,7 +155,7 @@ void UOneBrahamLockdownComponent::TickComponent(float DeltaTime, ELevelTick Tick
 		}
 	}
 
-	if (Remaining > WarningSeconds)
+	if (Remaining > WarningSeconds || Stage == EOneBrahamLockdownStage::Purge)
 	{
 		bWarningActive = false;
 	}
@@ -152,15 +172,56 @@ void UOneBrahamLockdownComponent::TickComponent(float DeltaTime, ELevelTick Tick
 	{
 		ServerApplyPurgeDamage(DeltaTime);
 	}
+}
 
-	if (ReplicationAccumulator >= 0.5f)
+float UOneBrahamLockdownComponent::ComputeSecondsToNextStage(EOneBrahamLockdownStage InStage, bool bRunning,
+	double InStageEndServerTime, double ServerNow)
+{
+	if (!bRunning || InStage == EOneBrahamLockdownStage::Purge || InStageEndServerTime <= 0.0)
 	{
-		ReplicationAccumulator = 0.f;
-		SecondsToNextStage = Remaining;
-		if (AActor* OwnerActor = GetOwner())
-		{
-			OwnerActor->ForceNetUpdate();
-		}
+		return 0.f;
+	}
+
+	return static_cast<float>(FMath::Max(0.0, InStageEndServerTime - ServerNow));
+}
+
+float UOneBrahamLockdownComponent::GetSecondsToNextStage() const
+{
+	// The game state's server world time: on the server its own clock, on a
+	// client the server's clock as last synced (replicated with the game state's
+	// initial bunch, so a late joiner has it from the start). Never the client's
+	// own world time - that started when the client loaded the map.
+	const AGameStateBase* GS = Cast<AGameStateBase>(GetOwner());
+	const double ServerNow = GS != nullptr ? GS->GetServerWorldTimeSeconds()
+		: (GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() : 0.0);
+
+	return ComputeSecondsToNextStage(Stage, bDirectorRunning, StageEndServerTime, ServerNow);
+}
+
+float UOneBrahamLockdownComponent::GetStageSeconds() const
+{
+	const AOneBrahamGameState* GS = CachedGameState.Get();
+	const UOneBrahamMatchSettingsAsset* Settings = GS ? GS->GetMatchSettings() : nullptr;
+	return Settings ? FMath::Max(5.f, Settings->LockdownStageSeconds) : OBFallbackStageSeconds;
+}
+
+void UOneBrahamLockdownComponent::ServerRestartStageClock()
+{
+	const UWorld* World = GetWorld();
+	if (GetOwnerRole() != ROLE_Authority || World == nullptr)
+	{
+		return;
+	}
+
+	// The Purge is the last stage: nothing to count down to. Otherwise the end
+	// time is on the server's world clock, which is what clients subtract from.
+	StageEndServerTime = Stage == EOneBrahamLockdownStage::Purge
+		? 0.0
+		: World->GetTimeSeconds() + GetStageSeconds();
+
+	if (AActor* OwnerActor = GetOwner())
+	{
+		OwnerActor->ForceNetUpdate();
 	}
 }
 
@@ -176,14 +237,10 @@ void UOneBrahamLockdownComponent::StartDirector()
 	}
 
 	bDirectorRunning = true;
-	TimeInStage = 0.f;
 	bWarningFiredForStage = false;
+	ServerRestartStageClock();
 
-	const AOneBrahamGameState* GS = CachedGameState.Get();
-	const UOneBrahamMatchSettingsAsset* Settings = GS ? GS->GetMatchSettings() : nullptr;
-	SecondsToNextStage = Settings ? Settings->LockdownStageSeconds : OBFallbackStageSeconds;
-
-	OB_MATCH_LOG("Lockdown director started (first escalation in %.0f s)", SecondsToNextStage);
+	OB_MATCH_LOG("Lockdown director started (first escalation in %.0f s)", GetSecondsToNextStage());
 }
 
 void UOneBrahamLockdownComponent::StopDirector()
@@ -195,6 +252,7 @@ void UOneBrahamLockdownComponent::StopDirector()
 
 	bDirectorRunning = false;
 	bWarningActive = false;
+	StageEndServerTime = 0.0;
 
 	// Unseal everything: used when a match ends and the building resets.
 	ServerSealFloorsBelow(OneBrahamConstants::FloorSkydeck + 1, /*bClose*/ false);
@@ -211,9 +269,9 @@ void UOneBrahamLockdownComponent::ServerForceStage(EOneBrahamLockdownStage NewSt
 	if (static_cast<uint8>(NewStage) < static_cast<uint8>(Stage))
 	{
 		Stage = NewStage;
-		TimeInStage = 0.f;
 		bWarningFiredForStage = false;
 		bWarningActive = false;
+		ServerRestartStageClock();
 
 		ServerSealFloorsBelow(OneBrahamConstants::FloorSkydeck + 1, false);
 		SealedFloors.Reset();
@@ -239,16 +297,10 @@ void UOneBrahamLockdownComponent::ServerApplyStage(EOneBrahamLockdownStage NewSt
 		return;
 	}
 
-	const AOneBrahamGameState* GS = CachedGameState.Get();
-	const UOneBrahamMatchSettingsAsset* Settings = GS ? GS->GetMatchSettings() : nullptr;
-
 	Stage = NewStage;
-	TimeInStage = 0.f;
 	bWarningFiredForStage = false;
 	bWarningActive = false;
-	SecondsToNextStage = NewStage == EOneBrahamLockdownStage::Purge
-		? 0.f
-		: (Settings ? Settings->LockdownStageSeconds : OBFallbackStageSeconds);
+	ServerRestartStageClock();
 
 	UpdateHighestOccupiedFloor();
 

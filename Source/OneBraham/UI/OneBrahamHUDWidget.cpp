@@ -4,7 +4,10 @@
 #include "UI/OneBrahamHUDStringTable.h"
 
 #include "OneBraham.h"
+#include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamGameUserSettings.h"
+#include "Data/OneBrahamMatchSettingsAsset.h"
+#include "Lockdown/OneBrahamLockdownComponent.h"
 #include "UI/OneBrahamCompassWidget.h"
 #include "UI/OneBrahamCrosshairWidget.h"
 #include "UI/OneBrahamUIStyle.h"
@@ -699,18 +702,49 @@ void UOneBrahamHUDWidget::UpdateObjectivePanel(const FOneBrahamHUDData& InData)
 	}
 	else if (InData.bLockdownActive)
 	{
+		// Which stage, and how long a stage is, come from the game state: the
+		// snapshot carries only the countdown, and a countdown of 0 means both
+		// "the Purge, nothing after it" and "the next stage is a packet away".
+		// The Purge used to fall through to "N s TO NEXT STAGE" here, with
+		// whatever number the server last sent - the last stage has no next.
+		const AOneBrahamGameState* GS = GetWorld() != nullptr ? GetWorld()->GetGameState<AOneBrahamGameState>() : nullptr;
+		const UOneBrahamLockdownComponent* Lockdown = GS != nullptr ? GS->GetLockdownComponent() : nullptr;
+		const EOneBrahamLockdownStage Stage = Lockdown != nullptr ? Lockdown->GetStage() : EOneBrahamLockdownStage::PreLockdown;
+		const UOneBrahamMatchSettingsAsset* Settings = GS != nullptr ? GS->GetMatchSettings() : nullptr;
+		const float StageSeconds = Settings != nullptr ? FMath::Max(5.f, Settings->LockdownStageSeconds) : 90.f;
+		// No clock either when the director is not running (a stage forced before
+		// the match starts, or left standing after it ends): the stage's own text
+		// and a full bar, not "IN 0s" over an empty one.
+		const bool bNoClock = Stage == EOneBrahamLockdownStage::Purge
+			|| (Lockdown != nullptr && !Lockdown->IsDirectorRunning());
+		const FText Seconds = FText::AsNumber(FMath::CeilToInt(InData.LockdownSecondsRemaining));
+
 		if (Text_Objective != nullptr)
 		{
-			Text_Objective->SetText(FText::Format(NSLOCTEXT("OneBraham", "HUD_Lockdown", "LOCKDOWN - {0}s TO NEXT STAGE"),
-				FText::AsNumber(FMath::CeilToInt(InData.LockdownSecondsRemaining))));
+			FText Text;
+			if (bNoClock)
+			{
+				Text = Lockdown->GetStageDisplayText();
+			}
+			else if (Stage == EOneBrahamLockdownStage::Lockdown)
+			{
+				Text = FText::Format(NSLOCTEXT("OneBraham", "HUD_LockdownToPurge", "SHUTTERS DOWN - PURGE IN {0}s"), Seconds);
+			}
+			else
+			{
+				Text = FText::Format(NSLOCTEXT("OneBraham", "HUD_LockdownToShutters", "LOCKDOWN - SHUTTERS IN {0}s"), Seconds);
+			}
+
+			Text_Objective->SetText(Text);
 			Text_Objective->SetColorAndOpacity(FSlateColor(UOneBrahamUIStyle::EmergencyRed()));
 		}
 
 		if (Bar_Objective != nullptr)
 		{
+			// The Purge has no clock to drain: the bar stays full, red, for as
+			// long as the building is gassing its lower floors.
 			Bar_Objective->SetFillColorAndOpacity(UOneBrahamUIStyle::EmergencyRed());
-			Bar_Objective->SetPercent(InData.LockdownSecondsRemaining > 0.f
-				? FMath::Clamp(InData.LockdownSecondsRemaining / 90.f, 0.f, 1.f) : 0.f);
+			Bar_Objective->SetPercent(bNoClock ? 1.f : FMath::Clamp(InData.LockdownSecondsRemaining / StageSeconds, 0.f, 1.f));
 			Bar_Objective->SetVisibility(ESlateVisibility::HitTestInvisible);
 		}
 	}
