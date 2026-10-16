@@ -4,6 +4,7 @@
 
 #include "OneBraham.h"
 #include "Core/OneBrahamGameSettings.h"
+#include "Core/OneBrahamGameUserSettings.h"
 #include "Core/OneBrahamSaveSettings.h"
 #include "Data/OneBrahamMatchSettingsAsset.h"
 #include "Kismet/GameplayStatics.h"
@@ -36,6 +37,24 @@ void UOneBrahamGameInstance::Init()
 
 	if (!IsDedicatedServerInstance())
 	{
+		// First run: pick a preset this machine can hold before the first map
+		// renders. Once per install (the settings object persists that it ran);
+		// a no-op on every later launch. Not in the editor, whose scalability is
+		// its own.
+		if (!GIsEditor)
+		{
+			if (UOneBrahamGameUserSettings* UserSettings = UOneBrahamGameUserSettings::GetOneBrahamSettings())
+			{
+				UserSettings->ApplyHardwareDefaultPreset();
+			}
+		}
+
+		// Saved settings that live in a world (the colour-blind material
+		// parameter, sound-mix volumes) start at their defaults in every new
+		// world, so they are re-applied whenever one of ours begins play.
+		WorldInitializedActorsHandle = FWorldDelegates::OnWorldInitializedActors.AddUObject(
+			this, &UOneBrahamGameInstance::HandleWorldInitializedActors);
+
 		LoadProfile();
 
 		// Steam persona name lands asynchronously; seed from the command line so
@@ -69,6 +88,9 @@ void UOneBrahamGameInstance::OnStart()
 
 void UOneBrahamGameInstance::Shutdown()
 {
+	FWorldDelegates::OnWorldInitializedActors.Remove(WorldInitializedActorsHandle);
+	WorldInitializedActorsHandle.Reset();
+
 	if (!IsDedicatedServerInstance())
 	{
 		SaveProfile();
@@ -76,6 +98,36 @@ void UOneBrahamGameInstance::Shutdown()
 	}
 
 	Super::Shutdown();
+}
+
+// ==========================================================================
+//  World-bound settings
+// ==========================================================================
+void UOneBrahamGameInstance::HandleWorldInitializedActors(const FActorsInitializedParams& Params)
+{
+	UWorld* World = Params.World;
+	if (World == nullptr || !World->IsGameWorld() || World->GetGameInstance() != this)
+	{
+		return;
+	}
+
+	// Begin play rather than now: the local player's controller exists by then,
+	// and anything a level's own BeginPlay writes to the collection is in first.
+	World->OnWorldBeginPlay.AddUObject(this, &UOneBrahamGameInstance::HandleWorldBeginPlay, TWeakObjectPtr<UWorld>(World));
+}
+
+void UOneBrahamGameInstance::HandleWorldBeginPlay(TWeakObjectPtr<UWorld> World)
+{
+	UWorld* BeganWorld = World.Get();
+	if (BeganWorld == nullptr || BeganWorld->GetNetMode() == NM_DedicatedServer || GetFirstGamePlayer() == nullptr)
+	{
+		return;
+	}
+
+	if (UOneBrahamGameUserSettings* UserSettings = UOneBrahamGameUserSettings::GetOneBrahamSettings())
+	{
+		UserSettings->ApplyWorldBoundSettings(BeganWorld);
+	}
 }
 
 // ==========================================================================

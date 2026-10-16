@@ -231,4 +231,13 @@ protected:
 	static constexpr float MatchmakingTimeoutSeconds = 12.f;
 
 	FTimerHandle MatchmakingTimeoutHandle;
+
+	// --- Saved settings that live in a world -------------------------------
+	/** Hooks each new world's begin play (FWorldDelegates::OnWorldInitializedActors). */
+	void HandleWorldInitializedActors(const struct FActorsInitializedParams& Params);
+
+	/** Re-applies the world-bound saved settings (colour-blind mode, bus volumes...). */
+	void HandleWorldBeginPlay(TWeakObjectPtr<UWorld> World);
+
+	FDelegateHandle WorldInitializedActorsHandle;
 };

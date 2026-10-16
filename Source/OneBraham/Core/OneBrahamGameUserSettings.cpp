@@ -20,6 +20,8 @@
 #include "UObject/Package.h"
 #include "Engine/World.h"
 #include "Misc/CommandLine.h"
+#include "Misc/ConfigCacheIni.h"
+#include "Misc/Paths.h"
 
 UOneBrahamGameUserSettings::UOneBrahamGameUserSettings()
 {
@@ -99,9 +101,174 @@ void UOneBrahamGameUserSettings::SetToDefaults()
 	OnSettingsChanged.Broadcast();
 }
 
+bool UOneBrahamGameUserSettings::ConsumeFirstRunPreset(bool bHasSavedUserSettings)
+{
+	if (bHardwarePresetApplied)
+	{
+		return false;
+	}
+
+	// Marked either way: an install that already has settings (including every
+	// install from before this ran at all) keeps what it has, and is not asked
+	// again on the next launch.
+	bHardwarePresetApplied = true;
+	return !bHasSavedUserSettings;
+}
+
+bool UOneBrahamGameUserSettings::HasSavedUserSettings()
+{
+	// The per-user file, not the merged config: Config/DefaultGameUserSettings.ini
+	// is always in GConfig. On a Mac it lives in the app's container
+	// (~/Library/Containers/<bundle id>/Data/Library/Application Support/Epic/<project>/Saved/Config/Mac/)
+	// or ~/Library/Application Support/Epic/<project>/... unsandboxed, and in
+	// Saved/Config/MacEditor/ for an uncooked -game run.
+	const FString UserIni = FConfigCacheIni::GetDestIniFilename(TEXT("GameUserSettings"), nullptr, *FPaths::GeneratedConfigDir());
+	return FPaths::FileExists(UserIni);
+}
+
+bool UOneBrahamGameUserSettings::IsPlausibleGpuBenchmark(float GpuIndex)
+{
+	// 100 is the engine's reference GPU; the fastest desktop cards land in the low
+	// thousands. Metal on Apple Silicon times every test identically and reports
+	// ~350,000, which would rate a fanless laptop above any GPU that exists.
+	return GpuIndex > 0.f && GpuIndex < 5000.f;
+}
+
+EOneBrahamQualityPreset UOneBrahamGameUserSettings::ChooseHardwarePreset(const FOneBrahamHardwareProbe& Probe)
+{
+	const FString& GPUBrand = Probe.GpuBrand;
+
+	// --- GPU family / VRAM ------------------------------------------------
+	EOneBrahamQualityPreset Preset = EOneBrahamQualityPreset::Epic;
+
+	const bool bAppleSilicon = GPUBrand.StartsWith(TEXT("Apple M"));
+	if (bAppleSilicon)
+	{
+		// Unified memory: the "VRAM" Metal reports is ~75% of system RAM, so it
+		// says nothing about the GPU. The chip suffix does: the base chip has
+		// 8-10 GPU cores, Pro 16-20, Max 32-40, Ultra twice a Max. On the base M5
+		// at 1280x720 Epic costs ~73 ms and High 30-48 ms; Medium (TSR, 50%
+		// internal on a base chip) is the cheapest tier that keeps Lumen GI - Low turns it off and
+		// the interiors wash out.
+		if (GPUBrand.Contains(TEXT(" Max")) || GPUBrand.Contains(TEXT(" Ultra")))
+		{
+			Preset = EOneBrahamQualityPreset::High;
+		}
+		else
+		{
+			Preset = EOneBrahamQualityPreset::Medium;
+		}
+	}
+	else
+	{
+		const bool bLooksRayCapable =
+			GPUBrand.Contains(TEXT("RTX")) ||
+			GPUBrand.Contains(TEXT("Radeon RX 6")) ||
+			GPUBrand.Contains(TEXT("Radeon RX 7")) ||
+			GPUBrand.Contains(TEXT("Radeon RX 9")) ||
+			GPUBrand.Contains(TEXT("Arc A7")) ||
+			GPUBrand.Contains(TEXT("Arc B"));
+
+		const bool bIsIntegrated =
+			(GPUBrand.Contains(TEXT("Intel")) && !GPUBrand.Contains(TEXT("Arc"))) ||
+			GPUBrand.Contains(TEXT("Vega 8")) ||
+			GPUBrand.Contains(TEXT("UHD Graphics")) ||
+			GPUBrand.Contains(TEXT("Iris")) ||
+			GPUBrand.Contains(TEXT("Radeon(TM) Graphics")) ||
+			GPUBrand.Contains(TEXT("Radeon Graphics"));
+
+		if (bIsIntegrated)
+		{
+			Preset = EOneBrahamQualityPreset::Low;
+		}
+		else if (Probe.VramMb > 0 && Probe.VramMb < 4096)
+		{
+			Preset = EOneBrahamQualityPreset::Medium;
+		}
+		else if (Probe.VramMb < 7000 && !bLooksRayCapable)
+		{
+			Preset = EOneBrahamQualityPreset::High;
+		}
+		else if (bLooksRayCapable && Probe.VramMb >= 10000)
+		{
+			Preset = EOneBrahamQualityPreset::Ultra;
+		}
+		else
+		{
+			Preset = EOneBrahamQualityPreset::Epic;
+		}
+	}
+
+	// --- Benchmark cap ----------------------------------------------------
+	// Only lowers. The engine's own ladder (BaseScalability.ini: 18 / 42 / 115)
+	// puts anything past 115 at Epic; this tower needs roughly four times a
+	// typical scene, so the project's steps sit higher.
+	if (IsPlausibleGpuBenchmark(Probe.GpuBenchmarkIndex))
+	{
+		EOneBrahamQualityPreset Cap = EOneBrahamQualityPreset::Ultra;
+		if (Probe.GpuBenchmarkIndex < 60.f)
+		{
+			Cap = EOneBrahamQualityPreset::Low;
+		}
+		else if (Probe.GpuBenchmarkIndex < 150.f)
+		{
+			Cap = EOneBrahamQualityPreset::Medium;
+		}
+		else if (Probe.GpuBenchmarkIndex < 400.f)
+		{
+			Cap = EOneBrahamQualityPreset::High;
+		}
+		else if (Probe.GpuBenchmarkIndex < 900.f)
+		{
+			Cap = EOneBrahamQualityPreset::Epic;
+		}
+
+		if (static_cast<uint8>(Cap) < static_cast<uint8>(Preset))
+		{
+			Preset = Cap;
+		}
+	}
+
+	return Preset;
+}
+
+bool UOneBrahamGameUserSettings::PrefersDynamicResolution(const FOneBrahamHardwareProbe& Probe)
+{
+	// Measured on the M5 (Metal, UE 5.8), Medium in the same room: fixed 71%
+	// 26 ms GPU; dynamic resolution pinned at its 50% floor 48 ms, with
+	// multi-frame hitches as it resized. Off on Apple Silicon until that changes.
+	return !Probe.GpuBrand.StartsWith(TEXT("Apple"));
+}
+
+float UOneBrahamGameUserSettings::FixedResolutionScaleFor(EOneBrahamQualityPreset Preset, const FOneBrahamHardwareProbe& Probe)
+{
+	// A base Apple M chip (8-10 GPU cores, no Pro / Max / Ultra suffix) is
+	// pixel-bound in the tower: per-pixel local lights and Lumen's screen
+	// probes scale with the internal resolution. Measured on the M5, Medium in
+	// the same view: 71% ~24 ms GPU at 1280x720 (~27 ms at the 1470x956 a
+	// game-mode window gets on its Retina panel), 50% ~15 ms. The floor holds
+	// 60 fps; TSR hides the difference in a still frame.
+	const FString& Brand = Probe.GpuBrand;
+	if (Brand.StartsWith(TEXT("Apple M")) &&
+		!Brand.Contains(TEXT(" Pro")) && !Brand.Contains(TEXT(" Max")) && !Brand.Contains(TEXT(" Ultra")))
+	{
+		return 50.f;
+	}
+
+	// The engine's own steps for its single quality levels
+	// (BaseScalability.ini PerfIndexValues_ResolutionQuality), TSR upscaling.
+	switch (Preset)
+	{
+	case EOneBrahamQualityPreset::Low:		return 50.f;
+	case EOneBrahamQualityPreset::Medium:	return 71.f;
+	case EOneBrahamQualityPreset::High:		return 87.f;
+	default:								return 100.f;
+	}
+}
+
 void UOneBrahamGameUserSettings::ApplyHardwareDefaultPreset(bool bForce)
 {
-	if (bHardwarePresetApplied && !bForce)
+	if (!bForce && !ConsumeFirstRunPreset(HasSavedUserSettings()))
 	{
 		return;
 	}
@@ -126,48 +293,42 @@ void UOneBrahamGameUserSettings::ApplyHardwareDefaultPreset(bool bForce)
 	}
 	DetectedVramMb = static_cast<int32>(VramBytes / (1024 * 1024));
 
-	const bool bLooksRayCapable =
-		GPUBrand.Contains(TEXT("RTX")) ||
-		GPUBrand.Contains(TEXT("Radeon RX 6")) ||
-		GPUBrand.Contains(TEXT("Radeon RX 7")) ||
-		GPUBrand.Contains(TEXT("Arc A7"));
+	FOneBrahamHardwareProbe Probe;
+	Probe.GpuBrand = GPUBrand;
+	Probe.VramMb = DetectedVramMb;
 
-	const bool bIsIntegrated =
-		GPUBrand.Contains(TEXT("Intel")) ||
-		GPUBrand.Contains(TEXT("Vega 8")) ||
-		GPUBrand.Contains(TEXT("UHD Graphics")) ||
-		GPUBrand.Contains(TEXT("Iris"));
+#if !PLATFORM_MAC
+	// The engine's synthetic benchmark (~3 s, once). Skipped on Metal, where its
+	// GPU timings are meaningless (see IsPlausibleGpuBenchmark); the result is
+	// only ever used to lower the family/VRAM pick, never to raise it.
+	// RunHardwareBenchmark overwrites ScalabilityQuality; SetQualityPreset below
+	// replaces every group of it.
+	RunHardwareBenchmark();
+	Probe.GpuBenchmarkIndex = LastGPUBenchmarkResult;
+#endif
 
-	EOneBrahamQualityPreset Preset = EOneBrahamQualityPreset::Epic;
-	if (bIsIntegrated)
-	{
-		Preset = EOneBrahamQualityPreset::Low;
-	}
-	else if (DetectedVramMb > 0 && DetectedVramMb < 4096)
-	{
-		Preset = EOneBrahamQualityPreset::Medium;
-	}
-	else if (DetectedVramMb < 7000 && !bLooksRayCapable)
-	{
-		Preset = EOneBrahamQualityPreset::High;
-	}
-	else if (bLooksRayCapable && DetectedVramMb >= 10000)
-	{
-		Preset = EOneBrahamQualityPreset::Ultra;
-	}
-	else
-	{
-		Preset = EOneBrahamQualityPreset::Epic;
-	}
+	const EOneBrahamQualityPreset Preset = ChooseHardwarePreset(Probe);
 
-	OB_LOG("[Settings] Detected GPU '%s' (%d MB VRAM). First-run preset: %s", *GPUBrand, DetectedVramMb,
-		*UEnum::GetValueAsString(Preset));
+	// Native output resolution with TSR. Where dynamic resolution works it keeps
+	// the frame time (the floor, 50%, is what a slower GPU renders in a heavy
+	// room; a fast one never leaves 100%); where it does not, a fixed internal
+	// resolution does the same job.
+	const bool bDynamicResolution = PrefersDynamicResolution(Probe);
+	const float Scale = bDynamicResolution ? 100.f : FixedResolutionScaleFor(Preset, Probe);
+	ResolutionScale = Scale;
+	ScalabilityQuality.ResolutionQuality = Scale;
+	SetDynamicResolutionEnabled(bDynamicResolution);
 
-	SetQualityPreset(Preset, /*bApplyImmediately*/ false);
-	ApplySettings(true);
+	OB_LOG("[Settings] Detected GPU '%s' (%d MB VRAM, benchmark %.0f%s). First-run preset: %s at %.0f%%, dynamic resolution %s.",
+		*GPUBrand, DetectedVramMb, Probe.GpuBenchmarkIndex,
+		IsPlausibleGpuBenchmark(Probe.GpuBenchmarkIndex) ? TEXT("") : TEXT(" - not used"),
+		*UEnum::GetValueAsString(Preset), Scale, bDynamicResolution ? TEXT("on") : TEXT("off"));
 
 	bHardwarePresetApplied = true;
-	SaveSettings();
+	SetQualityPreset(Preset, /*bApplyImmediately*/ false);
+
+	// ApplySettings saves.
+	ApplySettings(true);
 }
 
 void UOneBrahamGameUserSettings::SetQualityPreset(EOneBrahamQualityPreset NewPreset, bool bApplyImmediately)
@@ -191,15 +352,25 @@ void UOneBrahamGameUserSettings::ApplyQualityPresetCVars(EOneBrahamQualityPreset
 	const int32 Level = static_cast<int32>(Preset);
 
 	// Field-by-field so the code stays correct if Epic adds a quality group.
-	Scalability::FQualityLevels Levels = Scalability::GetQualityLevels();
+	// Global illumination and reflections are the tower's two largest costs
+	// (Lumen), so they follow the preset like everything else.
+	//
+	// Written into ScalabilityQuality as well as the live levels: the base
+	// class's ApplyNonResolutionSettings re-applies ScalabilityQuality, and
+	// SaveSettings writes the live levels to [ScalabilityGroups] - a preset that
+	// only touched the live levels was undone by the next ApplySettings.
+	Scalability::FQualityLevels Levels = ScalabilityQuality;
 	Levels.SetViewDistanceQuality(FMath::Clamp(Level, 0, 3));
 	Levels.SetAntiAliasingQuality(2);					// AA is driven by the upscaler selection instead
 	Levels.SetShadowQuality(FMath::Clamp(Level, 0, 4));
+	Levels.SetGlobalIlluminationQuality(FMath::Clamp(Level, 0, 4));
+	Levels.SetReflectionQuality(FMath::Clamp(Level, 0, 4));
 	Levels.SetPostProcessQuality(FMath::Clamp(Level, 0, 4));
 	Levels.SetTextureQuality(FMath::Clamp(Level, 0, 4));
 	Levels.SetEffectsQuality(FMath::Clamp(Level, 0, 4));
 	Levels.SetFoliageQuality(FMath::Clamp(Level, 0, 4));
 	Levels.SetShadingQuality(FMath::Clamp(Level, 0, 3));
+	ScalabilityQuality = Levels;
 	Scalability::SetQualityLevels(Levels);
 
 	// Explicit toggles that the numeric scalability groups cannot express.
@@ -207,13 +378,11 @@ void UOneBrahamGameUserSettings::ApplyQualityPresetCVars(EOneBrahamQualityPreset
 	static IConsoleVariable* VsmCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Shadow.Virtual.Enable"));
 	static IConsoleVariable* LumenCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.DynamicGlobalIlluminationMethod"));
 	static IConsoleVariable* HwLumenCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Lumen.HardwareRayTracing"));
-	static IConsoleVariable* MblurCVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.MotionBlurQuality"));
 
 	if (NaniteCVar) { NaniteCVar->Set(Preset == EOneBrahamQualityPreset::Low ? 0 : (bNanite ? 1 : 0), ECVF_SetByGameSetting); }
 	if (VsmCVar) { VsmCVar->Set((Preset == EOneBrahamQualityPreset::Low || Preset == EOneBrahamQualityPreset::Medium) ? 0 : (bVirtualShadowMaps ? 1 : 0), ECVF_SetByGameSetting); }
 	if (LumenCVar) { LumenCVar->Set(Preset == EOneBrahamQualityPreset::Low ? 0 : 1, ECVF_SetByGameSetting); }
 	if (HwLumenCVar) { HwLumenCVar->Set(Preset == EOneBrahamQualityPreset::Ultra ? 1 : 0, ECVF_SetByGameSetting); }
-	if (MblurCVar) { MblurCVar->Set(bMotionBlur ? 4 : 0, ECVF_SetByGameSetting); }
 
 	ApplyUpscalerCVars();
 	ApplyPostProcessCVars();
@@ -260,17 +429,38 @@ void UOneBrahamGameUserSettings::ApplyUpscalerCVars()
 		if (ScreenPctCVar) { ScreenPctCVar->Set(100.f, ECVF_SetByGameSetting); }
 		break;
 	}
+
+	ApplyDynamicResolutionCVars();
+}
+
+void UOneBrahamGameUserSettings::ApplyDynamicResolutionCVars()
+{
+	auto SetCVar = [](const TCHAR* Name, float Value)
+	{
+		if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(Name))
+		{
+			CVar->Set(Value, ECVF_SetByGameSetting);
+		}
+	};
+
+	// Mode 1 = on when the player's bUseDynamicResolution is (the engine's own
+	// default is 0, which ignores the setting entirely). Native has no temporal
+	// upscaler to hide a moving resolution, so it stays off there.
+	SetCVar(TEXT("r.DynamicRes.OperationMode"), UpscalerMode == EOneBrahamUpscaler::Native ? 0.f : 1.f);
+
+	// The budget is the frame cap when there is one, else 60 fps (the engine
+	// default of 33.3 ms only ever kicks in below 30).
+	const float TargetFps = FrameRateLimit >= 30.f ? FrameRateLimit : 60.f;
+	SetCVar(TEXT("r.DynamicRes.FrameTimeBudget"), 1000.f / TargetFps);
+
+	// TSR reconstructs well from half resolution; above 100 is supersampling,
+	// which the resolution-scale slider offers deliberately, not the heuristic.
+	SetCVar(TEXT("r.DynamicRes.MinScreenPercentage"), 50.f);
+	SetCVar(TEXT("r.DynamicRes.MaxScreenPercentage"), 100.f);
 }
 
 void UOneBrahamGameUserSettings::ApplyPostProcessCVars()
 {
-	auto SetBoolCVar = [](const TCHAR* Name, bool bValue)
-	{
-		if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(Name))
-		{
-			CVar->Set(bValue ? 1 : 0, ECVF_SetByGameSetting);
-		}
-	};
 	auto SetFloatCVar = [](const TCHAR* Name, float Value)
 	{
 		if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(Name))
@@ -279,16 +469,54 @@ void UOneBrahamGameUserSettings::ApplyPostProcessCVars()
 		}
 	};
 
+	// A player toggle for an effect whose quality belongs to the tier
+	// (PostProcessQuality in DefaultScalability.ini). Off is 0 at game-setting
+	// priority. On leaves the variable to the tier: this used to write a fixed
+	// Epic value (r.Tonemapper.Quality=5, bloom 5, DoF 3, flares 3) at
+	// game-setting priority, which outranks SetByScalability, so Low and Medium
+	// paid for full-quality post they had turned down. Once a toggle has been
+	// off this session the variable is stuck at game-setting priority, so
+	// turning it back on writes the current tier's own value at that priority.
+	// r.Tonemapper.Quality and r.Tonemapper.GrainQuantization are not player
+	// toggles at all and are never touched here.
+	const int32 PostLevel = FMath::Clamp(Scalability::GetQualityLevels().PostProcessQuality, 0, 4);
+	auto SetTierToggle = [PostLevel](const TCHAR* Name, bool bEnabled, int32 Fallback)
+	{
+		IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(Name);
+		if (CVar == nullptr)
+		{
+			return;
+		}
+		if (!bEnabled)
+		{
+			CVar->Set(0, ECVF_SetByGameSetting);
+			return;
+		}
+		if ((CVar->GetFlags() & ECVF_SetByMask) != ECVF_SetByGameSetting)
+		{
+			return;
+		}
+
+		// The engine names its top level "Cine", not 4 (see DefaultScalability.ini).
+		const FString Section = PostLevel >= 4
+			? FString(TEXT("PostProcessQuality@Cine"))
+			: FString::Printf(TEXT("PostProcessQuality@%d"), PostLevel);
+		int32 Value = Fallback;
+		if (GConfig != nullptr)
+		{
+			GConfig->GetInt(*Section, Name, Value, GScalabilityIni);
+		}
+		CVar->Set(Value, ECVF_SetByGameSetting);
+	};
+
 	SetFloatCVar(TEXT("r.TonemapperFilmGrainIntensity"), bFilmGrain ? FMath::Clamp(FilmGrainIntensity, 0.f, 1.f) : 0.f);
-	SetFloatCVar(TEXT("r.Tonemapper.Quality"), 5.f);
-	SetFloatCVar(TEXT("r.SceneColorFringeQuality"), bChromaticAberration ? FMath::Clamp(ChromaticAberrationIntensity, 0.f, 1.f) : 0.f);
-	SetFloatCVar(TEXT("r.BloomQuality"), bBloom ? 5.f : 0.f);
-	SetFloatCVar(TEXT("r.MotionBlurQuality"), bMotionBlur ? 4.f : 0.f);
-	SetFloatCVar(TEXT("r.DepthOfFieldQuality"), bDepthOfField ? 3.f : 0.f);
+	SetTierToggle(TEXT("r.SceneColorFringeQuality"), bChromaticAberration, 1);
+	SetTierToggle(TEXT("r.BloomQuality"), bBloom, 5);
+	SetTierToggle(TEXT("r.MotionBlurQuality"), bMotionBlur, 4);
+	SetTierToggle(TEXT("r.DepthOfFieldQuality"), bDepthOfField, 2);
+	SetTierToggle(TEXT("r.LensFlareQuality"), bLensFlare, 2);
 	SetFloatCVar(TEXT("r.DefaultFeature.AutoExposure.Bias"), 0.f);
-	SetFloatCVar(TEXT("r.LensFlareQuality"), bLensFlare ? 3.f : 0.f);
 	SetFloatCVar(TEXT("r.CameraShakeScale"), bCameraShake ? FMath::Clamp(CameraShakeIntensity, 0.f, 2.f) : 0.f);
-	SetBoolCVar(TEXT("r.Tonemapper.GrainQuantization"), true);
 }
 
 void UOneBrahamGameUserSettings::ApplySettings(bool bCheckForCommandLineOverrides)
@@ -640,20 +868,65 @@ void UOneBrahamGameUserSettings::SetFOV(float NewFOV)
 void UOneBrahamGameUserSettings::SetColourBlindMode(EOneBrahamColourBlindMode NewMode)
 {
 	ColourBlindMode = NewMode;
-
-	// CVD is implemented as a post-process material parameter so it works for
-	// all three deficiency types without shipping three LUTs.
-	UMaterialParameterCollection* Collection = LoadObject<UMaterialParameterCollection>(
-		nullptr, TEXT("/Game/OneBraham/Materials/MPC_OneBraham_Global.MPC_OneBraham_Global"));
-
-	UWorld* World = GEngine ? GEngine->GetCurrentPlayWorld() : nullptr;
-	if (Collection != nullptr && World != nullptr)
-	{
-		UKismetMaterialLibrary::SetScalarParameterValue(World, Collection, TEXT("ColourBlindMode"), static_cast<float>(static_cast<int32>(NewMode)));
-	}
+	ApplyColourBlindModeToWorld(GEngine ? GEngine->GetCurrentPlayWorld() : nullptr);
 
 	SaveSettings();
 	OnSettingsChanged.Broadcast();
+}
+
+void UOneBrahamGameUserSettings::ApplyColourBlindModeToWorld(UWorld* World) const
+{
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	// CVD is implemented as a post-process material parameter so it works for
+	// all three deficiency types without shipping three LUTs. Collection values
+	// live in the world's collection instance, so every new world starts at the
+	// asset default (Off) until this runs - ApplyWorldBoundSettings does that.
+	UMaterialParameterCollection* Collection = LoadObject<UMaterialParameterCollection>(
+		nullptr, TEXT("/Game/OneBraham/Materials/MPC_OneBraham_Global.MPC_OneBraham_Global"));
+	if (Collection != nullptr)
+	{
+		UKismetMaterialLibrary::SetScalarParameterValue(World, Collection, TEXT("ColourBlindMode"), static_cast<float>(static_cast<int32>(ColourBlindMode)));
+	}
+}
+
+void UOneBrahamGameUserSettings::ApplyWorldBoundSettings(UWorld* World)
+{
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	ApplyColourBlindModeToWorld(World);
+
+	// Sound-mix class overrides are pushed onto the world's audio device; before
+	// any world exists ApplyAudioSettings has nothing to push them to, so saved
+	// volumes only took effect once a slider was touched.
+	ApplyAudioSettings();
+
+	// Not world state, but nothing applied the saved toggles at startup either
+	// (the engine only calls ApplyNonResolutionSettings, which does not reach
+	// these): grain, fringe, bloom, DoF, flares, camera shake, and dynamic
+	// resolution. Cheap and idempotent, so every world gets them - except in
+	// the editor, where a PIE session would leave them (dynamic resolution,
+	// switched-off post) at game-setting priority in the editor's viewports
+	// after it ends.
+	if (!GIsEditor)
+	{
+		ApplyPostProcessCVars();
+		ApplyDynamicResolutionCVars();
+	}
+
+	if (IConsoleVariable* Gore = IConsoleManager::Get().FindConsoleVariable(TEXT("ob.Gore")))
+	{
+		Gore->Set(bGoreEnabled ? 1 : 0, ECVF_SetByGameSetting);
+	}
+
+	OB_LOG("[Settings] World-bound settings applied to %s (colour-blind mode %s).",
+		*World->GetMapName(), *UEnum::GetValueAsString(ColourBlindMode));
 }
 
 void UOneBrahamGameUserSettings::SetHUDSettings(float NewHUDScale, bool bNewShowKillFeed, bool bNewShowVoiceIndicators)

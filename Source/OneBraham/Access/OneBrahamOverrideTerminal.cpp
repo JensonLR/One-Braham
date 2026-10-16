@@ -111,10 +111,17 @@ void AOneBrahamOverrideTerminal::BeginPlay()
 		BodyMesh->SetRelativeScale3D(FVector(0.6f, 0.12f, 0.7f));
 		BodyMesh->SetRelativeLocation(FVector(0.f, 0.f, 130.f));
 		ScreenMesh->SetRelativeLocation(FVector(0.f, 10.f, 138.f));
-		LabelText->SetRelativeLocation(FVector(0.f, 9.f, 152.f));
+		if (LabelText != nullptr)
+		{
+			LabelText->SetRelativeLocation(FVector(0.f, 9.f, 152.f));
+		}
 	}
 
-	LabelText->SetText(GetTerminalDisplayName());
+	// No text render components on a dedicated server.
+	if (LabelText != nullptr)
+	{
+		LabelText->SetText(GetTerminalDisplayName());
+	}
 
 	ScreenLight->SetLightColor(bAlarmActive ? OBScreenAlarm : OBScreenReady);
 

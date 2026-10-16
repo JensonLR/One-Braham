@@ -190,6 +190,15 @@ The known gaps, from the end of Docs/18 and the session log:
       and unit-tested; needs the M5 LAN session to confirm.
 - [ ] Bots tuned against human play data from M5.
 
+- [x] Performance pass, measured on an Apple M5 at 720p: the per-fitting
+      bounce lights replaced by Lumen bounce, lights only on the viewer's floor
+      and the next (UOneBrahamFloorLightingSubsystem; 385 lights in the view's
+      grid became 53), offscreen shadowing on the global SDF at Medium. Epic on
+      an office floor 88 -> 59 ms, High ~30 ms; first run picks Medium at 50%
+      on a base Apple chip (~15-17 ms GPU, ~60 fps). The dedicated server
+      boots the tower (the lift and terminals no longer touch text render
+      components it never creates). *Next:* a Windows mid-range PC profile.
+
 ### M5 — Play it
 
 - [ ] Two-machine LAN session on the real network stack (voice, replication,

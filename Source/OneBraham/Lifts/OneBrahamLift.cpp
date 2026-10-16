@@ -380,9 +380,18 @@ void AOneBrahamLift::BuildLift()
 	}
 
 	// --- fittings -------------------------------------------------------------
-	CarLight->SetRelativeLocation(FVector(0.f, 0.f, H - 18.f));
-	CarIndicator->SetRelativeLocation(FVector(D * 0.5f - T - 1.f, 0.f, DH + (H - DH) * 0.5f));
-	CarIndicator->SetRelativeRotation(FRotator(0.f, 180.f, 0.f)); // Read from inside the car.
+	if (CarLight != nullptr)
+	{
+		CarLight->SetRelativeLocation(FVector(0.f, 0.f, H - 18.f));
+	}
+	// Text render components are not created on a dedicated server: the floor
+	// indicator is presentation only, and dereferencing it crashed the server
+	// on map load.
+	if (CarIndicator != nullptr)
+	{
+		CarIndicator->SetRelativeLocation(FVector(D * 0.5f - T - 1.f, 0.f, DH + (H - DH) * 0.5f));
+		CarIndicator->SetRelativeRotation(FRotator(0.f, 180.f, 0.f)); // Read from inside the car.
+	}
 
 	// --- landing doors --------------------------------------------------------
 	LandingDoors->ClearInstances();
@@ -841,7 +850,7 @@ void AOneBrahamLift::ApplyPresentation(double Now)
 
 	// --- the indicator --------------------------------------------------------
 	const int32 ShownFloor = Config.ZToNearestFloor(CarRelZ + GetActorLocation().Z);
-	if (ShownFloor != LastIndicatorFloor || bLastIndicatorLocked != LiftState.bLockedDown)
+	if (CarIndicator != nullptr && (ShownFloor != LastIndicatorFloor || bLastIndicatorLocked != LiftState.bLockedDown))
 	{
 		CarIndicator->SetText(LiftState.bLockedDown
 			? FText::Format(NSLOCTEXT("OneBraham", "Lift_IndicatorLocked", "{0}  STOPPED"), FText::AsNumber(ShownFloor))

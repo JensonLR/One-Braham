@@ -3578,9 +3578,6 @@ def build_lighting(report, floor_index):
             if (floor_index == 0 and _in_rect(px, py, RECEPTION_VOID)) or \
                     (floor_index == 16 and _in_rect(px, py, ATRIUM_VOID)):
                 continue
-            bounce_wanted = not ((floor_index == 1 and _in_rect(px, py, RECEPTION_VOID)) or
-                                 (floor_index == 17 and _in_rect(px, py, ATRIUM_VOID)))
-
             light = _spawn(unreal.RectLight, unreal.Vector(lx, ly, ceiling_z),
                            unreal.Rotator(roll=0.0, pitch=-90.0, yaw=0.0))  # facing the floor
             if light is None:
@@ -3598,13 +3595,21 @@ def build_lighting(report, floor_index):
                 # three or four floors each way as 16 m did. That put 60-120
                 # shadowed lights on a desk-height pixel against the engine's
                 # 32 (one-pass projection overflow, missing shadows); at 8 m it
-                # is about 14. Every fitting keeps its shadow: an unshadowed
-                # one would light the floor below through the slab.
+                # is about 14. Every fitting is authored with its shadow: an
+                # unshadowed one would light the floor below through the slab.
+                # At run time UOneBrahamFloorLightingSubsystem takes the floors
+                # out of view out of the scene, and drops the shadows of the
+                # fittings on the floor below a player (aimed at the floor,
+                # they cannot reach the player's).
                 component.set_editor_property("AttenuationRadius", 800.0)
                 component.set_editor_property("SourceWidth", 120.0)
                 component.set_editor_property("SourceHeight", 60.0)
                 # 4000 K: the colour of a building's own lighting, everywhere.
                 component.set_editor_property("LightColor", unreal.Color(r=255, g=246, b=232, a=232))
+                # 60% more into Lumen's bounce: the fill the per-fitting
+                # bounce lights used to fake (below), from the fitting itself.
+                # Direct light, shadows and exposure are unchanged.
+                component.set_editor_property("IndirectLightingIntensity", 1.6)
                 # Movable: the project disallows static lighting, so a static
                 # light is never baked and Lumen gives it no bounce - pure black
                 # shadow beside a white-hot wall.
@@ -3618,28 +3623,17 @@ def build_lighting(report, floor_index):
 
             _label(light, "Ceiling_Light_{0}_F{1:02d}_{2}".format(area_name, floor_index, spawn_count))
 
-            # The fitting's bounce: what the floor under it throws back onto the
-            # walls and ceiling. Lumen gets almost nothing back from the scaled
-            # blockout cubes, which left every wall that didn't face a fitting
-            # pitch black - unreadable, and a free hiding place. Shadowless and
-            # diffuse-only, so it costs little and never adds a second hotspot.
-            bounce = _spawn(unreal.PointLight, unreal.Vector(lx, ly, z + 90.0)) if bounce_wanted else None
-            if bounce is not None:
-                try:
-                    component = bounce.point_light_component
-                    component.set_editor_property("IntensityUnits", unreal.LightUnits.LUMENS)
-                    component.set_editor_property("Intensity", 2400.0)
-                    component.set_editor_property("AttenuationRadius", 1100.0)
-                    component.set_editor_property("SourceRadius", 200.0)
-                    component.set_editor_property("CastShadows", False)
-                    component.set_editor_property("SpecularScale", 0.0)
-                    component.set_editor_property("MaxDrawDistance", 3000.0)
-                    component.set_editor_property("MaxDistanceFadeRange", 800.0)
-                    component.set_editor_property("LightColor", unreal.Color(r=220, g=226, b=232, a=255))
-                    component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
-                except Exception as exc:  # noqa: BLE001
-                    report.failed("bounce light", str(exc))
-                _label(bounce, "Bounce_Light_{0}_F{1:02d}_{2}".format(area_name, floor_index, spawn_count))
+            # No bounce light under the fitting any more. Each fitting used to
+            # carry a shadowless 11 m point light at desk height, from when
+            # Lumen got nothing back off untextured blockout cubes and every
+            # wall that did not face a fitting was black. The floors are
+            # textured now, with measured albedos, and Lumen's own bounce fills
+            # them: an office floor and the reception measure within 1% mean
+            # frame luminance with and without them. The stair lobby read 12%
+            # darker without - the bounce lights, unshadowed, reached it
+            # through the core wall - and the fittings' raised Lumen bounce
+            # (above) brings it back to within 4%. Each was its own deferred
+            # lighting pass, ~800 of them in the building.
             spawn_count += 1
 
     C.log(u"  floor {0:02d} ({1}): {2} ceiling lights".format(floor_index, area_name, spawn_count))
@@ -3997,6 +3991,7 @@ def build_floor_level(report, floor_index, materials):
     build_post_process(report, floor_index)
     build_audio_zone(report, floor_index)
     build_nav(report, floor_index)
+    _tag_floor_lights(report, floor_index)
 
     try:
         level_subsystem.save_current_level()
@@ -4009,6 +4004,50 @@ def build_floor_level(report, floor_index, materials):
     else:
         report.created_asset(level_path)
     return level_path
+
+
+# The actor tag UOneBrahamFloorLightingSubsystem looks for (World/OneBrahamFloorLighting.h).
+FLOOR_LIGHT_TAG = "OB.FloorLight"
+
+# The floors that share a space with another, and which: a viewer on the
+# second can see what the first floor's ceiling panels light. Everywhere else a
+# slab stands between two floors and the subsystem keeps a floor's panels out
+# of the scene unless a player is on it (stair and lift-hall lights, seen up a
+# stairwell or a shaft, are lit a floor either side regardless).
+#   0 <-> 1    the double-height reception, the feature stair and escalators
+#   16 -> 15   the crown's windows over the Skydeck balcony
+#   16 <-> 17  the atrium the Winter Garden is built round
+FLOOR_LIGHT_OPEN_TO = "OB.FloorLight.OpenTo."
+FLOORS_OPEN_TO = {0: (1,), 1: (0,), 16: (15, 17), 17: (16,)}
+
+
+def _tag_floor_lights(report, floor_index):
+    """Tags every local light in this floor's level for the floor-lighting
+    subsystem, which keeps a floor's lights in the scene only while a player
+    is within a floor of it.
+
+    Every light a floor level holds lights that floor's rooms: the ceiling
+    grid, the stair bulkheads, the lift hall, the kitchens' strips. A floor in
+    FLOORS_OPEN_TO also names the floors that can see into it. The lights
+    that matter from outside - the sky, the district's street and facade
+    lights, the extraction beacon - are all in the persistent level and are
+    never tagged, so the subsystem never touches them.
+    """
+    tagged = 0
+    for actor in _actor_subsystem().get_all_level_actors():
+        if not isinstance(actor, (unreal.PointLight, unreal.RectLight, unreal.SpotLight)):
+            continue
+        try:
+            tags = list(actor.tags)
+            names = [str(t) for t in tags]
+            for tag in [FLOOR_LIGHT_TAG] + [FLOOR_LIGHT_OPEN_TO + str(f) for f in FLOORS_OPEN_TO.get(floor_index, ())]:
+                if tag not in names:
+                    tags.append(tag)
+            actor.set_editor_property("tags", tags)
+            tagged += 1
+        except Exception as exc:  # noqa: BLE001
+            report.failed("floor light tag", str(exc))
+    C.log(u"  floor {0:02d}: {1} lights tagged {2}".format(floor_index, tagged, FLOOR_LIGHT_TAG))
 
 
 def link_floor_levels(report, level_paths):

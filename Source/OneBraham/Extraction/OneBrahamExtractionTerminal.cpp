@@ -108,7 +108,11 @@ void AOneBrahamExtractionTerminal::BeginPlay()
 		}
 	}
 
-	LabelText->SetText(GetTerminalDisplayName());
+	// No text render components on a dedicated server.
+	if (LabelText != nullptr)
+	{
+		LabelText->SetText(GetTerminalDisplayName());
+	}
 	ApplyScreenState();
 
 	OB_EXTRACT_LOG("Winch console '%s' placed at %s", *TerminalId.ToString(),

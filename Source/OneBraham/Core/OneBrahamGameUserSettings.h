@@ -60,6 +60,23 @@ enum class EOneBrahamVoiceSubmixPreset : uint8
 	Comms = 2		UMETA(DisplayName = "Comms (muffled)")
 };
 
+/**
+ * What the first-run preset rule knows about the machine. A plain struct so the
+ * rule (UOneBrahamGameUserSettings::ChooseHardwarePreset) is a pure function the
+ * automation tests can feed any GPU.
+ */
+struct FOneBrahamHardwareProbe
+{
+	/** FPlatformMisc::GetPrimaryGPUBrand(), e.g. "Apple M5", "NVIDIA GeForce RTX 4070". */
+	FString GpuBrand;
+
+	/** Dedicated VRAM, or the shared pool the RHI reports for unified memory. 0 = unknown. */
+	int32 VramMb = 0;
+
+	/** SynthBenchmark GPU perf index (100 = the engine's reference GPU). <= 0 = not run. */
+	float GpuBenchmarkIndex = -1.f;
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOneBrahamSettingsApplied);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOneBrahamVoiceSettingsChanged, bool, bEnabled);
 
@@ -91,9 +108,61 @@ public:
 	UFUNCTION(BlueprintPure, Category = "One Braham|Settings")
 	bool IsGoreEnabled() const { return bGoreEnabled; }
 
-	/** Picks a sane first-run preset from GPU class + VRAM. */
+	/**
+	 * First run: picks a preset that holds frame rate on this machine (GPU family,
+	 * VRAM and, where its timings can be trusted, the engine's GPU benchmark),
+	 * picks dynamic resolution or a fixed TSR scale (PrefersDynamicResolution), applies and saves. Runs once per install: a
+	 * no-op once bHardwarePresetApplied is saved, or when the player already has
+	 * saved settings. bForce re-runs it (a "detect" button). Called from
+	 * UOneBrahamGameInstance::Init on clients, before the first map renders.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Settings")
 	void ApplyHardwareDefaultPreset(bool bForce = false);
+
+	/**
+	 * The first-run gate. True exactly once for a fresh install (no saved user
+	 * settings), and marks the run either way so an install that already has
+	 * settings is never re-tiered behind the player's back. Does not save.
+	 */
+	bool ConsumeFirstRunPreset(bool bHasSavedUserSettings);
+
+	bool HasAppliedHardwarePreset() const { return bHardwarePresetApplied; }
+
+	/** True when this user has a GameUserSettings.ini on disk (not a fresh install). */
+	static bool HasSavedUserSettings();
+
+	/**
+	 * The first-run rule, pure. The engine's preset ladder assumes a typical
+	 * scene; the tower (18 floors, every one loaded, ~700 lights in Lumen's
+	 * scene) costs about four times that, so the result is clamped to the
+	 * project's own tiers. Profiled on an Apple M5 (8-core GPU) at 1280x720:
+	 * Epic ~73 ms, High ~30-48 ms; Medium is the cheapest tier that keeps
+	 * Lumen GI (Low drops it and the interiors wash out), so a base chip gets it.
+	 */
+	static EOneBrahamQualityPreset ChooseHardwarePreset(const FOneBrahamHardwareProbe& Probe);
+
+	/** Whether first run turns dynamic resolution on for this GPU (it costs more than
+	 *  it saves on Metal), or uses FixedResolutionScaleFor instead. */
+	static bool PrefersDynamicResolution(const FOneBrahamHardwareProbe& Probe);
+
+	/** The internal resolution (percent, TSR-upscaled) a tier gets without dynamic
+	 *  resolution. A base Apple M chip gets the 50% floor whatever the tier: Medium at
+	 *  71% measured ~24 ms GPU on the M5 at 1280x720 and ~27 ms at its 1470x956
+	 *  game-mode desktop, 50% ~15 ms, with no visible loss under TSR. */
+	static float FixedResolutionScaleFor(EOneBrahamQualityPreset Preset, const FOneBrahamHardwareProbe& Probe);
+
+	/** SynthBenchmark's GPU index is garbage where the RHI's GPU timer is (Metal reports
+	 *  the same time for every test and an index in the hundreds of thousands). */
+	static bool IsPlausibleGpuBenchmark(float GpuIndex);
+
+	/**
+	 * Re-applies every saved setting that lives in a world rather than in the
+	 * settings object or a console variable: the colour-blind mode (a per-world
+	 * material parameter collection value), the sound-mix bus volumes, and the
+	 * post-process and dynamic-resolution console variables alongside them.
+	 * Called by the game instance whenever a world with a local player begins play.
+	 */
+	void ApplyWorldBoundSettings(UWorld* World);
 
 	// --- Graphics ---------------------------------------------------------
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Graphics")
@@ -324,11 +393,19 @@ private:
 	/** Applies the CVars for a preset. Called by SetQualityPreset and ApplySettings. */
 	void ApplyQualityPresetCVars(EOneBrahamQualityPreset Preset);
 
-	/** Applies motion blur / bloom / grain / chroma / DoF CVars. */
+	/** Applies motion blur / bloom / grain / chroma / DoF CVars. An enabled effect
+	 *  gets its quality from the current PostProcessQuality tier in
+	 *  DefaultScalability.ini; a disabled one is 0. */
 	void ApplyPostProcessCVars();
 
 	/** Applies r.ScreenPercentage + upscaler CVars. */
 	void ApplyUpscalerCVars();
+
+	/** Dynamic resolution follows bUseDynamicResolution, with a 60 fps (or frame cap) budget. */
+	void ApplyDynamicResolutionCVars();
+
+	/** Writes the colour-blind mode into the world's MPC_OneBraham_Global instance. */
+	void ApplyColourBlindModeToWorld(UWorld* World) const;
 
 	/** Cached GPU name captured at first run (used by the settings menu footer). */
 	UPROPERTY(config) FString DetectedGpuName;
