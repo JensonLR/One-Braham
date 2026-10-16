@@ -38,6 +38,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Net/UnrealNetwork.h"
 #include "Animation/AnimInstance.h"
+#include "Animation/AnimationAsset.h"
 
 AOneBrahamCharacter::AOneBrahamCharacter(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UOneBrahamCharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
@@ -85,8 +86,20 @@ AOneBrahamCharacter::AOneBrahamCharacter(const FObjectInitializer& ObjectInitial
 	FirstPersonMesh->CastShadow = true;             // arms cast a shadow on the world
 	FirstPersonMesh->bSelfShadowOnly = true;        // ...but not on themselves
 	FirstPersonMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	FirstPersonMesh->SetRelativeLocation(FVector(12.f, 0.f, -8.f));
+	// Mannequin space (+Y forward, +Z up, feet at the origin) into camera space:
+	// -90 yaw turns the mesh to face down the camera, and the offset puts the
+	// camera 9 cm above and 5 cm left of the mannequin's eye (head bone + Epic's
+	// template camera offset, about (-4.6, 0.3, 153.5) in the ADS idles), so the
+	// gun the idle holds up to the eye sits low and right of the crosshair
+	// instead of over it. Not further forward: the rifle idle leans
+	// into the stock, and its left shoulder would fill the bottom-left corner.
+	FirstPersonMesh->SetRelativeLocation(FVector(-0.3f, 0.4f, -162.5f));
 	FirstPersonMesh->SetRelativeRotation(FRotator(0.f, -90.f, 0.f));
+	// Only the owner draws it, so only the owner should pay for its pose.
+	FirstPersonMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
+	FirstPersonPrimaryPose = TSoftObjectPtr<UAnimationAsset>(FSoftObjectPath(TEXT("/Game/Characters/Mannequins/Anims/Rifle/MF_Rifle_Idle_ADS.MF_Rifle_Idle_ADS")));
+	FirstPersonSidearmPose = TSoftObjectPtr<UAnimationAsset>(FSoftObjectPath(TEXT("/Game/Characters/Mannequins/Anims/Pistol/MF_Pistol_Idle_ADS.MF_Pistol_Idle_ADS")));
+	FirstPersonHiddenBones = { TEXT("neck_01"), TEXT("thigh_l"), TEXT("thigh_r") };
 
 	// --- Weapon-mounted flashlight (the server room's only defence) -------
 	WeaponFlashlight = CreateDefaultSubobject<USpotLightComponent>(TEXT("WeaponFlashlight"));
@@ -262,6 +275,20 @@ void AOneBrahamCharacter::Tick(float DeltaSeconds)
 	{
 		FloorCheckAccumulator = 0.f;
 		UpdateFloorIndex(DeltaSeconds);
+
+		// Possession applies the archetype, but a player joining a match in
+		// progress is possessed inside the game mode's Super::PostLogin, before
+		// it picks their archetype; clients catch the tag in OnRep_Archetype, the
+		// server never would, and a listen host would see that player as an empty
+		// mesh with a gun hanging in the air. Catch the late tag here.
+		if (HasAuthority())
+		{
+			const AOneBrahamPlayerState* State = GetPlayerState<AOneBrahamPlayerState>();
+			if (State != nullptr && State->ArchetypeTag.IsValid() && State->ArchetypeTag != Appearance.ArchetypeTag)
+			{
+				ApplyArchetype(State->ArchetypeTag);
+			}
+		}
 	}
 
 	// Anti-cheat, both halves of it, at 4 Hz.
@@ -752,19 +779,40 @@ TSubclassOf<UAnimInstance> AOneBrahamCharacter::ChooseCarryAnimClass(EOneBrahamW
 
 void AOneBrahamCharacter::HandleWeaponChanged(AOneBrahamWeaponBase* NewWeapon, AOneBrahamWeaponBase* OldWeapon)
 {
+	const EOneBrahamWeaponSlot Slot = (NewWeapon != nullptr && NewWeapon->Definition != nullptr)
+		? NewWeapon->Definition->DefaultSlot : EOneBrahamWeaponSlot::Primary;
+	UpdateFirstPersonPose(Slot);
+
 	USkeletalMeshComponent* Body = GetMesh();
 	if (Body == nullptr || PrimaryAnimClass == nullptr)
 	{
 		return;
 	}
-	const EOneBrahamWeaponSlot Slot = (NewWeapon != nullptr && NewWeapon->Definition != nullptr)
-		? NewWeapon->Definition->DefaultSlot : EOneBrahamWeaponSlot::Primary;
 	const TSubclassOf<UAnimInstance> Wanted = ChooseCarryAnimClass(Slot, PrimaryAnimClass, SidearmAnimClass);
 	// Re-setting the class rebuilds the anim instance; only do it on a real change.
 	if (Body->GetAnimClass() != Wanted)
 	{
 		Body->SetAnimInstanceClass(Wanted);
 	}
+}
+
+void AOneBrahamCharacter::UpdateFirstPersonPose(EOneBrahamWeaponSlot Slot)
+{
+	if (FirstPersonMesh == nullptr || FirstPersonMesh->GetSkeletalMeshAsset() == nullptr || GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	const TSoftObjectPtr<UAnimationAsset>& PosePtr = (Slot == EOneBrahamWeaponSlot::Sidearm && !FirstPersonSidearmPose.IsNull())
+		? FirstPersonSidearmPose : FirstPersonPrimaryPose;
+	UAnimationAsset* Pose = PosePtr.IsNull() ? nullptr : PosePtr.LoadSynchronous();
+	if (Pose == nullptr || Pose == ActiveFirstPersonPose)
+	{
+		return;
+	}
+
+	ActiveFirstPersonPose = Pose;
+	FirstPersonMesh->PlayAnimation(Pose, true);
 }
 
 void AOneBrahamCharacter::ApplyArchetype(FGameplayTag ArchetypeTag)
@@ -854,11 +902,43 @@ void AOneBrahamCharacter::ApplyArchetype(FGameplayTag ArchetypeTag)
 		GetMesh()->SetAnimInstanceClass(ChooseCarryAnimClass(Slot, PrimaryAnimClass, SidearmAnimClass));
 	}
 
-	if (!Definition->FirstPersonMesh.IsNull() && FirstPersonMesh != nullptr)
+	// The arms. No archetype has an arms-only mesh yet, so the body stands in,
+	// headless and legless (FirstPersonHiddenBones), as Epic's
+	// first-person template draws its arms with the whole mannequin. Without a
+	// mesh here the component is empty, the weapon's hand socket does not exist
+	// and the gun hangs from the camera itself.
+	// A dedicated server draws nothing, so it does not load the arms.
+	if (FirstPersonMesh != nullptr && GetNetMode() != NM_DedicatedServer)
 	{
-		if (USkeletalMesh* ArmsMesh = Definition->FirstPersonMesh.LoadSynchronous())
+		const TSoftObjectPtr<USkeletalMesh>& ArmsPtr = !Definition->FirstPersonMesh.IsNull()
+			? Definition->FirstPersonMesh : Definition->BodyMesh;
+		USkeletalMesh* ArmsMesh = ArmsPtr.IsNull() ? nullptr : ArmsPtr.LoadSynchronous();
+		if (ArmsMesh != nullptr && FirstPersonMesh->GetSkeletalMeshAsset() != ArmsMesh)
 		{
 			FirstPersonMesh->SetSkeletalMesh(ArmsMesh);
+			for (const FName& Bone : FirstPersonHiddenBones)
+			{
+				if (FirstPersonMesh->GetBoneIndex(Bone) != INDEX_NONE)
+				{
+					FirstPersonMesh->HideBoneByName(Bone, EPhysBodyOp::PBO_None);
+				}
+			}
+
+			// A new mesh starts with no pose: pick the hold up again.
+			ActiveFirstPersonPose = nullptr;
+			const AOneBrahamWeaponBase* HeldWeapon = WeaponComponent != nullptr ? WeaponComponent->GetCurrentWeapon() : nullptr;
+			UpdateFirstPersonPose((HeldWeapon != nullptr && HeldWeapon->Definition != nullptr)
+				? HeldWeapon->Definition->DefaultSlot : EOneBrahamWeaponSlot::Primary);
+		}
+
+		// The arms mesh draws the archetype's clothing too: same slots, same
+		// materials, so a sleeve in first person matches the body others see.
+		if (ArmsMesh != nullptr && GetMesh() != nullptr && ArmsMesh == GetMesh()->GetSkeletalMeshAsset())
+		{
+			for (int32 Index = 0; Index < GetMesh()->GetNumMaterials(); ++Index)
+			{
+				FirstPersonMesh->SetMaterial(Index, GetMesh()->GetMaterial(Index));
+			}
 		}
 	}
 

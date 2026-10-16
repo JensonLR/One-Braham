@@ -71,7 +71,7 @@ namespace
 	/** How long the last screenshot gets to reach the disk. */
 	constexpr double FlushSeconds = 6.0;
 
-	float Percentile(const TArray<float>& Sorted, float Fraction)
+	float SmokePercentile(const TArray<float>& Sorted, float Fraction)
 	{
 		if (Sorted.Num() == 0)
 		{
@@ -432,7 +432,7 @@ void UOneBrahamSmokeTestSubsystem::TickMeasuring()
 	// to the build. ob.Bench.Skydeck is the measurement worth comparing.
 	OB_SMOKE_LOG("frames: %d over %.0fs, mean %.2f ms (%.0f fps), p95 %.2f ms, worst %.2f ms",
 		Sorted.Num(), MeasureSeconds, MeanMs, MeanMs > 0.f ? 1000.f / MeanMs : 0.f,
-		Percentile(Sorted, 0.95f), Sorted.Num() > 0 ? Sorted.Last() : 0.f);
+		SmokePercentile(Sorted, 0.95f), Sorted.Num() > 0 ? Sorted.Last() : 0.f);
 
 	if (Sorted.Num() == 0)
 	{

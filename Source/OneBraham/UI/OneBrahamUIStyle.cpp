@@ -2,6 +2,8 @@
 
 #include "UI/OneBrahamUIStyle.h"
 
+#include "Styling/CoreStyle.h"
+
 #include "OneBraham.h"
 #include "Core/OneBrahamGameSettings.h"
 #include "Styling/SlateBrush.h"
@@ -174,10 +176,19 @@ FSlateFontInfo UOneBrahamUIStyle::Font(EOneBrahamTextSize Size, bool bBold)
 		}
 	}
 
-	FSlateFontInfo Info;
-	Info.FontObject = BrandFont;
+	// Without the brand font, start from the engine's own Roboto: Slate draws a
+	// null FontObject as empty boxes, which is what every HUD label was until
+	// the first in-game frames showed it. The engine's Slate fonts are staged
+	// into every packaged build, so this cannot go missing the same way.
+	FSlateFontInfo Info = BrandFont != nullptr
+		? FSlateFontInfo()
+		: FCoreStyle::GetDefaultFontStyle(bBold ? TEXT("Bold") : TEXT("Regular"), SizeToPoints(Size));
+	if (BrandFont != nullptr)
+	{
+		Info.FontObject = BrandFont;
+		Info.TypefaceFontName = bBold ? TEXT("Bold") : TEXT("Regular");
+	}
 	Info.Size = SizeToPoints(Size);
-	Info.TypefaceFontName = bBold ? TEXT("Bold") : TEXT("Regular");
 	// 1% tracking on the big type, none below it. Written as a list because a
 	// scoped enum has no >=, which is what the previous version of this line
 	// asked it for.

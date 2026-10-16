@@ -35,6 +35,7 @@ class UOneBrahamDownedComponent;
 class UOneBrahamWeaponComponent;
 class AOneBrahamWeaponBase;
 class UAnimInstance;
+class UAnimationAsset;
 class UOneBrahamInventoryComponent;
 class UOneBrahamInteractComponent;
 class UOneBrahamRagdollComponent;
@@ -484,6 +485,27 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "One Braham|Camera")
 	float LeanCameraSideOffset = 22.f;
 
+	/**
+	 * The first-person hold, one looping pose per carry set, played on the arms
+	 * mesh as a single node (the arms hang off the camera, so they take no aim
+	 * offset: the camera's pitch is already theirs). Epic's mannequin idles,
+	 * which the third-person carry blueprints also use, until the cast has its
+	 * own first-person set.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "One Braham|First Person")
+	TSoftObjectPtr<UAnimationAsset> FirstPersonPrimaryPose;
+
+	UPROPERTY(EditDefaultsOnly, Category = "One Braham|First Person")
+	TSoftObjectPtr<UAnimationAsset> FirstPersonSidearmPose;
+
+	/**
+	 * Bones hidden on the arms mesh. Until the cast has arms-only meshes the arms
+	 * are the archetype's whole body, so the head (which would fill the camera)
+	 * and the legs (which would swing up into view) are switched off.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "One Braham|First Person")
+	TArray<FName> FirstPersonHiddenBones;
+
 	/** Remote footsteps further than this from the listener are not scheduled at all. */
 	UPROPERTY(EditDefaultsOnly, Category = "One Braham|Audio")
 	float FootstepCullDistanceCm = 5000.f;
@@ -499,6 +521,17 @@ private:
 
 	/** SetVisibility on Root and this pawn's own mesh children (the cosmetics), never attached actors or lights. */
 	void SetOwnMeshVisibility(USceneComponent* Root, bool bVisible);
+
+	/**
+	 * Plays the first-person hold for a weapon slot on the arms mesh. Only the
+	 * machine whose player is behind this camera draws the arms, so nothing
+	 * else pays for the pose.
+	 */
+	void UpdateFirstPersonPose(EOneBrahamWeaponSlot Slot);
+
+	/** The pose UpdateFirstPersonPose last started, so a re-run does not restart the loop. */
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimationAsset> ActiveFirstPersonPose = nullptr;
 
 	/** Accumulators for the 2 Hz/10 Hz subsystems. */
 	float FloorCheckAccumulator = 0.f;

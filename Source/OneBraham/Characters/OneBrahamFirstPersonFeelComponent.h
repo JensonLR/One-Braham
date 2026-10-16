@@ -261,6 +261,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Feel|Weapon")
 	float KickPitchDegreesPerCm = 2.2f;
 
+	/**
+	 * Where sway, breathing and kick turn the arms, in camera space (cm): about
+	 * the right hand on the grip. Not the arms mesh's own origin: that is the
+	 * stand-in body's feet, 1.6 m below the camera, and a 4 degree lag about it
+	 * would throw the gun 12 cm across the screen.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|Feel|Weapon")
+	FVector WeaponPivotCm = FVector(20.f, 8.f, -12.f);
+
 	// ======================================================================
 	//  Tuning: post-process
 	// ======================================================================

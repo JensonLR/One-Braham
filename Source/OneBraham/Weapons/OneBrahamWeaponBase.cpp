@@ -146,6 +146,7 @@ void AOneBrahamWeaponBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
+	DOREPLIFETIME(AOneBrahamWeaponBase, Definition);
 	DOREPLIFETIME(AOneBrahamWeaponBase, WeaponState);
 	DOREPLIFETIME(AOneBrahamWeaponBase, AmmoInMagazine);
 	DOREPLIFETIME(AOneBrahamWeaponBase, ReplicatedAttachments);
@@ -162,7 +163,16 @@ void AOneBrahamWeaponBase::BeginPlay()
 
 	if (Definition != nullptr)
 	{
-		InitialiseFromDefinition(Definition);
+		// A client's ammo and state are the server's, already replicated in by
+		// now: initialise the rest around them.
+		if (HasAuthority())
+		{
+			InitialiseFromDefinition(Definition);
+		}
+		else
+		{
+			OnRep_Definition();
+		}
 	}
 }
 
@@ -252,6 +262,10 @@ void AOneBrahamWeaponBase::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 
 	AdvanceStateTimer(DeltaSeconds);
+
+	// Cheap, and the only place that sees every way a weapon is put away, picked
+	// up or dropped (some of them are rep notifies on other actors).
+	UpdateHeldVisibility();
 
 	// Muzzle light decay: a one-frame flash reads as a strobe; a short decay reads
 	// as an actual muzzle flash.
@@ -364,6 +378,37 @@ FName AOneBrahamWeaponBase::GetHeldSocketName(bool bFirstPersonView)
 	return bFirstPersonView ? FName(TEXT("Weapon_1P")) : FName(TEXT("Weapon_3P"));
 }
 
+FName AOneBrahamWeaponBase::ResolveHeldSocketName(const USkeletalMeshComponent* TargetMesh, bool bFirstPersonView)
+{
+	const FName Preferred = GetHeldSocketName(bFirstPersonView);
+	if (TargetMesh == nullptr || TargetMesh->DoesSocketExist(Preferred))
+	{
+		return Preferred;
+	}
+
+	// Checked against the mesh, not assumed: an arms component with no mesh yet
+	// has no sockets at all, and keeps the hand name for when it gets one.
+	return GetMannequinGripSocketName();
+}
+
+FName AOneBrahamWeaponBase::GetMannequinGripSocketName()
+{
+	return FName(TEXT("HandGrip_R"));
+}
+
+FTransform AOneBrahamWeaponBase::GetMannequinGripOffset(bool bSidearm)
+{
+	// Measured, not guessed: in the mannequin's ADS idles the skeleton's own
+	// weapon_r bone (which the Simple meshes do not carry, so it cannot be the
+	// attach point) holds the gun level down the sight line with the support
+	// hand on the handguard. These are that gun's transform in HandGrip_R's
+	// space, with the template guns' barrel-along-+Y turned onto weapon_r's X.
+	// Without it the rifle tips ~15 degrees up and off the left hand.
+	return bSidearm
+		? FTransform(FRotator(3.2f, -3.3f, 5.8f), FVector(1.6f, 0.3f, -1.4f))
+		: FTransform(FRotator(14.8f, -6.1f, 9.3f), FVector(1.4f, 0.2f, -0.9f));
+}
+
 void AOneBrahamWeaponBase::AttachToOwnerMesh(AOneBrahamCharacter* HolderCharacter)
 {
 	if (HolderCharacter == nullptr || WeaponMesh == nullptr || GetRootComponent() == nullptr)
@@ -387,7 +432,25 @@ void AOneBrahamWeaponBase::AttachToOwnerMesh(AOneBrahamCharacter* HolderCharacte
 		return;
 	}
 
-	const FName Socket = GetHeldSocketName(bFirstPersonView);
+	// Drawn: show this gun now, and put away the one it replaces in the same
+	// hand, rather than both waiting for their next tick.
+	UpdateHeldVisibility();
+	TArray<AActor*> HolderAttached;
+	HolderCharacter->GetAttachedActors(HolderAttached);
+	for (AActor* Attached : HolderAttached)
+	{
+		if (AOneBrahamWeaponBase* Other = Cast<AOneBrahamWeaponBase>(Attached); Other != nullptr && Other != this)
+		{
+			Other->UpdateHeldVisibility();
+		}
+	}
+
+	// A rig with its own weapon sockets gets them; Epic's mannequin (the stand-in
+	// body and arms) has only HandGrip_R, the socket Epic's first-person template
+	// hangs SKM_Rifle/SKM_Pistol from. A socket name the mesh does not have would
+	// silently put the gun at the mesh origin: the feet, or the camera itself
+	// for the arms.
+	const FName Socket = ResolveHeldSocketName(TargetMesh, bFirstPersonView);
 	if (GetRootComponent()->GetAttachParent() == TargetMesh && GetRootComponent()->GetAttachSocketName() == Socket)
 	{
 		return;
@@ -396,6 +459,44 @@ void AOneBrahamWeaponBase::AttachToOwnerMesh(AOneBrahamCharacter* HolderCharacte
 	// Weapon root socket: the anim BP drives the hand IK; the socket is
 	// only the attach point so that recoil/aim offsets are additive.
 	AttachToComponent(TargetMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, Socket);
+
+	// A rig's own weapon socket is authored for the gun; the mannequin's hand
+	// socket needs the grip correction (see GetMannequinGripOffset).
+	if (Socket == GetMannequinGripSocketName())
+	{
+		const bool bSidearm = Definition != nullptr && Definition->DefaultSlot == EOneBrahamWeaponSlot::Sidearm;
+		GetRootComponent()->SetRelativeTransform(GetMannequinGripOffset(bSidearm));
+	}
+}
+
+void AOneBrahamWeaponBase::UpdateHeldVisibility()
+{
+	if (WeaponMesh == nullptr)
+	{
+		return;
+	}
+
+	const AOneBrahamCharacter* Holder = Cast<AOneBrahamCharacter>(GetOwner());
+	const UOneBrahamWeaponComponent* HolderWeapons = Holder != nullptr ? Holder->GetWeaponComponent() : nullptr;
+	const bool bPutAway = !bIsGroundPickup && HolderWeapons != nullptr && HolderWeapons->GetCurrentWeapon() != this;
+	if (bPutAway == bHiddenWhilePutAway)
+	{
+		return;
+	}
+
+	// bHiddenInGame, not visibility: the ground-pickup swap and the light
+	// toggles own SetVisibility on these components, and must find their own
+	// answer intact when the gun comes back out. The pickup mesh is the ground
+	// state's alone.
+	bHiddenWhilePutAway = bPutAway;
+	WeaponMesh->SetHiddenInGame(bPutAway, false);
+	for (USceneComponent* Child : WeaponMesh->GetAttachChildren())
+	{
+		if (Child != nullptr && Child != PickupMesh && Child->GetOwner() == this)
+		{
+			Child->SetHiddenInGame(bPutAway, false);
+		}
+	}
 }
 
 void AOneBrahamWeaponBase::OnRep_AttachmentReplication()
@@ -1724,6 +1825,25 @@ void AOneBrahamWeaponBase::SetWeaponState(EOneBrahamWeaponState NewState)
 	WeaponState = NewState;
 	OnWeaponStateChanged.Broadcast(NewState);
 	ForceNetUpdate();
+}
+
+void AOneBrahamWeaponBase::OnRep_Definition()
+{
+	// The meshes, effects and grip come from the definition. Its magazine and
+	// starting state do not: the server's values arrived with it and are kept.
+	const int32 ServerAmmo = AmmoInMagazine;
+	const EOneBrahamWeaponState ServerState = WeaponState;
+	InitialiseFromDefinition(Definition);
+	AmmoInMagazine = ServerAmmo;
+	WeaponState = ServerState;
+
+	// Attached before the definition landed, the gun took the rifle's grip.
+	USceneComponent* Root = GetRootComponent();
+	if (Definition != nullptr && Root != nullptr && Root->GetAttachParent() != nullptr
+		&& Root->GetAttachSocketName() == GetMannequinGripSocketName())
+	{
+		Root->SetRelativeTransform(GetMannequinGripOffset(Definition->DefaultSlot == EOneBrahamWeaponSlot::Sidearm));
+	}
 }
 
 void AOneBrahamWeaponBase::OnRep_State()

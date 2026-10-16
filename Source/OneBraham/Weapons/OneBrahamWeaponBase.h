@@ -100,7 +100,11 @@ public:
 	// ======================================================================
 	//  Setup
 	// ======================================================================
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "One Braham|Weapon")
+	/**
+	 * Replicated: loadout guns are spawned at runtime and initialised on the
+	 * server, so without it a client's guns have no mesh, in every hand.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_Definition, Category = "One Braham|Weapon")
 	TObjectPtr<UOneBrahamWeaponDefinition> Definition;
 
 	/** Initialises this weapon actor from a definition. Safe to call twice. */
@@ -128,6 +132,23 @@ public:
 
 	/** The socket a held weapon uses: Weapon_1P for its controller's view, Weapon_3P for everyone else's. */
 	static FName GetHeldSocketName(bool bFirstPersonView);
+
+	/**
+	 * The socket actually used on TargetMesh: GetHeldSocketName when the rig has
+	 * it, otherwise the mannequin's HandGrip_R (Epic's first-person template's
+	 * weapon socket, on the body and the arms alike).
+	 */
+	static FName ResolveHeldSocketName(const USkeletalMeshComponent* TargetMesh, bool bFirstPersonView);
+
+	/** HandGrip_R, the weapon socket on Epic's UE5 mannequins. */
+	static FName GetMannequinGripSocketName();
+
+	/**
+	 * Where a template gun sits relative to HandGrip_R so that it lies along the
+	 * mannequin idles' weapon bone (level, support hand on the handguard) rather
+	 * than at the bare socket. Pistol and rifle grips differ.
+	 */
+	static FTransform GetMannequinGripOffset(bool bSidearm);
 
 	/** The server's attachment arrives here too; a held weapon keeps the local answer instead. */
 	virtual void OnRep_AttachmentReplication() override;
@@ -372,6 +393,7 @@ protected:
 	TObjectPtr<class UAudioComponent> FireAudioComponent = nullptr;
 
 protected:
+	UFUNCTION() void OnRep_Definition();
 	UFUNCTION() void OnRep_State();
 	UFUNCTION() void OnRep_SkinId();
 	UFUNCTION() void OnRep_Ammo();
@@ -429,6 +451,18 @@ protected:
 
 	/** Sets state + fires the delegate + forces a net update. */
 	void SetWeaponState(EOneBrahamWeaponState NewState);
+
+	/**
+	 * Hides a weapon its holder owns but is not holding. A switch leaves the
+	 * put-away gun on the hand socket (there is no holster socket) and an
+	 * unequipped loadout gun where it spawned, so without this both guns draw
+	 * in one hand, or a sidearm floats at the spawn point. Per machine, from the
+	 * replicated current weapon, so client prediction and late reps agree.
+	 */
+	void UpdateHeldVisibility();
+
+	/** What UpdateHeldVisibility last applied. */
+	bool bHiddenWhilePutAway = false;
 
 	TWeakObjectPtr<class AOneBrahamCharacter> OwningCharacter;
 

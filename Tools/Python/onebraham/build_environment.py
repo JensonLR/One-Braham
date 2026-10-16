@@ -3073,6 +3073,117 @@ def settle_spawn_points(report, placed):
     return moved
 
 
+# Points sampled per floor plate (a NAV_SAMPLE_GRID x NAV_SAMPLE_GRID grid) to
+# prove the baked nav mesh covers it, and the share that must land on it. Cores,
+# shafts, atrium voids and furniture eat some samples; a floor under half
+# covered is a floor the bots cannot work.
+NAV_SAMPLE_GRID = 5
+NAV_MIN_COVERAGE = 0.5
+
+
+def _nav_world():
+    return unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_editor_world()
+
+
+def _on_navmesh(world, point, extent):
+    """The nav mesh point within extent of point, or None."""
+    hit = unreal.NavigationSystemV1.project_point_to_navigation(world, point, None, None, extent)
+    if isinstance(hit, tuple):
+        hit = hit[1] if hit and hit[0] else None
+    return hit
+
+
+def build_navigation(report, level_path, floor_indices=None, points=None):
+    """Bakes the nav mesh for level_path (and every level it streams in) and saves it.
+
+    Runs last, after everything that moves geometry - the district, the kitchen
+    kit, spawn settling - because a nav mesh built before any of it is stale on
+    load, and a map that never had one was what bots stood still on: the build
+    spawned NavMeshBoundsVolumes and never built inside them.
+
+    The project generates Dynamic (see [/Script/NavigationSystem.RecastNavMesh]
+    in DefaultEngine.ini): this bake is what the game loads, and only tiles a
+    door, shutter, breach or broken pane dirties are rebuilt at runtime.
+
+    floor_indices, when given, are checked by projecting a grid on each floor
+    plate onto the result; a floor that comes back mostly bare is a failure.
+    points, when given, are (name, x, y, z) spots that must each be on it.
+    """
+    level_subsystem = _level_subsystem()
+
+    # An editor world holds navigation building until asset compilation has
+    # settled - a ticker that never fires in a commandlet, so a headless build
+    # would log "navigation build is locked" and bake nothing. Off for the
+    # reload this bake opens; restored after so the editor itself is unchanged.
+    nav_cdo = unreal.get_default_object(unreal.NavigationSystemV1)
+    wait_flag = "bWaitForAsyncLoadingBeforeBuildingNavigationAutomatically"
+    waited = nav_cdo.get_editor_property(wait_flag)
+    nav_cdo.set_editor_property(wait_flag, False)
+    try:
+        if not level_subsystem.load_level(level_path):
+            report.failed(level_path, u"could not reopen to build navigation")
+            return 0
+    finally:
+        nav_cdo.set_editor_property(wait_flag, waited)
+
+    world = _nav_world()
+    if unreal.NavigationSystemV1.get_navigation_system(world) is None:
+        report.failed(level_path, u"has no navigation system to build with")
+        return 0
+
+    unreal.SystemLibrary.execute_console_command(world, "RebuildNavigation")
+
+    navmeshes = [actor for actor in _actor_subsystem().get_all_level_actors()
+                 if actor.get_class().get_name() == "RecastNavMesh"]
+    if not navmeshes:
+        report.failed(level_path, u"navigation build produced no RecastNavMesh")
+        return 0
+    for navmesh in navmeshes:
+        if navmesh.get_editor_property("RuntimeGeneration") != unreal.RuntimeGenerationType.DYNAMIC:
+            report.failed(level_path, u"{0} is not Dynamic - check RuntimeGeneration in DefaultEngine.ini".format(
+                navmesh.get_actor_label()))
+        # The tiles live on this actor; Modify() is what puts its package in the save.
+        navmesh.modify()
+
+    covered = 0
+    for floor_index in floor_indices or []:
+        area_name, origin_x, origin_y, size_x, size_y = _area_for_floor(floor_index)
+        if area_name is None:
+            continue
+        z = _floor_z(floor_index)
+        hits = 0
+        for i in range(NAV_SAMPLE_GRID):
+            for j in range(NAV_SAMPLE_GRID):
+                x = origin_x + size_x * ((i + 0.5) / NAV_SAMPLE_GRID - 0.5)
+                y = origin_y + size_y * ((j + 0.5) / NAV_SAMPLE_GRID - 0.5)
+                # A small box: the nearest polygon has to be on this floor plate,
+                # near this sample, not the floor below seen down a stairwell.
+                hit = _on_navmesh(world, unreal.Vector(x, y, z + 50.0), unreal.Vector(250.0, 250.0, 100.0))
+                if hit is not None and abs(hit.z - z) < 120.0:
+                    hits += 1
+        share = hits / float(NAV_SAMPLE_GRID * NAV_SAMPLE_GRID)
+        if share < NAV_MIN_COVERAGE:
+            report.failed(u"navigation F{0:02d}".format(floor_index),
+                          u"only {0:.0%} of the {1} floor plate is on the nav mesh".format(share, area_name))
+        else:
+            covered += 1
+        C.log(u"    nav F{0:02d} {1}: {2:.0%} of samples on the nav mesh".format(floor_index, area_name, share))
+
+    # Named spots a bot must be able to stand on (the arena's control points).
+    for name, x, y, z in points or []:
+        hit = _on_navmesh(world, unreal.Vector(x, y, z + 50.0), unreal.Vector(100.0, 100.0, 100.0))
+        if hit is None or abs(hit.z - z) >= 120.0:
+            report.failed(u"navigation {0}".format(name), u"is not on the nav mesh")
+
+    try:
+        if not level_subsystem.save_all_dirty_levels():
+            report.failed(level_path, u"could not save after building navigation")
+    except Exception as exc:  # noqa: BLE001
+        report.failed(level_path, u"could not save after building navigation: {0}".format(exc))
+    C.log(u"  navigation: built and saved for {0} ({1} floors covered)".format(level_path, covered))
+    return covered
+
+
 def build_access_zones(report):
     """Places one access zone component per locked door, plus its reader.
 
@@ -3483,7 +3594,13 @@ def build_lighting(report, floor_index):
                 # pool so the floor reads as lit, not as spotlights in a void.
                 component.set_editor_property("IntensityUnits", unreal.LightUnits.LUMENS)
                 component.set_editor_property("Intensity", 16000.0)
-                component.set_editor_property("AttenuationRadius", 1600.0)
+                # 8 m: past the next fittings on a 6 m grid, but not through
+                # three or four floors each way as 16 m did. That put 60-120
+                # shadowed lights on a desk-height pixel against the engine's
+                # 32 (one-pass projection overflow, missing shadows); at 8 m it
+                # is about 14. Every fitting keeps its shadow: an unshadowed
+                # one would light the floor below through the slab.
+                component.set_editor_property("AttenuationRadius", 800.0)
                 component.set_editor_property("SourceWidth", 120.0)
                 component.set_editor_property("SourceHeight", 60.0)
                 # 4000 K: the colour of a building's own lighting, everywhere.
@@ -3492,10 +3609,10 @@ def build_lighting(report, floor_index):
                 # light is never baked and Lumen gives it no bounce - pure black
                 # shadow beside a white-hot wall.
                 component.set_editor_property("Mobility", unreal.ComponentMobility.MOVABLE)
-                # Every floor is loaded at once: fittings more than ~40 m away
+                # Every floor is loaded at once: fittings more than ~25 m away
                 # (most of them on other floors) fade out instead of costing.
-                component.set_editor_property("MaxDrawDistance", 4000.0)
-                component.set_editor_property("MaxDistanceFadeRange", 1000.0)
+                component.set_editor_property("MaxDrawDistance", 2500.0)
+                component.set_editor_property("MaxDistanceFadeRange", 800.0)
             except Exception as exc:  # noqa: BLE001
                 report.failed("ceiling light", str(exc))
 
@@ -4207,6 +4324,10 @@ def build_all(write_manifest=True):
     # the floors actually put round them.
     C.guard(report, "spawn clearance", settle_spawn_points, report, manifest["spawn_anchors"])
 
+    # Last of all on the tower: nothing after this may move its geometry.
+    C.guard(report, "navigation", build_navigation, report, "{0}/{1}".format(C.MAPS, C.MAP_PERSISTENT),
+            [f["index"] for f in floors])
+
     C.step(5, 6, "fire drill arena")
     C.guard(report, "fire drill arena", build_fire_drill_arena, report, materials)
 
@@ -4267,7 +4388,11 @@ def build_fire_drill_arena(report, materials):
     # is that every point can be flanked and every flank can be held.
     _box((-2200.0, 0.0, 100.0), (200.0, 7000.0, 200.0), concrete, "Flank_West")
     _box((2200.0, 0.0, 100.0), (200.0, 7000.0, 200.0), concrete, "Flank_East")
-    _box((0.0, 0.0, 200.0), (600.0, 7000.0, 20.0), concrete, "Corridor_Roof")
+    # The roof runs over all three points: its underside at 280 leaves 240 cm
+    # over a 40 cm platform, room for a standing player (176 cm) and the nav
+    # agent. At 190 neither could stand on a point, and its top sat low enough
+    # under the ceiling to grow an unreachable strip of nav mesh.
+    _box((0.0, 0.0, 290.0), (600.0, 7000.0, 20.0), concrete, "Corridor_Roof")
 
     # Team spawn rooms at each end.
     for team, sy in (("Staff", -3200.0), ("Contractors", 3200.0)):
@@ -4292,7 +4417,13 @@ def build_fire_drill_arena(report, materials):
             except Exception:  # noqa: BLE001
                 pass
 
-    _spawn(unreal.NavMeshBoundsVolume, unreal.Vector(0.0, 0.0, 200.0))
+    # The bounds brush is a 200 cm cube: scaled to the whole floor, from under
+    # the slab to the ceiling's underside (not its top, or the roof gets a nav
+    # mesh). Unscaled it hung in mid-air over B and covered nothing.
+    bounds = _spawn(unreal.NavMeshBoundsVolume, unreal.Vector(0.0, 0.0, 175.0))
+    if bounds is not None:
+        _label(bounds, "NavBounds_Arena")
+        bounds.set_actor_scale3d(unreal.Vector(2500.0 / 100.0, 3500.0 / 100.0, 225.0 / 100.0))
     _spawn(unreal.SkyLight, unreal.Vector(0.0, 0.0, 600.0))
 
     try:
@@ -4300,6 +4431,8 @@ def build_fire_drill_arena(report, materials):
     except Exception as exc:  # noqa: BLE001
         report.failed(path, u"could not save: {0}".format(exc))
         return None
+    build_navigation(report, path, points=[(u"ControlPoint_" + name, cx, cy, 40.0)
+                                           for name, cx, cy in points])
 
     report.created_asset(path)
     C.log(u"FIRE DRILL arena built: three control points, two flanks, one corridor")

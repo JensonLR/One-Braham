@@ -1422,6 +1422,18 @@ bool AOneBrahamGameMode::PlayerCanRestart_Implementation(APlayerController* Play
 
 AActor* AOneBrahamGameMode::ChoosePlayerStart_Implementation(AController* Player)
 {
+	// ASCENT is the climb: everyone walks in off the plaza (Docs/09, floor 0
+	// is the spawn; Docs/06, "the lobby start"). Asking for any floor dropped
+	// squads straight onto 12 with the induction telling them to walk in from
+	// the street. A full plaza falls through to the general rule below.
+	if (MatchSettings != nullptr && MatchSettings->Mode == EOneBrahamMatchMode::Ascent)
+	{
+		if (AOneBrahamSpawnPoint* Spawn = SelectSpawnPointFor(Player, OneBrahamConstants::FloorPlaza))
+		{
+			return Spawn;
+		}
+	}
+
 	// Prefer our own spawn points; only fall back to a legacy APlayerStart if a
 	// level has not been authored yet (early greyblock, tutorial map).
 	if (AOneBrahamSpawnPoint* Spawn = SelectSpawnPointFor(Player))

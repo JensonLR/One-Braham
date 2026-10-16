@@ -535,9 +535,12 @@ void UOneBrahamFirstPersonFeelComponent::TickWeaponLayer(float DeltaSeconds, AOn
 		+ BobRotation + BreathRotation + KickRotation;
 
 	// The arms are parented to the camera, so camera space is their parent space:
-	// the offset rotation goes on the outside of the mesh's own (-90 yaw) basis.
-	const FQuat Composed = FQuat(OffsetRotation) * FQuat(BaseMeshRotation);
-	Arms->SetRelativeLocationAndRotation(BaseMeshLocation + OffsetLocation, Composed.Rotator());
+	// the offset rotation goes on the outside of the mesh's own (-90 yaw) basis,
+	// and turns the mesh about the hand (WeaponPivotCm), not about its origin.
+	const FQuat OffsetQuat(OffsetRotation);
+	const FQuat Composed = OffsetQuat * FQuat(BaseMeshRotation);
+	const FVector PivotedLocation = WeaponPivotCm + OffsetQuat.RotateVector(BaseMeshLocation - WeaponPivotCm);
+	Arms->SetRelativeLocationAndRotation(PivotedLocation + OffsetLocation, Composed.Rotator());
 }
 
 void UOneBrahamFirstPersonFeelComponent::TickScreenEffects(float DeltaSeconds, AOneBrahamCharacter& Character)

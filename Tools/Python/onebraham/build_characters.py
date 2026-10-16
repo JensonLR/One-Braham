@@ -455,6 +455,10 @@ def build_registry(report):
             # animation blueprint. fetch_open_assets.py copies them in from the
             # installed engine; the paths are the ones that content expects.
             "body_mesh_path": MANNEQUIN_BODIES[index % 2],
+            # No arms-only mesh yet: the first-person arms are the same body,
+            # drawn headless and legless by the character (Epic's first-person
+            # template does the same with its mannequin).
+            "first_person_mesh_path": MANNEQUIN_BODIES[index % 2],
             # Body mesh material slot -> this archetype's clothing instance.
             "body_material_paths": clothing_material_paths(entry["key"],
                                                           MANNEQUIN_BODIES[index % 2]),
