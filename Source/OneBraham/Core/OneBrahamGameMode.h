@@ -13,6 +13,9 @@
 //   Warmup -> Active with respawns and three control points -> Complete on
 //   score-to-win or time limit.
 //
+// Every mode with a time limit (ASCENT's hard end at 35 minutes included) is
+// ended by the server when the limit runs out - see DecideTimeOutOutcome.
+//
 // The GameMode owns: squad assignment, spawn selection, respawn logic, scoring,
 // match phase transitions, seamless travel and the bot-practice roster.
 
@@ -40,6 +43,21 @@ struct FOneBrahamTeamScoreCache
 	UPROPERTY() int32 Score = 0;
 	UPROPERTY() int32 Kills = 0;
 	UPROPERTY() float ControlPointHoldSeconds = 0.f;
+};
+
+/**
+ * How a match that ran out of time ends. Docs/06 section 7: in FIRE DRILL the
+ * team with more points wins (level scores are a draw); in every other mode the
+ * hard limit is the "Time out" ending - nobody extracts, everybody lost.
+ */
+struct FOneBrahamTimeOutOutcome
+{
+	EOneBrahamTeam WinningTeam = EOneBrahamTeam::None;
+	FString WinningSquadName;
+	/** Nobody got out: the result reads as everybody lost. */
+	bool bNoSurvivors = false;
+	/** FIRE DRILL only: level on points when the clock ran out. */
+	bool bDraw = false;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOneBrahamPlayerEliminated, AActor*, Victim, AActor*, Killer);
@@ -125,6 +143,17 @@ public:
 	static EOneBrahamKillFeedVerb ChooseKillVerb(bool bKilledByBuilding, bool bSelfKill,
 		bool bVictimWasDowned, EOneBrahamHitZone HitZone);
 
+	/**
+	 * True when a running match has used up its time limit. A limit of 0 is
+	 * unlimited; the clock only runs in Active and Extraction, the same phases
+	 * AOneBrahamGameState accumulates PhaseElapsedSeconds in, so the server
+	 * ends the match on the second the HUD countdown reaches zero.
+	 */
+	static bool HasMatchTimeLimitExpired(float TimeLimitSeconds, float ElapsedSeconds, EOneBrahamMatchPhase Phase);
+
+	/** The Docs/06 section 7 outcome of a time-out, for this mode and these team scores. */
+	static FOneBrahamTimeOutOutcome DecideTimeOutOutcome(EOneBrahamMatchMode Mode, const TArray<int32>& TeamScores);
+
 	/** Called whenever a player state changes in a way that might end the match. */
 	void EvaluateMatchEndConditions();
 
@@ -193,7 +222,9 @@ protected:
 	// ======================================================================
 	void StartWarmup();
 	void StartActiveMatch();
-	void FinishMatch(EOneBrahamTeam WinningTeam, const FString& WinningSquadName, bool bNoSurvivors, int32 ExtractedCount, EOneBrahamExtractionFailReason FailReason);
+	/** AnnouncementOverride, when not empty, replaces the Tannoy line FinishMatch would pick. */
+	void FinishMatch(EOneBrahamTeam WinningTeam, const FString& WinningSquadName, bool bNoSurvivors, int32 ExtractedCount,
+		EOneBrahamExtractionFailReason FailReason, const FText& AnnouncementOverride = FText::GetEmpty());
 
 	/** Applies the settings-derived defaults to the GameMode's player classes. */
 	void ConfigureClassesFromSettings();

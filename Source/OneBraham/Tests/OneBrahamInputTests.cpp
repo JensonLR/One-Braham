@@ -26,6 +26,7 @@
 #include "Core/OneBrahamPlayerController.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
+#include "InputModifiers.h"
 #include "OneBraham.h"
 
 #if WITH_AUTOMATION_TESTS
@@ -33,7 +34,7 @@
 namespace
 {
 	/** The number of Input Actions the shipped game binds. */
-	constexpr int32 ExpectedActionCount = 41;
+	constexpr int32 ExpectedActionCount = 42;
 
 	/**
 	 * Every reflected UInputAction property on the config class, in declaration
@@ -75,8 +76,8 @@ bool FOneBrahamInputAllActionsBoundTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	// 41 actions: movement and stance, weapons, interaction, voice, the UI, and
-	// the three overlays. The count is documentation - Docs/03 and the README
+	// 42 actions: movement and stance (mouse and stick look apart), weapons,
+	// interaction, voice, the UI, and the three overlays. The count is documentation - Docs/03 and the README
 	// both quote it - and check_input_actions.py keeps the five lists at this
 	// number, so a change here is a change to the control schema.
 	TArray<FObjectProperty*> Properties;
@@ -301,6 +302,45 @@ bool FOneBrahamInputControllerDefaultsTest::RunTest(const FString& Parameters)
 		}
 	};
 
+	// Mouse and stick look are two actions: Input_Look applies a mouse delta as
+	// is, Input_LookGamepad scales a stick deflection by the frame time. A stick
+	// on IA_Look turns faster the higher the frame rate, which is how it shipped.
+	TestNotNull(TEXT("the default config has a LookGamepad action"), Config->LookGamepad.Get());
+
+	auto TestLookSplit = [this, Config](const TCHAR* Source, const UInputMappingContext* Context)
+	{
+		bool bMouseLook = false;
+		bool bStickLook = false;
+
+		for (const FEnhancedActionKeyMapping& Mapping : Context->GetMappings())
+		{
+			if (Mapping.Action == Config->Look)
+			{
+				bMouseLook |= Mapping.Key == EKeys::Mouse2D;
+				TestFalse(*FString::Printf(TEXT("%s: Look has no pad key (%s)"), Source, *Mapping.Key.ToString()),
+					Mapping.Key.IsGamepadKey());
+			}
+			else if (Mapping.Action == Config->LookGamepad)
+			{
+				TestTrue(*FString::Printf(TEXT("%s: LookGamepad has only pad keys (%s)"), Source, *Mapping.Key.ToString()),
+					Mapping.Key.IsGamepadKey());
+
+				if (Mapping.Key == EKeys::Gamepad_Right2D)
+				{
+					bStickLook = true;
+					TestTrue(*FString::Printf(TEXT("%s: the right stick has a dead zone"), Source),
+						Mapping.Modifiers.ContainsByPredicate([](const UInputModifier* Modifier)
+						{
+							return Modifier != nullptr && Modifier->IsA<UInputModifierDeadZone>();
+						}));
+				}
+			}
+		}
+
+		TestTrue(*FString::Printf(TEXT("%s: Look is on the mouse"), Source), bMouseLook);
+		TestTrue(*FString::Printf(TEXT("%s: LookGamepad is on the right stick"), Source), bStickLook);
+	};
+
 	{
 		const UInputMappingContext* Authored = LoadObject<UInputMappingContext>(nullptr,
 			TEXT("/Game/OneBraham/Input/IMC_OneBraham_Default.IMC_OneBraham_Default"));
@@ -311,6 +351,7 @@ bool FOneBrahamInputControllerDefaultsTest::RunTest(const FString& Parameters)
 			&& TestNotNull(TEXT("IMC_OneBraham_UI exists"), AuthoredUI))
 		{
 			TestEveryActionMapped(TEXT("authored contexts"), { Authored, AuthoredUI });
+			TestLookSplit(TEXT("IMC_OneBraham_Default"), Authored);
 		}
 	}
 
@@ -322,10 +363,10 @@ bool FOneBrahamInputControllerDefaultsTest::RunTest(const FString& Parameters)
 	}
 
 	TestEveryActionMapped(TEXT("[OneBraham.Input]"), { Context });
+	TestLookSplit(TEXT("[OneBraham.Input]"), Context);
 
-	// The two axis actions have to work on a keyboard and a mouse, not just a pad.
+	// Move has to work on a keyboard, not just a pad.
 	int32 MoveKeys = 0;
-	bool bMouseLook = false;
 	for (const FEnhancedActionKeyMapping& Mapping : Context->GetMappings())
 	{
 		if (Mapping.Action == Config->Move && !Mapping.Key.IsGamepadKey())
@@ -334,12 +375,9 @@ bool FOneBrahamInputControllerDefaultsTest::RunTest(const FString& Parameters)
 			TestTrue(TEXT("W, A and S carry a direction modifier"),
 				Mapping.Key == EKeys::D || Mapping.Modifiers.Num() > 0);
 		}
-
-		bMouseLook |= Mapping.Action == Config->Look && Mapping.Key == EKeys::Mouse2D;
 	}
 
 	TestEqual(TEXT("Move has four keyboard keys"), MoveKeys, 4);
-	TestTrue(TEXT("Look is on the mouse"), bMouseLook);
 
 	return true;
 }

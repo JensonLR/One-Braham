@@ -149,6 +149,10 @@ MODES = [
             warmup_seconds=30,                      # ini WarmupSeconds
             post_match_seconds=45,                  # ini PostMatchSeconds
             night_shift_wave_count=8,               # ini NightShiftEnemyWaves; C++
+            # The waves are the clock: surviving the last one is the win, so a
+            # time limit (the C++ default, 900 s) would end a winning run as a
+            # loss. Off until the mode is designed past its beta.
+            bScoreByTimeLimit=False,
         ),
     ),
 ]

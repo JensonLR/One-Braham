@@ -13,7 +13,7 @@ THE CONTRACT, AND WHY IT IS THIS STRICT
     reports every field left null. So the *field names in the C++ class are the
     spec*, and this script's table is the implementation of it:
 
-        Move Look Jump Sprint Walk Crouch Lean Mantle Slide
+        Move Look LookGamepad Jump Sprint Walk Crouch Lean Mantle Slide
         Fire Aim Reload FireModeSwitch Melee Inspect
         WeaponSlotPrimary WeaponSlotSidearm WeaponSlotMelee
         WeaponCycleNext WeaponCyclePrev ThrowGrenade UseUtility UseMedkit DropWeapon
@@ -61,8 +61,14 @@ ACTIONS = [
     # --- Movement ---------------------------------------------------------
     ("Axis2D", "IA_Move", "Walk, jog, sprint, backpedal",
      ["W", "S", "A", "D"], ["Gamepad_Left2D"]),
-    ("Axis2D", "IA_Look", "Mouse or stick look (sensitivity from settings)",
-     ["Mouse2D"], ["Gamepad_Right2D"]),
+    # Mouse and stick look are two actions, not one with two keys: the mouse
+    # reports how far it moved this frame and the stick how far it is held over,
+    # so only the stick's turn is scaled by the frame time. On one action the pad
+    # turned faster at a higher frame rate.
+    ("Axis2D", "IA_Look", "Mouse look (sensitivity from settings)",
+     ["Mouse2D"], []),
+    ("Axis2D", "IA_LookGamepad", "Stick look (pad sensitivity and invert from settings)",
+     [], ["Gamepad_Right2D"]),
     ("Boolean", "IA_Jump", "Jump / vault / mantle upward",
      ["SpaceBar"], ["Gamepad_FaceButton_Bottom"]),
     ("Boolean", "IA_Sprint", "Sprint while held, or toggle",
@@ -141,13 +147,13 @@ ACTIONS = [
 # Per-key modifiers, as (action, key) -> modifier names. IA_Move's value is
 # (right, forward): W and S drive the second axis, so they are swizzled. Look
 # takes the raw mouse delta (the controller applies sensitivity and invert);
-# the sticks get a dead zone.
+# the sticks, Move's and LookGamepad's, get a dead zone.
 KEY_MODIFIERS = {
     ("IA_Move", "W"): ("SwizzleYXZ",),
     ("IA_Move", "S"): ("SwizzleYXZ", "Negate"),
     ("IA_Move", "A"): ("Negate",),
     ("IA_Move", "Gamepad_Left2D"): ("DeadZone",),
-    ("IA_Look", "Gamepad_Right2D"): ("DeadZone",),
+    ("IA_LookGamepad", "Gamepad_Right2D"): ("DeadZone",),
     ("IA_Lean", "Q"): ("Negate",),
 }
 
@@ -176,7 +182,7 @@ VALUE_TYPE_ENUM = {
 
 # The C++ field name is the action name without the IA_ prefix.
 INPUT_CONFIG_FIELD_ORDER = [
-    "Move", "Look", "Jump", "Sprint", "Walk", "Crouch", "Lean", "Mantle", "Slide",
+    "Move", "Look", "LookGamepad", "Jump", "Sprint", "Walk", "Crouch", "Lean", "Mantle", "Slide",
     "Fire", "Aim", "Reload", "FireModeSwitch", "Melee", "Inspect",
     "WeaponSlotPrimary", "WeaponSlotSidearm", "WeaponSlotMelee",
     "WeaponCycleNext", "WeaponCyclePrev", "ThrowGrenade", "UseUtility", "UseMedkit",

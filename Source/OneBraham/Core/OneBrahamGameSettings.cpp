@@ -28,6 +28,7 @@ bool UOneBrahamInputConfig::ValidateAllActionsSet(TArray<FName>& OutMissing) con
 	const TMap<FName, const UInputAction*> Required = {
 		{ TEXT("Move"), Move },
 		{ TEXT("Look"), Look },
+		{ TEXT("LookGamepad"), LookGamepad },
 		{ TEXT("Jump"), Jump },
 		{ TEXT("Sprint"), Sprint },
 		{ TEXT("Walk"), Walk },

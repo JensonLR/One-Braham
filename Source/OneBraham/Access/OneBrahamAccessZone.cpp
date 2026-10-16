@@ -123,8 +123,30 @@ AOneBrahamAccessZone::AOneBrahamAccessZone()
 	LeafRightMesh->SetRelativeLocation(FVector(55.f, 0.f, 105.f));
 }
 
+void AOneBrahamAccessZone::PostInitializeComponents()
+{
+	Super::PostInitializeComponents();
+
+	// Components are initialised but none has begun play yet, so this is where the
+	// placement has to land: the zone component's BeginPlay reads ZoneId and
+	// bUnlockedAtStart. This runs for zones loaded from the level and for zones
+	// spawned at runtime (SpawnActorDeferred values are in by now), on server and
+	// clients. Editor worlds are left alone so the builder never saves a derived id.
+	const UWorld* World = GetWorld();
+	if (World != nullptr && World->IsGameWorld())
+	{
+		ApplyPlacementToZone();
+	}
+}
+
 void AOneBrahamAccessZone::BeginPlay()
 {
+	// Again, before Super::BeginPlay hands play to the components. A client that
+	// spawns this zone from replication only has the replicated placement after
+	// PostInitializeComponents, and a server spawn may set it between spawn and
+	// begin play. Re-applying the same values is a no-op.
+	ApplyPlacementToZone();
+
 	Super::BeginPlay();
 
 	ClosedLeftLocation = LeafLeftMesh->GetRelativeLocation();
@@ -140,7 +162,6 @@ void AOneBrahamAccessZone::BeginPlay()
 
 	if (Zone != nullptr)
 	{
-		ApplyPlacementToZone();
 		Zone->OnZoneChanged.AddDynamic(this, &AOneBrahamAccessZone::HandleZoneChanged);
 	}
 
@@ -161,6 +182,17 @@ void AOneBrahamAccessZone::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
 
 	DOREPLIFETIME(AOneBrahamAccessZone, bOpen);
 	DOREPLIFETIME(AOneBrahamAccessZone, bBreached);
+
+	// Placement never changes after spawn; it only has to reach clients that
+	// spawn the zone from replication rather than load it with the level.
+	DOREPLIFETIME_CONDITION(AOneBrahamAccessZone, ZoneId, COND_InitialOnly);
+	DOREPLIFETIME_CONDITION(AOneBrahamAccessZone, ZoneDisplayName, COND_InitialOnly);
+	DOREPLIFETIME_CONDITION(AOneBrahamAccessZone, RequiredTier, COND_InitialOnly);
+	DOREPLIFETIME_CONDITION(AOneBrahamAccessZone, FloorIndex, COND_InitialOnly);
+	DOREPLIFETIME_CONDITION(AOneBrahamAccessZone, bEscalationOpens, COND_InitialOnly);
+	DOREPLIFETIME_CONDITION(AOneBrahamAccessZone, PairedZoneId, COND_InitialOnly);
+	DOREPLIFETIME_CONDITION(AOneBrahamAccessZone, bUnlockedAtStart, COND_InitialOnly);
+	DOREPLIFETIME_CONDITION(AOneBrahamAccessZone, bBreachable, COND_InitialOnly);
 }
 
 FName AOneBrahamAccessZone::GetZoneId() const
@@ -180,10 +212,13 @@ void AOneBrahamAccessZone::ApplyPlacementToZone()
 		return;
 	}
 
-	// The actor's placement values win on BeginPlay, because they are what the
-	// map (and the map builder) authored. A zone with no id set on either object
-	// gets one derived from the actor's name, so a stray door in a test map is
-	// still identifiable in the logs and on the HUD.
+	// The actor's placement values win, because they are what the map (and the
+	// map builder) authored. A zone with no id set on either object gets one
+	// derived from the actor's name, so a stray door in a test map is still
+	// identifiable in the logs and on the HUD.
+	const FName PreviousZoneId = Zone->ZoneId;
+	const bool bWasUnlockedAtStart = Zone->bUnlockedAtStart;
+
 	if (!ZoneId.IsNone())
 	{
 		Zone->ZoneId = ZoneId;
@@ -211,6 +246,13 @@ void AOneBrahamAccessZone::ApplyPlacementToZone()
 
 	// The door is the reader: the component's own override timing is what the
 	// panel uses, and the two-person rule is expressed as a pair of zone ids.
+	// Called twice per zone (PostInitializeComponents, BeginPlay): log only the
+	// pass that actually changed something.
+	if (Zone->ZoneId == PreviousZoneId && Zone->bUnlockedAtStart == bWasUnlockedAtStart)
+	{
+		return;
+	}
+
 	OB_ACCESS_LOG("Door '%s' placement applied: tier %s, floor %d, pair '%s'.",
 		*Zone->ZoneId.ToString(), *UEnum::GetValueAsString(Zone->RequiredTier),
 		Zone->FloorIndex, *Zone->PairedZoneId.ToString());

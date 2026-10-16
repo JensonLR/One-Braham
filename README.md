@@ -118,7 +118,7 @@ cosmetic is earnable.
 | Engine | UE 5.5, World Partition, level streaming per floor |
 | Rendering | Lumen GI and reflections, Virtual Shadow Maps, Nanite on architecture, TSR |
 | Language | C++20 for every system; Blueprint for authoring and animation glue |
-| Input | Enhanced Input, 41 actions, four mapping contexts — all generated |
+| Input | Enhanced Input, 42 actions, four mapping contexts — all generated |
 | UI | UMG with CommonUI for the menu stack; the HUD builds itself in C++ |
 | Physics | Chaos, ragdolls and Chaos Cloth |
 | Effects | Niagara — 17 systems, fixed bounds, hard particle budgets |

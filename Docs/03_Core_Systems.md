@@ -177,6 +177,7 @@ inventory" bugs.
 | --- | --- |
 | `MatchPhase`, `PhaseStartTime`, `PhaseDuration` | the top-level clock; every countdown derives from these |
 | `Mode`, `ModeName` | |
+| `MatchSettingsPath` (`FSoftObjectPath`), `GetMatchSettings()` | the match settings asset's path, replicated so clients can load the same asset; null when the server's settings are a transient fallback rather than an authored asset |
 | `Squads` (`TArray<FOneBrahamSquadInfo>`) | 3 for ASCENT, 2 for FIRE DRILL |
 | `HighestOccupiedFloor` | drives the lockdown's sealing rule |
 | `KillFeed` (`TArray<FOneBrahamKillFeedEntry>`) | 7-second entries, batched |
@@ -190,6 +191,17 @@ Two components rather than one because they have different lifetimes: the
 lockdown runs from the second stage of a match to the end, and the extraction only
 exists once a squad calls it. A single "match component" holding both would carry
 an inactive extraction machine through 20 minutes of every match.
+
+The match settings object itself is never replicated. On the server
+`GetMatchSettings()` returns the game mode's object. On a client it resolves the
+replicated `MatchSettingsPath` (used only if the loaded asset's mode matches the
+replicated `MatchMode`), or else `MatchMode` through
+`UOneBrahamGameInstance::GetMatchSettings`, the same per-mode lookup the server
+made. The result is cached and resolved again when either value changes. Both
+arrive in the game state's first replication packet, so a late joiner gets the
+same settings, and every client reader (lockdown, extraction, downed, voice,
+weapons, projectiles) works through `GS->GetMatchSettings()` unchanged.
+`OneBraham.Match.SettingsReplicationPath` holds the path rule.
 
 ---
 

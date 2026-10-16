@@ -58,6 +58,7 @@ class ONEBRAHAM_API AOneBrahamAccessZone : public AActor,
 public:
 	AOneBrahamAccessZone();
 
+	virtual void PostInitializeComponents() override;
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -70,34 +71,38 @@ public:
 	//   on the *actor*, because that is the object it spawned. Rather than make the
 	//   build script reach into a component by name (fragile, and invisible to a
 	//   designer selecting the door in the level), the data lives on the actor and
-	//   is copied into the component on BeginPlay. The component stays the single
-	//   authority for the rules at runtime; these are the placement-time values.
+	//   is copied into the component before the component begins play (see
+	//   ApplyPlacementToZone). The component stays the single authority for the
+	//   rules at runtime; these are the placement-time values.
+	//
+	//   They replicate once (initial only) so a zone spawned at runtime reaches
+	//   clients with its id and tier; a zone loaded from the level already has them.
 	/** Stable zone id, e.g. "Office_Floor09", "Skydeck_Gate". */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "One Braham|Access")
+	UPROPERTY(EditAnywhere, Replicated, BlueprintReadOnly, Category = "One Braham|Access")
 	FName ZoneId = NAME_None;
 
 	/** What the door sign and the prompt call this place. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "One Braham|Access")
+	UPROPERTY(EditAnywhere, Replicated, BlueprintReadOnly, Category = "One Braham|Access")
 	FText ZoneDisplayName;
 
 	/** Badge needed to open it with a card; Override means terminal only. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "One Braham|Access")
+	UPROPERTY(EditAnywhere, Replicated, BlueprintReadOnly, Category = "One Braham|Access")
 	EOneBrahamAccessTier RequiredTier = EOneBrahamAccessTier::Staff;
 
 	/** Floor the door sits on (0 = plaza, 15 = Skydeck). */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "One Braham|Access")
+	UPROPERTY(EditAnywhere, Replicated, BlueprintReadOnly, Category = "One Braham|Access")
 	int32 FloorIndex = 1;
 
 	/** True when the lockdown director may force this open as the building escalates. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "One Braham|Access")
+	UPROPERTY(EditAnywhere, Replicated, BlueprintReadOnly, Category = "One Braham|Access")
 	bool bEscalationOpens = true;
 
 	/** The other panel/door of a pair: both held together override in 3 seconds. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "One Braham|Access")
+	UPROPERTY(EditAnywhere, Replicated, BlueprintReadOnly, Category = "One Braham|Access")
 	FName PairedZoneId = NAME_None;
 
 	/** True when this door has no card reader at all (plaza, public corridors). */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "One Braham|Access")
+	UPROPERTY(EditAnywhere, Replicated, BlueprintReadOnly, Category = "One Braham|Access")
 	bool bUnlockedAtStart = false;
 
 	// ======================================================================
@@ -120,7 +125,7 @@ public:
 	bool bStartsOpen = false;
 
 	/** True when a breaching charge can defeat this door rather than only its walls. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "One Braham|Door")
+	UPROPERTY(EditAnywhere, Replicated, BlueprintReadOnly, Category = "One Braham|Door")
 	bool bBreachable = true;
 
 	/** Raw breaching damage the door absorbs before it opens. Doors resist more
@@ -154,7 +159,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "One Braham|Door")
 	bool IsOpen() const { return bOpen; }
 
-	/** Server: writes the placement values onto the zone component.  */
+	/** Server and client: writes the placement values onto the zone component.
+	 *  Runs from PostInitializeComponents (level-loaded and spawned zones) and
+	 *  again just before the component's BeginPlay, which is the first point a
+	 *  client-side spawned zone has its replicated placement. Idempotent. */
 	void ApplyPlacementToZone();
 
 	/** Server or client: the pairing partner, if one is placed and loaded. */

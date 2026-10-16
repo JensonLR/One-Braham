@@ -168,6 +168,11 @@ public:
 	// --- Movement ---------------------------------------------------------
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement") TObjectPtr<UInputAction> Move;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement") TObjectPtr<UInputAction> Look;
+	// The right stick, apart from the mouse: a mouse reports a distance moved this
+	// frame and a stick a deflection held, so the stick's turn has to be scaled by
+	// DeltaTime and the mouse's must not. One action for both made pad turn speed
+	// follow the frame rate.
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement") TObjectPtr<UInputAction> LookGamepad;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement") TObjectPtr<UInputAction> Jump;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement") TObjectPtr<UInputAction> Sprint;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement") TObjectPtr<UInputAction> Walk;

@@ -106,11 +106,31 @@ public:
 	UFUNCTION(BlueprintPure, Category = "One Braham|Extraction")
 	UOneBrahamExtractionComponent* GetExtractionComponent() const { return ExtractionComponent; }
 
+	/**
+	 * The match's tuned values, on every machine.
+	 *
+	 * The server returns the asset the GameMode handed it. A client never
+	 * receives that object - a settings asset is not something to push through
+	 * the package map, and the runtime fallback the GameInstance generates in a
+	 * content-less checkout is transient and could not be - so a client resolves
+	 * its own copy: the replicated asset path when the server's settings are a
+	 * cooked asset, else its GameInstance's settings for the replicated
+	 * MatchMode. Both arrive in the GameState's initial bunch, so a late joiner
+	 * resolves the same settings as somebody who was there from warmup.
+	 */
 	UFUNCTION(BlueprintPure, Category = "One Braham|Match")
-	UOneBrahamMatchSettingsAsset* GetMatchSettings() const { return MatchSettings; }
+	UOneBrahamMatchSettingsAsset* GetMatchSettings() const;
 
 	/** Server-only: caches the settings asset so components can read tuned values. */
 	void SetMatchSettings(UOneBrahamMatchSettingsAsset* InSettings);
+
+	/**
+	 * The path a client may load the server's settings from, or a null path
+	 * when the object is not a loadable asset (the GameInstance's transient
+	 * runtime fallback, anything made with NewObject). Static so the "is this
+	 * net-addressable" rule has a test.
+	 */
+	static FSoftObjectPath GetReplicableSettingsPath(const UOneBrahamMatchSettingsAsset* Settings);
 
 	// ======================================================================
 	//  Helpers used by HUD, scoreboard and voice
@@ -165,6 +185,7 @@ public:
 
 protected:
 	UFUNCTION() void OnRep_MatchMode();
+	UFUNCTION() void OnRep_MatchSettingsPath();
 	UFUNCTION() void OnRep_MatchPhase();
 	UFUNCTION() void OnRep_Squads();
 	UFUNCTION() void OnRep_TeamScores();
@@ -177,8 +198,26 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "One Braham|Components")
 	TObjectPtr<UOneBrahamExtractionComponent> ExtractionComponent = nullptr;
 
+	/** Server only: the GameMode's settings. Not replicated - see GetMatchSettings. */
 	UPROPERTY(BlueprintReadOnly, Category = "One Braham|Match")
 	TObjectPtr<UOneBrahamMatchSettingsAsset> MatchSettings = nullptr;
+
+	/**
+	 * The server's settings as an asset path, replicated as a string so the
+	 * package map never sees the object. Null when the server is running on a
+	 * transient fallback; the client then resolves by MatchMode.
+	 */
+	UPROPERTY(ReplicatedUsing = OnRep_MatchSettingsPath)
+	FSoftObjectPath MatchSettingsPath;
+
+	/** Client: what GetMatchSettings resolved, and the mode/path it was resolved for. */
+	UPROPERTY(Transient)
+	TObjectPtr<UOneBrahamMatchSettingsAsset> ClientMatchSettings = nullptr;
+	EOneBrahamMatchMode ClientMatchSettingsMode = EOneBrahamMatchMode::Ascent;
+	FSoftObjectPath ClientMatchSettingsSource;
+
+	/** Client: resolves ClientMatchSettings for the current MatchMode/MatchSettingsPath. */
+	UOneBrahamMatchSettingsAsset* ResolveClientMatchSettings();
 
 	/** Cached previous killfeed length so OnRep only fires the delegate for new rows. */
 	int32 LastAcknowledgedKillFeedCount = 0;

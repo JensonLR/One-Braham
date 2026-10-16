@@ -31,6 +31,8 @@
 #include "UI/OneBrahamMenuWidget.h"
 #include "OneBrahamSettingsWidget.generated.h"
 
+class APlayerController;
+struct FKey;
 class UOneBrahamGameUserSettings;
 class UImage;
 class UTextBlock;
@@ -85,8 +87,16 @@ public:
 
 	bool HasUnappliedChanges() const { return bDirty; }
 
-	/** The Controls tab's lines, from the mapping contexts the game loads. */
-	static TArray<FOneBrahamBindingLine> GatherBindings();
+	/**
+	 * The Controls tab's lines, from the mapping contexts the player actually
+	 * has: Owner's gameplay and common contexts when it is a One Braham
+	 * controller (the ini-built runtime context included, rebinds and all),
+	 * else the contexts UOneBrahamGameSettings names.
+	 */
+	static TArray<FOneBrahamBindingLine> GatherBindings(const APlayerController* Owner = nullptr);
+
+	/** A key as the Controls tab prints it: "MOUSE", "LEFT STICK", "A / CROSS". */
+	static FString KeyLabel(const FKey& Key);
 
 protected:
 	virtual void BuildLayout() override;
@@ -120,6 +130,14 @@ protected:
 	void BuildGameplayPage();
 	void BuildControlsPage();
 
+	/**
+	 * (Re)fills the Controls tab's rows from GatherBindings. Run when the page is
+	 * built and again whenever the tab is shown: the pause menu builds this
+	 * widget when the HUD is created, which can be before the controller has
+	 * resolved its contexts (a client given its local player late).
+	 */
+	void RefreshControlsRows();
+
 	void MarkDirty();
 
 	/** Microphone state for the Voice tab. Polled from paint while that tab is up. */
@@ -144,6 +162,10 @@ protected:
 
 	int32 ActiveTab = 0;
 	int32 VoiceTabIndex = INDEX_NONE;
+	int32 ControlsTabIndex = INDEX_NONE;
+
+	/** The Controls tab's binding rows, under its fixed headings. */
+	UPROPERTY(Transient) TObjectPtr<UVerticalBox> ControlsRows = nullptr;
 	bool bDirty = false;
 
 	/** Real time of the next microphone poll: ten a second is plenty for a lamp. */

@@ -348,12 +348,11 @@ void AOneBrahamPlayerController::BindInputActions()
 
 	// --- Movement ---------------------------------------------------------
 	if (InputConfig->Move)			EIC->BindAction(InputConfig->Move, ETriggerEvent::Triggered, this, &AOneBrahamPlayerController::Input_Move);
-	if (InputConfig->Look)
-	{
-		// Mouse and gamepad share the action but use different handlers so the
-		// aim-assist curve only applies to the stick.
-		EIC->BindAction(InputConfig->Look, ETriggerEvent::Triggered, this, &AOneBrahamPlayerController::Input_Look);
-	}
+	// Mouse and stick are two actions with two handlers: the mouse is a delta
+	// applied as is, the stick a rate scaled by DeltaTime with the pad's own
+	// sensitivity and invert settings.
+	if (InputConfig->Look)			EIC->BindAction(InputConfig->Look, ETriggerEvent::Triggered, this, &AOneBrahamPlayerController::Input_Look);
+	if (InputConfig->LookGamepad)	EIC->BindAction(InputConfig->LookGamepad, ETriggerEvent::Triggered, this, &AOneBrahamPlayerController::Input_LookGamepad);
 	if (InputConfig->Jump)
 	{
 		EIC->BindAction(InputConfig->Jump, ETriggerEvent::Started, this, &AOneBrahamPlayerController::Input_JumpStarted);
@@ -600,9 +599,19 @@ UInputMappingContext* AOneBrahamPlayerController::BuildMappingContextFromIni(UOb
 				continue;
 			}
 
+			// A stick on IA_Look would turn by a mouse delta per frame, so its
+			// speed would follow the frame rate. The stick is IA_LookGamepad's;
+			// a rebind written before the split is dropped rather than doubled.
+			if (Action == InputConfig->Look && Key.IsGamepadKey())
+			{
+				OB_WARN("[%s] %s: '%s' is a pad key - the stick binds IA_LookGamepad. Skipped.",
+					OneBrahamInput::BindingsSection, *ActionName, *KeyName);
+				continue;
+			}
+
 			FEnhancedActionKeyMapping& Mapping = Context->MapKey(Action, Key);
 
-			if (Action == InputConfig->Look && !Key.IsGamepadKey())
+			if (Action == InputConfig->Look)
 			{
 				bLookHasPointer = true;
 			}
@@ -639,8 +648,9 @@ UInputMappingContext* AOneBrahamPlayerController::BuildMappingContextFromIni(UOb
 		}
 	}
 
-	// Mouse look is not a key a player rebinds, so the generator writes none.
-	// Input_Look takes the raw mouse delta and flips Y itself.
+	// Mouse look is not a key a player rebinds; a rebind that leaves IA_Look
+	// with no key still gets the mouse. Input_Look takes the raw mouse delta and
+	// flips Y itself.
 	if (!bLookHasPointer && InputConfig->Look != nullptr)
 	{
 		Context->MapKey(InputConfig->Look, EKeys::Mouse2D);
@@ -753,12 +763,29 @@ void AOneBrahamPlayerController::Input_LookGamepad(const FInputActionValue& Valu
 	const float SensY = Settings != nullptr ? Settings->GamepadSensitivityY : 0.07f;
 	const bool bInvertY = Settings != nullptr && Settings->bInvertGamepadY;
 
-	// Frame-rate independent: the input exponent curve lives in the IMC (1.7),
-	// which gives the "smooth in the middle, fast at the edges" feel players
-	// expect from a pad without any extra code here.
+	// Aiming slows the stick as it slows the mouse. Before the split the stick
+	// went through Input_Look and so took the aiming multiplier; the settings
+	// have no pad-only one, so it is the same "Aiming sensitivity" value.
+	const bool bAiming = Character->GetWeaponComponent() != nullptr && Character->GetWeaponComponent()->IsAimingDownSights();
+	const float AimScale = (bAiming && Settings != nullptr) ? Settings->MouseSensitivityADSMultiplier : 1.f;
+
+	// Frame-rate independent: a held stick is a rate, so it is scaled by the
+	// frame time. The response curve is the right stick's AxisConfig in
+	// DefaultInput.ini (exponent 1.7), not code here.
+	//
+	// At the default sensitivity a full deflection turns at the pad turn rates
+	// generate_input_ini.py writes (TurnRateGamepadYaw/Pitch, degrees a second).
+	// AddYaw/PitchInput still multiply by the engine's legacy look scale (2.5,
+	// BaseGame.ini, bEnableLegacyInputScales), so that is divided out here. The
+	// first constants, 300 and 220 with no such allowance, turned a full stick
+	// at about 52 degrees a second: a 180 took three and a half seconds.
+	constexpr float DefaultSensitivity = 0.07f;		// UOneBrahamGameUserSettings::GamepadSensitivityX/Y
+	constexpr float TurnRateYaw = 165.f;
+	constexpr float TurnRatePitch = 125.f;
+	constexpr float LegacyLookScale = 2.5f;
 	const float DeltaTime = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.016f;
-	AddYawInput(Axis.X * SensX * 300.f * DeltaTime);
-	AddPitchInput((bInvertY ? Axis.Y : -Axis.Y) * SensY * 220.f * DeltaTime);
+	AddYawInput(Axis.X * AimScale * (SensX / DefaultSensitivity) * (TurnRateYaw / LegacyLookScale) * DeltaTime);
+	AddPitchInput((bInvertY ? Axis.Y : -Axis.Y) * AimScale * (SensY / DefaultSensitivity) * (TurnRatePitch / LegacyLookScale) * DeltaTime);
 }
 
 void AOneBrahamPlayerController::Input_JumpStarted(const FInputActionValue& Value)

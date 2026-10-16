@@ -34,7 +34,7 @@ it into two sides pushing a line.
 | Players | 12 (6v6) or 16 (8v8) |
 | Teams | Internal Staff vs External Contractors |
 | Objective | TDM/control over three points: Lobby, Server Floor, Canteen–Skydeck |
-| Respawn | wave respawn every 12 s, spawn protection 3 s (ended by any attack), no downed state |
+| Respawn | wave respawn every 5 s, spawn protection 3 s (ended by any attack), no downed state |
 | Match length | 10 minutes, or first to 200 points |
 | Why it exists | it is how a player learns the map, the weapons and the callouts without losing a 25-minute run to it |
 
@@ -106,6 +106,16 @@ is the single best story a squad will tell after a match.
 
 A door left open stays open. That is a decision the player made and the building
 remembers it.
+
+The door's placement (`ZoneId`, `ZoneDisplayName`, `RequiredTier`, `FloorIndex`,
+`bEscalationOpens`, `PairedZoneId`, `bUnlockedAtStart`, `bBreachable`) is applied
+to its `UOneBrahamAccessZoneComponent` in `PostInitializeComponents`, so the
+component already has its id and starting lock state when its own `BeginPlay`
+runs, and applied again in the actor's `BeginPlay` before the component's, for a
+zone spawned at runtime whose values arrive after that. Game worlds only: an editor
+world is skipped, so the map builder never saves a derived id. The placement
+properties replicate once (`COND_InitialOnly`), so a runtime-spawned zone reaches
+clients with its id and tier; zones loaded from the map already carry them.
 
 ---
 
@@ -208,7 +218,7 @@ state, so a bot never walks into a door a player sealed five seconds ago.
 | `SquadSize` | 4 | 6 |
 | `SquadCount` | 3 | 2 |
 | `bAllowRespawn` | false | true |
-| `RespawnDelaySeconds` | 0 | 12 |
+| `RespawnDelaySeconds` | 0 | 5 |
 | `bDownedStateEnabled` | true | false |
 | `BleedOutSeconds` | 45 | 0 |
 | `ReviveSeconds` | 4.0 | 0 |
@@ -239,7 +249,19 @@ Four endings, all designed, none of them a null:
 | **No survivors** | every squad eliminated, including by the purge | every player listed as lost, the building named as the cause |
 | **Time out** | the hard limit is reached | nobody extracts, everybody lost |
 
-The last two are the reason the game has a tone. A match that goes wrong in this
+The server enforces the time out in every timed mode. `AOneBrahamGameMode::Tick`
+ends the match when `HasMatchTimeLimitExpired` says so, reading the same clock as
+the HUD countdown and counting through Extraction as well as Active, so a
+helicopter on its way does not stop it. `DecideTimeOutOutcome` then picks the
+ending per mode (tested by `OneBraham.Match.TimeLimit` and `TimeOutOutcome`):
+
+| Mode | When the limit is reached |
+| --- | --- |
+| ASCENT | the **Time out** ending above, with its own Tannoy line ("The building is now closed. Nobody has been extracted...") |
+| FIRE DRILL | the team with more points wins; a tie, or no score at all, is a draw with its own announcement |
+| NIGHT SHIFT | never reached: the mode has no time limit. The waves are its clock, and surviving the last one is the win |
+
+The last two endings are the reason the game has a tone. A match that goes wrong in this
 building should end with nobody walking out of it, and the results screen should
 say so plainly rather than pretending a losing squad "placed second".
 

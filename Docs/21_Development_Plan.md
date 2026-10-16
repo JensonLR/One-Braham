@@ -202,6 +202,10 @@ The known gaps, from the end of Docs/18 and the session log:
 
 ### M6 — Ship
 
+- [x] First packaged Mac Development build boots clean, with no warnings.
+      `Scripts/SmokePackaged.sh` is the unattended check for every Mac package
+      from here (Docs/18 §3, `-OBSmoke`). The bundle identifier is
+      `com.onbreakgame.onbreak`.
 - [ ] Windows build packaged and uploaded to Steam (Docs/20 §11).
 - [ ] Xbox build through ID@Xbox (§5).
 - [ ] Store pages, trailer, capsule art (Docs/19); legal notices including the

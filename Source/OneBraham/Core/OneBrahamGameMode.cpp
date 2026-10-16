@@ -228,18 +228,19 @@ void AOneBrahamGameMode::Tick(float DeltaSeconds)
 		}
 	}
 
-	// FIRE DRILL control point scoring and time limit.
+	// Time limit, for every mode that has one. The game state's
+	// MatchTimeLimitSeconds is the number the HUD counts down from, so the
+	// match ends when the clock players can see says it does - ASCENT's 35
+	// minutes included, which used to be a countdown to nothing.
 	AOneBrahamGameState* GS = GetOBGameState();
-	if (GS != nullptr && GS->MatchPhase == EOneBrahamMatchPhase::Active && MatchSettings->Mode == EOneBrahamMatchMode::FireDrill)
+	if (GS != nullptr && !bMatchFinished
+		&& HasMatchTimeLimitExpired(GS->MatchTimeLimitSeconds, GS->PhaseElapsedSeconds, GS->MatchPhase))
 	{
-		if (MatchSettings->bScoreByTimeLimit && GS->PhaseElapsedSeconds >= MatchSettings->TimeLimitSeconds)
-		{
-			HandleMatchTimeLimitReached();
-		}
+		HandleMatchTimeLimitReached();
 	}
 
 	// Keep the survivor count fresh for the HUD.
-	if (GS != nullptr && GS != nullptr && (GS->MatchPhase == EOneBrahamMatchPhase::Active || GS->MatchPhase == EOneBrahamMatchPhase::Extraction))
+	if (GS != nullptr && (GS->MatchPhase == EOneBrahamMatchPhase::Active || GS->MatchPhase == EOneBrahamMatchPhase::Extraction))
 	{
 		GS->SurvivorsRemaining = GS->GetAlivePlayerCount();
 	}
@@ -277,6 +278,31 @@ void AOneBrahamGameMode::StartActiveMatch()
 	MatchStartTime = GetWorld()->GetTimeSeconds();
 
 	Announce(FText::FromString(TEXT("The lift lobby is open. Ascend.")), true);
+
+	// Bring in everyone held back during warmup. HandleStartingNewPlayer parks
+	// ASCENT players as spectators of the plaza until now, and nothing else
+	// spawned them: every match began with an empty building and ended "no
+	// survivors". Players on the spectator team (squads full) stay spectating.
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		APlayerController* PlayerController = It->Get();
+		if (PlayerController == nullptr || PlayerController->GetPawn() != nullptr)
+		{
+			continue;
+		}
+
+		AOneBrahamPlayerState* State = PlayerController->GetPlayerState<AOneBrahamPlayerState>();
+		if (State == nullptr || State->Team == EOneBrahamTeam::Spectator)
+		{
+			continue;
+		}
+
+		if (State->LifeState == EOneBrahamLifeState::Spectating)
+		{
+			State->LifeState = EOneBrahamLifeState::Alive;
+		}
+		RestartPlayer(PlayerController);
+	}
 
 	BindGameStateComponents();
 
@@ -505,7 +531,8 @@ void AOneBrahamGameMode::CompleteMatchNoSurvivors()
 	FinishMatch(EOneBrahamTeam::None, FString(), /*bNoSurvivors*/ true, 0, EOneBrahamExtractionFailReason::CallersEliminated);
 }
 
-void AOneBrahamGameMode::FinishMatch(EOneBrahamTeam WinningTeam, const FString& WinningSquadName, bool bNoSurvivors, int32 ExtractedCount, EOneBrahamExtractionFailReason FailReason)
+void AOneBrahamGameMode::FinishMatch(EOneBrahamTeam WinningTeam, const FString& WinningSquadName, bool bNoSurvivors, int32 ExtractedCount,
+	EOneBrahamExtractionFailReason FailReason, const FText& AnnouncementOverride)
 {
 	bMatchFinished = true;
 	SetMatchPhase(EOneBrahamMatchPhase::Complete);
@@ -521,7 +548,11 @@ void AOneBrahamGameMode::FinishMatch(EOneBrahamTeam WinningTeam, const FString& 
 
 	// End-of-match announcements: the Tannoy gets the last word, as it should.
 	FText Announcement;
-	if (bNoSurvivors)
+	if (!AnnouncementOverride.IsEmpty())
+	{
+		Announcement = AnnouncementOverride;
+	}
+	else if (bNoSurvivors)
 	{
 		Announcement = FText::FromString(TEXT("All staff accounted for. There are no survivors. Please await further instruction."));
 	}
@@ -782,31 +813,90 @@ void AOneBrahamGameMode::AddTeamScoreByIndex(int32 TeamIndex, int32 Amount)
 	}
 }
 
-void AOneBrahamGameMode::HandleMatchTimeLimitReached()
+bool AOneBrahamGameMode::HasMatchTimeLimitExpired(float TimeLimitSeconds, float ElapsedSeconds, EOneBrahamMatchPhase Phase)
 {
-	AOneBrahamGameState* GS = GetOBGameState();
-	if (GS == nullptr || GS->TeamScores.Num() == 0)
+	if (TimeLimitSeconds <= 0.f)
 	{
-		CompleteMatchNoSurvivors();
-		return;
+		return false;
 	}
 
-	int32 BestIndex = 0;
-	for (int32 Index = 1; Index < GS->TeamScores.Num(); ++Index)
+	if (Phase != EOneBrahamMatchPhase::Active && Phase != EOneBrahamMatchPhase::Extraction)
 	{
-		if (GS->TeamScores[Index] > GS->TeamScores[BestIndex])
+		return false;
+	}
+
+	return ElapsedSeconds >= TimeLimitSeconds;
+}
+
+FOneBrahamTimeOutOutcome AOneBrahamGameMode::DecideTimeOutOutcome(EOneBrahamMatchMode Mode, const TArray<int32>& TeamScores)
+{
+	FOneBrahamTimeOutOutcome Outcome;
+
+	// ASCENT (and anything else without points): the hard limit is the "Time
+	// out" ending. Nobody extracts and the results screen says everybody lost
+	// rather than ranking the squad that happened to be highest in the tower.
+	if (Mode != EOneBrahamMatchMode::FireDrill)
+	{
+		Outcome.bNoSurvivors = true;
+		return Outcome;
+	}
+
+	// FIRE DRILL: most points when the drill ends. Level at the top is a draw,
+	// whatever the number of teams.
+	int32 BestIndex = INDEX_NONE;
+	bool bLevel = false;
+	for (int32 Index = 0; Index < TeamScores.Num(); ++Index)
+	{
+		if (BestIndex == INDEX_NONE || TeamScores[Index] > TeamScores[BestIndex])
 		{
 			BestIndex = Index;
+			bLevel = false;
+		}
+		else if (TeamScores[Index] == TeamScores[BestIndex])
+		{
+			bLevel = true;
 		}
 	}
 
-	const bool bDraw = GS->TeamScores.Num() > 1 && GS->TeamScores[0] == GS->TeamScores[1];
-	const EOneBrahamTeam WinningTeam = bDraw
-		? EOneBrahamTeam::None
-		: (BestIndex == 0 ? EOneBrahamTeam::InternalStaff : EOneBrahamTeam::ExternalContractors);
+	if (BestIndex == INDEX_NONE || bLevel)
+	{
+		Outcome.bDraw = true;
+		Outcome.WinningSquadName = TEXT("Draw");
+		return Outcome;
+	}
 
-	FinishMatch(WinningTeam, bDraw ? TEXT("Draw") : (BestIndex == 0 ? TEXT("Internal Staff") : TEXT("External Contractors")),
-		false, 0, EOneBrahamExtractionFailReason::LoiterExpired);
+	Outcome.WinningTeam = BestIndex == 0 ? EOneBrahamTeam::InternalStaff : EOneBrahamTeam::ExternalContractors;
+	Outcome.WinningSquadName = BestIndex == 0 ? TEXT("Internal Staff") : TEXT("External Contractors");
+	return Outcome;
+}
+
+void AOneBrahamGameMode::HandleMatchTimeLimitReached()
+{
+	if (bMatchFinished)
+	{
+		return;
+	}
+
+	const AOneBrahamGameState* GS = GetOBGameState();
+	const EOneBrahamMatchMode Mode = GetMatchMode();
+	const FOneBrahamTimeOutOutcome Outcome = DecideTimeOutOutcome(Mode, GS != nullptr ? GS->TeamScores : TArray<int32>());
+
+	OB_MATCH_LOG("Time limit reached (%.0fs) in %s: winner=%s draw=%d nobodyOut=%d",
+		GS != nullptr ? GS->MatchTimeLimitSeconds : 0.f, *UEnum::GetValueAsString(Mode),
+		*UEnum::GetValueAsString(Outcome.WinningTeam), Outcome.bDraw ? 1 : 0, Outcome.bNoSurvivors ? 1 : 0);
+
+	FText Announcement;
+	if (Outcome.bNoSurvivors)
+	{
+		Announcement = FText::FromString(TEXT("The building is now closed. Nobody has been extracted. Please await further instruction."));
+	}
+	else if (Outcome.bDraw)
+	{
+		Announcement = FText::FromString(TEXT("The fire drill has ended. Both departments are level. Please return to your desks."));
+	}
+
+	FinishMatch(Outcome.WinningTeam, Outcome.WinningSquadName, Outcome.bNoSurvivors, 0,
+		EOneBrahamExtractionFailReason::None, Announcement);
 }
 
 void AOneBrahamGameMode::EvaluateMatchEndConditions()
@@ -892,6 +982,15 @@ void AOneBrahamGameMode::AssignPlayerToSquad(AOneBrahamPlayerState* PlayerState)
 	if (GS == nullptr)
 	{
 		return;
+	}
+
+	// The replicated squad list is built from the squad plan InitGame made, but
+	// only ever rebuilt after an assignment - so the first player searched an
+	// empty list, found "all 0 squads full" and joined as a spectator, and so
+	// did everyone after them. Build it before searching it.
+	if (GS->Squads.Num() != SquadToTeamMap.Num())
+	{
+		RebuildSquadInfo();
 	}
 
 	// Find the squad with the fewest members that is not full. Squads fill in

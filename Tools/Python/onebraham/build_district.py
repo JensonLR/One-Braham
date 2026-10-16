@@ -909,7 +909,10 @@ def build_sky(report, preset=None):
         component.set_static_mesh(unreal.EditorAssetLibrary.load_asset("/Engine/BasicShapes/Sphere.Sphere"))
         component.set_material(0, instance or material)
         component.set_editor_property("cast_shadow", False)
-        component.set_collision_enabled(unreal.CollisionEnabled.NO_COLLISION)
+        # The profile, not just the enabled flag: a StaticMeshActor's BlockAll
+        # profile reapplies itself when the map loads, and a blocking 10 km
+        # sphere round the origin swallows every spawn point and trace.
+        component.set_collision_profile_name("NoCollision")
         dome.set_actor_scale3d(unreal.Vector(10000.0, 10000.0, 10000.0))   # 10 km across
         dome.set_actor_label("Sky_Dome_" + preset.capitalize())
 

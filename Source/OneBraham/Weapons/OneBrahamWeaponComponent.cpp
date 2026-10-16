@@ -128,7 +128,7 @@ void UOneBrahamWeaponComponent::BeginPlay()
 	if (WeaponRegistry == nullptr)
 	{
 		OB_ERROR("No weapon registry on '%s'. Weapons will not function. "
-			"Run Tools/Python/create_data_assets.py and assign DA_WeaponRegistry.", *GetOwner()->GetName());
+			"Run Scripts/BuildContent.sh --only weapons to build DA_WeaponRegistry.", *GetOwner()->GetName());
 	}
 
 	HitboxHistory.Reserve(64);

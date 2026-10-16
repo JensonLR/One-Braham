@@ -22,6 +22,7 @@
 #include "Components/WidgetSwitcher.h"
 #include "Core/OneBrahamGameSettings.h"
 #include "Core/OneBrahamGameUserSettings.h"
+#include "Core/OneBrahamPlayerController.h"
 #include "Core/OneBrahamPlayerState.h"
 
 namespace
@@ -32,6 +33,7 @@ namespace
 #include "HAL/PlatformTime.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
+#include "InputModifiers.h"
 #include "Voice/OneBrahamMicrophonePermission.h"
 #include "Voice/OneBrahamProximityVoiceComponent.h"
 
@@ -611,6 +613,7 @@ void UOneBrahamSettingsWidget::BuildControlsPage()
 {
 	using namespace OneBrahamSettingsLayout;
 
+	ControlsTabIndex = TabButtons.Num();
 	UVerticalBox* Page = AddPage(NSLOCTEXT("OneBraham", "Settings_TabControls", "CONTROLS"));
 
 	AddNote(Page, NSLOCTEXT("OneBraham", "Settings_ControlsNote",
@@ -626,11 +629,27 @@ void UOneBrahamSettingsWidget::BuildControlsPage()
 	Page->AddChildToVerticalBox(Headings)->SetPadding(FMargin(0.f, 8.f, 0.f, 4.f));
 	Page->AddChildToVerticalBox(MakeRule(FLinearColor(Ink().R, Ink().G, Ink().B, 0.1f)));
 
-	const TArray<FOneBrahamBindingLine> Lines = GatherBindings();
+	ControlsRows = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ControlsRows"));
+	Page->AddChildToVerticalBox(ControlsRows);
+	RefreshControlsRows();
+}
+
+void UOneBrahamSettingsWidget::RefreshControlsRows()
+{
+	using namespace OneBrahamSettingsLayout;
+
+	if (ControlsRows == nullptr)
+	{
+		return;
+	}
+
+	ControlsRows->ClearChildren();
+
+	const TArray<FOneBrahamBindingLine> Lines = GatherBindings(GetOwningPlayer());
 
 	if (Lines.IsEmpty())
 	{
-		AddNote(Page, NSLOCTEXT("OneBraham", "Settings_NoBindings",
+		AddNote(ControlsRows, NSLOCTEXT("OneBraham", "Settings_NoBindings",
 			"No input mapping contexts are loaded. Run the input content build."));
 		return;
 	}
@@ -644,25 +663,131 @@ void UOneBrahamSettingsWidget::BuildControlsPage()
 			->SetVerticalAlignment(VAlign_Center);
 		Row->AddChildToHorizontalBox(MakeCell(MakeLabel(Line.Controller, EOneBrahamTextSize::Small, InkMuted()), 260.f, 30.f))
 			->SetVerticalAlignment(VAlign_Center);
-		Page->AddChildToVerticalBox(Row);
+		ControlsRows->AddChildToVerticalBox(Row);
 	}
 }
 
-TArray<FOneBrahamBindingLine> UOneBrahamSettingsWidget::GatherBindings()
+FString UOneBrahamSettingsWidget::KeyLabel(const FKey& Key)
+{
+	// Engine display names are written for the editor ("Mouse XY 2D-Axis",
+	// "Gamepad Face Button Bottom"); the ones a player reads are spelled out
+	// here. Both axes of a stick print as the stick, so X and Y mappings of
+	// one action collapse into one entry.
+	static const TMap<FName, FString> Labels =
+	{
+		{ EKeys::Mouse2D.GetFName(),					TEXT("MOUSE") },
+		{ EKeys::MouseX.GetFName(),						TEXT("MOUSE") },
+		{ EKeys::MouseY.GetFName(),						TEXT("MOUSE") },
+		{ EKeys::MouseWheelAxis.GetFName(),				TEXT("MOUSE WHEEL") },
+		{ EKeys::MouseScrollUp.GetFName(),				TEXT("WHEEL UP") },
+		{ EKeys::MouseScrollDown.GetFName(),			TEXT("WHEEL DOWN") },
+		{ EKeys::LeftMouseButton.GetFName(),			TEXT("LEFT MOUSE") },
+		{ EKeys::RightMouseButton.GetFName(),			TEXT("RIGHT MOUSE") },
+		{ EKeys::MiddleMouseButton.GetFName(),			TEXT("MIDDLE MOUSE") },
+		{ EKeys::ThumbMouseButton.GetFName(),			TEXT("MOUSE 4") },
+		{ EKeys::ThumbMouseButton2.GetFName(),			TEXT("MOUSE 5") },
+		{ EKeys::Gamepad_Left2D.GetFName(),				TEXT("LEFT STICK") },
+		{ EKeys::Gamepad_LeftX.GetFName(),				TEXT("LEFT STICK") },
+		{ EKeys::Gamepad_LeftY.GetFName(),				TEXT("LEFT STICK") },
+		{ EKeys::Gamepad_Right2D.GetFName(),			TEXT("RIGHT STICK") },
+		{ EKeys::Gamepad_RightX.GetFName(),				TEXT("RIGHT STICK") },
+		{ EKeys::Gamepad_RightY.GetFName(),				TEXT("RIGHT STICK") },
+		{ EKeys::Gamepad_LeftThumbstick.GetFName(),		TEXT("L3") },
+		{ EKeys::Gamepad_RightThumbstick.GetFName(),	TEXT("R3") },
+		{ EKeys::Gamepad_FaceButton_Bottom.GetFName(),	TEXT("A / CROSS") },
+		{ EKeys::Gamepad_FaceButton_Right.GetFName(),	TEXT("B / CIRCLE") },
+		{ EKeys::Gamepad_FaceButton_Left.GetFName(),	TEXT("X / SQUARE") },
+		{ EKeys::Gamepad_FaceButton_Top.GetFName(),		TEXT("Y / TRIANGLE") },
+		{ EKeys::Gamepad_LeftShoulder.GetFName(),		TEXT("LB / L1") },
+		{ EKeys::Gamepad_RightShoulder.GetFName(),		TEXT("RB / R1") },
+		{ EKeys::Gamepad_LeftTrigger.GetFName(),		TEXT("LT / L2") },
+		{ EKeys::Gamepad_LeftTriggerAxis.GetFName(),	TEXT("LT / L2") },
+		{ EKeys::Gamepad_RightTrigger.GetFName(),		TEXT("RT / R2") },
+		{ EKeys::Gamepad_RightTriggerAxis.GetFName(),	TEXT("RT / R2") },
+		{ EKeys::Gamepad_DPad_Up.GetFName(),			TEXT("D-PAD UP") },
+		{ EKeys::Gamepad_DPad_Down.GetFName(),			TEXT("D-PAD DOWN") },
+		{ EKeys::Gamepad_DPad_Left.GetFName(),			TEXT("D-PAD LEFT") },
+		{ EKeys::Gamepad_DPad_Right.GetFName(),			TEXT("D-PAD RIGHT") },
+		{ EKeys::Gamepad_Special_Left.GetFName(),		TEXT("VIEW / SHARE") },
+		{ EKeys::Gamepad_Special_Right.GetFName(),		TEXT("MENU / OPTIONS") },
+	};
+
+	if (const FString* Label = Labels.Find(Key.GetFName()))
+	{
+		return *Label;
+	}
+
+	return Key.GetDisplayName(/*bLongDisplayName=*/ false).ToString().ToUpper();
+}
+
+TArray<FOneBrahamBindingLine> UOneBrahamSettingsWidget::GatherBindings(const APlayerController* Owner)
 {
 	TArray<FOneBrahamBindingLine> Lines;
 
+	// What the player actually has: the controller's contexts are the ones it
+	// installed (an authored asset, or the context it built from the ini with
+	// the player's rebinds). Only without a One Braham controller - the main
+	// menu's page before any is spawned, a test - fall back to the settings.
 	const UOneBrahamGameSettings& GameSettings = UOneBrahamGameSettings::Get();
-	const UInputMappingContext* Contexts[] =
+	const AOneBrahamPlayerController* Controller = Cast<AOneBrahamPlayerController>(Owner);
+
+	const UInputMappingContext* Gameplay = Controller != nullptr ? Controller->GameplayMappingContext.Get() : nullptr;
+	const UInputMappingContext* Common = Controller != nullptr ? Controller->CommonMappingContext.Get() : nullptr;
+	if (Gameplay == nullptr && !GameSettings.DefaultMappingContext.IsNull())
 	{
-		GameSettings.DefaultMappingContext.LoadSynchronous(),
-		GameSettings.CommonMappingContext.LoadSynchronous(),
+		Gameplay = GameSettings.DefaultMappingContext.LoadSynchronous();
+	}
+	if (Common == nullptr && !GameSettings.CommonMappingContext.IsNull())
+	{
+		Common = GameSettings.CommonMappingContext.LoadSynchronous();
+	}
+
+	const UInputMappingContext* Contexts[] = { Gameplay, Common };
+
+	// One key as found: its label, and where it sorts within its action.
+	struct FKeyEntry
+	{
+		FString Label;
+		int32 Rank = 0;
+		int32 Index = 0;
+	};
+
+	// A button on an axis action reads as a direction, set by the modifiers
+	// both the authored contexts and BuildMappingContextFromIni use (Move:
+	// swizzle = Y, negate = minus). Sorting by direction lists Move as
+	// W, A, S, D whatever order the context holds the mappings in; Lean lists
+	// its negative (left) key first. Analog keys and plain buttons keep the
+	// order the context lists them.
+	auto DirectionRank = [](const UInputAction& Action, const FEnhancedActionKeyMapping& Mapping) -> int32
+	{
+		if (Mapping.Key.IsAnalog() || Action.ValueType == EInputActionValueType::Boolean)
+		{
+			return 0;
+		}
+
+		bool bSwizzle = false;
+		bool bNegate = false;
+		for (const UInputModifier* Modifier : Mapping.Modifiers)
+		{
+			bSwizzle |= Modifier != nullptr && Modifier->IsA<UInputModifierSwizzleAxis>();
+			bNegate |= Modifier != nullptr && Modifier->IsA<UInputModifierNegate>();
+		}
+
+		if (Action.ValueType == EInputActionValueType::Axis1D)
+		{
+			return bNegate ? 0 : 1;
+		}
+
+		// Forward, left, back, right: the WASD reading order.
+		return bSwizzle ? (bNegate ? 2 : 0) : (bNegate ? 1 : 3);
 	};
 
 	// Action -> (keyboard keys, pad keys), in the order the contexts list them,
 	// so the page reads in the order the input designer laid the actions out.
+	// Every mapping of an action lands on that action's one line: Move's four
+	// keys are one row, not four.
 	TArray<const UInputAction*> Order;
-	TMap<const UInputAction*, TPair<TArray<FString>, TArray<FString>>> Keys;
+	TMap<const UInputAction*, TPair<TArray<FKeyEntry>, TArray<FKeyEntry>>> Keys;
 
 	for (const UInputMappingContext* Context : Contexts)
 	{
@@ -683,15 +808,42 @@ TArray<FOneBrahamBindingLine> UOneBrahamSettingsWidget::GatherBindings()
 				Order.Add(Mapping.Action);
 			}
 
-			TPair<TArray<FString>, TArray<FString>>& Entry = Keys.FindOrAdd(Mapping.Action);
-			TArray<FString>& Column = Mapping.Key.IsGamepadKey() ? Entry.Value : Entry.Key;
-			Column.AddUnique(Mapping.Key.GetDisplayName().ToString().ToUpper());
+			TPair<TArray<FKeyEntry>, TArray<FKeyEntry>>& Entry = Keys.FindOrAdd(Mapping.Action);
+			TArray<FKeyEntry>& Column = Mapping.Key.IsGamepadKey() ? Entry.Value : Entry.Key;
+
+			FKeyEntry Key;
+			Key.Label = KeyLabel(Mapping.Key);
+			Key.Rank = DirectionRank(*Mapping.Action, Mapping);
+			Key.Index = Column.Num();
+			Column.Add(MoveTemp(Key));
 		}
 	}
 
+	auto Join = [](TArray<FKeyEntry>& Column) -> FText
+	{
+		if (Column.IsEmpty())
+		{
+			return NSLOCTEXT("OneBraham", "Settings_Unbound", "-");
+		}
+
+		Column.Sort([](const FKeyEntry& A, const FKeyEntry& B)
+		{
+			return A.Rank != B.Rank ? A.Rank < B.Rank : A.Index < B.Index;
+		});
+
+		// Each key once: both contexts may map it, and both axes of a stick
+		// print as the stick. Commas, since a pad label carries its own slash.
+		TArray<FString> Labels;
+		for (const FKeyEntry& Key : Column)
+		{
+			Labels.AddUnique(Key.Label);
+		}
+		return FText::FromString(FString::Join(Labels, TEXT(", ")));
+	};
+
 	for (const UInputAction* Action : Order)
 	{
-		const TPair<TArray<FString>, TArray<FString>>& Entry = Keys[Action];
+		TPair<TArray<FKeyEntry>, TArray<FKeyEntry>>& Entry = Keys[Action];
 
 		FOneBrahamBindingLine Line;
 
@@ -708,9 +860,8 @@ TArray<FOneBrahamBindingLine> UOneBrahamSettingsWidget::GatherBindings()
 			Line.Action = SignageCase(Name);
 		}
 
-		const FText Dash = NSLOCTEXT("OneBraham", "Settings_Unbound", "-");
-		Line.KeyboardMouse = Entry.Key.IsEmpty() ? Dash : FText::FromString(FString::Join(Entry.Key, TEXT("  /  ")));
-		Line.Controller = Entry.Value.IsEmpty() ? Dash : FText::FromString(FString::Join(Entry.Value, TEXT("  /  ")));
+		Line.KeyboardMouse = Join(Entry.Key);
+		Line.Controller = Join(Entry.Value);
 		Lines.Add(MoveTemp(Line));
 	}
 
@@ -771,6 +922,10 @@ void UOneBrahamSettingsWidget::SelectTab(int32 Index)
 	{
 		NextVoicePollSeconds = 0.0;
 		RefreshVoiceStatus();
+	}
+	else if (Index == ControlsTabIndex)
+	{
+		RefreshControlsRows();
 	}
 }
 

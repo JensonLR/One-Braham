@@ -43,6 +43,17 @@ WHAT IT CHECKS
        what the control-schema automation test reads - and it had drifted by
        eight rows while a comment above it claimed a test would catch that.
 
+    6. Every field the struct declares is read somewhere in C++. A field nothing
+       reads is an action no handler is bound to: a key that does nothing, from
+       the other end.
+    7. No action is bound to both mouse movement and a stick. The mouse reports
+       a distance moved this frame and the stick a deflection held, so one
+       handler cannot scale both: stick look on `IA_Look` turned faster at a
+       higher frame rate. The stick is `IA_LookGamepad`'s.
+    8. Every `KEY_MODIFIERS` entry names an (action, key) pair the ACTIONS
+       table binds. An entry that matches nothing is skipped without a word -
+       which is how a stick loses its dead zone when its key moves action.
+
     The ACTIONS table is read with `ast`, not by importing `build_input.py`: that
     module imports `unreal`, so importing it would tie a static check to a running
     editor, and the whole point of these checks is that they run without one.
@@ -87,6 +98,13 @@ INI_BINDING = re.compile(r'^\+[A-Za-z]*Binding\s*=\s*(IA_[A-Za-z0-9_]+)\s*,', re
 #: `+ActionPrompt=IA_Map=Floor plan overlay`.
 INI_PROMPT = re.compile(r'^\+ActionPrompt\s*=\s*(IA_[A-Za-z0-9_]+)\s*=', re.MULTILINE)
 
+#: Keys that report how far the mouse moved this frame, not a held value.
+POINTER_KEYS = {"Mouse2D", "MouseX", "MouseY"}
+
+#: Keys that report how far a stick is held over.
+STICK_KEYS = {"Gamepad_Left2D", "Gamepad_Right2D", "Gamepad_LeftX", "Gamepad_LeftY",
+              "Gamepad_RightX", "Gamepad_RightY"}
+
 #: `{ TEXT("Map"), Map }` in ValidateAllActionsSet's Required table.
 VALIDATED_FIELD = re.compile(r'\{\s*TEXT\("([A-Za-z0-9_]+)"\)\s*,\s*([A-Za-z0-9_]+)\s*\}')
 
@@ -121,6 +139,23 @@ def generated_actions():
         return []
 
     return [row[1][3:] for row in table if len(row) > 1 and row[1].startswith("IA_")]
+
+
+def action_keys():
+    """(action name without IA_, every default key) from the ACTIONS table."""
+    table = _literal_assignment(BUILD_INPUT, "ACTIONS")
+
+    if table is None:
+        return []
+
+    return [(row[1][3:], list(row[3]) + list(row[4]))
+            for row in table if len(row) > 4 and row[1].startswith("IA_")]
+
+
+def key_modifier_pairs():
+    """The (action, key) pairs KEY_MODIFIERS gives a modifier to."""
+    table = _literal_assignment(BUILD_INPUT, "KEY_MODIFIERS")
+    return list(table.keys()) if isinstance(table, dict) else []
 
 
 def config_fields():
@@ -310,6 +345,39 @@ def run(source_root=None):
                 u"{0}:{1} - InputConfig->{2} is not a field of UOneBrahamInputConfig "
                 u"(fields: {3})".format(rel, number, field, ", ".join(sorted(field_set))[:120]),
                 u"missing field"))
+
+    # 6. Every declared field is read by something.
+    read_fields = set(field for _rel, _number, field, _called in reads)
+
+    for name in fields:
+        if name not in read_fields:
+            problems.append((
+                u"UOneBrahamInputConfig::{0} is never read in Source/OneBraham - no "
+                u"handler is bound to IA_{0}, so its key does nothing".format(name),
+                u"unread field"))
+
+    # 7. Mouse movement and a stick never share an action.
+    bound = action_keys()
+
+    for name, keys in bound:
+        pointer = sorted(set(keys) & POINTER_KEYS)
+        stick = sorted(set(keys) & STICK_KEYS)
+        if pointer and stick:
+            problems.append((
+                u"IA_{0} is bound to {1} and {2} - a mouse delta and a stick "
+                u"deflection need different handlers, or the stick's turn rate "
+                u"follows the frame rate".format(name, ", ".join(pointer), ", ".join(stick)),
+                u"mixed look"))
+
+    # 8. Every per-key modifier lands on a binding.
+    bound_pairs = set(("IA_" + name, key) for name, keys in bound for key in keys)
+
+    for action, key in key_modifier_pairs():
+        if (action, key) not in bound_pairs:
+            problems.append((
+                u"KEY_MODIFIERS gives {0} on {1} a modifier, but ACTIONS does not bind "
+                u"that key to that action - the modifier is never applied".format(action, key),
+                u"stray modifier"))
 
     return len(reads), problems
 

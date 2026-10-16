@@ -263,7 +263,7 @@ UOneBrahamMatchSettingsAsset* UOneBrahamGameInstance::GetMatchSettings(EOneBraha
 		Settings->EnsureDefaults();
 
 		OB_WARN("Match settings asset '%s' missing - generated a runtime default. "
-			"Run Tools/Python/create_data_assets.py to author the real asset.", *AssetPath);
+			"Run Scripts/BuildContent.sh --only match_settings to author the real asset.", *AssetPath);
 	}
 
 	CachedMatchSettings.Add(Mode, Settings);

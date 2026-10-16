@@ -43,8 +43,8 @@ Nothing in `Content/OneBraham` is hand-placed that a script can place. Nothing i
 
 ## 2. The C++ module
 
-`Source/OneBraham` is thirteen systems plus the test suite, fourteen folders in
-all. Each one is a system with a single owner:
+`Source/OneBraham` is fifteen systems plus the development tools and the test
+suite, seventeen folders in all. Each one has a single owner:
 
 | Folder | Contents | Belongs to |
 | --- | --- | --- |
@@ -63,6 +63,7 @@ all. Each one is a system with a single owner:
 | `Audio/` | procedural audio, types, bank asset, audio manager component | PART 12 |
 | `VFX/` | VFX statics, camera shake | PART 11 |
 | `Data/` | weapon definition/registry, match settings, character data asset | PART 3 |
+| `Dev/` | development-only tools compiled out of Shipping: `OneBrahamSmokeTest`, the `-OBSmoke` packaged smoke test | PART 18 |
 | `Tests/` | the automation suite, one file per system it covers | PART 18 |
 
 Conventions that hold across all of it:

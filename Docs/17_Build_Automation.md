@@ -16,7 +16,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 
 | Script | Builds | Needs the editor | Idempotent |
 | --- | --- | --- | --- |
-| `generate_input_ini.py` | `Config/DefaultInput.ini` `[OneBraham.Input]`, 41 actions, 72 bindings | no | yes |
+| `generate_input_ini.py` | `Config/DefaultInput.ini` `[OneBraham.Input]`, 42 actions, 72 bindings | no | yes |
 | `build_materials.py` | 15 physical materials, 9 masters (node graphs, one of them the post-process interaction outline), 28 instances | yes | yes |
 | `build_environment.py` | the map: 9 areas, 18 levels, 48 rooms, 10 access zones, 5 terminals, 4 breach walls, 28 shutters | yes | yes |
 | `build_district.py` | Aldgate East round the tower (run by `build_environment`): OSM buildings extruded with `M_OB_Facade` in eight window-pattern variants, roof plant, shopfronts on the near streets, streets, kerbs, markings, traffic, lamps, parks, trees, play bounds | yes | yes |
@@ -28,7 +28,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `build_characters.py` | the cast payload + `ABP_OneBrahamCharacter` when the skeleton exists | yes | yes |
 | `apply_cast_payload.py` | writes the payload onto `DA_CharacterRegistry`, verifies 6 archetypes | yes | yes |
 | `build_audio.py` | 12 sound classes, 3 submixes, 4 mixes, 13 attenuations, 11 ambience, 8 music, `DA_AudioBank` | yes | yes |
-| `build_input.py` | 41 input actions, 4 mapping contexts, `DA_InputConfig` | yes | yes |
+| `build_input.py` | 42 input actions, 4 mapping contexts, `DA_InputConfig` | yes | yes |
 | `build_ui.py` | 11 widget blueprints, the HUD string table, the font slot, the palette check | yes | yes |
 | `build_vfx.py` | 17 Niagara systems, 3 camera shakes, 6 decal materials, the authoring sheet | yes | yes |
 | `import_font.py` | font faces from `Content/UI/Fonts` | yes | yes |
@@ -38,7 +38,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `check_calls.py` | call sites whose argument count cannot match the project's own declaration (defaults honoured, qualified calls skipped) | **no** | yes |
 | `check_gameplay_tags.py` | every tag the code requests, declared natively or in `DefaultGame.ini`; resolves `Printf`-assembled tags from local string tables; and every tag the documentation names, the 147-entry registry block in Docs/03 included | **no** | yes |
 | `check_building_layout.py` | the floor/area table the map is built from against the floor table the game describes (`DA_BuildingLayout` / its compiled-in default) | **no** | yes |
-| `check_input_actions.py` | every generated `IA_` action against the `UOneBrahamInputConfig` field that points at it, every field against its action, every `DefaultInput.ini` binding and prompt against a real action, and every `InputConfig->Field` read against the fields that exist | **no** | yes |
+| `check_input_actions.py` | every generated `IA_` action against the `UOneBrahamInputConfig` field that points at it, every field against its action, every `DefaultInput.ini` binding and prompt against a real action, and every `InputConfig->Field` read against the fields that exist; also that every declared field is read somewhere in C++, that no action is bound to both a mouse-movement key and a stick key, and that every `KEY_MODIFIERS` entry matches a real binding | **no** | yes |
 | `check_doc_numbers.py` | every count quoted in this document's build report and in the README against the count the tooling produces, and the Docs/13 archetype table against `build_characters.py` field by field | **no** | yes |
 | `check_test_names.py` | every automation test `Docs/18` lists against the tests that exist in `Source/OneBraham/Tests`, every test that exists against the table, and every `OneBraham.*` name in `Scripts/` against a test or a category | **no** | yes |
 | `check_doc_files.py` | every `Scripts/` file and `Tools/Python/` path the documentation names against the files on disk, every script on disk against the script index, and every tooling module against this document's pipeline table | **no** | yes |
@@ -90,15 +90,15 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
-| input_ini | OK | 0.0 | wrote 41 actions (40 with a default key) |
-| cpp_symbols | OK | 0.7 | 904 declarations, all defined; compile hygiene clean |
-| uht_contracts | OK | 1.5 | 926 UE reflection contracts, all satisfied |
-| soft_paths | OK | 0.0 | 48 soft paths, all conventional |
-| calls | OK | 0.3 | 1575 call sites, all arities plausible |
+| input_ini | OK | 0.0 | wrote 42 actions (41 with a default key) |
+| cpp_symbols | OK | 0.7 | 921 declarations, all defined; compile hygiene clean |
+| uht_contracts | OK | 1.5 | 942 UE reflection contracts, all satisfied |
+| soft_paths | OK | 0.0 | 49 soft paths, all conventional |
+| calls | OK | 0.3 | 1603 call sites, all arities plausible |
 | tags | OK | 0.4 | 6 resolvable tag requests and 147 documented tags, all declared |
 | layout | OK | 0.0 | 18 floors, map and layout agree |
 | voice_lines | OK | 0.0 | 42 line references, all declared and documented |
-| input_actions | OK | 0.0 | 41 actions, 41 fields, 95 reads |
+| input_actions | OK | 0.0 | 42 actions, 42 fields, 98 reads |
 | doc_numbers | OK | 2.2 | 84 documented numbers, all current |
 | test_names | OK | 0.0 | 23 automation tests, every one documented and resolvable |
 | doc_files | OK | 0.1 | 72 documented paths, all on disk |

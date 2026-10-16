@@ -3,6 +3,7 @@
 #include "Core/OneBrahamGameState.h"
 
 #include "OneBraham.h"
+#include "Core/OneBrahamGameInstance.h"
 #include "Core/OneBrahamGameplayTags.h"
 #include "Core/OneBrahamPlayerState.h"
 #include "Data/OneBrahamMatchSettingsAsset.h"
@@ -27,6 +28,7 @@ void AOneBrahamGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& 
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AOneBrahamGameState, MatchMode);
+	DOREPLIFETIME(AOneBrahamGameState, MatchSettingsPath);
 	DOREPLIFETIME(AOneBrahamGameState, MatchPhase);
 	DOREPLIFETIME(AOneBrahamGameState, ServerName);
 	DOREPLIFETIME(AOneBrahamGameState, bIsDedicatedServerMatch);
@@ -63,6 +65,7 @@ void AOneBrahamGameState::SetMatchSettings(UOneBrahamMatchSettingsAsset* InSetti
 
 	MatchSettings = InSettings;
 	MatchMode = InSettings->Mode;
+	MatchSettingsPath = GetReplicableSettingsPath(InSettings);
 	MatchTimeLimitSeconds = InSettings->bScoreByTimeLimit ? static_cast<float>(InSettings->TimeLimitSeconds) : 0.f;
 
 	// FIRE DRILL uses two fixed teams; ASCENT uses squads.
@@ -75,8 +78,84 @@ void AOneBrahamGameState::SetMatchSettings(UOneBrahamMatchSettingsAsset* InSetti
 		TeamScores.Init(0, InSettings->TeamCount);
 	}
 
-	OB_MATCH_LOG("Match settings applied: mode=%s teams=%d teamSize=%d phase=%d",
-		*UEnum::GetValueAsString(MatchMode), InSettings->TeamCount, InSettings->PlayersPerTeam, static_cast<int32>(MatchPhase));
+	OB_MATCH_LOG("Match settings applied: mode=%s teams=%d teamSize=%d phase=%d path='%s'",
+		*UEnum::GetValueAsString(MatchMode), InSettings->TeamCount, InSettings->PlayersPerTeam, static_cast<int32>(MatchPhase),
+		MatchSettingsPath.IsNull() ? TEXT("(transient - clients resolve by mode)") : *MatchSettingsPath.ToString());
+}
+
+FSoftObjectPath AOneBrahamGameState::GetReplicableSettingsPath(const UOneBrahamMatchSettingsAsset* Settings)
+{
+	// IsAsset() is false for anything transient or outered to something other
+	// than its package - which is exactly the GameInstance's runtime fallback
+	// (outer: the GameInstance) and the GameMode's own last-ditch NewObject.
+	// Those have no path a client could load, so none is replicated.
+	if (Settings == nullptr || !Settings->IsAsset())
+	{
+		return FSoftObjectPath();
+	}
+
+	return FSoftObjectPath(Settings);
+}
+
+UOneBrahamMatchSettingsAsset* AOneBrahamGameState::GetMatchSettings() const
+{
+	if (MatchSettings != nullptr)
+	{
+		return MatchSettings;
+	}
+
+	// Resolving caches a pointer, which is bookkeeping rather than a change to
+	// the match state, so the getter stays const for its forty callers.
+	return const_cast<AOneBrahamGameState*>(this)->ResolveClientMatchSettings();
+}
+
+UOneBrahamMatchSettingsAsset* AOneBrahamGameState::ResolveClientMatchSettings()
+{
+	// Re-resolve whenever what the server told us changes, so a mode or path
+	// that arrives after the first read replaces the default-mode guess.
+	if (ClientMatchSettings != nullptr && ClientMatchSettingsMode == MatchMode && ClientMatchSettingsSource == MatchSettingsPath)
+	{
+		return ClientMatchSettings;
+	}
+
+	UOneBrahamMatchSettingsAsset* Resolved = nullptr;
+
+	// The server's exact asset first - a custom lobby can force one that is not
+	// at the per-mode path. It must agree with the replicated mode; a path that
+	// does not is stale and the mode wins.
+	if (!MatchSettingsPath.IsNull())
+	{
+		Resolved = Cast<UOneBrahamMatchSettingsAsset>(MatchSettingsPath.TryLoad());
+		if (Resolved != nullptr && Resolved->Mode != MatchMode)
+		{
+			Resolved = nullptr;
+		}
+	}
+
+	// Then the same per-mode resolution the server ran: the configured override,
+	// /Game/OneBraham/Data/DA_MatchSettings_<Mode>, or a runtime default built
+	// from the same EnsureDefaults the server's fallback used.
+	if (Resolved == nullptr)
+	{
+		if (UOneBrahamGameInstance* GameInstance = GetGameInstance<UOneBrahamGameInstance>())
+		{
+			Resolved = GameInstance->GetMatchSettings(MatchMode);
+		}
+	}
+
+	if (Resolved == nullptr)
+	{
+		return nullptr;
+	}
+
+	ClientMatchSettings = Resolved;
+	ClientMatchSettingsMode = MatchMode;
+	ClientMatchSettingsSource = MatchSettingsPath;
+
+	OB_MATCH_LOG("Client resolved match settings '%s' for mode %s.",
+		*GetNameSafe(Resolved), *UEnum::GetValueAsString(MatchMode));
+
+	return ClientMatchSettings;
 }
 
 // ==========================================================================
@@ -85,6 +164,14 @@ void AOneBrahamGameState::SetMatchSettings(UOneBrahamMatchSettingsAsset* InSetti
 void AOneBrahamGameState::OnRep_MatchMode()
 {
 	OB_MATCH_LOG("Client received match mode: %s", *UEnum::GetValueAsString(MatchMode));
+
+	// Warm the cache now rather than on the first HUD tick that asks.
+	GetMatchSettings();
+}
+
+void AOneBrahamGameState::OnRep_MatchSettingsPath()
+{
+	GetMatchSettings();
 }
 
 void AOneBrahamGameState::OnRep_MatchPhase()

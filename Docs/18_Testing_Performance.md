@@ -67,7 +67,8 @@ that is otherwise a link error.
 | `OneBraham.VFX` | `DecalOrientation`, `EmptySystemIsMissing`, `Ricochet` | a decal projects *into* the surface (its +X is minus the normal) on a floor, a wall, a ceiling and a ramp, and a streaked blood decal's long axis follows the shot across the surface - the yaw-only rotation that projected every floor and ceiling decal sideways is pinned; a Niagara system with no emitters (what `build_vfx.py` creates) is not usable and routes to the procedural fallback; a head-on round never ricochets, a grazing one can off metal and less often off concrete, and never off carpet or plasterboard |
 | `OneBraham.Damage` | `HealthModel`, `Armour`, `Zone` | the UE5 mannequin's bone names (head, neck_01, spine_03, pelvis, upperarm, lowerarm, hand, thigh, calf, foot) resolve to the right hit zones; 100 health + 50 armour, armour absorbing 60 % of each hit until it breaks (the worked example in `Docs/04`: 30 damage → 12 health and 18 armour), four shots to break the plate and a fifth to kill, head/neck/torso/limb multipliers in the right order, and the shots-to-kill a carbine and a marksman rifle need through a full plate |
 | `OneBraham.Voice` | `CodecShape`, `LineSet`, `Wheel`, `ActivityDetector`, `Routing`, `ProximityShaping` | 16 kHz mono 20 ms frames inside a 1024-byte transport ceiling and under 64 kB/s worst case; the line set fills itself from the compiled-in table (97 core + 66 variants), idempotently, with no duplicate ids, no empty subtitles, and no line that can never be said; the comms wheel's eight segments are unique, labelled, and every one resolves against the script; out-of-range segments return nothing; the Settings meter reads in dBFS (-20 dB two-thirds along, the default gate in the speech range); the voice-activation gate ignores room noise, opens on speech at once, holds through a 300 ms pause and closes after 500 ms of silence, does not flutter around its threshold, and learns a steady fan; the relay rule hears proximity in a sphere (enemies included) and radio by squad or team, honours the listener's own mutes and the match switches, moves the dead to squad radio only, lets spectators hear proximity from the watched player, and takes the proximity range from the match settings first; proximity shaping falls off naturally and monotonically to silence at the range, costs at least 6 dB and most of the treble per wall and more per floor, and turns a crouched voice into a whisper |
-| `OneBraham.Input` | `AllActionsBound`, `MappingContexts`, `ControllerDefaults` | `ValidateAllActionsSet` reports every one of the 41 reflected action fields on an empty config, reports nothing on a fully assigned one, names the three overlay actions explicitly, and the mapping contexts are soft references of the right type; the native controller ships `DA_InputConfig` with every action set, and the authored contexts reach every action but the unbound-by-design clip marker, with WASD and the mouse on Move and Look |
+| `OneBraham.Input` | `AllActionsBound`, `MappingContexts`, `ControllerDefaults` | `ValidateAllActionsSet` reports every one of the 42 reflected action fields on an empty config, reports nothing on a fully assigned one, names the three overlay actions explicitly, and the mapping contexts are soft references of the right type; the native controller ships `DA_InputConfig` with every action set, and the authored contexts reach every action but the unbound-by-design clip marker, with WASD on Move; in both the authored `IMC_OneBraham_Default` and the context built from the ini, `IA_Look` is on the mouse with no pad key and `IA_LookGamepad` has only pad keys, its right stick carrying a dead zone |
+| `OneBraham.Match` | `TimeLimit`, `TimeOutOutcome`, `SettingsReplicationPath` | the match clock expires exactly at the limit, counts through Extraction as well as Active, never in Warmup or Complete, and a limit of 0 is unlimited; a time-out ends ASCENT and NIGHT SHIFT with nobody out, gives FIRE DRILL to whichever team has more points, and makes a tie, 0-0 or no scores a draw; a transient or null settings object replicates no `MatchSettingsPath`, while the authored `DA_MatchSettings_Ascent` replicates its own path |
 | `OneBraham.Multiplayer` | `ReplicationContract`, `Smoke` | every server and client RPC is reliable, every `ReplicatedUsing` property names a function that exists on its own class, there are zero `WithValidation` RPCs, and the network surface has the shape a server-authoritative game should; then the match-boot composition check: the classes the config names load and derive from the right bases, ASCENT is the default mode, and the building and mode data agree on a twelve-player match |
 | `OneBraham.Feel` | `Punch`, `Heartbeat`, `Springs`, `Shake` | the hit punch turns and rolls the view away from the shooter, lifts it for a frontal hit and drops it for one from behind, is measured against the current view and is a plain dip with no instigator; the heartbeat races as health falls, rests at the low-health line, stays in range and actually beats; a spring impulse sized for a peak reaches that peak, survives a one-second hitch and comes to rest; explosion falloff is squared and zero at the radius, and the shake scale honours off, the 30% reduction and the slider |
 | `OneBraham.Downed` | `Rule`, `ReviveHealth` | only a player's hit downs: the building's damage never does, even with revives banked; out of revives is out; headshots and explosions bypass the downed state unless the mode turns the bypass off; a player already crawling is not downed twice; a revive brings a player back alive at the revive health, below full, and never revives a corpse |
@@ -150,6 +151,42 @@ Build\WindowsServer\OneBrahamServer.exe OneBrahamServer-L_Persistent_OneBraham?M
 
 It takes a few minutes with `-NullRHI` and about as long again with rendering on,
 which is the version to run before a build goes to Steam.
+
+### Smoke test of a packaged build (`-OBSmoke`)
+
+`UOneBrahamSmokeTestSubsystem` (`Source/OneBraham/Dev/OneBrahamSmokeTest.h`) is a
+game-instance subsystem that exists in non-Shipping builds only when the command
+line has `-OBSmoke`. `-OBSmokeShots=N` sets the number of screenshots (default 4,
+clamped to 0-16) and `-OBSmokeTimeout=S` the budget from boot to verdict, loading
+included (default 120 s, clamped to 15-900). It ticks from the core ticker rather
+than a world, so a map that never loads still times out. It waits for the local
+player to possess a pawn, waits 2 s, then logs one `[OB.SMOKE]` line per check:
+
+| check | logged | fails when |
+| --- | --- | --- |
+| map | map name, package, net mode | no game world |
+| pawn | pawn class and location | no pawn before the timeout |
+| input | the controller's InputConfig | controller is not `AOneBrahamPlayerController`, or InputConfig is null |
+| mappings | live key mappings, actions, installed controller contexts with priority | no key mappings, or none of the controller's contexts installed |
+| match | match settings asset and mode | no `AOneBrahamGameState`, or no match settings |
+| sky | number of `AOneBrahamSkyDirector` actors | none |
+| frames | count, mean ms / fps, p95, worst over 4 s | never: depends on the machine; use `ob.Bench.Skydeck` for numbers that can be compared |
+| shot N | absolute path of each screenshot, HUD included, turning 90 degrees between shots, 2 s apart | the file was not written |
+
+It ends with `[OB.SMOKE] PASS` or `[OB.SMOKE] FAIL: <reasons>` and quits. On
+Windows and Linux the exit code is also 0 or 1; a Mac build always exits 0, so the
+line is the verdict. In a Test build, where `UE_LOG` is compiled out, the lines are
+written straight to stdout. A sandboxed Mac build writes its screenshots to
+`~/Library/Containers/<bundle id>/Data/Library/Application Support/Epic/OneBraham/Saved/Screenshots`.
+
+`Scripts/SmokePackaged.sh [--shots N] [--timeout S] [-- extra game args]` runs the
+whole thing on macOS against `Saved/StagedBuilds/Mac/OneBraham.app` (`OB_SMOKE_APP`
+overrides the binary), keeps the game's full log in `Saved/Smoke/smoke_<stamp>.log`,
+prints the `[OB.SMOKE]` lines and each screenshot path, and exits non-zero on FAIL,
+on its own timeout (the game's budget plus 60 s), or when the game quits without a
+verdict. Shipping builds ignore `-OBSmoke`, so for them the script times out. This
+is a boot-and-look check, not a gameplay test: it complements the automation suites
+and does not replace them.
 
 ---
 

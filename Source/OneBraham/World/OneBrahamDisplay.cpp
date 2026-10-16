@@ -100,6 +100,15 @@ float AOneBrahamDisplay::CopyAlphaAt(double Time, float InSlideSeconds, float In
 
 void AOneBrahamDisplay::Layout()
 {
+	// A dedicated server loads the actor without its render-only parts (text
+	// render components are not created there), and a screen nobody can see
+	// needs no layout.
+	if (Bezel == nullptr || Panel == nullptr || Accent == nullptr
+		|| EyebrowText == nullptr || HeadlineText == nullptr || SublineText == nullptr)
+	{
+		return;
+	}
+
 	const float W = WidthCm;
 	const float H = HeightCm;
 
@@ -191,7 +200,7 @@ void AOneBrahamDisplay::ApplyAt(double Time)
 		PanelMID->SetVectorParameterValue(TEXT("ColourB"), FMath::Lerp(Previous.ColourB, Slide.ColourB, Blend));
 	}
 
-	if (!bShowCopy)
+	if (!bShowCopy || EyebrowText == nullptr || HeadlineText == nullptr || SublineText == nullptr)
 	{
 		return;
 	}
@@ -232,7 +241,8 @@ void AOneBrahamDisplay::BeginPlay()
 	Super::BeginPlay();
 	ShownSlide = INDEX_NONE;
 	Layout();
-	SetActorTickEnabled(Slides.Num() > 0);
+	// Nothing to animate where nothing renders.
+	SetActorTickEnabled(Slides.Num() > 0 && !IsRunningDedicatedServer());
 }
 
 void AOneBrahamDisplay::Tick(float DeltaSeconds)
