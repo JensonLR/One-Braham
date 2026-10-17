@@ -11,6 +11,9 @@
 #include "UI/OneBrahamCompassWidget.h"
 #include "UI/OneBrahamCrosshairWidget.h"
 #include "UI/OneBrahamUIStyle.h"
+#include "UI/HUD/OneBrahamHUDPaint.h"
+#include "UI/FrontEnd/OneBrahamPaint.h"
+#include "UI/FrontEnd/OneBrahamPaintedControl.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
@@ -18,14 +21,19 @@
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
 #include "Components/Widget.h"
+#include "Internationalization/Regex.h"
 #include "Styling/CoreStyle.h"
 
-namespace
+namespace OneBrahamHUDLayout
 {
-	/** Screen-space design constants. Positions are relative - see AddToCanvas. */
-	constexpr float AmmoFontScale = 1.f;
-	constexpr float PanelPadding = 14.f;
+	/** The compass strip: 34% of the width, at the top of the safe area. */
+	constexpr float CompassWidthFraction = 0.34f;
+	constexpr float CompassTopFraction = 0.035f;
+	/** Tall enough for the markers above the slats and their deltas below. */
+	constexpr float CompassHeight = 64.f;
 
+	/** How long a PA card stays after its words (the tannoy's audio + 1.5 s). */
+	constexpr float AnnouncementTail = 1.5f;
 }
 
 UOneBrahamHUDWidget::UOneBrahamHUDWidget(const FObjectInitializer& ObjectInitializer)
@@ -40,7 +48,7 @@ UOneBrahamHUDWidget::UOneBrahamHUDWidget(const FObjectInitializer& ObjectInitial
 TSharedRef<SWidget> UOneBrahamHUDWidget::RebuildWidget()
 {
 	// A designer's Blueprint supplies its own tree. If there is none, we build the
-	// entire HUD here so a content-free checkout still has a complete interface.
+	// canvas here and paint the rest, so a content-free checkout is complete.
 	if (WidgetTree != nullptr && WidgetTree->RootWidget == nullptr)
 	{
 		BuildDefaultLayout();
@@ -53,92 +61,22 @@ void UOneBrahamHUDWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
-	// The Blueprint path binds its own widgets; the code path already has them.
+	// The Blueprint path binds its own widgets; the code path paints instead.
 	if (Text_Ammo != nullptr)
 	{
-		Text_Ammo->SetFont(UOneBrahamUIStyle::Font(EOneBrahamTextSize::Large, true));
+		Text_Ammo->SetFont(UOneBrahamUIStyle::TypeFont(EOneBrahamType::TelemetryStrong, 40.f, 0, true));
 	}
 
 	UE_LOG(LogOneBrahamUI, Verbose, TEXT("[OB.UI] HUD widget constructed (%s layout)."),
-		bBuiltLayoutInCode ? TEXT("code") : TEXT("authored"));
+		bBuiltLayoutInCode ? TEXT("painted") : TEXT("authored"));
 }
 
-int32 UOneBrahamHUDWidget::NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
-	const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements,
-	int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
+double UOneBrahamHUDWidget::HUDNow() const
 {
-	const int32 CurrentLayer = Super::NativePaint(Args, AllottedGeometry, MyCullingRect,
-		OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
-
-	// --- Why there is no NativeTick here ---------------------------------
-	// A C++ UUserWidget is created with EWidgetTickFrequency::Auto, and Auto
-	// means "tick only if this widget has a tick event implemented in
-	// Blueprint". An override of NativeTick is not one, so this widget's tick
-	// was never going to be called: the banner, the subtitle and the damage
-	// flash would each have frozen at whatever the last component snapshot set
-	// them to. Paint is the one callback a visible widget is guaranteed, so the
-	// same timers advance from the clock that the painter already has.
-	if (const UWorld* World = GetWorld())
-	{
-		const double Now = World->GetTimeSeconds();
-		const double Delta = LastPaintTimeSeconds < 0.0 ? 0.0 : Now - LastPaintTimeSeconds;
-		LastPaintTimeSeconds = Now;
-
-		if (Delta > 0.0)
-		{
-			AdvanceOverlayTimers(static_cast<float>(Delta));
-		}
-	}
-
-	return CurrentLayer;
-}
-
-void UOneBrahamHUDWidget::AdvanceOverlayTimers(float InDeltaTime) const
-{
-	// Overlay fades are widget-side because they are purely cosmetic: the
-	// component's snapshot stays authoritative for gameplay-visible values.
-	if (BannerRemaining > 0.f)
-	{
-		BannerRemaining = FMath::Max(0.f, BannerRemaining - InDeltaTime);
-
-		if (BannerRemaining <= 0.f && Text_Banner != nullptr)
-		{
-			Text_Banner->SetVisibility(ESlateVisibility::Collapsed);
-		}
-	}
-
-	if (SubBannerRemaining > 0.f)
-	{
-		SubBannerRemaining = FMath::Max(0.f, SubBannerRemaining - InDeltaTime);
-
-		if (SubBannerRemaining <= 0.f && Text_SubBanner != nullptr)
-		{
-			Text_SubBanner->SetVisibility(ESlateVisibility::Collapsed);
-		}
-	}
-
-	if (SubtitleRemaining > 0.f)
-	{
-		SubtitleRemaining = FMath::Max(0.f, SubtitleRemaining - InDeltaTime);
-
-		if (SubtitleRemaining <= 0.f && Text_Subtitle != nullptr)
-		{
-			Text_Subtitle->SetVisibility(ESlateVisibility::Collapsed);
-		}
-	}
-
-	// Damage flash fades smoothly even between the component's 15 Hz updates.
-	if (Image_DamageFlash != nullptr)
-	{
-		const float TargetAlpha = Data.DamageIndicatorAlpha * 0.35f;
-		const FLinearColor Current = Image_DamageFlash->GetColorAndOpacity();
-
-		if (!FMath::IsNearlyEqual(Current.A, TargetAlpha, 0.01f))
-		{
-			Image_DamageFlash->SetColorAndOpacity(FLinearColor(Current.R, Current.G, Current.B,
-				FMath::FInterpTo(Current.A, TargetAlpha, InDeltaTime, 6.f)));
-		}
-	}
+	// World time, the same clock the component stamps the kill feed and the
+	// pings with, so "seven seconds" means the same thing on both sides.
+	const UWorld* World = GetWorld();
+	return World != nullptr ? World->GetTimeSeconds() : FPlatformTime::Seconds();
 }
 
 // ==========================================================================
@@ -158,15 +96,10 @@ UTextBlock* UOneBrahamHUDWidget::MakeText(FName Name, EOneBrahamTextSize Size, c
 		return nullptr;
 	}
 
-	// Text must stay readable over a bright office window and over a dark stairwell,
-	// so everything carries a 1 px dark outline in the brand navy. This is the
-	// single most important legibility decision on the HUD: a white number on a
-	// sunlit Skydeck is invisible without it.
 	FSlateFontInfo Font = UOneBrahamUIStyle::Font(Size, bBold);
 	Font.OutlineSettings = FFontOutlineSettings(1);
-	Font.OutlineSettings.OutlineColor = UOneBrahamUIStyle::Navy();
+	Font.OutlineSettings.OutlineColor = FLinearColor(0.f, 0.f, 0.f, 0.6f);
 	Text->SetFont(Font);
-
 	Text->SetColorAndOpacity(FSlateColor(Colour));
 	Text->SetJustification(Justify);
 	Text->SetVisibility(ESlateVisibility::HitTestInvisible);
@@ -239,239 +172,136 @@ void UOneBrahamHUDWidget::AddStretched(UWidget* Widget)
 
 void UOneBrahamHUDWidget::BuildDefaultLayout()
 {
+	using namespace OneBrahamHUDLayout;
+
 	bBuiltLayoutInCode = true;
 
 	RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("HUDRoot"));
 	WidgetTree->RootWidget = RootCanvas;
 
-	const FAnchors TopLeft(0.f, 0.f);
-	const FAnchors TopCentre(0.5f, 0.f);
-	const FAnchors TopRight(1.f, 0.f);
-	const FAnchors Centre(0.5f, 0.5f);
-	const FAnchors BottomLeft(0.f, 1.f);
-	const FAnchors BottomRight(1.f, 1.f);
-	const FAnchors BottomCentre(0.5f, 1.f);
-
-	// --- Crosshair (screen centre) ---------------------------------------
-	Crosshair = WidgetTree->ConstructWidget<UOneBrahamCrosshairWidget>(
-		UOneBrahamCrosshairWidget::StaticClass(), TEXT("Crosshair"));
-	AddToCanvas(Crosshair, FVector2D::ZeroVector, FVector2D(600.f, 600.f), Centre, FVector2D(0.5f, 0.5f));
-
-	// --- Compass (top centre) --------------------------------------------
-	Compass = WidgetTree->ConstructWidget<UOneBrahamCompassWidget>(
-		UOneBrahamCompassWidget::StaticClass(), TEXT("Compass"));
-	AddToCanvas(Compass, FVector2D(0.f, 18.f), FVector2D(680.f, 44.f), TopCentre, FVector2D(0.5f, 0.f));
-
-	// --- Match clock (top centre, beneath the compass) -------------------
-	Text_Clock = MakeText(TEXT("Text_Clock"), EOneBrahamTextSize::Medium, UOneBrahamUIStyle::LightGrey(),
-		ETextJustify::Center, true);
-	AddToCanvas(Text_Clock, FVector2D(0.f, 62.f), FVector2D(240.f, 22.f), TopCentre, FVector2D(0.5f, 0.f));
-
-	// --- Objective banner (top centre, under the clock) ------------------
-	Text_Banner = MakeText(TEXT("Text_Banner"), EOneBrahamTextSize::Header, UOneBrahamUIStyle::LightGrey(),
-		ETextJustify::Center, true);
-	AddToCanvas(Text_Banner, FVector2D(0.f, 96.f), FVector2D(900.f, 40.f), TopCentre, FVector2D(0.5f, 0.f));
-
-	Text_SubBanner = MakeText(TEXT("Text_SubBanner"), EOneBrahamTextSize::Small, UOneBrahamUIStyle::SafetyYellow(),
-		ETextJustify::Center);
-	AddToCanvas(Text_SubBanner, FVector2D(0.f, 138.f), FVector2D(900.f, 22.f), TopCentre, FVector2D(0.5f, 0.f));
-
-	// --- Objective state (top left) --------------------------------------
-	Text_Floor = MakeText(TEXT("Text_Floor"), EOneBrahamTextSize::Medium, UOneBrahamUIStyle::LightGrey(), ETextJustify::Left, true);
-	AddToCanvas(Text_Floor, FVector2D(PanelPadding, 18.f), FVector2D(320.f, 24.f), TopLeft, FVector2D(0.f, 0.f));
-
-	Text_Objective = MakeText(TEXT("Text_Objective"), EOneBrahamTextSize::Small, UOneBrahamUIStyle::SafetyYellow());
-	AddToCanvas(Text_Objective, FVector2D(PanelPadding, 44.f), FVector2D(360.f, 20.f), TopLeft, FVector2D(0.f, 0.f));
-
-	Bar_Objective = MakeBar(TEXT("Bar_Objective"), UOneBrahamUIStyle::SafetyYellow(), 6.f);
-	AddToCanvas(Bar_Objective, FVector2D(PanelPadding, 68.f), FVector2D(220.f, 6.f), TopLeft, FVector2D(0.f, 0.f));
-
-	// --- Squad (top right) -----------------------------------------------
-	Text_Squad = MakeText(TEXT("Text_Squad"), EOneBrahamTextSize::Small, UOneBrahamUIStyle::LightGrey(),
-		ETextJustify::Right);
-	AddToCanvas(Text_Squad, FVector2D(-PanelPadding, 18.f), FVector2D(360.f, 108.f), TopRight, FVector2D(1.f, 0.f));
-
-	// --- Kill feed (right, below the squad) ------------------------------
-	Text_KillFeed = MakeText(TEXT("Text_KillFeed"), EOneBrahamTextSize::Small, UOneBrahamUIStyle::LightGrey(),
-		ETextJustify::Right);
-	AddToCanvas(Text_KillFeed, FVector2D(-PanelPadding, 134.f), FVector2D(420.f, 120.f), TopRight, FVector2D(1.f, 0.f));
-
-	// --- Health (bottom left) --------------------------------------------
-	Bar_Health = MakeBar(TEXT("Bar_Health"), UOneBrahamUIStyle::LightGrey(), 8.f);
-	AddToCanvas(Bar_Health, FVector2D(PanelPadding, -46.f), FVector2D(300.f, 8.f), BottomLeft, FVector2D(0.f, 1.f));
-
-	Bar_Armour = MakeBar(TEXT("Bar_Armour"), UOneBrahamUIStyle::SignalBlue(), 5.f);
-	AddToCanvas(Bar_Armour, FVector2D(PanelPadding, -32.f), FVector2D(300.f, 5.f), BottomLeft, FVector2D(0.f, 1.f));
-
-	Text_Health = MakeText(TEXT("Text_Health"), EOneBrahamTextSize::Medium, UOneBrahamUIStyle::LightGrey(), ETextJustify::Left, true);
-	AddToCanvas(Text_Health, FVector2D(PanelPadding, -26.f), FVector2D(300.f, 22.f), BottomLeft, FVector2D(0.f, 1.f));
-
-	Text_Access = MakeText(TEXT("Text_Access"), EOneBrahamTextSize::Micro, UOneBrahamUIStyle::Muted(UOneBrahamUIStyle::LightGrey(), 0.4f));
-	AddToCanvas(Text_Access, FVector2D(PanelPadding, -8.f), FVector2D(320.f, 16.f), BottomLeft, FVector2D(0.f, 1.f));
-
-	// --- Weapon (bottom right) -------------------------------------------
-	Text_Ammo = MakeText(TEXT("Text_Ammo"), EOneBrahamTextSize::Large, UOneBrahamUIStyle::LightGrey(), ETextJustify::Right, true);
-	AddToCanvas(Text_Ammo, FVector2D(-PanelPadding, -58.f), FVector2D(260.f, 34.f), BottomRight, FVector2D(1.f, 1.f));
-
-	Text_WeaponName = MakeText(TEXT("Text_WeaponName"), EOneBrahamTextSize::Small, UOneBrahamUIStyle::Muted(UOneBrahamUIStyle::LightGrey(), 0.3f), ETextJustify::Right);
-	AddToCanvas(Text_WeaponName, FVector2D(-PanelPadding, -30.f), FVector2D(260.f, 20.f), BottomRight, FVector2D(1.f, 1.f));
-
-	Text_FireMode = MakeText(TEXT("Text_FireMode"), EOneBrahamTextSize::Micro, UOneBrahamUIStyle::Muted(UOneBrahamUIStyle::LightGrey(), 0.45f), ETextJustify::Right);
-	AddToCanvas(Text_FireMode, FVector2D(-PanelPadding, -14.f), FVector2D(260.f, 16.f), BottomRight, FVector2D(1.f, 1.f));
-
-	Text_Utilities = MakeText(TEXT("Text_Utilities"), EOneBrahamTextSize::Small, UOneBrahamUIStyle::LightGrey(), ETextJustify::Right);
-	AddToCanvas(Text_Utilities, FVector2D(-PanelPadding, -86.f), FVector2D(300.f, 20.f), BottomRight, FVector2D(1.f, 1.f));
-
-	Bar_Reload = MakeBar(TEXT("Bar_Reload"), UOneBrahamUIStyle::SafetyYellow(), 4.f);
-	AddToCanvas(Bar_Reload, FVector2D(-PanelPadding, -66.f), FVector2D(180.f, 4.f), BottomRight, FVector2D(1.f, 1.f));
-
-	// --- Interaction prompt (centre bottom) -------------------------------
-	Text_Interaction = MakeText(TEXT("Text_Interaction"), EOneBrahamTextSize::Medium, UOneBrahamUIStyle::LightGrey(),
-		ETextJustify::Center, true);
-	AddToCanvas(Text_Interaction, FVector2D(0.f, -150.f), FVector2D(700.f, 26.f), BottomCentre, FVector2D(0.5f, 1.f));
-
-	Bar_Interaction = MakeBar(TEXT("Bar_Interaction"), UOneBrahamUIStyle::SignalBlue(), 4.f);
-	AddToCanvas(Bar_Interaction, FVector2D(0.f, -122.f), FVector2D(240.f, 4.f), BottomCentre, FVector2D(0.5f, 1.f));
-
-	// --- Subtitle (bottom centre) ----------------------------------------
-	Text_Subtitle = MakeText(TEXT("Text_Subtitle"), EOneBrahamTextSize::Small, UOneBrahamUIStyle::LightGrey(),
-		ETextJustify::Center);
-	AddToCanvas(Text_Subtitle, FVector2D(0.f, -84.f), FVector2D(900.f, 22.f), BottomCentre, FVector2D(0.5f, 1.f));
-
-	// --- Voice indicator (bottom centre, above the subtitle) -------------
-	Text_Voice = MakeText(TEXT("Text_Voice"), EOneBrahamTextSize::Micro, UOneBrahamUIStyle::SignalBlue(),
-		ETextJustify::Center);
-	AddToCanvas(Text_Voice, FVector2D(0.f, -64.f), FVector2D(400.f, 16.f), BottomCentre, FVector2D(0.5f, 1.f));
-
-	// --- Damage flash (full screen) --------------------------------------
-	Image_DamageFlash = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("Image_DamageFlash"));
-	if (Image_DamageFlash != nullptr)
+	// The underlay: the canvas's first child, so it paints beneath the compass.
+	// The stage card's letterbox lives here - the compass never hides (Docs/08),
+	// and painted over it the top bar took the strip to 15% for every card.
+	Underlay = CreateWidget<UOneBrahamPaintedControl>(this, UOneBrahamPaintedControl::StaticClass());
+	if (Underlay != nullptr)
 	{
-		Image_DamageFlash->SetBrush(UOneBrahamUIStyle::SolidBrush(FLinearColor(0.7f, 0.05f, 0.05f, 0.f)));
-		Image_DamageFlash->SetVisibility(ESlateVisibility::HitTestInvisible);
-		AddStretched(Image_DamageFlash);
-	}
-
-	// --- Downed overlay ---------------------------------------------------
-	Panel_Downed = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("Panel_Downed"));
-	if (Panel_Downed != nullptr)
-	{
-		Panel_Downed->SetVisibility(ESlateVisibility::Collapsed);
-
-		Text_BleedOut = MakeText(TEXT("Text_BleedOut"), EOneBrahamTextSize::Header, UOneBrahamUIStyle::EmergencyRed(),
-			ETextJustify::Center, true);
-		UCanvasPanelSlot* BleedSlot = Panel_Downed->AddChildToCanvas(Text_BleedOut);
-		if (BleedSlot != nullptr)
+		Underlay->Setup(FVector2D::ZeroVector, false);
+		Underlay->SetVisibility(ESlateVisibility::HitTestInvisible);
+		TWeakObjectPtr<UOneBrahamHUDWidget> WeakThis(this);
+		Underlay->PaintFn = [WeakThis](const OneBrahamPaint::FPainter& Surface, const FOneBrahamControlState&)
 		{
-			BleedSlot->SetAnchors(FAnchors(0.5f, 0.5f));
-			BleedSlot->SetAlignment(FVector2D(0.5f, 0.5f));
-			BleedSlot->SetPosition(FVector2D(0.f, -190.f));
-			BleedSlot->SetSize(FVector2D(600.f, 40.f));
-			BleedSlot->SetAutoSize(false);
-		}
-
-		// The revive bar, under the bleed-out timer.
-		//
-		// The person doing the reviving watches the interaction ring above the
-		// crosshair; the person being revived watches this one. Same colour
-		// (signal blue) because it is the same interaction seen from the two ends
-		// of it, and a player who has been on both ends should not have to learn
-		// two colours for one verb. Wider than the interaction ring and across the
-		// middle of the screen: while you are on the carpet, this is the only
-		// thing worth reading.
-		Bar_Revive = MakeBar(TEXT("Bar_Revive"), UOneBrahamUIStyle::SignalBlue(), 8.f);
-		UCanvasPanelSlot* ReviveSlot = Bar_Revive != nullptr ? Panel_Downed->AddChildToCanvas(Bar_Revive) : nullptr;
-		if (ReviveSlot != nullptr)
-		{
-			ReviveSlot->SetAnchors(FAnchors(0.5f, 0.5f));
-			ReviveSlot->SetAlignment(FVector2D(0.5f, 0.5f));
-			ReviveSlot->SetPosition(FVector2D(0.f, -160.f));
-			ReviveSlot->SetSize(FVector2D(420.f, 8.f));
-			ReviveSlot->SetAutoSize(false);
-		}
-
-		if (Bar_Revive != nullptr)
-		{
-			Bar_Revive->SetPercent(0.f);
-			Bar_Revive->SetVisibility(ESlateVisibility::Collapsed);
-		}
-
-		AddStretched(Panel_Downed);
-	}
-
-	// --- Overlays ---------------------------------------------------------
-	auto BuildOverlayPanel = [this](FName Name, UTextBlock*& OutTitle) -> UCanvasPanel*
-	{
-		UCanvasPanel* Panel = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), Name);
-		if (Panel == nullptr)
-		{
-			return nullptr;
-		}
-
-		Panel->SetVisibility(ESlateVisibility::Collapsed);
-
-		UImage* Backdrop = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), FName(*(Name.ToString() + TEXT("_Backdrop"))));
-		if (Backdrop != nullptr)
-		{
-			Backdrop->SetBrush(UOneBrahamUIStyle::PanelBrush(0.88f, 0.f));
-
-			UCanvasPanelSlot* BackdropSlot = Panel->AddChildToCanvas(Backdrop);
-			if (BackdropSlot != nullptr)
+			if (const UOneBrahamHUDWidget* Widget = WeakThis.Get())
 			{
-				BackdropSlot->SetAnchors(FAnchors(0.f, 0.f));
-				BackdropSlot->SetOffsets(FMargin(0.f, 0.f, 0.f, 0.f));
-				BackdropSlot->SetAutoSize(false);
+				int32 Layer = Surface.Layer;
+				FOneBrahamPainter P(Surface.Out, Surface.Geometry, Layer, FMath::Clamp(Widget->Data.HUDOpacity, 0.2f, 1.f));
+				Widget->PaintUnderlay(P, Surface.Geometry);
 			}
-		}
+		};
+		AddStretched(Underlay);
+	}
 
-		OutTitle = MakeText(FName(*(Name.ToString() + TEXT("_Title"))), EOneBrahamTextSize::Display,
-			UOneBrahamUIStyle::LightGrey(), ETextJustify::Center, true);
+	// The compass is its own widget - it repaints from the camera every frame,
+	// faster than the 15 Hz the rest of the HUD's data arrives at - stretched
+	// across the middle third of the top of the screen: 34% of any width, so a
+	// 21:9 screen gets a wider strip rather than a stretched one.
+	Compass = WidgetTree->ConstructWidget<UOneBrahamCompassWidget>(UOneBrahamCompassWidget::StaticClass(), TEXT("Compass"));
+	if (UCanvasPanelSlot* CompassSlot = RootCanvas->AddChildToCanvas(Compass))
+	{
+		const float Half = CompassWidthFraction * 0.5f;
+		CompassSlot->SetAnchors(FAnchors(0.5f - Half, CompassTopFraction, 0.5f + Half, CompassTopFraction));
+		CompassSlot->SetOffsets(FMargin(0.f, -10.f, 0.f, CompassHeight));
+		CompassSlot->SetAlignment(FVector2D(0.f, 0.f));
+		CompassSlot->SetAutoSize(false);
+	}
 
-		UCanvasPanelSlot* TitleSlot = Panel->AddChildToCanvas(OutTitle);
-		if (TitleSlot != nullptr)
-		{
-			TitleSlot->SetAnchors(FAnchors(0.5f, 0.5f));
-			TitleSlot->SetAlignment(FVector2D(0.5f, 0.5f));
-			TitleSlot->SetPosition(FVector2D(0.f, -120.f));
-			TitleSlot->SetSize(FVector2D(1200.f, 60.f));
-			TitleSlot->SetAutoSize(false);
-		}
+	// Everything else is painted (UI/HUD/OneBrahamHUDElements.cpp). The old
+	// text blocks are not built: an authored Blueprint may still bind them.
+	UE_LOG(LogOneBrahamUI, Log, TEXT("[OB.UI] HUD layout built in code: painted elements, compass widget."));
+}
 
-		AddStretched(Panel);
+// ==========================================================================
+//  Paint
+// ==========================================================================
+bool UOneBrahamHUDWidget::MakePaintContext(const FGeometry& Geometry, FPaintContext& C) const
+{
+	C.Now = HUDNow();
+	C.Screen = Geometry.GetLocalSize();
+	if (!bBuiltLayoutInCode || C.Screen.X < 64.f || C.Screen.Y < 64.f)
+	{
+		return false;
+	}
 
-		return Panel;
+	// The safe area: 2.5% left and right, 3.5% top and bottom (TV-safe margins
+	// are the accessibility setting's business, not the layout's).
+	C.SafeL = C.Screen.X * 0.025f;
+	C.SafeR = C.Screen.X - C.SafeL;
+	C.SafeT = C.Screen.Y * 0.035f;
+	C.SafeB = C.Screen.Y - C.SafeT;
+	C.Scale = FMath::Clamp(Frame.HUDScale, 0.8f, 1.2f);
+	C.bReduceMotion = Frame.bReduceMotion;
+	C.bRestDimming = Frame.bRestDimming;
+	C.Stage = Frame.Building.Stage;
+	C.Band = OneBrahamHUDStyle::StageBand(C.Stage);
+	C.bHeavyOutline = C.Band == 2;
+	C.bAlive = Data.LifeState == EOneBrahamLifeState::Alive || Data.LifeState == EOneBrahamLifeState::Downed;
+	UpdateStageTint(C.Now, C);
+	return true;
+}
+
+int32 UOneBrahamHUDWidget::NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
+	const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements,
+	int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
+{
+	int32 Layer = Super::NativePaint(Args, AllottedGeometry, MyCullingRect,
+		OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
+
+	// --- Why there is no NativeTick here ---------------------------------
+	// A C++ UUserWidget is created with EWidgetTickFrequency::Auto, and Auto
+	// means "tick only if this widget has a tick event implemented in
+	// Blueprint". An override of NativeTick is not one, so this widget's tick
+	// would never be called. Paint is the one callback a visible widget is
+	// guaranteed, so every element below is a function of the clock read here.
+	FPaintContext C;
+	if (!MakePaintContext(AllottedGeometry, C))
+	{
+		return Layer;
+	}
+
+	// The whole HUD under the accessibility opacity slider; the painter's own
+	// opacity is how a painted element honours it.
+	FOneBrahamPainter Painter(OutDrawElements, AllottedGeometry, Layer, FMath::Clamp(Data.HUDOpacity, 0.2f, 1.f));
+	PaintHUD(Painter, C);
+
+	return Layer + 1;
+}
+
+void UOneBrahamHUDWidget::PaintUnderlay(FOneBrahamPainter& P, const FGeometry& Geometry) const
+{
+	// A widget's NativePaint runs after its children have painted, so anything
+	// the compass must stay on top of is painted here, by the canvas's first
+	// child, instead.
+	FPaintContext C;
+	if (MakePaintContext(Geometry, C) && C.bAlive && !bDeathScreenVisible)
+	{
+		PaintStageBars(P, C);
+	}
+}
+
+void UOneBrahamHUDWidget::UpdateStageTint(double Now, FPaintContext& C) const
+{
+	using namespace OneBrahamHUDStyle;
+
+	// One getter drives every hairline and accent; a stage change cross-fades
+	// the lot together over 400 ms, linearly, so no element changes alone.
+	auto AccentFor = [](int32 Band) { return Band == 2 ? EmergencyRed() : (Band == 1 ? SafetyYellow() : SignalBlue()); };
+	auto HairlineFor = [](int32 Band)
+	{
+		return Band == 2 ? WithAlpha(EmergencyRed(), 0.30f) : (Band == 1 ? WithAlpha(SafetyYellow(), 0.25f) : WithAlpha(LightGrey(), 0.20f));
 	};
 
-	UTextBlock* DeathTitle = nullptr;
-	Panel_DeathScreen = BuildOverlayPanel(TEXT("Panel_DeathScreen"), DeathTitle);
-
-	Text_DeathCause = MakeText(TEXT("Text_DeathCause"), EOneBrahamTextSize::Medium,
-		UOneBrahamUIStyle::Muted(UOneBrahamUIStyle::LightGrey(), 0.25f), ETextJustify::Center);
-	if (Panel_DeathScreen != nullptr && Text_DeathCause != nullptr)
-	{
-		UCanvasPanelSlot* CauseSlot = Panel_DeathScreen->AddChildToCanvas(Text_DeathCause);
-		if (CauseSlot != nullptr)
-		{
-			CauseSlot->SetAnchors(FAnchors(0.5f, 0.5f));
-			CauseSlot->SetAlignment(FVector2D(0.5f, 0.5f));
-			CauseSlot->SetPosition(FVector2D(0.f, -50.f));
-			CauseSlot->SetSize(FVector2D(1200.f, 30.f));
-			CauseSlot->SetAutoSize(false);
-		}
-	}
-
-	// The scoreboard and the pause menu are not panels of this widget any more:
-	// both have buttons, and this widget is hit-test invisible by design, so a
-	// button inside it could be seen and never clicked. They are their own
-	// widgets (UOneBrahamScoreboardWidget, UOneBrahamPauseMenuWidget), created
-	// by UOneBrahamHUDComponent. Panel_Scoreboard and Panel_PauseMenu remain as
-	// optional bindings for an authored HUD that wants to decorate them.
-	if (Panel_DeathScreen != nullptr && DeathTitle != nullptr)
-	{
-		DeathTitle->SetText(NSLOCTEXT("OneBraham", "HUD_DeathTitle", "ELIMINATED"));
-	}
-
-	UE_LOG(LogOneBrahamUI, Log, TEXT("[OB.UI] HUD layout built in code (no authored Blueprint found)."));
+	const float T = FMath::Clamp(static_cast<float>((Now - TintChangedAt) / OneBrahamEase::StageCrossFade), 0.f, 1.f);
+	C.Accent = FMath::Lerp(AccentFor(TintFromBand), AccentFor(TintBand), T);
+	C.Hairline = FMath::Lerp(HairlineFor(TintFromBand), HairlineFor(TintBand), T);
 }
 
 // ==========================================================================
@@ -479,44 +309,395 @@ void UOneBrahamHUDWidget::BuildDefaultLayout()
 // ==========================================================================
 void UOneBrahamHUDWidget::ApplyHUDData(const FOneBrahamHUDData& NewData)
 {
+	const double Now = HUDNow();
+	const FOneBrahamHUDData Previous = Data;
 	Data = NewData;
 
-	// Accessibility: a single opacity slider for the whole HUD. Applied to the
-	// root so a sub-panel can never be missed by the setting.
-	if (RootCanvas != nullptr)
+	// --- the staff pass: a hit leaves a ghost, a heal refills ---------------------
+	const float MaxHealth = FMath::Max(1.f, Data.MaxHealth);
+	if (Data.Health < Previous.Health - 0.5f && Previous.LifeState == EOneBrahamLifeState::Alive)
 	{
-		RootCanvas->SetRenderOpacity(FMath::Clamp(Data.HUDOpacity, 0.2f, 1.f));
+		const float Lost = Previous.Health - Data.Health;
+		// A ghost that is still draining keeps its top: three quick hits read as
+		// one long red section, which is what they were.
+		GhostFrom = (Now - GhostAt) < 0.65 ? FMath::Max(GhostFrom, Previous.Health) : Previous.Health;
+		GhostTo = Data.Health;
+		GhostAt = Now;
+		CountFrom = ShownHealth;
+		CountAt = Now;
+		if (Lost > 20.f)
+		{
+			NudgeAt = Now;
+		}
+	}
+	else if (Data.Health > Previous.Health + 0.5f)
+	{
+		HealFrom = Previous.Health / MaxHealth;
+		HealAt = Now;
+		CountFrom = ShownHealth;
+		CountAt = Now;
+	}
+	ShownHealth = Data.Health;
+
+	if (LastArmour > 0.5f && Data.Armour <= 0.5f)
+	{
+		ArmourBreakAt = Now;
+	}
+	LastArmour = Data.Armour;
+
+	// --- the magazine: each shot fades the top tick -------------------------------
+	if (LastAmmo >= 0 && Data.AmmoInMagazine < LastAmmo && Data.WeaponId == Previous.WeaponId)
+	{
+		ShotAt = Now;
+		NotifyFireInput();
+	}
+	LastAmmo = Data.AmmoInMagazine;
+
+	if (Data.FireMode != LastFireMode)
+	{
+		PrevFireMode = LastFireMode;
+		LastFireMode = Data.FireMode;
+		FireModeAt = Now;
 	}
 
-	// --- Crosshair --------------------------------------------------------
-	if (Crosshair != nullptr)
+	if (Data.bReloading && !bWasReloading)
 	{
-		Crosshair->SetCrosshairVisible(Data.bShowCrosshair);
-		Crosshair->SetSpreadDegrees(Data.SpreadDegrees);
-		Crosshair->SetSpreadAlpha(FMath::Clamp(Data.SpreadDegrees / 8.f, 0.f, 1.f));
-		Crosshair->SetHitMarker(Data.bShowHitMarkers ? Data.HitMarkerAlpha : 0.f,
-			Data.bLastHitWasHeadshot, Data.bLastHitWasKill);
-		Crosshair->SetDamageDirection(Data.bShowDamageDirection ? Data.DamageDirectionDegrees : -1000.f);
-		Crosshair->SetDamageAlpha(Data.DamageIndicatorAlpha);
-		Crosshair->SetReloadProgress(Data.bReloading ? Data.ReloadProgress01 : 0.f);
-		Crosshair->SetInteractionProgress(Data.bHasInteractionTarget ? Data.InteractionHoldProgress01 : 0.f);
-		Crosshair->SetBlocked(Data.bInteractionBlocked);
-		Crosshair->SetLowHealthPulse(Data.LowHealthPulseAlpha);
+		ReloadStartAt = Now;
+	}
+	bWasReloading = Data.bReloading;
+
+	// --- hit markers: the snapshot's alpha jumps to 1 on a confirmed hit -----------
+	if (Data.HitMarkerAlpha > LastHitMarkerAlpha + 0.05f && Data.HitMarkerAlpha > 0.5f)
+	{
+		HitAt = Now;
+		bHitHeadshot = Data.bLastHitWasHeadshot;
+		bHitKill = Data.bLastHitWasKill;
+	}
+	LastHitMarkerAlpha = Data.HitMarkerAlpha;
+
+	// --- the card reader: a hold that completed --------------------------------------
+	if (LastHoldProgress >= 0.9f && Data.InteractionHoldProgress01 < 0.05f && !Data.bInteractionBlocked)
+	{
+		ReaderAcceptedAt = Now;
+	}
+	LastHoldProgress = Data.InteractionHoldProgress01;
+	if (Data.bHasInteractionTarget)
+	{
+		LastPromptText = (Data.bInteractionBlocked && !Data.InteractionBlockedReason.IsEmpty()
+			? Data.InteractionBlockedReason : Data.InteractionPrompt).ToString();
 	}
 
-	UpdateHealthPanel(Data);
-	UpdateWeaponPanel(Data);
-	UpdateObjectivePanel(Data);
-	UpdateSquadPanel(Data);
-	UpdateKillFeed(Data);
-	UpdateInteractionPanel(Data);
-	UpdateVoicePanel(Data);
+	// --- downed ------------------------------------------------------------------------------
+	const bool bDowned = Data.LifeState == EOneBrahamLifeState::Downed;
+	if (bDowned && !bWasDowned)
+	{
+		DownedAt = Now;
+	}
+	bWasDowned = bDowned;
+
+	// --- subtitles from the snapshot (the tannoy's words arrive this way) --------------
+	if (!Data.SubtitleText.IsEmpty() && Data.SubtitleRemaining > 0.f && Data.SubtitleText.ToString() != SubtitleShown)
+	{
+		SubtitleShown = Data.SubtitleText.ToString();
+		SubtitleSpeaker = Data.SubtitleSpeaker;
+		SubtitleAt = Now;
+		SubtitleSeconds = Data.SubtitleRemaining;
+	}
+
+	if (!Data.BannerText.IsEmpty() && Data.BannerRemaining > 0.f && Data.BannerText.ToString() != BannerShown)
+	{
+		ShowBanner(Data.BannerText, Data.BannerRemaining, Data.BannerColour);
+	}
+
+	// --- the authored path ------------------------------------------------------------------
+	if (!bBuiltLayoutInCode)
+	{
+		if (Crosshair != nullptr)
+		{
+			Crosshair->SetCrosshairVisible(Data.bShowCrosshair);
+			Crosshair->SetSpreadDegrees(Data.SpreadDegrees);
+			Crosshair->SetSpreadAlpha(FMath::Clamp(Data.SpreadDegrees / 8.f, 0.f, 1.f));
+			Crosshair->SetHitMarker(Data.bShowHitMarkers ? Data.HitMarkerAlpha : 0.f,
+				Data.bLastHitWasHeadshot, Data.bLastHitWasKill);
+			Crosshair->SetDamageDirection(Data.bShowDamageDirection ? Data.DamageDirectionDegrees : -1000.f);
+			Crosshair->SetDamageAlpha(Data.DamageIndicatorAlpha);
+			Crosshair->SetReloadProgress(Data.bReloading ? Data.ReloadProgress01 : 0.f);
+			Crosshair->SetInteractionProgress(Data.bHasInteractionTarget ? Data.InteractionHoldProgress01 : 0.f);
+			Crosshair->SetBlocked(Data.bInteractionBlocked);
+			Crosshair->SetLowHealthPulse(Data.LowHealthPulseAlpha);
+		}
+
+		UpdateHealthPanel(Data);
+		UpdateWeaponPanel(Data);
+		UpdateObjectivePanel(Data);
+		UpdateSquadPanel(Data);
+		UpdateKillFeed(Data);
+		UpdateInteractionPanel(Data);
+		UpdateVoicePanel(Data);
+		UpdateOverlays(Data);
+	}
+
 	UpdateCompassData(Data);
-	UpdateOverlays(Data);
+}
+
+void UOneBrahamHUDWidget::ApplyHUDFrame(const FOneBrahamHUDFrame& NewFrame)
+{
+	const double Now = HUDNow();
+	const FOneBrahamBuildingStatus& Building = NewFrame.Building;
+
+	// --- the floor plate's split-flap ----------------------------------------------
+	if (Building.LocalFloor != ShownFloor)
+	{
+		const bool bFirst = ShownFloor == INDEX_NONE;
+		PreviousFloor = ShownFloor;
+		ShownFloor = Building.LocalFloor;
+		FloorChangedAt = bFirst ? -100.0 : Now;
+
+		if (const FOneBrahamFloorStatus* Here = Building.Find(ShownFloor))
+		{
+			PlateArea = Here->ShortName.ToString().ToUpper();
+			PlateAreaAt = bFirst ? -100.0 : Now;
+		}
+
+		// The lift indicator appears on the first move: before that the
+		// player is standing on the plaza and a column of eighteen empty cells
+		// is noise.
+		if (!bFirst && !bStackRevealed)
+		{
+			bStackRevealed = true;
+			StackChangedAt = Now;
+		}
+	}
+
+	// --- the stage: tint, the fire panel's clock, the OVERRIDE -----------------------
+	const int32 Band = OneBrahamHUDStyle::StageBand(Building.Stage);
+	if (!bStagePrimed)
+	{
+		bStagePrimed = true;
+		LastStage = Building.Stage;
+		TintBand = TintFromBand = Band;
+		StageStartedAt = Band > 0 ? -100.0 : Now;
+		LastSealCeiling = Building.SealCeiling;
+	}
+	else if (Building.Stage != LastStage)
+	{
+		LastStage = Building.Stage;
+		StageStartedAt = Now;
+
+		if (Band != TintBand)
+		{
+			// The colour the tint was showing, frozen, becomes the start of the fade.
+			TintFromBand = TintBand;
+			TintBand = Band;
+			TintChangedAt = Now;
+		}
+
+		// The building overrides the objective: the old line stays, struck
+		// through in the stage colour, with the new instruction under it.
+		if (Band > 0 && !ObjectiveShown.IsEmpty())
+		{
+			OverriddenLine = ObjectiveShown;
+			OverriddenDetail = ObjectiveDetailShown;
+			OverrideAt = Now;
+			OverrideBand = Band;
+		}
+
+		bStackRevealed = bStackRevealed || Band > 0;
+		StackChangedAt = Now;
+	}
+
+	// --- the LCD strip: one line per change in the sealed zones ------------------------
+	if (Building.SealCeiling != LastSealCeiling || (Building.Stage == EOneBrahamLockdownStage::Purge && LCDLines.Num() == 0))
+	{
+		FString Line;
+		if (Building.Stage == EOneBrahamLockdownStage::Purge)
+		{
+			Line = FString::Printf(TEXT("PURGE ZONES 00-%02d ACTIVE"), Building.PurgeCeiling);
+		}
+		else if (Building.SealCeiling != INDEX_NONE)
+		{
+			Line = FString::Printf(TEXT("ZONES 00-%02d SEALED"), Building.SealCeiling);
+		}
+
+		if (!Line.IsEmpty() && (LCDLines.Num() == 0 || LCDLines.Last() != Line))
+		{
+			LCDLines.Add(Line);
+			while (LCDLines.Num() > 4)
+			{
+				LCDLines.RemoveAt(0);
+			}
+			LCDScrolledAt = Now;
+		}
+		LastSealCeiling = Building.SealCeiling;
+	}
+
+	// --- the objective line ---------------------------------------------------------------
+	const FString NewObjective = NewFrame.Objective.ToString();
+	if (NewObjective != ObjectiveShown || NewFrame.ObjectiveDetail != ObjectiveDetailShown)
+	{
+		// A detail tick ("8 FLOORS" to "7 FLOORS") is not a new objective: only a
+		// new sentence gets the wipe and the ribbon.
+		if (NewObjective != ObjectiveShown)
+		{
+			ObjectiveChangedAt = Now;
+		}
+		ObjectiveShown = NewObjective;
+		ObjectiveDetailShown = NewFrame.ObjectiveDetail;
+	}
+
+	// --- rest dimming: what changed, and when --------------------------------------------
+	FString Stack;
+	for (const FOneBrahamFloorStatus& Floor : Building.Floors)
+	{
+		Stack.AppendChar(TEXT('0') + static_cast<TCHAR>(Floor.Condition));
+		Stack.AppendChar(Floor.bLocal ? TEXT('*') : TEXT('.'));
+		Stack.AppendInt(Floor.Mates * 10 + Floor.MatesDowned);
+	}
+	if (Stack != StackSignature)
+	{
+		StackSignature = Stack;
+		StackChangedAt = Now;
+	}
+
+	FString Squad;
+	for (const FOneBrahamSquadRowView& Row : NewFrame.Squad)
+	{
+		Squad += FString::Printf(TEXT("%d:%d:%d:%d:%d;"), Row.PlayerId, Row.Floor, static_cast<int32>(Row.LifeState),
+			FMath::RoundToInt(Row.HealthFraction * 4.f), Row.bTransmitting ? 1 : 0);
+	}
+	if (Squad != SquadSignature)
+	{
+		SquadSignature = Squad;
+		SquadChangedAt = Now;
+	}
+
+	Frame = NewFrame;
+
+	// --- the PA card queue: one at a time, the next when the last has gone -------------
+	const bool bCurrentDone = CurrentAnnouncement.At < 0.0
+		|| Now > CurrentAnnouncement.At + CurrentAnnouncement.Hold + 0.3;
+	if (bCurrentDone && AnnouncementQueue.Num() > 0 && !IsStageCardUp(Now))
+	{
+		CurrentAnnouncement = AnnouncementQueue[0];
+		CurrentAnnouncement.At = Now;
+		AnnouncementQueue.RemoveAt(0);
+	}
+
+	// --- the compass's markers and the stage it draws its tags in ------------------------
+	if (Compass != nullptr)
+	{
+		Compass->SetFrame(Frame.Compass, Frame.Building.Stage, Frame.bReduceMotion, Frame.HUDScale);
+
+		// The strip goes with the rest of the HUD when the player is out: the
+		// accident book and the spectator's lower third are all that is left.
+		const bool bOut = Data.LifeState == EOneBrahamLifeState::Dead || Data.LifeState == EOneBrahamLifeState::Spectating;
+		Compass->SetCompassVisible(Data.bShowCompass && !bOut && !bDeathScreenVisible);
+	}
+}
+
+void UOneBrahamHUDWidget::PushAnnouncement(const FText& Headline, const FText& Subline, EOneBrahamLockdownStage Stage, float HoldSeconds)
+{
+	if (Headline.IsEmpty())
+	{
+		return;
+	}
+
+	FAnnouncement Entry;
+	Entry.Headline = Headline.ToString();
+	Entry.Subline = Subline.ToString();
+	Entry.Stage = Stage;
+	Entry.Hold = FMath::Clamp(HoldSeconds, 2.f, 14.f) + OneBrahamHUDLayout::AnnouncementTail;
+	Entry.Eyebrow = FString::Printf(TEXT("ONE BRAHAM  ·  ALL FLOORS  ·  %s"),
+		Frame.DuskClock.IsEmpty() ? *OneBrahamDuskClock::Now(GetWorld()).ToString() : *Frame.DuskClock);
+
+	// The same sentence twice in a row is one announcement repeated by the
+	// server, not two: the card would flash off and on for nothing.
+	if ((CurrentAnnouncement.At >= 0.0 && CurrentAnnouncement.Headline == Entry.Headline
+		&& HUDNow() < CurrentAnnouncement.At + CurrentAnnouncement.Hold)
+		|| AnnouncementQueue.ContainsByPredicate([&Entry](const FAnnouncement& A) { return A.Headline == Entry.Headline; }))
+	{
+		return;
+	}
+
+	AnnouncementQueue.Add(Entry);
+	while (AnnouncementQueue.Num() > 3)
+	{
+		AnnouncementQueue.RemoveAt(0);
+	}
+
+	if ((CurrentAnnouncement.At < 0.0 || HUDNow() > CurrentAnnouncement.At + CurrentAnnouncement.Hold + 0.3) && !IsStageCardUp(HUDNow()))
+	{
+		CurrentAnnouncement = AnnouncementQueue[0];
+		CurrentAnnouncement.At = HUDNow();
+		AnnouncementQueue.RemoveAt(0);
+	}
+}
+
+void UOneBrahamHUDWidget::ShowStageCard(EOneBrahamStageCard Card)
+{
+	if (Card == EOneBrahamStageCard::None)
+	{
+		return;
+	}
+
+	StageCard = Card;
+	StageCardAt = HUDNow();
+
+	// The card is the building's loudest voice: a PA line already up leaves
+	// now (its 300 ms exit), and anything queued waits until the card has gone.
+	if (CurrentAnnouncement.At >= 0.0 && StageCardAt < CurrentAnnouncement.At + CurrentAnnouncement.Hold)
+	{
+		CurrentAnnouncement.Hold = FMath::Max(0.f, static_cast<float>(StageCardAt - CurrentAnnouncement.At));
+	}
+	UE_LOG(LogOneBrahamUI, Verbose, TEXT("[OB.UI] Stage card %d at %.2f"), static_cast<int32>(Card), StageCardAt);
+	StageCardHold = 2.f;
+	StageCardEyebrow = FString::Printf(TEXT("%s  ·  ALL FLOORS"),
+		Frame.DuskClock.IsEmpty() ? *OneBrahamDuskClock::Now(GetWorld()).ToString() : *Frame.DuskClock);
+}
+
+void UOneBrahamHUDWidget::NotifyFireInput()
+{
+	// A player who fires is busy: the card gets out of the way at twice the pace.
+	if (StageCard == EOneBrahamStageCard::None)
+	{
+		return;
+	}
+
+	const double Now = HUDNow();
+	const double HoldStart = StageCardAt + 0.35;
+	const double HoldEnd = HoldStart + StageCardHold;
+	if (Now > HoldStart && Now < HoldEnd)
+	{
+		const float Left = static_cast<float>(HoldEnd - Now);
+		StageCardHold -= Left * 0.5f;
+	}
+}
+
+void UOneBrahamHUDWidget::PushDamage(float Damage, const FVector& FromLocation, bool bHasSource, int32 FloorDelta)
+{
+	const double Now = HUDNow();
+
+	if (bHasSource)
+	{
+		FDamageArc& Arc = DamageArcs.AddDefaulted_GetRef();
+		Arc.From = FromLocation;
+		Arc.Damage = Damage;
+		Arc.At = Now;
+		Arc.FloorDelta = FloorDelta;
+		while (DamageArcs.Num() > 6)
+		{
+			DamageArcs.RemoveAt(0);
+		}
+	}
+
+	if (Damage > 40.f)
+	{
+		HeavyHitAt = Now;
+	}
 }
 
 // ==========================================================================
-//  Panels
+//  The authored path: bound widgets, kept for a designer's Blueprint HUD
 // ==========================================================================
 void UOneBrahamHUDWidget::UpdateHealthPanel(const FOneBrahamHUDData& InData)
 {
@@ -539,8 +720,6 @@ void UOneBrahamHUDWidget::UpdateHealthPanel(const FOneBrahamHUDData& InData)
 
 	if (Text_Health != nullptr)
 	{
-		// Downed shows the bleed-out countdown instead of a number: the player needs
-		// to know how long they have, not how much health is left.
 		if (InData.LifeState == EOneBrahamLifeState::Downed)
 		{
 			Text_Health->SetText(FText::Format(NSLOCTEXT("OneBraham", "HUD_BleedOut", "BLEED OUT IN {0}s"),
@@ -564,8 +743,6 @@ void UOneBrahamHUDWidget::UpdateHealthPanel(const FOneBrahamHUDData& InData)
 
 FText UOneBrahamHUDWidget::BuildAccessRow(const FOneBrahamHUDData& InData) const
 {
-	// Access is deliberately text rather than icons: a keycard tier is a colour
-	// and a word, and the player learns the colour code from the doors themselves.
 	FString Row;
 
 	switch (InData.HighestKeycardTier)
@@ -588,8 +765,6 @@ FText UOneBrahamHUDWidget::BuildAccessRow(const FOneBrahamHUDData& InData) const
 
 FText UOneBrahamHUDWidget::BuildUtilityRow(const FOneBrahamHUDData& InData) const
 {
-	// Row of glyph + count. Empty utilities are dimmed out of the row entirely so
-	// the remainder is readable at a glance mid-fight.
 	TArray<FString> Parts;
 
 	if (InData.FragCount > 0)		{ Parts.Add(FString::Printf(TEXT("F %d"), InData.FragCount)); }
@@ -605,25 +780,10 @@ void UOneBrahamHUDWidget::UpdateWeaponPanel(const FOneBrahamHUDData& InData)
 {
 	if (Text_Ammo != nullptr)
 	{
-		if (!InData.bShowAmmoCount)
-		{
-			Text_Ammo->SetVisibility(ESlateVisibility::Collapsed);
-		}
-		else
-		{
-			Text_Ammo->SetVisibility(ESlateVisibility::HitTestInvisible);
-
-			// "12 / 90" - magazine then reserve. No icons, no shells: this is a
-			// corporate building, the number is the number.
-			Text_Ammo->SetText(FText::FromString(FString::Printf(TEXT("%d / %d"),
-				InData.AmmoInMagazine, InData.AmmoReserve)));
-
-			// Low ammo is the only colour the ammo counter ever takes.
-			const bool bLow = InData.MagazineSize > 0 && InData.AmmoInMagazine <= FMath::Max(2, InData.MagazineSize / 5);
-			Text_Ammo->SetColorAndOpacity(FSlateColor(bLow
-				? UOneBrahamUIStyle::SafetyYellow()
-				: UOneBrahamUIStyle::LightGrey()));
-		}
+		Text_Ammo->SetVisibility(InData.bShowAmmoCount ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		Text_Ammo->SetText(FText::FromString(FString::Printf(TEXT("%d / %d"), InData.AmmoInMagazine, InData.AmmoReserve)));
+		const bool bLow = InData.MagazineSize > 0 && InData.AmmoInMagazine <= FMath::Max(2, InData.MagazineSize / 5);
+		Text_Ammo->SetColorAndOpacity(FSlateColor(bLow ? UOneBrahamUIStyle::SafetyYellow() : UOneBrahamUIStyle::LightGrey()));
 	}
 
 	if (Text_WeaponName != nullptr)
@@ -633,24 +793,7 @@ void UOneBrahamHUDWidget::UpdateWeaponPanel(const FOneBrahamHUDData& InData)
 
 	if (Text_FireMode != nullptr)
 	{
-		FText ModeText;
-		switch (InData.FireMode)
-		{
-		case EOneBrahamFireMode::Single:	ModeText = NSLOCTEXT("OneBraham", "FireMode_Single", "SINGLE"); break;
-		case EOneBrahamFireMode::Burst:		ModeText = NSLOCTEXT("OneBraham", "FireMode_Burst", "BURST"); break;
-		case EOneBrahamFireMode::Auto:		ModeText = NSLOCTEXT("OneBraham", "FireMode_Auto", "AUTO"); break;
-		case EOneBrahamFireMode::Pump:		ModeText = NSLOCTEXT("OneBraham", "FireMode_Pump", "PUMP"); break;
-		case EOneBrahamFireMode::Bolt:		ModeText = NSLOCTEXT("OneBraham", "FireMode_Bolt", "BOLT"); break;
-		default:							ModeText = FText::GetEmpty(); break;
-		}
-
-		FString Suffix;
-		if (InData.bLaserOn)		{ Suffix += TEXT("  LASER"); }
-		if (InData.bFlashlightOn)	{ Suffix += TEXT("  LIGHT"); }
-
-		Text_FireMode->SetText(Suffix.IsEmpty()
-			? ModeText
-			: FText::FromString(ModeText.ToString() + Suffix));
+		Text_FireMode->SetText(UEnum::GetDisplayValueAsText(InData.FireMode));
 	}
 
 	if (Text_Utilities != nullptr)
@@ -673,101 +816,21 @@ void UOneBrahamHUDWidget::UpdateObjectivePanel(const FOneBrahamHUDData& InData)
 		Text_Floor->SetVisibility(InData.bShowFloorIndicator ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	}
 
-	if (Text_Objective == nullptr && Bar_Objective == nullptr)
+	if (Text_Objective != nullptr)
 	{
-		return;
+		Text_Objective->SetText(Frame.Objective);
 	}
 
-	// Priority order: extraction beats lockdown beats generic phase text. The
-	// player only ever needs the single most urgent thing.
-	if (InData.bExtractionActive)
+	if (Bar_Objective != nullptr)
 	{
-		const FText Text = InData.HoldingSquadId >= 0
-			? FText::Format(NSLOCTEXT("OneBraham", "HUD_ExtractionHeld", "EXTRACTION - {0}s"),
-				FText::AsNumber(FMath::CeilToInt(InData.ExtractionSecondsRemaining)))
-			: NSLOCTEXT("OneBraham", "HUD_ExtractionOpen", "EXTRACTION LIVE ON THE SKYDECK");
-
-		if (Text_Objective != nullptr)
-		{
-			Text_Objective->SetText(Text);
-			Text_Objective->SetColorAndOpacity(FSlateColor(UOneBrahamUIStyle::SuccessGreen()));
-		}
-
-		if (Bar_Objective != nullptr)
-		{
-			Bar_Objective->SetPercent(InData.ExtractionHoldProgress01);
-			Bar_Objective->SetFillColorAndOpacity(UOneBrahamUIStyle::SuccessGreen());
-			Bar_Objective->SetVisibility(ESlateVisibility::HitTestInvisible);
-		}
-	}
-	else if (InData.bLockdownActive)
-	{
-		// Which stage, and how long a stage is, come from the game state: the
-		// snapshot carries only the countdown, and a countdown of 0 means both
-		// "the Purge, nothing after it" and "the next stage is a packet away".
-		// The Purge used to fall through to "N s TO NEXT STAGE" here, with
-		// whatever number the server last sent - the last stage has no next.
-		const AOneBrahamGameState* GS = GetWorld() != nullptr ? GetWorld()->GetGameState<AOneBrahamGameState>() : nullptr;
-		const UOneBrahamLockdownComponent* Lockdown = GS != nullptr ? GS->GetLockdownComponent() : nullptr;
-		const EOneBrahamLockdownStage Stage = Lockdown != nullptr ? Lockdown->GetStage() : EOneBrahamLockdownStage::PreLockdown;
-		const UOneBrahamMatchSettingsAsset* Settings = GS != nullptr ? GS->GetMatchSettings() : nullptr;
-		const float StageSeconds = Settings != nullptr ? FMath::Max(5.f, Settings->LockdownStageSeconds) : 90.f;
-		// No clock either when the director is not running (a stage forced before
-		// the match starts, or left standing after it ends): the stage's own text
-		// and a full bar, not "IN 0s" over an empty one.
-		const bool bNoClock = Stage == EOneBrahamLockdownStage::Purge
-			|| (Lockdown != nullptr && !Lockdown->IsDirectorRunning());
-		const FText Seconds = FText::AsNumber(FMath::CeilToInt(InData.LockdownSecondsRemaining));
-
-		if (Text_Objective != nullptr)
-		{
-			FText Text;
-			if (bNoClock)
-			{
-				Text = Lockdown->GetStageDisplayText();
-			}
-			else if (Stage == EOneBrahamLockdownStage::Lockdown)
-			{
-				Text = FText::Format(NSLOCTEXT("OneBraham", "HUD_LockdownToPurge", "SHUTTERS DOWN - PURGE IN {0}s"), Seconds);
-			}
-			else
-			{
-				Text = FText::Format(NSLOCTEXT("OneBraham", "HUD_LockdownToShutters", "LOCKDOWN - SHUTTERS IN {0}s"), Seconds);
-			}
-
-			Text_Objective->SetText(Text);
-			Text_Objective->SetColorAndOpacity(FSlateColor(UOneBrahamUIStyle::EmergencyRed()));
-		}
-
-		if (Bar_Objective != nullptr)
-		{
-			// The Purge has no clock to drain: the bar stays full, red, for as
-			// long as the building is gassing its lower floors.
-			Bar_Objective->SetFillColorAndOpacity(UOneBrahamUIStyle::EmergencyRed());
-			Bar_Objective->SetPercent(bNoClock ? 1.f : FMath::Clamp(InData.LockdownSecondsRemaining / StageSeconds, 0.f, 1.f));
-			Bar_Objective->SetVisibility(ESlateVisibility::HitTestInvisible);
-		}
-	}
-	else
-	{
-		if (Text_Objective != nullptr)
-		{
-			Text_Objective->SetText(FText::Format(NSLOCTEXT("OneBraham", "HUD_AliveCount", "{0} ALIVE  -  {1} SQUADS"),
-				FText::AsNumber(InData.AlivePlayersRemaining), FText::AsNumber(InData.SquadsRemaining)));
-			Text_Objective->SetColorAndOpacity(FSlateColor(UOneBrahamUIStyle::Muted(UOneBrahamUIStyle::LightGrey(), 0.3f)));
-		}
-
-		if (Bar_Objective != nullptr)
-		{
-			Bar_Objective->SetVisibility(ESlateVisibility::Collapsed);
-		}
+		Bar_Objective->SetVisibility(InData.bExtractionActive ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		Bar_Objective->SetPercent(InData.ExtractionHoldProgress01);
 	}
 
 	if (Text_Clock != nullptr)
 	{
 		Text_Clock->SetText(UOneBrahamUIStyle::ClockLabel(InData.MatchTimeRemaining));
-		Text_Clock->SetVisibility(InData.MatchTimeRemaining > 0.f
-			? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		Text_Clock->SetVisibility(InData.MatchTimeRemaining > 0.f ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	}
 }
 
@@ -786,45 +849,16 @@ void UOneBrahamHUDWidget::UpdateSquadPanel(const FOneBrahamHUDData& InData)
 
 	Text_Squad->SetVisibility(ESlateVisibility::HitTestInvisible);
 
+	// One line per member, joined by line breaks: a list of names concatenated
+	// without them is how "BOT BrennanBOT Patel" reached a screen.
 	TArray<FString> Lines;
-	Lines.Add(FString::Join(TArray<FString>{ TEXT("SQUAD") }, TEXT("")));
-
 	for (const FOneBrahamHUDSquadMember& Member : InData.Squad)
 	{
-		FString Status;
-		switch (Member.LifeState)
-		{
-		case EOneBrahamLifeState::Alive:
-			Status = TEXT("");
-			break;
-		case EOneBrahamLifeState::Downed:
-			Status = FString::Printf(TEXT("  DOWN %ds"), FMath::CeilToInt(Member.BleedOutFraction * 60.f));
-			break;
-		case EOneBrahamLifeState::Extracted:
-			Status = TEXT("  EXTRACTED");
-			break;
-		default:
-			Status = TEXT("  OUT");
-			break;
-		}
-
-		FString Range;
-		if (Member.LifeState == EOneBrahamLifeState::Alive || Member.LifeState == EOneBrahamLifeState::Downed)
-		{
-			Range = Member.DistanceCm >= 0.f
-				? TEXT("  ") + UOneBrahamUIStyle::DistanceLabel(Member.DistanceCm).ToString()
-				: (Member.FloorIndex != INDEX_NONE
-					? TEXT("  ") + FText::Format(
-						OneBrahamHUDStrings::Get(TEXT("HUD_Floor_Format")),
-						FText::AsNumber(Member.FloorIndex)).ToString()
-					: FString());
-		}
-
-		const FString Mic = Member.bIsTransmitting ? TEXT("[mic] ") : TEXT("");
-
-		Lines.Add(FString::Printf(TEXT("%s%s%s%s"), *Mic, *Member.PlayerName, *Status, *Range));
+		const FString Floor = Member.FloorIndex != INDEX_NONE
+			? FText::Format(OneBrahamHUDStrings::Get(TEXT("HUD_Floor_Format")), FText::AsNumber(Member.FloorIndex)).ToString()
+			: FString();
+		Lines.Add(FString::Printf(TEXT("%s  %s"), *Member.PlayerName, *Floor));
 	}
-
 	Text_Squad->SetText(FText::FromString(FString::Join(Lines, TEXT("\n"))));
 }
 
@@ -844,23 +878,13 @@ void UOneBrahamHUDWidget::UpdateKillFeed(const FOneBrahamHUDData& InData)
 	Text_KillFeed->SetVisibility(ESlateVisibility::HitTestInvisible);
 
 	TArray<FString> Lines;
-
-	// Newest first, and never more than five: a feed longer than that is a log,
-	// not a feed.
 	const int32 StartIndex = FMath::Max(0, InData.KillFeed.Num() - 5);
-
 	for (int32 Index = InData.KillFeed.Num() - 1; Index >= StartIndex; --Index)
 	{
 		const FOneBrahamHUDKillFeedEntry& Entry = InData.KillFeed[Index];
-
-		FString Verb = Entry.bHeadshot ? TEXT("[HS] ") : (Entry.bMelee ? TEXT("[M] ") : TEXT(""));
-		if (Entry.WeaponId == TEXT("Building"))	{ Verb = TEXT("[B] "); }
-		if (Entry.WeaponId == TEXT("Utility"))	{ Verb = TEXT("[U] "); }
-
-		const FString Self = Entry.bKillerIsLocalPlayer ? TEXT("* ") : TEXT("");
-
-		Lines.Add(FString::Printf(TEXT("%s%s%s%s"), *Self, *Entry.KillerName, *Verb,
-			*Entry.VictimName));
+		// Always a separator between the two names: the verb used to be the
+		// only thing between them, and an ordinary kill has no verb.
+		Lines.Add(FString::Printf(TEXT("%s  →  %s"), *Entry.KillerName, *Entry.VictimName));
 	}
 
 	Text_KillFeed->SetText(FText::FromString(FString::Join(Lines, TEXT("\n"))));
@@ -874,25 +898,15 @@ void UOneBrahamHUDWidget::UpdateInteractionPanel(const FOneBrahamHUDData& InData
 	}
 
 	const bool bVisible = InData.bShowInteractionPrompt && InData.bHasInteractionTarget;
+	Text_Interaction->SetVisibility(bVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	Bar_Interaction->SetVisibility(bVisible && InData.InteractionHoldProgress01 > 0.f ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 
-	if (!bVisible)
+	if (bVisible)
 	{
-		Text_Interaction->SetVisibility(ESlateVisibility::Collapsed);
-		Bar_Interaction->SetVisibility(ESlateVisibility::Collapsed);
-		return;
+		Text_Interaction->SetText(InData.bInteractionBlocked && !InData.InteractionBlockedReason.IsEmpty()
+			? InData.InteractionBlockedReason : InData.InteractionPrompt);
+		Bar_Interaction->SetPercent(InData.InteractionHoldProgress01);
 	}
-
-	Text_Interaction->SetVisibility(ESlateVisibility::HitTestInvisible);
-	Text_Interaction->SetText(InData.bInteractionBlocked && !InData.InteractionBlockedReason.IsEmpty()
-		? InData.InteractionBlockedReason
-		: InData.InteractionPrompt);
-	Text_Interaction->SetColorAndOpacity(FSlateColor(InData.bInteractionBlocked
-		? UOneBrahamUIStyle::EmergencyRed()
-		: UOneBrahamUIStyle::LightGrey()));
-
-	const bool bHold = InData.InteractionHoldProgress01 > 0.f && InData.InteractionHoldProgress01 < 1.f;
-	Bar_Interaction->SetPercent(InData.InteractionHoldProgress01);
-	Bar_Interaction->SetVisibility(bHold ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 }
 
 void UOneBrahamHUDWidget::UpdateVoicePanel(const FOneBrahamHUDData& InData)
@@ -902,34 +916,9 @@ void UOneBrahamHUDWidget::UpdateVoicePanel(const FOneBrahamHUDData& InData)
 		return;
 	}
 
-	if (!InData.bShowVoiceIndicator)
-	{
-		Text_Voice->SetVisibility(ESlateVisibility::Collapsed);
-		return;
-	}
-
-	// Only show the indicator when transmitting, muted or there is a problem: a
-	// permanent voice widget is clutter, and this is not a streaming overlay.
-	FString VoiceText;
-
-	if (InData.bSelfMuted)
-	{
-		VoiceText = TEXT("VOICE MUTED");
-	}
-	else if (InData.bLocalTransmitting)
-	{
-		VoiceText = FString::Printf(TEXT("TRANSMITTING - %s"), *InData.VoiceChannelName.ToString());
-	}
-	else if (!InData.bMicrophoneAvailable)
-	{
-		VoiceText = TEXT("NO MICROPHONE DETECTED");
-	}
-
-	Text_Voice->SetVisibility(VoiceText.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
-	Text_Voice->SetText(FText::FromString(VoiceText));
-	Text_Voice->SetColorAndOpacity(FSlateColor(InData.bLocalTransmitting
-		? UOneBrahamUIStyle::SuccessGreen()
-		: UOneBrahamUIStyle::Muted(UOneBrahamUIStyle::LightGrey(), 0.4f)));
+	const bool bShow = InData.bShowVoiceIndicator && InData.bLocalTransmitting;
+	Text_Voice->SetVisibility(bShow ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	Text_Voice->SetText(InData.VoiceChannelName);
 }
 
 void UOneBrahamHUDWidget::UpdateCompassData(const FOneBrahamHUDData& InData)
@@ -939,13 +928,13 @@ void UOneBrahamHUDWidget::UpdateCompassData(const FOneBrahamHUDData& InData)
 		return;
 	}
 
-	Compass->SetCompassVisible(InData.bShowCompass && InData.bShowObjectiveMarkers);
+	// The compass never hides while the setting has it on and the player is in
+	// the fight (Docs/08): it is the one navigation aid in a game with no minimap.
+	const bool bOut = InData.LifeState == EOneBrahamLifeState::Dead || InData.LifeState == EOneBrahamLifeState::Spectating;
+	Compass->SetCompassVisible(InData.bShowCompass && !bOut && !bDeathScreenVisible);
 	Compass->SetMarkers(InData.CompassMarkers);
 }
 
-// ==========================================================================
-//  Overlays
-// ==========================================================================
 void UOneBrahamHUDWidget::UpdateOverlays(const FOneBrahamHUDData& InData)
 {
 	if (Panel_Downed != nullptr)
@@ -955,78 +944,27 @@ void UOneBrahamHUDWidget::UpdateOverlays(const FOneBrahamHUDData& InData)
 
 		if (bDowned && Text_BleedOut != nullptr)
 		{
-			// "BLEEDING OUT  12s": the words come from the copy table (which a
-			// writer can edit in DT_HUDStrings), the number from the state.
 			Text_BleedOut->SetText(FText::Format(
 				NSLOCTEXT("OneBraham", "HUD_BigValue", "{0}  {1}s"),
 				OneBrahamHUDStrings::Get(TEXT("HUD_Downed_BleedOut")),
 				FText::AsNumber(FMath::CeilToInt(InData.BleedOutRemaining))));
 		}
-
-		if (bDowned && Bar_Revive != nullptr)
-		{
-			// Zero means nobody is helping. The bar appears the moment a hand
-			// touches the player and fills at the server's rate, so a revive that
-			// gets interrupted visibly snaps back to nothing - which is the whole
-			// drama of the moment and worth one element on the screen.
-			const bool bBeingRevived = InData.ReviveProgress01 > 0.f;
-
-			Bar_Revive->SetPercent(FMath::Clamp(InData.ReviveProgress01, 0.f, 1.f));
-			Bar_Revive->SetVisibility(bBeingRevived ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
-		}
-	}
-
-	// The damage flash is the one full-screen element in the game, and it is kept
-	// deliberately faint: at 35% maximum it reads as pain without hiding a threat.
-	if (Image_DamageFlash != nullptr)
-	{
-		Image_DamageFlash->SetVisibility(InData.DamageIndicatorAlpha > 0.01f
-			? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
-	}
-
-	// Banner text: driven by the component's snapshot, so a replicate-order change
-	// cannot leave a stale banner on screen.
-	if (Text_Banner != nullptr)
-	{
-		const bool bHasBanner = !InData.BannerText.IsEmpty() && InData.BannerRemaining > 0.f;
-		Text_Banner->SetVisibility(bHasBanner ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
-
-		if (bHasBanner)
-		{
-			Text_Banner->SetText(InData.BannerText);
-			Text_Banner->SetColorAndOpacity(FSlateColor(InData.BannerColour));
-		}
-	}
-
-	if (Text_SubBanner != nullptr)
-	{
-		const bool bHasSub = !InData.SubBannerText.IsEmpty();
-		Text_SubBanner->SetVisibility(bHasSub ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
-
-		if (bHasSub)
-		{
-			Text_SubBanner->SetText(InData.SubBannerText);
-		}
 	}
 
 	if (Text_Subtitle != nullptr)
 	{
-		const bool bHasSubtitle = InData.bShowSubtitles
-			&& !InData.SubtitleText.IsEmpty()
-			&& InData.SubtitleRemaining > 0.f;
-
+		const bool bHasSubtitle = InData.bShowSubtitles && !InData.SubtitleText.IsEmpty() && InData.SubtitleRemaining > 0.f;
 		Text_Subtitle->SetVisibility(bHasSubtitle ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
-
 		if (bHasSubtitle)
 		{
-			const FText Speaker = InData.SubtitleSpeaker.IsEmpty()
-				? FText::GetEmpty()
-				: FText::FromString(InData.SubtitleSpeaker + TEXT(": "));
-			Text_Subtitle->SetText(FText::Join(Speaker, InData.SubtitleText));
+			Text_Subtitle->SetText(InData.SubtitleText);
 		}
 	}
 }
 
+// ==========================================================================
+//  Overlay commands
+// ==========================================================================
 void UOneBrahamHUDWidget::SetScoreboardVisible(bool bVisible)
 {
 	if (Panel_Scoreboard != nullptr)
@@ -1051,6 +989,26 @@ void UOneBrahamHUDWidget::SetDeathScreenVisible(bool bVisible, const FText& Caus
 		// the player.
 		Text_DeathCause->SetText(CauseText);
 	}
+
+	if (bVisible && !bDeathScreenVisible)
+	{
+		// The book is stamped with the moment and the place: the clock the
+		// building keeps, and the floor the player fell on.
+		DeathAt = HUDNow();
+		DeathTime = Frame.DuskClock;
+		++DeathEntryNumber;
+		DeathLocation.Reset();
+		if (const FOneBrahamFloorStatus* Floor = Frame.Building.Find(ShownFloor))
+		{
+			DeathLocation = FString::Printf(TEXT("Level %02d · %s"), ShownFloor, *Floor->AreaName.ToString());
+		}
+	}
+
+	bDeathScreenVisible = bVisible;
+	if (bVisible)
+	{
+		DeathText = CauseText;
+	}
 }
 
 void UOneBrahamHUDWidget::TogglePauseMenu(bool bVisible)
@@ -1067,11 +1025,20 @@ void UOneBrahamHUDWidget::SetDownedVisible(bool bDowned)
 	{
 		Panel_Downed->SetVisibility(bDowned ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	}
+
+	if (bDowned && !bWasDowned)
+	{
+		DownedAt = HUDNow();
+	}
+	bWasDowned = bDowned;
 }
 
 void UOneBrahamHUDWidget::ShowBanner(const FText& Text, float DurationSeconds, FLinearColor Colour)
 {
-	BannerRemaining = FMath::Max(0.2f, DurationSeconds);
+	BannerShown = Text.ToString();
+	BannerColour = Colour;
+	BannerAt = HUDNow();
+	BannerSeconds = FMath::Max(0.6f, DurationSeconds);
 
 	if (Text_Banner != nullptr)
 	{
@@ -1083,7 +1050,9 @@ void UOneBrahamHUDWidget::ShowBanner(const FText& Text, float DurationSeconds, F
 
 void UOneBrahamHUDWidget::ShowSubBanner(const FText& Text, float DurationSeconds)
 {
-	SubBannerRemaining = FMath::Max(0.2f, DurationSeconds);
+	SubBannerShown = Text.ToString();
+	SubBannerAt = HUDNow();
+	SubBannerSeconds = FMath::Max(0.6f, DurationSeconds);
 
 	if (Text_SubBanner != nullptr)
 	{
@@ -1094,30 +1063,83 @@ void UOneBrahamHUDWidget::ShowSubBanner(const FText& Text, float DurationSeconds
 
 void UOneBrahamHUDWidget::ShowSubtitle(const FText& Text, const FString& SpeakerName, float DurationSeconds)
 {
-	SubtitleRemaining = FMath::Max(0.5f, DurationSeconds);
+	SubtitleShown = Text.ToString();
+	SubtitleSpeaker = SpeakerName;
+	SubtitleAt = HUDNow();
+	SubtitleSeconds = FMath::Max(0.75f, DurationSeconds);
 
-	if (Text_Subtitle == nullptr)
+	if (Text_Subtitle != nullptr)
 	{
-		return;
+		Text_Subtitle->SetText(Text);
+		Text_Subtitle->SetVisibility(ESlateVisibility::HitTestInvisible);
 	}
-
-	const FText Speaker = SpeakerName.IsEmpty()
-		? FText::GetEmpty()
-		: FText::FromString(SpeakerName + TEXT(": "));
-
-	Text_Subtitle->SetText(FText::Join(Speaker, Text));
-	Text_Subtitle->SetVisibility(ESlateVisibility::HitTestInvisible);
 }
 
 void UOneBrahamHUDWidget::AddWorldPing(const FOneBrahamHUDWorldPing& Ping)
 {
-	// Screened pings are drawn in the world by the marker component; the HUD keeps
-	// the list so the compass can fall back to it when the marker is off screen.
+	// Pings are drawn in the world by the marker component; the HUD keeps the
+	// list so the compass can hang a diamond on the strip for their six seconds.
 	RecentPings.Add(Ping);
 
 	static constexpr int32 MaxPings = 8;
 	while (RecentPings.Num() > MaxPings)
 	{
 		RecentPings.RemoveAt(0, 1, EAllowShrinking::No);
+	}
+}
+
+// ==========================================================================
+//  The accident book's reading of the death text
+// ==========================================================================
+void UOneBrahamHUDWidget::ParseDeathText(const FText& Text, FString& OutCause, TArray<FRecapRow>& OutRows, FString& OutRemaining)
+{
+	OutCause.Reset();
+	OutRows.Reset();
+	OutRemaining.Reset();
+
+	// The controller composes "cause\n\nrecap line\nrecap line": the cause is
+	// the first paragraph, the recap the second (Core/OneBrahamDeathRecap.h).
+	TArray<FString> Lines;
+	Text.ToString().ParseIntoArrayLines(Lines, /*bCullEmpty*/ true);
+	if (Lines.Num() == 0)
+	{
+		return;
+	}
+
+	OutCause = Lines[0];
+
+	static const FRegexPattern RecapLine(TEXT("^(.+?) - (\\d+) hits?, (\\d+) damage \\((.*)\\) at (\\d+) m$"));
+	static const FRegexPattern RemainingLine(TEXT("^(.+?) had (\\d+) health(?: and (\\d+) armour)? left$"));
+
+	for (int32 Index = 1; Index < Lines.Num(); ++Index)
+	{
+		const FString& Line = Lines[Index];
+
+		FRegexMatcher Recap(RecapLine, Line);
+		if (Recap.FindNext())
+		{
+			FRecapRow& Row = OutRows.AddDefaulted_GetRef();
+			Row.Attacker = Recap.GetCaptureGroup(1);
+			Row.Hits = Recap.GetCaptureGroup(2);
+			Row.Damage = Recap.GetCaptureGroup(3);
+			Row.Locations = Recap.GetCaptureGroup(4);
+			Row.Distance = Recap.GetCaptureGroup(5) + TEXT(" m");
+			Row.bParsed = true;
+			Row.Raw = Line;
+			continue;
+		}
+
+		FRegexMatcher Remaining(RemainingLine, Line);
+		if (Remaining.FindNext())
+		{
+			const FString Armour = Remaining.GetCaptureGroup(3);
+			OutRemaining = Armour.IsEmpty()
+				? FString::Printf(TEXT("%s %s HP"), *Remaining.GetCaptureGroup(1), *Remaining.GetCaptureGroup(2))
+				: FString::Printf(TEXT("%s %s HP · %s ARMOUR"), *Remaining.GetCaptureGroup(1), *Remaining.GetCaptureGroup(2), *Armour);
+			continue;
+		}
+
+		FRecapRow& Row = OutRows.AddDefaulted_GetRef();
+		Row.Raw = Line;
 	}
 }

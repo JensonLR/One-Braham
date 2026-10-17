@@ -3,8 +3,12 @@
 #include "UI/OneBrahamFloorPlanWidget.h"
 
 #include "OneBraham.h"
-#include "UI/OneBrahamUIStyle.h"
 #include "Rendering/DrawElements.h"
+#include "UI/HUD/OneBrahamHUDPaint.h"
+#include "UI/HUD/OneBrahamSectionPainter.h"
+#include "UI/HUD/OneBrahamTween.h"
+
+using namespace OneBrahamHUDStyle;
 
 UOneBrahamFloorPlanWidget::UOneBrahamFloorPlanWidget(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -34,11 +38,9 @@ void UOneBrahamFloorPlanWidget::SetPlanVisible(bool bVisible)
 
 	if (bPlanVisible)
 	{
-		// The fade and the pulse are both measured from this instant, in paint.
+		// The fade and the stroke-in are both measured from this instant, in paint.
 		const UWorld* World = GetWorld();
-		OpenedAtSeconds = World != nullptr ? World->GetTimeSeconds() : 0.f;
-		FadeAlpha = 0.f;
-		PulseTime = 0.f;
+		OpenedAtSeconds = World != nullptr ? World->GetTimeSeconds() : 0.0;
 	}
 }
 
@@ -55,364 +57,141 @@ bool UOneBrahamFloorPlanWidget::HasDownedSquadmate() const
 	return false;
 }
 
-void UOneBrahamFloorPlanWidget::PaintFloorRow(FSlateWindowElementList& OutDrawElements, int32 LayerId,
-	const FGeometry& Geometry, const FOneBrahamFloorPlanFloor& Floor, float RowTop, float InRowHeight) const
-{
-	const float RowLeft = PanelPadding;
-	const float RowWidth = LabelColumnWidth;
-	const bool bLocal = Floor.bLocalPlayerFloor;
-
-	// --- Row background ----------------------------------------------------
-	// The local floor is a filled bar; every other floor is a hairline. That
-	// asymmetry is the whole design of the panel: the player's eye lands on
-	// their own floor first, every time.
-	FLinearColor RowColour = UOneBrahamUIStyle::Muted(UOneBrahamUIStyle::LightGrey(), 0.10f);
-
-	if (Floor.bSealed)
-	{
-		RowColour = UOneBrahamUIStyle::EmergencyRed();
-		RowColour.A = bLocal ? 0.42f : 0.22f;
-	}
-	else if (bLocal)
-	{
-		RowColour = UOneBrahamUIStyle::LightGrey();
-		RowColour.A = 0.30f;
-	}
-
-	if (RowColour.A > 0.f)
-	{
-		const FSlateBrush RowBrush = UOneBrahamUIStyle::PanelBrush(RowColour.A * FadeAlpha, 2.f);
-
-		FSlateDrawElement::MakeBox(
-			OutDrawElements,
-			LayerId,
-			Geometry.ToPaintGeometry(FVector2D(RowWidth, InRowHeight - 2.f),
-				FSlateLayoutTransform(FVector2D(RowLeft, RowTop))),
-			&RowBrush,
-			ESlateDrawEffect::None,
-			FLinearColor(RowColour.R, RowColour.G, RowColour.B, 1.f));
-	}
-
-	// --- Left edge rule: the sealed and local markers ----------------------
-	const float RuleWidth = 3.f;
-	FLinearColor RuleColour = FLinearColor::Transparent;
-
-	if (Floor.bSealed)
-	{
-		RuleColour = UOneBrahamUIStyle::EmergencyRed();
-	}
-	else if (bLocal)
-	{
-		RuleColour = UOneBrahamUIStyle::SignalBlue();
-	}
-	else if (Floor.bSquadmateDown)
-	{
-		// Pulses toward full opacity. One property of one element: a panel that
-		// animates as a whole is noise in the corner of the eye of a player who
-		// is being shot at.
-		const float Pulse = 0.55f + 0.45f * FMath::Sin(PulseTime * 2.f * PI * DownedPulseHz);
-		RuleColour = UOneBrahamUIStyle::EmergencyRed();
-		RuleColour.A = Pulse;
-	}
-
-	if (RuleColour.A > 0.f)
-	{
-		const FSlateBrush RuleBrush = UOneBrahamUIStyle::PanelBrush(RuleColour.A * FadeAlpha, 0.f);
-
-		FSlateDrawElement::MakeBox(
-			OutDrawElements,
-			LayerId + 1,
-			Geometry.ToPaintGeometry(FVector2D(RuleWidth, InRowHeight - 2.f),
-				FSlateLayoutTransform(FVector2D(RowLeft, RowTop))),
-			&RuleBrush,
-			ESlateDrawEffect::None,
-			FLinearColor(RuleColour.R, RuleColour.G, RuleColour.B, 1.f));
-	}
-
-	// --- Floor number ------------------------------------------------------
-	{
-		const FSlateFontInfo NumberFont = UOneBrahamUIStyle::Font(EOneBrahamTextSize::Small, bLocal);
-
-		// Ground floor reads "G", the Skydeck reads "15". A tower that calls its
-		// ground floor "0" is a tower designed by an engineer.
-		const FText NumberText = FText::FromString(Floor.FloorIndex == 0
-			? TEXT("G")
-			: FString::Printf(TEXT("%d"), Floor.FloorIndex));
-
-		FSlateDrawElement::MakeText(
-			OutDrawElements,
-			LayerId + 2,
-			Geometry.ToPaintGeometry(FVector2D(34.f, InRowHeight - 2.f),
-				FSlateLayoutTransform(FVector2D(RowLeft + 10.f, RowTop + 2.f))),
-			NumberText,
-			NumberFont,
-			ESlateDrawEffect::None,
-			(bLocal ? UOneBrahamUIStyle::LightGrey() : UOneBrahamUIStyle::Muted(UOneBrahamUIStyle::LightGrey(), 0.45f)).CopyWithNewOpacity(
-				(bLocal ? 1.f : 0.75f) * FadeAlpha));
-	}
-
-	// --- Area name ---------------------------------------------------------
-	{
-		const FSlateFontInfo NameFont = UOneBrahamUIStyle::Font(EOneBrahamTextSize::Small, bLocal);
-
-		// A sealed floor says so instead of its name: the name is not the news.
-		const FText NameText = Floor.bSealed
-			? NSLOCTEXT("OneBraham", "PlanSealed", "SEALED")
-			: Floor.AreaName;
-
-		const FLinearColor NameColour = Floor.bSealed
-			? UOneBrahamUIStyle::EmergencyRed()
-			: (bLocal ? UOneBrahamUIStyle::LightGrey() : UOneBrahamUIStyle::Muted(UOneBrahamUIStyle::LightGrey(), 0.5f));
-
-		FSlateDrawElement::MakeText(
-			OutDrawElements,
-			LayerId + 2,
-			Geometry.ToPaintGeometry(FVector2D(LabelColumnWidth - 56.f, InRowHeight - 2.f),
-				FSlateLayoutTransform(FVector2D(RowLeft + 46.f, RowTop + 2.f))),
-			NameText,
-			NameFont,
-			ESlateDrawEffect::None,
-			NameColour.CopyWithNewOpacity((bLocal ? 1.f : 0.8f) * FadeAlpha));
-	}
-
-	// --- Squad count and the downed marker ---------------------------------
-	if (Floor.SquadCount > 0)
-	{
-		const FSlateFontInfo CountFont = UOneBrahamUIStyle::Font(EOneBrahamTextSize::Small, true);
-
-		const FText CountText = Floor.bSquadmateDown
-			? NSLOCTEXT("OneBraham", "PlanDownedHere", "DOWNED")
-			: FText::FromString(FString::Printf(TEXT("%d"), Floor.SquadCount));
-
-		const FLinearColor CountColour = Floor.bSquadmateDown
-			? UOneBrahamUIStyle::EmergencyRed()
-			: UOneBrahamUIStyle::SignalBlue();
-
-		FSlateDrawElement::MakeText(
-			OutDrawElements,
-			LayerId + 2,
-			Geometry.ToPaintGeometry(FVector2D(70.f, InRowHeight - 2.f),
-				FSlateLayoutTransform(FVector2D(RowLeft + RowWidth - 74.f, RowTop + 2.f))),
-			CountText,
-			CountFont,
-			ESlateDrawEffect::None,
-			CountColour.CopyWithNewOpacity(FadeAlpha));
-	}
-}
-
-void UOneBrahamFloorPlanWidget::PaintHeaderAndFooter(FSlateWindowElementList& OutDrawElements, int32 LayerId,
-	const FGeometry& Geometry, float PanelHeight, float PanelWidth) const
-{
-	// --- Header ------------------------------------------------------------
-	{
-		const FSlateFontInfo TitleFont = UOneBrahamUIStyle::Font(EOneBrahamTextSize::Medium, true);
-
-		FSlateDrawElement::MakeText(
-			OutDrawElements,
-			LayerId,
-			Geometry.ToPaintGeometry(FVector2D(LabelColumnWidth, HeaderHeight),
-				FSlateLayoutTransform(FVector2D(PanelPadding, PanelPadding * 0.5f))),
-			PlanData.BuildingName,
-			TitleFont,
-			ESlateDrawEffect::None,
-			UOneBrahamUIStyle::LightGrey().CopyWithNewOpacity(FadeAlpha));
-
-		// Where the player is, in the lift's own words, under the building name:
-		// "FLOOR 9 - SERVER AND COMMS". The plan is for orientation, and
-		// orientation starts with knowing where you are.
-		const FSlateFontInfo PlaceFont = UOneBrahamUIStyle::Font(EOneBrahamTextSize::Micro, false);
-
-		FSlateDrawElement::MakeText(
-			OutDrawElements,
-			LayerId,
-			Geometry.ToPaintGeometry(FVector2D(LabelColumnWidth * 1.6f, 16.f),
-				FSlateLayoutTransform(FVector2D(PanelPadding, PanelPadding * 0.5f + 24.f))),
-			PlanData.LocalFloorLabel,
-			PlaceFont,
-			ESlateDrawEffect::None,
-			UOneBrahamUIStyle::SignalBlue().CopyWithNewOpacity(FadeAlpha));
-	}
-
-	// --- Extraction banner -------------------------------------------------
-	if (PlanData.bExtractionInProgress)
-	{
-		const float BarHeight = 6.f;
-		const float BarWidth = LabelColumnWidth * 1.35f;
-		const float BarLeft = PanelPadding;
-		const float BarTop = PanelPadding * 0.5f + 44.f;
-
-		const FSlateBrush TrackBrush = UOneBrahamUIStyle::PanelBrush(0.25f * FadeAlpha, 1.f);
-		FSlateDrawElement::MakeBox(
-			OutDrawElements,
-			LayerId,
-			Geometry.ToPaintGeometry(FVector2D(BarWidth, BarHeight),
-				FSlateLayoutTransform(FVector2D(BarLeft, BarTop))),
-			&TrackBrush,
-			ESlateDrawEffect::None,
-			FLinearColor::White);
-
-		const float Progress = FMath::Clamp(PlanData.ExtractionProgress01, 0.f, 1.f);
-
-		const FSlateBrush FillBrush = UOneBrahamUIStyle::PanelBrush(FadeAlpha, 1.f);
-		FSlateDrawElement::MakeBox(
-			OutDrawElements,
-			LayerId + 1,
-			Geometry.ToPaintGeometry(FVector2D(BarWidth * Progress, BarHeight),
-				FSlateLayoutTransform(FVector2D(BarLeft, BarTop))),
-			&FillBrush,
-			ESlateDrawEffect::None,
-			UOneBrahamUIStyle::SafetyYellow());
-
-		const FText ExtractionText = PlanData.ExtractingSquadId == INDEX_NONE
-			? NSLOCTEXT("OneBraham", "PlanExtraction", "WINCH RUNNING")
-			: FText::Format(NSLOCTEXT("OneBraham", "PlanExtractionSquad", "SQUAD {0} ON THE WINCH"),
-				FText::AsNumber(PlanData.ExtractingSquadId + 1));
-
-		FSlateDrawElement::MakeText(
-			OutDrawElements,
-			LayerId + 2,
-			Geometry.ToPaintGeometry(FVector2D(BarWidth, 16.f),
-				FSlateLayoutTransform(FVector2D(BarLeft, BarTop + BarHeight + 3.f))),
-			ExtractionText,
-			UOneBrahamUIStyle::Font(EOneBrahamTextSize::Micro, true),
-			ESlateDrawEffect::None,
-			UOneBrahamUIStyle::SafetyYellow().CopyWithNewOpacity(FadeAlpha));
-	}
-
-	// --- Footer ------------------------------------------------------------
-	{
-		const float FooterTop = PanelHeight - FooterHeight + 4.f;
-		const FSlateFontInfo FooterFont = UOneBrahamUIStyle::Font(EOneBrahamTextSize::Micro, false);
-
-		// Minutes and seconds, because a timer that reads "07:14" is readable at
-		// a glance and "434" is not.
-		const int32 TotalSeconds = FMath::Max(0, FMath::FloorToInt(PlanData.MatchTimeRemaining));
-		const FText ClockText = FText::FromString(FString::Printf(TEXT("%02d:%02d"),
-			TotalSeconds / 60, TotalSeconds % 60));
-
-		FSlateDrawElement::MakeText(
-			OutDrawElements,
-			LayerId,
-			Geometry.ToPaintGeometry(FVector2D(80.f, 16.f),
-				FSlateLayoutTransform(FVector2D(PanelPadding, FooterTop))),
-			ClockText,
-			FooterFont,
-			ESlateDrawEffect::None,
-			UOneBrahamUIStyle::Muted(UOneBrahamUIStyle::LightGrey(), 0.4f).CopyWithNewOpacity(FadeAlpha));
-
-		FSlateDrawElement::MakeText(
-			OutDrawElements,
-			LayerId,
-			Geometry.ToPaintGeometry(FVector2D(LabelColumnWidth * 1.1f, 16.f),
-				FSlateLayoutTransform(FVector2D(PanelPadding + 76.f, FooterTop))),
-			PlanData.LockdownStageLabel,
-			FooterFont,
-			ESlateDrawEffect::None,
-			UOneBrahamUIStyle::EmergencyRed().CopyWithNewOpacity(0.9f * FadeAlpha));
-	}
-}
-
 int32 UOneBrahamFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
 	const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements,
 	int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
 {
-	int32 CurrentLayer = Super::NativePaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements,
+	int32 Layer = Super::NativePaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements,
 		LayerId, InWidgetStyle, bParentEnabled);
 
 	// --- Animation, taken from the clock rather than from a tick -------------
 	// A C++ UUserWidget starts at EWidgetTickFrequency::Auto, and the engine
 	// reads Auto as "tick only if this widget has a tick implemented in
-	// Blueprint" - an overridden NativeTick does not count as one. So a widget
-	// that animates itself in NativeTick is a widget that may simply never
-	// animate, and the plan would open at zero alpha and stay there.
-	//
-	// Nothing here needs a tick. A visible widget is painted every frame, so the
-	// fade and the downed pulse are computed from the world clock each time the
-	// painter runs. It costs two subtractions, it cannot be switched off by a
-	// property nobody remembered, and it is exactly as smooth as the framerate.
-	if (bPlanVisible)
-	{
-		const UWorld* World = GetWorld();
-		const float Now = World != nullptr ? World->GetTimeSeconds() : OpenedAtSeconds;
+	// Blueprint" - an overridden NativeTick does not count as one. Nothing here
+	// needs a tick: a visible widget is painted every frame, so the fade and
+	// the stroke-in are computed from the world clock each time.
+	const UWorld* World = GetWorld();
+	const double Now = World != nullptr ? World->GetTimeSeconds() : OpenedAtSeconds;
+	const float Open = static_cast<float>(Now - OpenedAtSeconds);
+	const float Fade = FadeSeconds > KINDA_SMALL_NUMBER ? FMath::Clamp(Open / FadeSeconds, 0.f, 1.f) : 1.f;
 
-		PulseTime = FMath::Max(0.f, Now - OpenedAtSeconds);
-		FadeAlpha = FadeSeconds > KINDA_SMALL_NUMBER
-			? FMath::Min(1.f, PulseTime / FadeSeconds)
-			: 1.f;
+	const FVector2D Screen = AllottedGeometry.GetLocalSize();
+	const FOneBrahamBuildingStatus& Building = Frame.Building;
+	if (!bPlanVisible || Fade <= KINDA_SMALL_NUMBER || Screen.X < 200.f || Screen.Y < 200.f || Building.FloorCount() == 0)
+	{
+		return Layer;
 	}
 
-	if (!bPlanVisible || PlanData.Floors.Num() == 0 || FadeAlpha <= KINDA_SMALL_NUMBER)
+	FOneBrahamPainter Root(OutDrawElements, AllottedGeometry, Layer, Fade);
+
+	// --- the panel: left of the field of view, beside the floor stack ----------------
+	// Under the floor plate, above the staff pass: the plan takes the place of
+	// the floor stack and the squad board, which it draws bigger.
+	const float Left = Screen.X * 0.025f;
+	const float Top = Screen.Y * 0.035f + 88.f;
+	const float Height = Screen.Y * 0.965f - 84.f - 18.f - Top;
+	const float Width = FMath::Min(PanelWidth, Screen.X * 0.4f);
+	FOneBrahamPainter P = Root.Child(FVector2D(Left, Top));
+	const EOneBrahamLockdownStage Stage = Building.Stage;
+	const int32 Band = StageBand(Stage);
+	const FLinearColor Accent = Band == 2 ? EmergencyRed() : (Band == 1 ? SafetyYellow() : SignalBlue());
+
+	P.RoundRect(FVector2D::ZeroVector, FVector2D(Width, Height), WithAlpha(Navy(), 0.88f), 4.f);
+	P.Outline(FVector2D::ZeroVector, FVector2D(Width, Height), WithAlpha(LightGrey(), 0.1f), 1.f, 4.f);
+	P.Rect(FVector2D::ZeroVector, FVector2D(4.f, Height), Accent);
+
+	// --- header: the building, where you are, the stage --------------------------------
+	const float Pad = 26.f;
+	P.Text(FVector2D(Pad, 20.f), TEXT("ONE BRAHAM  ·  ALDGATE EAST  ·  SECTION A-A"), Font(EOneBrahamHUDType::Eyebrow, 11.f, 200), WithAlpha(LightGrey(), 0.6f));
+
+	FString Here = TEXT("--");
+	if (const FOneBrahamFloorStatus* Floor = Building.Find(Building.LocalFloor))
 	{
-		return CurrentLayer;
+		Here = FString::Printf(TEXT("Level %02d · %s"), Building.LocalFloor, *Floor->AreaName.ToString());
 	}
-
-	const FVector2D WidgetSize = AllottedGeometry.GetLocalSize();
-
-	if (WidgetSize.X < 40.f || WidgetSize.Y < 40.f)
+	// The floor name fits beside nothing: the chip sits on the eyebrow's line.
+	const FSlateFontInfo HereFont = Font(EOneBrahamHUDType::Verb, 22.f, -10);
+	FString Fitted = Here;
+	if (Measure(Fitted, HereFont).X > Width - Pad * 2.f)
 	{
-		return CurrentLayer;
-	}
-
-	// --- Panel -------------------------------------------------------------
-	const float PanelWidth = FMath::Min(WidgetSize.X - PanelPadding * 2.f, LabelColumnWidth + PanelPadding * 2.f);
-	const float PanelHeight = FMath::Min(WidgetSize.Y - PanelPadding * 2.f,
-		HeaderHeight + FooterHeight + PlanData.Floors.Num() * RowHeight + PanelPadding * 2.5f);
-
-	// Anchored to the left edge, vertically centred: the plan is read next to
-	// the player's field of view, not on top of the crosshair.
-	const float PanelLeft = PanelPadding;
-	const float PanelTop = (WidgetSize.Y - PanelHeight) * 0.5f;
-
-	const FSlateBrush PanelBrush = UOneBrahamUIStyle::PanelBrush(BackgroundAlpha * FadeAlpha, 6.f);
-
-	FSlateDrawElement::MakeBox(
-		OutDrawElements,
-		CurrentLayer,
-		AllottedGeometry.ToPaintGeometry(FVector2D(PanelWidth, PanelHeight),
-			FSlateLayoutTransform(FVector2D(PanelLeft, PanelTop))),
-		&PanelBrush,
-		ESlateDrawEffect::None,
-		FLinearColor::White);
-
-	// A hairline of signal blue down the left edge: the brand mark, at the size
-	// a HUD can afford.
-	const FSlateBrush AccentBrush = UOneBrahamUIStyle::PanelBrush(FadeAlpha, 0.f);
-
-	FSlateDrawElement::MakeBox(
-		OutDrawElements,
-		CurrentLayer + 1,
-		AllottedGeometry.ToPaintGeometry(FVector2D(3.f, PanelHeight),
-			FSlateLayoutTransform(FVector2D(PanelLeft, PanelTop))),
-		&AccentBrush,
-		ESlateDrawEffect::None,
-		UOneBrahamUIStyle::SignalBlue());
-
-	// --- Content, in panel space ------------------------------------------
-	// Everything below draws in a space whose origin is the panel's top-left.
-	const FGeometry PanelGeometry = AllottedGeometry.MakeChild(
-		FVector2D(PanelWidth, PanelHeight),
-		FSlateLayoutTransform(FVector2D(PanelLeft, PanelTop)));
-
-	const int32 ContentLayer = CurrentLayer + 2;
-
-	PaintHeaderAndFooter(OutDrawElements, ContentLayer, PanelGeometry, PanelHeight, PanelWidth);
-
-	// Floors are drawn top-down: the Skydeck is at the top, because that is the
-	// direction the players are trying to move and a map that counts upwards is
-	// a map that matches the building.
-	const float ListTop = PanelPadding + (PlanData.bExtractionInProgress ? 70.f : 52.f);
-
-	for (int32 Index = 0; Index < PlanData.Floors.Num(); ++Index)
-	{
-		const float RowTop = ListTop + Index * RowHeight;
-
-		if (RowTop + RowHeight > PanelHeight - FooterHeight)
+		while (Fitted.Len() > 4 && Measure(Fitted + TEXT("…"), HereFont).X > Width - Pad * 2.f)
 		{
-			break;
+			Fitted.LeftChopInline(1);
 		}
+		Fitted = Fitted.TrimEnd() + TEXT("…");
+	}
+	P.Text(FVector2D(Pad, 42.f), Fitted, HereFont, White());
 
-		PaintFloorRow(OutDrawElements, ContentLayer, PanelGeometry, PlanData.Floors[Index], RowTop, RowHeight);
+	FString StageWord = TEXT("SYSTEM NORMAL");
+	if (Building.Mode != EOneBrahamMatchMode::Ascent)		{ StageWord = Building.Mode == EOneBrahamMatchMode::FireDrill ? TEXT("FIRE DRILL") : TEXT("AFTER HOURS"); }
+	else if (Stage == EOneBrahamLockdownStage::Purge)		{ StageWord = TEXT("PURGE"); }
+	else if (Band == 1)										{ StageWord = TEXT("LOCKDOWN"); }
+	const FSlateFontInfo ChipFont = Font(EOneBrahamHUDType::Telemetry, 11.f, 120);
+	const FVector2D Chip = Measure(StageWord, ChipFont) + FVector2D(16.f, 6.f);
+	P.RoundRect(FVector2D(Width - Pad - Chip.X, 15.f), Chip, WithAlpha(Accent, Band > 0 ? 1.f : 0.f), Chip.Y * 0.5f);
+	P.Outline(FVector2D(Width - Pad - Chip.X, 15.f), Chip, Accent, 1.f, Chip.Y * 0.5f);
+	P.Text(FVector2D(Width - Pad - Chip.X * 0.5f, 18.f), StageWord, ChipFont, Band == 1 ? Navy() : White(), EOneBrahamTextAnchor::Centre);
+	P.Rect(FVector2D(Pad, 80.f), FVector2D(Width - Pad * 2.f, 1.f), WithAlpha(Accent, 0.35f));
+
+	// --- the section --------------------------------------------------------------------------
+	const float LegendH = 96.f;
+	const FVector2D DrawPos(Pad, 92.f);
+	const FVector2D DrawSize(Width - Pad * 2.f, Height - 92.f - LegendH);
+
+	FOneBrahamSectionParams Params;
+	Params.Mode = EOneBrahamSectionMode::Full;
+	Params.FillFromStatus(Building);
+	Params.Time = Now;
+	Params.Reveal = FMath::Clamp(Open / (Params.FloorCount * 0.04f), 0.f, 1.f);
+	Params.LineColour = WithAlpha(LightGrey(), 0.55f);
+	Params.bShowRoute = Building.Mode == EOneBrahamMatchMode::Ascent && Building.LocalFloor < Building.ExtractionFloor;
+	Params.TargetFloor = Building.Mode == EOneBrahamMatchMode::Ascent ? Building.ExtractionFloor : INDEX_NONE;
+	Params.Opacity = Fade;
+	for (int32 Index = 0; Index < Frame.Points.Num(); ++Index)
+	{
+		FOneBrahamSectionPoint& Point = Params.Points.AddDefaulted_GetRef();
+		Point.Floor = Frame.Points[Index].Floor;
+		Point.Letter = Frame.Points[Index].Letter;
+		Point.Owner = Frame.Points[Index].bYoursPresent ? 1 : 0;
 	}
 
-	return CurrentLayer + 3;
+	const FGeometry SectionGeometry = P.Geometry.MakeChild(DrawSize, FSlateLayoutTransform(DrawPos));
+	*P.Layer = FOneBrahamSectionPainter::Paint(OutDrawElements, *P.Layer + 1, SectionGeometry, Params);
+
+	// --- the legend: every state has a shape ----------------------------------------------------
+	const float LY = Height - LegendH + 10.f;
+	P.Rect(FVector2D(Pad, LY - 8.f), FVector2D(Width - Pad * 2.f, 1.f), WithAlpha(LightGrey(), 0.12f));
+	const FSlateFontInfo LegendFont = Font(EOneBrahamHUDType::Hint, 11.f, 80);
+	const float Col = (Width - Pad * 2.f) / 3.f;
+	auto Key = [&](int32 Column, int32 RowIndex, const TCHAR* Label, TFunctionRef<void(const FVector2D&)> Swatch)
+	{
+		const FVector2D At(Pad + Column * Col, LY + RowIndex * 24.f);
+		Swatch(At);
+		P.Text(At + FVector2D(24.f, 0.f), Label, LegendFont, WithAlpha(LightGrey(), 0.75f));
+	};
+	Key(0, 0, TEXT("YOU"), [&](const FVector2D& At) { P.Triangle(At + FVector2D(2.f, 1.f), At + FVector2D(12.f, 7.f), At + FVector2D(2.f, 13.f), White()); });
+	Key(1, 0, TEXT("SQUAD"), [&](const FVector2D& At) { P.Circle(At + FVector2D(7.f, 7.f), 4.f, SignalBlue()); });
+	Key(2, 0, TEXT("EXTRACTION"), [&](const FVector2D& At) { P.Rect(At + FVector2D(0.f, 2.f), FVector2D(16.f, 10.f), WithAlpha(SafetyYellow(), 0.6f)); });
+	Key(0, 1, TEXT("SEALED"), [&](const FVector2D& At)
+	{
+		P.Rect(At + FVector2D(0.f, 2.f), FVector2D(16.f, 10.f), WithAlpha(EmergencyRed(), 0.3f));
+		P.Hatch(At + FVector2D(0.f, 2.f), FVector2D(16.f, 10.f), EmergencyRed(), 4.f);
+	});
+	Key(1, 1, TEXT("PURGE"), [&](const FVector2D& At)
+	{
+		P.Rect(At + FVector2D(0.f, 2.f), FVector2D(16.f, 10.f), EmergencyRed());
+		P.Cross(At + FVector2D(8.f, 7.f), 6.f, White(), 1.5f);
+	});
+	Key(2, 1, TEXT("SEALS NEXT"), [&](const FVector2D& At) { P.Outline(At + FVector2D(0.f, 2.f), FVector2D(16.f, 10.f), SafetyYellow(), 1.f); });
+
+	// --- the footer: the clock, the honest limit of the plan ----------------------------------------
+	const FString Footer = Building.Mode == EOneBrahamMatchMode::Ascent && Building.bDirectorRunning && Building.SecondsToNextStage > 0.f
+		? FString::Printf(TEXT("%s  ·  NEXT STAGE %02d:%02d"), *Frame.DuskClock,
+			FMath::CeilToInt(Building.SecondsToNextStage) / 60, FMath::CeilToInt(Building.SecondsToNextStage) % 60)
+		: Frame.DuskClock;
+	P.Text(FVector2D(Pad, Height - 26.f), Footer, Font(EOneBrahamHUDType::TelemetryLight, 11.f, 60), WithAlpha(LightGrey(), 0.55f));
+	P.Text(FVector2D(Width - Pad, Height - 28.f), TEXT("The plan does not know where anybody else is."), Font(EOneBrahamHUDType::Aside, 14.f),
+		WithAlpha(LightGrey(), 0.55f), EOneBrahamTextAnchor::Right);
+
+	return *P.Layer + 1;
 }

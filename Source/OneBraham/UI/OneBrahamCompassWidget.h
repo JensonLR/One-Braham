@@ -2,21 +2,33 @@
 //
 // OneBrahamCompassWidget.h
 // ---------------------------------------------------------------------------
-// The heading strip and the objective markers that hang off it.
+// The heading strip: the reception's black baffle ceiling, turned on its side.
 //
 // This is the only navigational aid in the game: ONE BRAHAM has no minimap by
-// design, because a minimap turns a fifteen-floor building into a corridor. The
-// player learns the tower, and the strip tells them which way they are facing
-// and how far away the thing that matters is.
+// design, because a minimap turns an eighteen-floor building into a corridor.
+// The strip says which way the player is facing - in London's terms, not just
+// the compass's: the City is west, Shoreditch north, Whitechapel east, the
+// Tower south, because that is how anybody who works at Aldgate East thinks -
+// and where the things that matter are: the squad, the pings, the extraction,
+// and in a lockdown the nearest stair core that is still open.
 //
-// Drawn in code for the same reasons as the crosshair: it must be crisp at any
-// resolution and it updates every frame.
+// THE LOOK
+//   No filled bar. Slats hang from a hairline like baffles: a short one every
+//   5 degrees, a longer one every 15, the cardinals in Archivo with their
+//   London bearing under them. The centre notch is signal blue with a soft
+//   ribbon glow beneath the slats. Markers clamp to the strip's ends as half
+//   chevrons when they are behind the player.
+//
+// Repaints every frame from the player's camera (heading and floor), which is
+// why it is its own widget rather than a part of the 15 Hz HUD snapshot. It
+// never hides while the compass setting is on (Docs/08).
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "UI/OneBrahamHUDTypes.h"
+#include "UI/HUD/OneBrahamHUDFrame.h"
 #include "OneBrahamCompassWidget.generated.h"
 
 UCLASS()
@@ -34,49 +46,61 @@ public:
 	// -----------------------------------------------------------------------
 	//  Data
 	// -----------------------------------------------------------------------
-	/** Compass the local player is looking along. */
-	void SetHeading(float YawDegrees) { HeadingYaw = FRotator::NormalizeAxis(YawDegrees); }
+	/** Overrides the camera's heading (tests, an authored HUD with no camera). */
+	void SetHeading(float YawDegrees) { HeadingYaw = FRotator::NormalizeAxis(YawDegrees); bHeadingOverride = true; }
 
-	/** Full marker list; the widget projects and culls it itself. */
+	/** The snapshot's generic markers (an authored HUD's path). */
 	void SetMarkers(const TArray<FOneBrahamHUDCompassMarker>& InMarkers) { Markers = InMarkers; }
 
-	/** Where the player is, so the widget can work out bearings and ranges. */
-	void SetViewerLocation(const FVector& Location) { ViewerLocation = Location; }
+	/** The painted HUD's markers, the stage (for the stair tags), and the settings. */
+	void SetFrame(const TArray<FOneBrahamCompassMarkView>& InMarks, EOneBrahamLockdownStage InStage, bool bInReduceMotion, float InScale)
+	{
+		Marks = InMarks;
+		Stage = InStage;
+		bReduceMotion = bInReduceMotion;
+		Scale = FMath::Clamp(InScale, 0.8f, 1.2f);
+	}
+
+	/** Overrides where the player is (tests); otherwise the camera's location. */
+	void SetViewerLocation(const FVector& Location) { ViewerLocation = Location; bViewerOverride = true; }
 
 	void SetCompassVisible(bool bVisible) { bCompassVisible = bVisible; }
 
-protected:
-	FLinearColor ColourForMarker(const FOneBrahamHUDCompassMarker& Marker) const;
+	/** Degrees clockwise from geographic north for a world yaw. */
+	float BearingForYaw(float Yaw) const { return FRotator::ClampAxis(Yaw - NorthYawDegrees); }
 
-	/** Projects a world point onto the strip in normalised strip space (-0.5..0.5). */
-	float ProjectMarkerToStrip(const FVector& WorldLocation, float& OutAngleDelta, float& OutDistance) const;
+	/** The world yaw that points at geographic north. */
+	float GetNorthYaw() const { return NorthYawDegrees; }
+
+protected:
+	/** The camera's yaw and location this frame, or the overrides. */
+	void ResolveView(float& OutYaw, FVector& OutLocation) const;
 
 	float HeadingYaw = 0.f;
+	bool bHeadingOverride = false;
 	FVector ViewerLocation = FVector::ZeroVector;
+	bool bViewerOverride = false;
 	TArray<FOneBrahamHUDCompassMarker> Markers;
+	TArray<FOneBrahamCompassMarkView> Marks;
+	EOneBrahamLockdownStage Stage = EOneBrahamLockdownStage::Normal;
+	bool bReduceMotion = false;
+	float Scale = 1.f;
+
+	/**
+	 * The world yaw of geographic north. The district is built in One
+	 * Braham's own frame (Tools/Python/onebraham/district_data.py): X along the
+	 * tower's long axis, turned 30.13 degrees from east, so north is at -59.87.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "Compass")
+	float NorthYawDegrees = -59.87f;
 
 	/** Degrees of world space the strip covers; 120 is legible without panning. */
 	UPROPERTY(EditDefaultsOnly, Category = "Compass")
 	float VisibleFieldDegrees = 120.f;
 
-	/** Markers further than this are clamped to the edge with a distance label. */
+	/** The hairline the slats hang from, in the widget's local units. */
 	UPROPERTY(EditDefaultsOnly, Category = "Compass")
-	float EdgeClampDegrees = 56.f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Compass")
-	float StripHeightPixels = 26.f;
-
-	/** Cardinal ticks every 15 degrees, with a label every 45. */
-	UPROPERTY(EditDefaultsOnly, Category = "Compass")
-	float CardinalSpacingDegrees = 15.f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Compass")
-	float StripBackgroundAlpha = 0.45f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Compass")
-	bool bShowOffscreenMarkers = true;
+	float BaselineY = 22.f;
 
 	bool bCompassVisible = true;
-
-	/** Cached font-free glyphs: the compass uses text drawn by the parent panel. */
 };

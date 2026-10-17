@@ -1,6 +1,7 @@
 // Copyright (c) One Braham. All Rights Reserved.
 
 #include "Core/OneBrahamGameInstance.h"
+#include "UI/FrontEnd/SOneBrahamLiftLoading.h"
 
 #include "OneBraham.h"
 #include "Core/OneBrahamGameSettings.h"
@@ -980,36 +981,25 @@ void UOneBrahamGameInstance::ShowLoadingScreen(const FText& StatusText, float Pr
 	bLoadingScreenActive = true;
 
 	// The engine movie player puts this on screen at the next map load
-	// (PreLoadMap) and takes it down when the map has loaded: a black page,
-	// the title and one line of status, drawn by Slate on its own thread so it
-	// keeps up while the game thread is busy loading.
-	const FLinearColor Grey = UOneBrahamUIStyle::LightGrey();
-	const FLinearColor Faint(Grey.R, Grey.G, Grey.B, 0.55f);
+	// (PreLoadMap) and takes it down when the map has loaded: THE LIFT, a floor
+	// counter going up and the tower lighting floor by floor with the real
+	// load, drawn by Slate on the movie player's own thread so it keeps up
+	// while the game thread is busy loading (UI/FrontEnd/SOneBrahamLiftLoading).
+	FText ModeName;
+	switch (PendingMatchMode)
+	{
+	case EOneBrahamMatchMode::FireDrill:	ModeName = NSLOCTEXT("OneBraham", "Menu_ModeFireDrill", "FIRE DRILL"); break;
+	case EOneBrahamMatchMode::NightShift:	ModeName = NSLOCTEXT("OneBraham", "Menu_ModeNightShift", "NIGHT SHIFT"); break;
+	default:								ModeName = NSLOCTEXT("OneBraham", "Menu_ModeAscent", "ASCENT"); break;
+	}
+	TArray<FString> Squad;
+	Squad.Add(Profile != nullptr && !Profile->PlayerName.IsEmpty() ? Profile->PlayerName : FString(TEXT("You")));
 
-	TSharedRef<SWidget> Page =
-		SNew(SBorder)
-		.BorderImage(FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox")))
-		.BorderBackgroundColor(FLinearColor::Black)
-		.Padding(FMargin(96.f, 0.f, 96.f, 88.f))
-		.HAlign(HAlign_Left)
-		.VAlign(VAlign_Bottom)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight()
-			[
-				SNew(STextBlock)
-				.Text(FText::FromString(ONE_BRAHAM_DISPLAY_NAME))
-				.Font(UOneBrahamUIStyle::Font(EOneBrahamTextSize::Header, true))
-				.ColorAndOpacity(Grey)
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 8.f, 0.f, 0.f)
-			[
-				SNew(STextBlock)
-				.Text(StatusText)
-				.Font(UOneBrahamUIStyle::Font(EOneBrahamTextSize::Small, false))
-				.ColorAndOpacity(Faint)
-			]
-		];
+	TSharedRef<SWidget> Page = SNew(SOneBrahamLiftLoading)
+		.ModeName(ModeName)
+		.Status(StatusText)
+		.Squad(Squad)
+		.TargetFloor(PendingMatchMode == EOneBrahamMatchMode::FireDrill ? 15 : 18);
 
 	FLoadingScreenAttributes LoadingScreen;
 	LoadingScreen.WidgetLoadingScreen = Page;

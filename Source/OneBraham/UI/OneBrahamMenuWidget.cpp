@@ -167,20 +167,12 @@ FReply UOneBrahamMenuWidget::NativeOnMouseWheel(const FGeometry& InGeometry, con
 // ==========================================================================
 //  Colour tokens
 // ==========================================================================
-FLinearColor UOneBrahamMenuWidget::Ink()		{ return UOneBrahamUIStyle::LightGrey(); }
-FLinearColor UOneBrahamMenuWidget::Accent()		{ return UOneBrahamUIStyle::SignalBlue(); }
-
-FLinearColor UOneBrahamMenuWidget::InkMuted()
-{
-	const FLinearColor Grey = UOneBrahamUIStyle::LightGrey();
-	return FLinearColor(Grey.R, Grey.G, Grey.B, 0.62f);
-}
-
-FLinearColor UOneBrahamMenuWidget::InkFaint()
-{
-	const FLinearColor Grey = UOneBrahamUIStyle::LightGrey();
-	return FLinearColor(Grey.R, Grey.G, Grey.B, 0.32f);
-}
+// The display-correct tokens (UOneBrahamUIStyle::Colour): the brand floats
+// read as linear washed every menu out.
+FLinearColor UOneBrahamMenuWidget::Ink()		{ return UOneBrahamUIStyle::Colour(EOneBrahamColour::LightGrey); }
+FLinearColor UOneBrahamMenuWidget::Accent()		{ return UOneBrahamUIStyle::Colour(EOneBrahamColour::SignalBlue); }
+FLinearColor UOneBrahamMenuWidget::InkMuted()	{ return UOneBrahamUIStyle::Colour(EOneBrahamColour::LightGrey, 0.62f); }
+FLinearColor UOneBrahamMenuWidget::InkFaint()	{ return UOneBrahamUIStyle::Colour(EOneBrahamColour::LightGrey, 0.32f); }
 
 FText UOneBrahamMenuWidget::SignageCase(const FString& Identifier)
 {

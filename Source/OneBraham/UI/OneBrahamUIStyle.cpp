@@ -11,6 +11,10 @@
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "Brushes/SlateColorBrush.h"
 #include "Internationalization/Text.h"
+#include "Core/OneBrahamGameUserSettings.h"
+#include "Engine/FontFace.h"
+#include "Fonts/CompositeFont.h"
+#include "Misc/DateTime.h"
 
 namespace
 {
@@ -100,11 +104,11 @@ FLinearColor UOneBrahamUIStyle::TeamColour(int32 Team)
 FSlateBrush UOneBrahamUIStyle::PanelBrush(float Alpha, float CornerRadius)
 {
 	FSlateBrush Brush;
-	const FLinearColor Colour(Navy().R, Navy().G, Navy().B, FMath::Clamp(Alpha, 0.f, 1.f));
+	const FLinearColor PanelTint(Navy().R, Navy().G, Navy().B, FMath::Clamp(Alpha, 0.f, 1.f));
 
 	Brush.SetResourceObject(nullptr);
 	Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
-	Brush.TintColor = FSlateColor(Colour);
+	Brush.TintColor = FSlateColor(PanelTint);
 	Brush.OutlineSettings = FSlateBrushOutlineSettings(FVector4(CornerRadius, CornerRadius, CornerRadius, CornerRadius));
 	Brush.OutlineSettings.Color = FSlateColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
 	Brush.OutlineSettings.Width = 0.f;
@@ -155,48 +159,15 @@ FProgressBarStyle UOneBrahamUIStyle::ProgressBarStyle(const FLinearColor& FillCo
 // ==========================================================================
 //  Type
 // ==========================================================================
-FSlateFontInfo UOneBrahamUIStyle::Font(EOneBrahamTextSize Size, bool bBold)
+FSlateFontInfo UOneBrahamUIStyle::Font(EOneBrahamTextSize Size, bool bBold, int32 TrackingThousandths)
 {
-	// The shipped font is "One Braham Sans" (see Docs/07_UI.md for the licence and
-	// where to drop the .ttf). Until it is imported we use the engine's Roboto,
-	// which has the correct corporate neutrality to be a believable placeholder -
-	// and, critically, ships with the engine so a clean checkout still renders.
-	static const FSoftObjectPath BrandFontPath(TEXT("/Game/OneBraham/UI/Fonts/F_OneBrahamSans.F_OneBrahamSans"));
-
-	UObject* BrandFont = BrandFontPath.ResolveObject();
-	if (BrandFont == nullptr)
-	{
-		static bool bLoggedFontFallback = false;
-		if (!bLoggedFontFallback)
-		{
-			bLoggedFontFallback = true;
-			UE_LOG(LogOneBrahamUI, Log,
-				TEXT("[OB.UI] Brand font not imported; using the engine font. "
-					 "See Docs/07_UI.md for the import steps."));
-		}
-	}
-
-	// Without the brand font, start from the engine's own Roboto: Slate draws a
-	// null FontObject as empty boxes, which is what every HUD label was until
-	// the first in-game frames showed it. The engine's Slate fonts are staged
-	// into every packaged build, so this cannot go missing the same way.
-	FSlateFontInfo Info = BrandFont != nullptr
-		? FSlateFontInfo()
-		: FCoreStyle::GetDefaultFontStyle(bBold ? TEXT("Bold") : TEXT("Regular"), SizeToPoints(Size));
-	if (BrandFont != nullptr)
-	{
-		Info.FontObject = BrandFont;
-		Info.TypefaceFontName = bBold ? TEXT("Bold") : TEXT("Regular");
-	}
-	Info.Size = SizeToPoints(Size);
-	// 1% tracking on the big type, none below it. Written as a list because a
-	// scoped enum has no >=, which is what the previous version of this line
-	// asked it for.
-	const bool bTracked = Size == EOneBrahamTextSize::Header ||
-		Size == EOneBrahamTextSize::Display;
-	Info.LetterSpacing = bTracked ? 100 : 0;
-
-	return Info;
+	// The old type scale, kept as a wrapper while screens migrate to the
+	// tokens: bold is the HUD label face, regular the body face, at the old
+	// point sizes (a point is 4/3 of a pixel at Slate's 96 DPI).
+	const float Px = static_cast<float>(SizeToPoints(Size)) * (4.f / 3.f);
+	const bool bTracked = Size == EOneBrahamTextSize::Header || Size == EOneBrahamTextSize::Display;
+	return TypeFont(bBold ? EOneBrahamType::Label : EOneBrahamType::Body, Px,
+		TrackingThousandths != 0 ? TrackingThousandths : (bTracked ? 60 : 0));
 }
 
 FSlateFontInfo UOneBrahamUIStyle::FontWithOutline(EOneBrahamTextSize Size, const FLinearColor& OutlineColour,
@@ -267,4 +238,273 @@ FText UOneBrahamUIStyle::FloorLabel(int32 FloorIndex)
 	default:
 		return FText::Format(NSLOCTEXT("OneBraham", "Floor_Generic", "FL {0}"), FText::AsNumber(FloorIndex));
 	}
+}
+
+
+// ==========================================================================
+//  The design system
+// ==========================================================================
+namespace OneBrahamType
+{
+	/** One face: the imported asset, and the engine Roboto weight standing in for it. */
+	struct FFace
+	{
+		const TCHAR* Asset;
+		const TCHAR* Fallback;
+	};
+
+	const FFace& FaceFor(EOneBrahamType Token)
+	{
+		// Asset names are build_frontend.import_fonts' (FF_ + the file name).
+		static const FFace Faces[] =
+		{
+			{ TEXT("FF_ArchivoExpanded_Black"),			TEXT("Black") },		// Title
+			{ TEXT("FF_ArchivoExpanded_Bold"),			TEXT("Bold") },			// Verb
+			{ TEXT("FF_ArchivoSemiCondensed_Bold"),		TEXT("Bold") },			// Label
+			{ TEXT("FF_ArchivoSemiCondensed_SemiBold"),	TEXT("Bold") },			// Eyebrow
+			{ TEXT("FF_ArchivoSemiCondensed_Medium"),	TEXT("Regular") },		// Hint
+			{ TEXT("FF_ArchivoSemiCondensed_Regular"),	TEXT("Regular") },		// Caption
+			{ TEXT("FF_Archivo_Regular"),				TEXT("Regular") },		// Body
+			{ TEXT("FF_IBMPlexMono_Medium"),			TEXT("Regular") },		// Telemetry
+			{ TEXT("FF_IBMPlexMono_SemiBold"),			TEXT("Bold") },			// TelemetryStrong
+			{ TEXT("FF_IBMPlexMono_Regular"),			TEXT("Regular") },		// TelemetryLight
+			{ TEXT("FF_Doto_Bold"),						TEXT("Bold") },			// LED
+			{ TEXT("FF_Doto_Medium"),					TEXT("Regular") },		// LEDMedium
+			{ TEXT("FF_InstrumentSerif_Italic"),		TEXT("Italic") },		// Aside
+		};
+		static_assert(UE_ARRAY_COUNT(Faces) == static_cast<int32>(EOneBrahamType::Aside) + 1, "one face per token");
+		return Faces[FMath::Clamp(static_cast<int32>(Token), 0, UE_ARRAY_COUNT(Faces) - 1)];
+	}
+
+	/**
+	 * The composite font for a token: one typeface, one face asset. Built once
+	 * per token and kept for the life of the process; FStandaloneCompositeFont
+	 * reports its face to the garbage collector, so the asset stays loaded
+	 * while any FSlateFontInfo still points at it.
+	 */
+	TSharedPtr<const FCompositeFont> CompositeFor(EOneBrahamType Token)
+	{
+		static TMap<EOneBrahamType, TSharedPtr<const FCompositeFont>> Cache;
+		static TSet<EOneBrahamType> Missing;
+
+		if (const TSharedPtr<const FCompositeFont>* Found = Cache.Find(Token))
+		{
+			return *Found;
+		}
+		if (Missing.Contains(Token))
+		{
+			return nullptr;
+		}
+
+		const FFace& Face = FaceFor(Token);
+		const FString Path = FString::Printf(TEXT("/Game/OneBraham/UI/Fonts/%s.%s"), Face.Asset, Face.Asset);
+		const UFontFace* Asset = LoadObject<UFontFace>(nullptr, *Path, nullptr, LOAD_NoWarn | LOAD_Quiet);
+		if (Asset == nullptr)
+		{
+			Missing.Add(Token);
+			static bool bLogged = false;
+			if (!bLogged)
+			{
+				bLogged = true;
+				UE_LOG(LogOneBrahamUI, Log, TEXT("[OB.UI] Brand faces not imported (%s missing); using the engine font. "
+					"Run Scripts/BuildContent.sh --only frontend."), *Path);
+			}
+			return nullptr;
+		}
+
+		TSharedRef<FStandaloneCompositeFont> Composite = MakeShared<FStandaloneCompositeFont>();
+		FTypefaceEntry& Entry = Composite->DefaultTypeface.Fonts.AddDefaulted_GetRef();
+		Entry.Name = TEXT("Regular");
+		Entry.Font = FFontData(Asset);
+		// Glyphs a face lacks (an arrow in Archivo, a box-drawing rule) come from
+		// the engine's Roboto rather than from the last-resort font's boxes.
+		const FSlateFontInfo Engine = FCoreStyle::GetDefaultFontStyle(Face.Fallback, 12);
+		if (Engine.CompositeFont.IsValid())
+		{
+			Composite->FallbackTypeface.Typeface = Engine.CompositeFont->DefaultTypeface;
+		}
+		Cache.Add(Token, Composite);
+		return Composite;
+	}
+}
+
+FSlateFontInfo UOneBrahamUIStyle::TypeFont(EOneBrahamType Token, float Px, int32 TrackingThousandths, bool bOutline)
+{
+	// Sizes are pixels at 1080p; Slate sizes are points at 96 DPI.
+	const float Points = FMath::Max(1.f, Px * 0.75f);
+
+	FSlateFontInfo Info;
+	if (const TSharedPtr<const FCompositeFont> Composite = OneBrahamType::CompositeFor(Token))
+	{
+		Info = FSlateFontInfo(Composite, Points, TEXT("Regular"));
+	}
+	else
+	{
+		Info = FCoreStyle::GetDefaultFontStyle(OneBrahamType::FaceFor(Token).Fallback, FMath::RoundToInt(Points));
+		Info.Size = Points;
+	}
+
+	Info.LetterSpacing = TrackingThousandths;
+	if (bOutline)
+	{
+		Info.OutlineSettings = FFontOutlineSettings(1);
+		Info.OutlineSettings.OutlineColor = FLinearColor(0.f, 0.f, 0.f, 0.6f);
+		Info.OutlineSettings.bSeparateFillAlpha = true;
+	}
+	return Info;
+}
+
+bool UOneBrahamUIStyle::HasBrandFaces()
+{
+	return OneBrahamType::CompositeFor(EOneBrahamType::Body).IsValid();
+}
+
+FLinearColor UOneBrahamUIStyle::Hex(const TCHAR* InHex, float Alpha)
+{
+	FLinearColor Result = FLinearColor::FromSRGBColor(FColor::FromHex(InHex));
+	Result.A = Alpha;
+	return Result;
+}
+
+FLinearColor UOneBrahamUIStyle::FromBrandFloat(const FLinearColor& IniColour, float Alpha)
+{
+	// The ini floats are the hex divided by 255: quantise back to the byte and
+	// read it as sRGB, which is what the brand book meant.
+	FLinearColor Result = FLinearColor::FromSRGBColor(IniColour.ToFColor(/*bSRGB*/ false));
+	Result.A = Alpha;
+	return Result;
+}
+
+FLinearColor UOneBrahamUIStyle::Colour(EOneBrahamColour Token, float Alpha)
+{
+	const UOneBrahamGameSettings& Settings = UOneBrahamGameSettings::Get();
+	switch (Token)
+	{
+	case EOneBrahamColour::Primary:			return FromBrandFloat(Settings.BrandPrimary, Alpha);
+	case EOneBrahamColour::Navy:			return FromBrandFloat(Settings.BrandNavy, Alpha);
+	case EOneBrahamColour::SignalBlue:		return FromBrandFloat(Settings.BrandSignalBlue, Alpha);
+	case EOneBrahamColour::LightGrey:		return FromBrandFloat(Settings.BrandLightGrey, Alpha);
+	case EOneBrahamColour::SafetyYellow:
+	{
+		// Tritanopia cannot separate yellow from white-ish greys reliably; the
+		// spec swaps it to white, and the shapes (hatching) carry the meaning.
+		const UOneBrahamGameUserSettings* User = UOneBrahamGameUserSettings::GetOneBrahamSettings();
+		if (User != nullptr && User->ColourBlindMode == EOneBrahamColourBlindMode::Tritanopia)
+		{
+			return Hex(TEXT("FFFFFF"), Alpha);
+		}
+		return FromBrandFloat(Settings.BrandSafetyYellow, Alpha);
+	}
+	case EOneBrahamColour::EmergencyRed:
+	{
+		// Deuteranopia and protanopia lose red against dark navy: danger becomes
+		// a hot orange there. Only this hue moves; every state keeps its shape.
+		const UOneBrahamGameUserSettings* User = UOneBrahamGameUserSettings::GetOneBrahamSettings();
+		if (User != nullptr && (User->ColourBlindMode == EOneBrahamColourBlindMode::Deuteranopia
+			|| User->ColourBlindMode == EOneBrahamColourBlindMode::Protanopia))
+		{
+			return Hex(TEXT("FF6B00"), Alpha);
+		}
+		return FromBrandFloat(Settings.BrandEmergencyRed, Alpha);
+	}
+	case EOneBrahamColour::OLEDBlack:		return Hex(TEXT("000000"), Alpha);
+	case EOneBrahamColour::BaffleBlack:		return Hex(TEXT("0B0C0F"), Alpha);
+	case EOneBrahamColour::SignageWhite:	return Hex(TEXT("F4F6F8"), Alpha);
+	case EOneBrahamColour::Paper:			return Hex(TEXT("E9ECEF"), Alpha);
+	case EOneBrahamColour::RibbonA:			return Hex(TEXT("6A1BFF"), Alpha);
+	case EOneBrahamColour::RibbonB:			return Hex(TEXT("1485FF"), Alpha);
+	case EOneBrahamColour::LockdownFieldA:	return Hex(TEXT("FFCD00"), Alpha);
+	case EOneBrahamColour::LockdownFieldB:	return Hex(TEXT("B37400"), Alpha);
+	case EOneBrahamColour::PurgeFieldA:		return Hex(TEXT("DD1E1F"), Alpha);
+	case EOneBrahamColour::PurgeFieldB:		return Hex(TEXT("5A0A0C"), Alpha);
+	case EOneBrahamColour::LCDField:		return Hex(TEXT("12160F"), Alpha);
+	case EOneBrahamColour::LCDInk:			return Hex(TEXT("D8F27A"), Alpha);
+	case EOneBrahamColour::FireHousing:		return Hex(TEXT("8F1418"), Alpha);
+	default:								return Hex(TEXT("FFFFFF"), Alpha);
+	}
+}
+
+FLinearColor UOneBrahamUIStyle::StageAccent(EOneBrahamLockdownStage Stage)
+{
+	switch (Stage)
+	{
+	case EOneBrahamLockdownStage::Lockdown:	return Colour(EOneBrahamColour::SafetyYellow);
+	case EOneBrahamLockdownStage::Purge:	return Colour(EOneBrahamColour::EmergencyRed);
+	default:								return Colour(EOneBrahamColour::SignalBlue);
+	}
+}
+
+FLinearColor UOneBrahamUIStyle::StageHairline(EOneBrahamLockdownStage Stage)
+{
+	switch (Stage)
+	{
+	case EOneBrahamLockdownStage::Lockdown:	return Colour(EOneBrahamColour::SafetyYellow, 0.25f);
+	case EOneBrahamLockdownStage::Purge:	return Colour(EOneBrahamColour::EmergencyRed, 0.30f);
+	default:								return Colour(EOneBrahamColour::LightGrey, 0.20f);
+	}
+}
+
+void UOneBrahamUIStyle::StageField(EOneBrahamLockdownStage Stage, FLinearColor& OutA, FLinearColor& OutB)
+{
+	switch (Stage)
+	{
+	case EOneBrahamLockdownStage::Lockdown:
+		OutA = Colour(EOneBrahamColour::LockdownFieldA);
+		OutB = Colour(EOneBrahamColour::LockdownFieldB);
+		break;
+	case EOneBrahamLockdownStage::Purge:
+		OutA = Colour(EOneBrahamColour::PurgeFieldA);
+		OutB = Colour(EOneBrahamColour::PurgeFieldB);
+		break;
+	default:
+		OutA = Colour(EOneBrahamColour::RibbonA);
+		OutB = Colour(EOneBrahamColour::RibbonB);
+		break;
+	}
+}
+
+float UOneBrahamUIStyle::Ease(EOneBrahamEase Curve, float T)
+{
+	const float X = FMath::Clamp(T, 0.f, 1.f);
+	switch (Curve)
+	{
+	case EOneBrahamEase::Lift:
+		return X < 0.5f ? 4.f * X * X * X : 1.f - FMath::Pow(-2.f * X + 2.f, 3.f) * 0.5f;
+	case EOneBrahamEase::Ribbon:
+		// Expo out: arrives fast and settles, the shape of cubic-bezier(0.16,1,0.3,1).
+		return X >= 1.f ? 1.f : 1.f - FMath::Pow(2.f, -10.f * X);
+	case EOneBrahamEase::Exit:
+		return X * X * X;
+	case EOneBrahamEase::Reader:
+	{
+		const float C1 = 1.2f;
+		const float C3 = C1 + 1.f;
+		return 1.f + C3 * FMath::Pow(X - 1.f, 3.f) + C1 * FMath::Pow(X - 1.f, 2.f);
+	}
+	default:
+		return X;
+	}
+}
+
+float UOneBrahamUIStyle::Tween(double NowSeconds, double StartSeconds, float DurationSeconds, EOneBrahamEase Curve)
+{
+	if (DurationSeconds <= 0.f)
+	{
+		return NowSeconds >= StartSeconds ? 1.f : 0.f;
+	}
+	return Ease(Curve, static_cast<float>((NowSeconds - StartSeconds) / DurationSeconds));
+}
+
+bool UOneBrahamUIStyle::ReduceMotion()
+{
+	const UOneBrahamGameUserSettings* User = UOneBrahamGameUserSettings::GetOneBrahamSettings();
+	return User != nullptr && User->bReduceMotion;
+}
+
+FText UOneBrahamUIStyle::LocalClock(bool bSeconds)
+{
+	const FDateTime Now = FDateTime::Now();
+	return FText::FromString(bSeconds
+		? FString::Printf(TEXT("%02d:%02d:%02d"), Now.GetHour(), Now.GetMinute(), Now.GetSecond())
+		: FString::Printf(TEXT("%02d:%02d"), Now.GetHour(), Now.GetMinute()));
 }

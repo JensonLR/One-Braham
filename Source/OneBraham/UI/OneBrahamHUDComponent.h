@@ -22,6 +22,8 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "UI/OneBrahamHUDTypes.h"
+#include "UI/HUD/OneBrahamHUDFrame.h"
+#include "UI/HUD/OneBrahamMatchReplay.h"
 #include "OneBrahamHUDComponent.generated.h"
 
 class AOneBrahamPlayerController;
@@ -187,6 +189,21 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "One Braham|HUD")
 	FOneBrahamHUDKillFeedUpdated OnKillFeedUpdated;
 
+	/** The building, the clock, the objective and the markers, as last gathered. */
+	const FOneBrahamHUDFrame& GetHUDFrame() const { return Frame; }
+
+	/** What this machine saw of the match, floor by floor (the end-of-day chart). */
+	const FOneBrahamMatchReplay& GetMatchReplay() const { return Replay; }
+
+	/**
+	 * Dev only: puts the HUD into a demonstration state - "calm", "lockdown",
+	 * "purge", "extraction", "critical", "downed", "death", "firedrill",
+	 * "scoreboard", "pause", "plan", "matchend" - over the live world, for
+	 * screenshots of states a smoke run cannot reach on demand. "off" clears it.
+	 * Does nothing in Shipping.
+	 */
+	void DevDemo(const FString& State);
+
 	/** Debug: writes the whole HUD snapshot to LogOneBrahamUI.Needed by QA. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|HUD|Debug")
 	void DumpHUDState() const;
@@ -194,6 +211,26 @@ public:
 protected:
 	/** Pulls continuous state from the pawn's components and the game state. */
 	void GatherHUDData();
+
+	/** Fills Frame: the building, the dusk clock, the objective in words, the
+	 *  compass's markers, the FIRE DRILL points, the squad and the kill rows. */
+	void GatherHUDFrame();
+
+	/** The objective line for the moment, in the building's words. */
+	void BuildObjective(const class AOneBrahamGameState* GS);
+
+	/** Appends a replay sample every two seconds of the live match. */
+	void RecordReplay(float DeltaTime);
+
+	/**
+	 * The hero moment: every OLED screen in the building shows the line the
+	 * tannoy is reading, on the same frame as the HUD's card. Client-side only;
+	 * each machine drives its own copy of the displays.
+	 */
+	void SyncBuildingDisplays(const FText& Headline, const FText& Subline, EOneBrahamLockdownStage Stage, float HoldSeconds);
+
+	/** Dev: overwrites the gathered state with the demonstration state. */
+	void ApplyDevDemo();
 
 	// --- delegate handlers -------------------------------------------------
 	UFUNCTION() void HandleHealthChanged(float NewHealth, float MaxHealthValue, float Delta);
@@ -256,6 +293,35 @@ protected:
 
 	/** The snapshot being filled and handed to the widget. */
 	FOneBrahamHUDData Data;
+
+	/** The redesigned HUD's half of the snapshot, filled on the same gather. */
+	FOneBrahamHUDFrame Frame;
+
+	/** The end-of-day chart's record. */
+	FOneBrahamMatchReplay Replay;
+	float ReplayAccumulator = 0.f;
+	TWeakObjectPtr<const class AOneBrahamGameState> ReplayGameState;
+
+	/**
+	 * The highest sealed floor as of the last stage change. The sealed set does
+	 * not replicate; a client reads the highest occupied floor on the frame the
+	 * stage moved, and the shutters do not reopen when people climb.
+	 */
+	int32 SealCeilingHint = INDEX_NONE;
+
+	/** Kill-feed rows already given to the replay. */
+	TSet<FString> ReplayKillKeys;
+
+	/** Warning banners within this window of a stage card are the card's echo. */
+	double LastStageCardTime = -100.0;
+
+	/** The HUD hid itself for the pause menu (and comes back when it closes). */
+	bool bHiddenForPause = false;
+
+	/** Dev: the demonstration state, and when it began. */
+	FString DemoState;
+	double DemoStartedAt = 0.0;
+	bool bDemoOneShotsDone = false;
 
 	// --- change detectors for the announcements ---------------------------
 	/** Extraction state as of the last tick. */

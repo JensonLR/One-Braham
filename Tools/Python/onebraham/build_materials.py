@@ -908,9 +908,79 @@ def build_all():
     C.guard(report, "textured surfaces", build_textured_surfaces, report)
     C.guard(report, "glass grime", build_grimed_glass, report)
     C.guard(report, "decal textures", apply_decal_texture_sets, report)
+    C.guard(report, "UI display text", build_ui_display_text, report)
 
     C.log(report.summary())
     return report
+
+
+# ---------------------------------------------------------------------------
+#  UI materials (the front end's)
+# ---------------------------------------------------------------------------
+
+UI_MATERIALS = C.UI + "/Materials"
+DISPLAY_TEXT_SOURCE = "/Engine/EngineMaterials/DefaultTextMaterialTranslucent"
+DISPLAY_TEXT_GLOW = 18.0
+DISPLAY_TEXT_GLOW_FRONT_END = 420.0
+
+
+def build_ui_display_text(report):
+    """M_UI_DisplayText: the OLED screens' copy, glowing like the screen does.
+
+    The engine's text material is lit, which the dusk
+    exposure (EV 11.3 in the front end, the Purge's sky in a match) renders
+    as a grey smudge on a lit panel. This is that material, duplicated, with
+    its emissive multiplied by a Glow parameter, so ON BREAK on the reception
+    wall reads as light, not as print. AOneBrahamDisplay takes it as its
+    TextMaterial; the front end loads it for the reception wall it places.
+    """
+    path = UI_MATERIALS + "/M_UI_DisplayText"
+    if not unreal.EditorAssetLibrary.does_directory_exist(UI_MATERIALS):
+        unreal.EditorAssetLibrary.make_directory(UI_MATERIALS)
+    if unreal.EditorAssetLibrary.does_asset_exist(path):
+        unreal.EditorAssetLibrary.delete_asset(path)
+    material = unreal.EditorAssetLibrary.duplicate_asset(DISPLAY_TEXT_SOURCE, path)
+    if material is None or not _mel():
+        report.failed(path, "could not duplicate the engine text material")
+        return None
+
+    # The engine's text is lit, its colour (the vertex colour the text render
+    # component writes) on Base Color. Here it is unlit, the same colour times
+    # Glow on Emissive, and the distance-field opacity left as it was.
+    colour = _mel().get_material_property_input_node(material, unreal.MaterialProperty.MP_BASE_COLOR)
+    if colour is None:
+        report.failed(path, "the engine text material has no colour input to light")
+        return material
+    output = _mel().get_material_property_input_node_output_name(material, unreal.MaterialProperty.MP_BASE_COLOR)
+    _set_shading(material, "MSM_UNLIT")
+    glow = _scalar_param(material, "Glow", DISPLAY_TEXT_GLOW, -600, 300, 0.0, 100.0)
+    mul = _expr(material, unreal.MaterialExpressionMultiply, -250, 200)
+    _connect(material, colour, output or "", mul, "A")
+    _connect(material, glow, "", mul, "B")
+    _connect_property(material, mul, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+    try:
+        _mel().recompile_material(material)
+    except Exception:  # noqa: BLE001
+        pass
+    unreal.EditorAssetLibrary.save_asset(path)
+    report.created_asset(path)
+
+    # The front end's instance: L_MainMenu holds its exposure at dusk's
+    # EV 11.3, twenty times brighter than an office floor, so its screens glow
+    # twenty times harder to read as light.
+    instance_path = UI_MATERIALS + "/MI_UI_DisplayText_FrontEnd"
+    if unreal.EditorAssetLibrary.does_asset_exist(instance_path):
+        unreal.EditorAssetLibrary.delete_asset(instance_path)
+    instance = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
+        "MI_UI_DisplayText_FrontEnd", UI_MATERIALS, unreal.MaterialInstanceConstant, unreal.MaterialInstanceConstantFactoryNew())
+    if instance is not None:
+        _mel().set_material_instance_parent(instance, material)
+        _mel().set_material_instance_scalar_parameter_value(instance, "Glow", DISPLAY_TEXT_GLOW_FRONT_END)
+        unreal.EditorAssetLibrary.save_asset(instance_path)
+        report.created_asset(instance_path)
+    C.log(u"  M_UI_DisplayText: the display copy at x{0} glow (x{1} in the front end)".format(
+        DISPLAY_TEXT_GLOW, DISPLAY_TEXT_GLOW_FRONT_END))
+    return material
 
 
 if __name__ == "__main__":

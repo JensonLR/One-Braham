@@ -34,6 +34,19 @@
 #include "Weapons/OneBrahamWeaponBase.h"
 #include "Weapons/OneBrahamWeaponComponent.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
+#include "Engine/LocalPlayer.h"
+#include "EngineUtils.h"
+#include "AI/OneBrahamBotRules.h"
+#include "Data/OneBrahamMatchSettingsAsset.h"
+#include "HAL/IConsoleManager.h"
+#include "Misc/Paths.h"
+#include "TimerManager.h"
+#include "Containers/Ticker.h"
+#include "UI/HUD/OneBrahamBuildingStatus.h"
+#include "UI/HUD/OneBrahamHUDPaint.h"
+#include "UnrealClient.h"
+#include "World/OneBrahamDisplay.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Blueprint/UserWidget.h"
 #include "GameFramework/PlayerState.h"
@@ -392,17 +405,37 @@ void UOneBrahamHUDComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 		return (Now - Ping.SpawnTime) > Ping.Lifetime;
 	});
 
+	// The building's half of the snapshot, on the same gather, then the replay
+	// sample and (in a dev build, on request) the demonstration state.
+	GatherHUDFrame();
+	RecordReplay(DeltaTime);
+	ApplyDevDemo();
+
 	// Announcements run after the snapshot is gathered, so they read the same
 	// state the widget is about to draw.
 	AnnounceStateChanges();
 
+	HUDWidget->ApplyHUDFrame(Frame);
 	HUDWidget->ApplyHUDData(Data);
+
+	// The plan, while open, follows the building live: it reads the same
+	// status the floor stack does, so the two can never disagree.
+	if (bFloorPlanVisible && FloorPlanWidget != nullptr)
+	{
+		FloorPlanWidget->SetBuildingFrame(Frame);
+	}
 
 	UpdateMatchEndScreen();
 }
 
 void UOneBrahamHUDComponent::UpdateMatchEndScreen()
 {
+	// Dev: a demonstrated end screen stays up over the live match until "off".
+	if (DemoState == TEXT("matchend"))
+	{
+		return;
+	}
+
 	const UWorld* World = GetWorld();
 	const AOneBrahamGameState* GS = World != nullptr ? World->GetGameState<AOneBrahamGameState>() : nullptr;
 	AOneBrahamPlayerController* Controller = OwningController.Get();
@@ -450,6 +483,7 @@ void UOneBrahamHUDComponent::UpdateMatchEndScreen()
 
 	MatchEndGameState = GS;
 	MatchEndWidget->AddToPlayerScreen(MatchEndZOrder);
+	MatchEndWidget->SetReplay(Replay, Frame);
 	MatchEndWidget->ShowMatchEnd();
 
 	// The screen takes the input: the fight is over on the server, and a
@@ -522,14 +556,59 @@ void UOneBrahamHUDComponent::HandleServerAnnouncement(const FText& Announcement)
 	}
 
 	// A tannoy sentence is four or five seconds of reading. Six is generous
-	// without being a permanent fixture on screen.
+	// without being a permanent fixture on screen. The subtitle carries every
+	// word; the PA card at the top carries the headline.
 	Data.SubtitleText = Announcement;
+	Data.SubtitleSpeaker.Reset();
 	SubtitleRemaining = TannoySubtitleSeconds;
+
+	// The card's headline is the paragraph's point: the first sentence after
+	// the building clears its throat ("Attention all staff."). Its subline is
+	// the building's own aside for the moment, from a short list per stage.
+	FString Paragraph = Announcement.ToString().TrimStartAndEnd();
+	for (const TCHAR* Preamble : { TEXT("Attention all staff."), TEXT("Attention, all staff."), TEXT("Attention.") })
+	{
+		if (Paragraph.StartsWith(Preamble))
+		{
+			Paragraph = Paragraph.Mid(FCString::Strlen(Preamble)).TrimStart();
+		}
+	}
+
+	FString Headline = Paragraph;
+	int32 Stop = INDEX_NONE;
+	if (Paragraph.FindChar(TEXT('.'), Stop) && Stop > 8 && Stop < Paragraph.Len() - 1)
+	{
+		Headline = Paragraph.Left(Stop + 1);
+	}
+
+	const EOneBrahamLockdownStage Stage = Frame.Building.Stage;
+	static const TCHAR* Calm[] = { TEXT("Thank you for choosing One Braham."), TEXT("Please sign in at reception.") };
+	static const TCHAR* Lockdown[] = { TEXT("The lifts are thinking about what they've done."), TEXT("Please do not prop fire doors open."),
+		TEXT("Taking the stairs burns seven calories per floor.") };
+	static const TCHAR* Purge[] = { TEXT("Thank you for your patience."), TEXT("Hot desks are cleaned at 18:00. Do not be on one.") };
+	const uint32 Pick = GetTypeHash(Headline);
+	const int32 Band = Stage == EOneBrahamLockdownStage::Purge ? 2 : (Stage == EOneBrahamLockdownStage::Normal ? 0 : 1);
+	const FString Aside = Band == 2 ? Purge[Pick % UE_ARRAY_COUNT(Purge)]
+		: (Band == 1 ? Lockdown[Pick % UE_ARRAY_COUNT(Lockdown)] : Calm[Pick % UE_ARRAY_COUNT(Calm)]);
+
+	if (HUDWidget != nullptr)
+	{
+		HUDWidget->PushAnnouncement(FText::FromString(Headline), FText::FromString(Aside), Stage, TannoySubtitleSeconds - 1.5f);
+	}
+
+	SyncBuildingDisplays(FText::FromString(Headline), FText::FromString(Aside), Stage, TannoySubtitleSeconds);
 }
 
 void UOneBrahamHUDComponent::HandleWarningBanner(const FText& Text, float DurationSeconds, FLinearColor Colour)
 {
 	if (Text.IsEmpty())
+	{
+		return;
+	}
+
+	// The stage's own two-word banner arrives with the stage: the card is
+	// already saying it at eighty-eight pixels, so the echo is dropped.
+	if (const UWorld* World = GetWorld(); World != nullptr && World->GetTimeSeconds() - LastStageCardTime < 3.0)
 	{
 		return;
 	}
@@ -572,6 +651,15 @@ void UOneBrahamHUDComponent::AnnounceStateChanges()
 				Announce(TEXT("HUD_Objective_Winch"), 4.f, WinchBlue);
 				break;
 
+			case EOneBrahamExtractionState::Arriving:
+				// The helicopter is on its way: THE ROOF, once, for everybody.
+				if (HUDWidget != nullptr)
+				{
+					HUDWidget->ShowStageCard(EOneBrahamStageCard::Roof);
+					LastStageCardTime = World->GetTimeSeconds();
+				}
+				break;
+
 			case EOneBrahamExtractionState::Holding:
 				Announce(TEXT("HUD_Extraction_Hold"), 4.f, WinchBlue);
 				break;
@@ -599,7 +687,6 @@ void UOneBrahamHUDComponent::AnnounceStateChanges()
 			}
 
 			case EOneBrahamExtractionState::Inactive:
-			case EOneBrahamExtractionState::Arriving:
 			default:
 				break;
 			}
@@ -619,7 +706,38 @@ void UOneBrahamHUDComponent::AnnounceStateChanges()
 		}
 		else if (Stage != LastLockdownStage)
 		{
+			const EOneBrahamLockdownStage Previous = LastLockdownStage;
 			LastLockdownStage = Stage;
+
+			// The sealed set does not replicate; the seal rule does. The line is
+			// the highest occupied floor on the frame the shutters moved, and it
+			// only ever rises until the Purge takes everything below the ceiling.
+			if (Stage == EOneBrahamLockdownStage::PreLockdown || Stage == EOneBrahamLockdownStage::Lockdown)
+			{
+				SealCeilingHint = FMath::Max(SealCeilingHint, Lockdown->GetHighestOccupiedFloor() - 1);
+			}
+			else if (Stage == EOneBrahamLockdownStage::Normal)
+			{
+				SealCeilingHint = INDEX_NONE;
+			}
+
+			// The three moments the whole screen speaks: the first shutters (the
+			// building going from calm to lockdown), and the Purge. The second
+			// sealing stage is the tannoy's alone - the card has made its point.
+			if (HUDWidget != nullptr)
+			{
+				if (Previous == EOneBrahamLockdownStage::Normal && Stage != EOneBrahamLockdownStage::Normal
+					&& Stage != EOneBrahamLockdownStage::Purge)
+				{
+					HUDWidget->ShowStageCard(EOneBrahamStageCard::Lockdown);
+					LastStageCardTime = World->GetTimeSeconds();
+				}
+				else if (Stage == EOneBrahamLockdownStage::Purge)
+				{
+					HUDWidget->ShowStageCard(EOneBrahamStageCard::Purge);
+					LastStageCardTime = World->GetTimeSeconds();
+				}
+			}
 
 			// The floor plan dims the floors the shutters have taken, so it is
 			// stale the moment the stage moves.
@@ -693,21 +811,19 @@ void UOneBrahamHUDComponent::ApplyAccessibilitySettings()
 		return;
 	}
 
-	const float Scale = FMath::Clamp(Settings->HUDScale, 0.75f, 1.5f);
-
-	// A render-scale change invalidates the layout of every child, so it is only
-	// pushed when the number has actually moved. This function is called from the
-	// options menu's apply path, and "apply" is a button people press repeatedly.
+	// HUD Scale (80-120%) is applied by the painted HUD itself, each element
+	// about the corner it is anchored to: a render scale about the centre walks
+	// the corner panels off the screen at 120%, which is the classic broken
+	// "HUD scaling". Only an authored Blueprint HUD, which paints nothing,
+	// still takes the render scale.
+	const float Scale = FMath::Clamp(Settings->HUDScale, 0.8f, 1.2f);
 	if (!FMath::IsNearlyEqual(CachedHUDScale, Scale, 0.001f))
 	{
-		// Scaling about the centre keeps the crosshair under the player's eye line;
-		// scaling about the default top-left origin walks the whole HUD off-screen
-		// at 1.5x, which is the classic broken "HUD scaling" implementation.
 		HUDWidget->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
-		HUDWidget->SetRenderScale(FVector2D(Scale, Scale));
-
+		HUDWidget->SetRenderScale(HUDWidget->IsCodelessLayout() ? FVector2D(1.f, 1.f) : FVector2D(Scale, Scale));
 		CachedHUDScale = Scale;
 	}
+	Frame.HUDScale = Scale;
 }
 
 void UOneBrahamHUDComponent::GatherHUDData()
@@ -1015,6 +1131,10 @@ void UOneBrahamHUDComponent::SetScoreboardVisible(bool bVisible)
 	{
 		ScoreboardWidget->SetScoreboardOpen(bVisible);
 	}
+	if (HUDWidget != nullptr)
+	{
+		HUDWidget->SetBoardOpen(bVisible);
+	}
 }
 
 void UOneBrahamHUDComponent::SetDeathScreenVisible(bool bVisible, const FText& CauseText)
@@ -1042,6 +1162,19 @@ void UOneBrahamHUDComponent::SetPauseMenuVisible(bool bVisible)
 		{
 			PauseMenuWidget->CloseMenu();
 		}
+	}
+
+	// The HUD steps out while the player is ON BREAK: the pause screen has its
+	// own status card, and two lockdown timers on one screen is one too many.
+	if (bVisible && bHUDVisible)
+	{
+		bHiddenForPause = true;
+		SetHUDVisible(false);
+	}
+	else if (!bVisible && bHiddenForPause)
+	{
+		bHiddenForPause = false;
+		SetHUDVisible(true);
 	}
 }
 
@@ -1172,6 +1305,20 @@ void UOneBrahamHUDComponent::NotifyDamageTaken(float Damage, const FVector& Inst
 	DamageInstigatorLocation = InstigatorLocation;
 
 	UpdateDamageDirection();
+
+	// The painted HUD keeps its own arcs (several at once, each fading), and
+	// the floor the shot came from: in a tower that is half of "where".
+	if (HUDWidget != nullptr)
+	{
+		int32 FloorDelta = 0;
+		if (bHasDamageInstigator)
+		{
+			const AOneBrahamCharacter* Character = BoundCharacter.Get();
+			const int32 Here = Character != nullptr ? Character->GetCurrentFloorIndex() : Data.CurrentFloorIndex;
+			FloorDelta = OneBrahamConstants::FloorIndexForZ(InstigatorLocation.Z - 90.f) - Here;
+		}
+		HUDWidget->PushDamage(Damage, InstigatorLocation, bHasDamageInstigator, FloorDelta);
+	}
 }
 
 void UOneBrahamHUDComponent::UpdateDamageDirection()
@@ -1400,6 +1547,11 @@ void UOneBrahamHUDComponent::SetFloorPlanVisible(bool bVisible)
 
 	bFloorPlanVisible = bVisible;
 
+	if (HUDWidget != nullptr)
+	{
+		HUDWidget->SetPlanOpen(bFloorPlanVisible);
+	}
+
 	if (!bFloorPlanVisible)
 	{
 		if (FloorPlanWidget != nullptr)
@@ -1424,6 +1576,7 @@ void UOneBrahamHUDComponent::SetFloorPlanVisible(bool bVisible)
 	FOneBrahamFloorPlanData PlanData;
 	GatherFloorPlanData(PlanData);
 	FloorPlanWidget->SetPlanData(PlanData);
+	FloorPlanWidget->SetBuildingFrame(Frame);
 	FloorPlanWidget->SetPlanVisible(true);
 }
 
@@ -1471,6 +1624,7 @@ void UOneBrahamHUDComponent::RefreshOverlays()
 		FOneBrahamFloorPlanData PlanData;
 		GatherFloorPlanData(PlanData);
 		FloorPlanWidget->SetPlanData(PlanData);
+		FloorPlanWidget->SetBuildingFrame(Frame);
 	}
 
 	if (bQuickLineMenuVisible && QuickLineWidget != nullptr)
@@ -1686,3 +1840,1106 @@ void UOneBrahamHUDComponent::DumpHUDState() const
 	UE_LOG(LogOneBrahamUI, Log, TEXT("   squad rows %d  killfeed rows %d  pings %d"),
 		Data.Squad.Num(), Data.KillFeed.Num(), Data.WorldPings.Num());
 }
+
+// ==========================================================================
+//  The building's half of the snapshot
+// ==========================================================================
+namespace OneBrahamHUDFrameRules
+{
+	FString CategoryWord(EOneBrahamWeaponCategory Category)
+	{
+		switch (Category)
+		{
+		case EOneBrahamWeaponCategory::Pistol:
+		case EOneBrahamWeaponCategory::CompactPistol:		return TEXT("PISTOL");
+		case EOneBrahamWeaponCategory::SuppressedPistol:	return TEXT("SUPPRESSED");
+		case EOneBrahamWeaponCategory::SMG:					return TEXT("SMG");
+		case EOneBrahamWeaponCategory::PDW:					return TEXT("PDW");
+		case EOneBrahamWeaponCategory::PumpShotgun:
+		case EOneBrahamWeaponCategory::SemiAutoShotgun:		return TEXT("SHOTGUN");
+		case EOneBrahamWeaponCategory::Carbine556:			return TEXT("CARBINE");
+		case EOneBrahamWeaponCategory::CompactAssaultRifle:	return TEXT("RIFLE");
+		case EOneBrahamWeaponCategory::MarksmanRifle:		return TEXT("MARKSMAN");
+		default:											return FString();
+		}
+	}
+
+	/** A weapon id as the sign-out log prints it: "MP7", "M4 CARBINE". */
+	FString WeaponWord(FName WeaponId)
+	{
+		FString Id = WeaponId.ToString();
+		Id.RemoveFromStart(TEXT("Weapon_"));
+		Id.RemoveFromStart(TEXT("WPN_"));
+		if (Id == TEXT("None") || Id.IsEmpty())
+		{
+			return FString();
+		}
+		// "M4Carbine" -> "M4 CARBINE": a space before a capital that follows a
+		// lower-case letter, so model numbers stay whole.
+		FString Out;
+		for (int32 Index = 0; Index < Id.Len(); ++Index)
+		{
+			const TCHAR C = Id[Index];
+			if (Index > 0 && FChar::IsUpper(C) && FChar::IsLower(Id[Index - 1]))
+			{
+				Out.AppendChar(TEXT(' '));
+			}
+			Out.AppendChar(C == TEXT('_') ? TEXT(' ') : C);
+		}
+		return Out.ToUpper();
+	}
+}
+
+void UOneBrahamHUDComponent::GatherHUDFrame()
+{
+	using namespace OneBrahamHUDFrameRules;
+
+	UWorld* World = GetWorld();
+	AOneBrahamPlayerController* PC = OwningController.Get();
+	const AOneBrahamGameState* GS = World != nullptr ? World->GetGameState<AOneBrahamGameState>() : nullptr;
+
+	Frame.bValid = GS != nullptr;
+	if (GS == nullptr)
+	{
+		return;
+	}
+
+	Frame.Mode = GS->MatchMode;
+	Frame.Phase = GS->MatchPhase;
+	FOneBrahamBuildingStatus::Gather(World, PC, SealCeilingHint, Frame.Building);
+	Frame.DuskClock = OneBrahamDuskClock::Now(World).ToString();
+	Frame.TimeRemaining = GS->MatchTimeLimitSeconds > 0.f ? FMath::Max(0.f, GS->MatchTimeLimitSeconds - GS->PhaseElapsedSeconds) : 0.f;
+
+	// --- settings --------------------------------------------------------------------
+	if (const UOneBrahamGameUserSettings* Settings = UOneBrahamGameUserSettings::GetOneBrahamSettings())
+	{
+		Frame.bReduceMotion = Settings->bReduceMotion;
+		Frame.HUDScale = FMath::Clamp(Settings->HUDScale, 0.8f, 1.2f);
+		Frame.SubtitleScale = Settings->SubtitleScale;
+
+		// "HUD rest dimming" is an accessibility switch the settings screen owns;
+		// read by name so the HUD honours it from the moment it exists, and
+		// rests by default until then.
+		static const FBoolProperty* RestDimming = FindFProperty<FBoolProperty>(UOneBrahamGameUserSettings::StaticClass(), TEXT("bHUDRestDimming"));
+		Frame.bRestDimming = RestDimming != nullptr ? RestDimming->GetPropertyValue_InContainer(Settings) : true;
+	}
+
+	// --- who the player is ----------------------------------------------------------------
+	const AOneBrahamPlayerState* LocalState = PC != nullptr ? PC->GetPlayerState<AOneBrahamPlayerState>() : nullptr;
+	if (LocalState != nullptr)
+	{
+		Frame.PlayerName = LocalState->GetPlayerName();
+		Frame.RoleLabel = UOneBrahamScoreboardWidget::ArchetypeLabel(LocalState->ArchetypeTag).ToString();
+		if (Frame.RoleLabel == TEXT("-"))
+		{
+			Frame.RoleLabel.Reset();
+		}
+	}
+
+	// --- the weapon's family and its modes ------------------------------------------------
+	Frame.WeaponCategory.Reset();
+	Frame.FireModes.Reset();
+	Frame.bAiming = false;
+	if (UOneBrahamWeaponComponent* Weapons = CachedWeapons.Get())
+	{
+		Frame.bAiming = Weapons->IsAimingDownSights();
+		if (const AOneBrahamWeaponBase* Weapon = Weapons->GetCurrentWeapon())
+		{
+			if (const UOneBrahamWeaponDefinition* Definition = Weapon->Definition)
+			{
+				Frame.WeaponCategory = CategoryWord(Definition->Category);
+				Frame.FireModes = Definition->AvailableFireModes;
+			}
+		}
+	}
+
+	// --- voice ----------------------------------------------------------------------------
+	switch (Data.VoiceChannel)
+	{
+	case EOneBrahamVoiceChannel::Squad:	Frame.VoiceChannelWord = OneBrahamHUDStrings::Get(TEXT("HUD_Voice_Squad")).ToString(); break;
+	case EOneBrahamVoiceChannel::Team:	Frame.VoiceChannelWord = OneBrahamHUDStrings::Get(TEXT("HUD_Voice_Team")).ToString(); break;
+	default:							Frame.VoiceChannelWord = OneBrahamHUDStrings::Get(TEXT("HUD_Voice_Proximity")).ToString(); break;
+	}
+	Frame.VoiceRangeMetres = 0;
+	if (Data.VoiceChannel == EOneBrahamVoiceChannel::Proximity)
+	{
+		if (const UOneBrahamVoiceSubsystem* Voice = UOneBrahamVoiceSubsystem::Get(PC))
+		{
+			Frame.VoiceRangeMetres = FMath::RoundToInt(Voice->GetProximityRangeCm() / 100.f);
+		}
+	}
+
+	// --- the extraction --------------------------------------------------------------------
+	const UOneBrahamExtractionComponent* Extraction = GS->GetExtractionComponent();
+	Frame.ExtractionState = Extraction != nullptr ? Extraction->GetExtractionState() : EOneBrahamExtractionState::Inactive;
+	Frame.ExtractionSeconds = Extraction != nullptr ? Extraction->GetSecondsRemainingInState() : 0.f;
+	Frame.bExtractionContested = Extraction != nullptr && Extraction->IsContested();
+	Frame.bOwnSquadHolding = Extraction != nullptr && LocalState != nullptr && Extraction->IsSquadHoldingExtraction(LocalState->SquadId);
+	Frame.ExtractionProgress01 = 0.f;
+	if (Extraction != nullptr)
+	{
+		Frame.ExtractionProgress01 = Frame.ExtractionState == EOneBrahamExtractionState::Holding
+			? Extraction->GetHoldProgress01() : Extraction->GetArrivalAlpha01();
+	}
+
+	// --- FIRE DRILL ---------------------------------------------------------------------------
+	Frame.Points.Reset();
+	if (Frame.Mode == EOneBrahamMatchMode::FireDrill)
+	{
+		const int32 TeamIndex = LocalState != nullptr && LocalState->Team == EOneBrahamTeam::ExternalContractors ? 1 : 0;
+		Frame.ScoreOurs = GS->TeamScores.IsValidIndex(TeamIndex) ? GS->TeamScores[TeamIndex] : 0;
+		Frame.ScoreTheirs = GS->TeamScores.IsValidIndex(1 - TeamIndex) ? GS->TeamScores[1 - TeamIndex] : 0;
+
+		if (const UOneBrahamMatchSettingsAsset* Settings = GS->GetMatchSettings())
+		{
+			Frame.ScoreToWin = Settings->ScoreToWin;
+			for (int32 Index = 0; Index < Settings->ControlPoints.Num(); ++Index)
+			{
+				const FOneBrahamControlPointDef& Def = Settings->ControlPoints[Index];
+				FOneBrahamPointView& Point = Frame.Points.AddDefaulted_GetRef();
+				Point.Letter = FString::Chr(TEXT('A') + Index);
+				Point.Name = Def.DisplayName.ToString();
+				Point.Floor = Def.FloorIndex;
+				for (const FOneBrahamSquadMarker& Mate : Frame.Building.Squad)
+				{
+					Point.bYoursPresent |= Mate.Floor == Def.FloorIndex && !Mate.bDowned;
+				}
+			}
+		}
+	}
+
+	// --- the in/out board ---------------------------------------------------------------------
+	Frame.Squad.Reset();
+	for (const FOneBrahamHUDSquadMember& Member : Data.Squad)
+	{
+		FOneBrahamSquadRowView& Row = Frame.Squad.AddDefaulted_GetRef();
+		Row.PlayerId = Member.PlayerId;
+		Row.Name = Member.PlayerName;
+		Row.Floor = Member.FloorIndex;
+		Row.LifeState = Member.LifeState;
+		Row.HealthFraction = Member.HealthFraction;
+		Row.BleedOutRemaining = Member.BleedOutFraction * OneBrahamConstants::BleedOutSeconds;
+		Row.bTransmitting = Member.bIsTransmitting;
+		Row.bLocal = Member.bIsLocalPlayer;
+		Row.bKeycard = Member.bIsLocalPlayer && Data.HighestKeycardTier != EOneBrahamAccessTier::Public;
+	}
+
+	// --- the sign-out log ----------------------------------------------------------------------
+	Frame.Kills.Reset();
+	const float PurgeAt = OneBrahamDuskClock::PurgeAtSeconds(World);
+	const double ServerNow = GS->GetServerWorldTimeSeconds();
+	for (int32 Index = 0; Index < GS->KillFeed.Num(); ++Index)
+	{
+		const FOneBrahamKillFeedEntry& Entry = GS->KillFeed[Index];
+		FOneBrahamKillRowView& Row = Frame.Kills.AddDefaulted_GetRef();
+		const float Ago = Entry.Timestamp > 0.f ? FMath::Clamp(static_cast<float>(ServerNow - Entry.Timestamp), 0.f, 600.f) : 0.f;
+		Row.Time = OneBrahamDuskClock::MatchSecondsToClock(GS->PhaseElapsedSeconds - Ago, PurgeAt).ToString();
+		Row.Killer = Entry.KillerName;
+		Row.Victim = Entry.VictimName;
+		Row.Weapon = WeaponWord(Entry.WeaponId);
+		Row.bHeadshot = Entry.Verb == EOneBrahamKillFeedVerb::Headshot;
+		Row.bBuilding = Entry.Verb == EOneBrahamKillFeedVerb::Building;
+		Row.Stage = Frame.Building.Stage;
+		Row.EventTime = Data.KillFeed.IsValidIndex(Index) ? Data.KillFeed[Index].EventTime : World->GetTimeSeconds();
+		for (const FOneBrahamSquadRowView& Mate : Frame.Squad)
+		{
+			Row.bKillerSquad |= Mate.Name == Entry.KillerName;
+			Row.bVictimSquad |= Mate.Name == Entry.VictimName;
+		}
+		Row.bKillerYou = !Frame.PlayerName.IsEmpty() && Entry.KillerName == Frame.PlayerName;
+		Row.bVictimYou = !Frame.PlayerName.IsEmpty() && Entry.VictimName == Frame.PlayerName;
+	}
+
+	// --- the compass's markers ---------------------------------------------------------------------
+	Frame.Compass.Reset();
+	const int32 LocalFloor = Frame.Building.LocalFloor;
+	FVector Eye = FVector::ZeroVector;
+	if (PC != nullptr && PC->PlayerCameraManager != nullptr)
+	{
+		Eye = PC->PlayerCameraManager->GetCameraLocation();
+	}
+
+	for (const FOneBrahamSquadMarker& Mate : Frame.Building.Squad)
+	{
+		if (Mate.bLocal || !Mate.bHasLocation)
+		{
+			continue;
+		}
+		FOneBrahamCompassMarkView& Mark = Frame.Compass.AddDefaulted_GetRef();
+		Mark.Type = EOneBrahamCompassMark::Squad;
+		Mark.WorldLocation = Mate.Location;
+		FString Clean = Mate.Name;
+		Clean.RemoveFromStart(TEXT("BOT "));
+		Mark.Label = Clean.Left(2).ToUpper();
+		Mark.FloorDelta = LocalFloor != INDEX_NONE && Mate.Floor != INDEX_NONE ? Mate.Floor - LocalFloor : 0;
+		Mark.DistanceCm = FVector::Dist(Eye, Mate.Location);
+		Mark.bAlert = Mate.bDowned;
+	}
+
+	for (const FOneBrahamHUDWorldPing& Ping : Data.WorldPings)
+	{
+		FOneBrahamCompassMarkView& Mark = Frame.Compass.AddDefaulted_GetRef();
+		Mark.Type = EOneBrahamCompassMark::Ping;
+		Mark.WorldLocation = Ping.Location;
+		Mark.SpawnTime = Ping.SpawnTime;
+		Mark.FloorDelta = LocalFloor != INDEX_NONE ? OneBrahamConstants::FloorIndexForZ(Ping.Location.Z) - LocalFloor : 0;
+		Mark.DistanceCm = FVector::Dist(Eye, Ping.Location);
+	}
+
+	if (Frame.Mode == EOneBrahamMatchMode::Ascent && Extraction != nullptr && !Extraction->GetHelipadLocation().IsNearlyZero())
+	{
+		FOneBrahamCompassMarkView& Mark = Frame.Compass.AddDefaulted_GetRef();
+		Mark.Type = EOneBrahamCompassMark::Extraction;
+		Mark.WorldLocation = Extraction->GetHelipadLocation();
+		Mark.FloorDelta = LocalFloor != INDEX_NONE ? Frame.Building.ExtractionFloor - LocalFloor : 0;
+		Mark.DistanceCm = FVector::Dist(Eye, Mark.WorldLocation);
+	}
+
+	// In a lockdown, the nearest stair core: the way up is the only thing that
+	// matters, and the lifts have stopped. A core on a sealed floor is struck.
+	if (Frame.Mode == EOneBrahamMatchMode::Ascent && OneBrahamHUDStyle::StageBand(Frame.Building.Stage) > 0 && LocalFloor != INDEX_NONE
+		&& LocalFloor < OneBrahamConstants::FloorTop)
+	{
+		using namespace OneBrahamBotRules;
+		const FVector A = RouteDoorPoint(EClimbRoute::FireStairA, LocalFloor);
+		const FVector B = RouteDoorPoint(EClimbRoute::SpiralB, LocalFloor);
+		const bool bAIsNearer = FVector::DistSquared(Eye, A) <= FVector::DistSquared(Eye, B);
+		const EOneBrahamFloorCondition Here = Frame.Building.ConditionOf(LocalFloor);
+
+		FOneBrahamCompassMarkView& Mark = Frame.Compass.AddDefaulted_GetRef();
+		Mark.Type = EOneBrahamCompassMark::Stair;
+		Mark.WorldLocation = bAIsNearer ? A : B;
+		Mark.Label = bAIsNearer ? TEXT("STAIR A") : TEXT("STAIR B");
+		Mark.DistanceCm = FVector::Dist(Eye, Mark.WorldLocation);
+		Mark.bStruck = Here == EOneBrahamFloorCondition::Sealed || Here == EOneBrahamFloorCondition::Purged;
+	}
+
+	// --- spectating ---------------------------------------------------------------------------------
+	Frame.SpectatingName.Reset();
+	Frame.SpectatingFloor = INDEX_NONE;
+	if (PC != nullptr && LocalState != nullptr && LocalState->IsEliminated())
+	{
+		if (const APawn* Watched = Cast<APawn>(PC->GetViewTarget()))
+		{
+			if (const APlayerState* WatchedState = Watched->GetPlayerState())
+			{
+				Frame.SpectatingName = WatchedState->GetPlayerName();
+				Frame.SpectatingFloor = OneBrahamConstants::FloorIndexForZ(Watched->GetActorLocation().Z - 90.f);
+			}
+		}
+	}
+
+	BuildObjective(GS);
+}
+
+void UOneBrahamHUDComponent::BuildObjective(const AOneBrahamGameState* GS)
+{
+	Frame.Objective = FText::GetEmpty();
+	Frame.ObjectiveDetail.Reset();
+
+	const FOneBrahamBuildingStatus& Building = Frame.Building;
+	const int32 Here = Building.LocalFloor;
+	const int32 Target = Building.ExtractionFloor;
+	const int32 ToGo = Here != INDEX_NONE ? Target - Here : 0;
+	auto FloorsToGo = [&]()
+	{
+		return ToGo > 0 ? FString::Printf(TEXT("%d %s"), ToGo, ToGo == 1 ? TEXT("FLOOR") : TEXT("FLOORS")) : FString();
+	};
+
+	if (Frame.Mode == EOneBrahamMatchMode::NightShift)
+	{
+		Frame.Objective = NSLOCTEXT("OneBraham", "HUD_Obj_NightShift", "Survive the night shift");
+		Frame.ObjectiveDetail = Frame.DuskClock;
+		return;
+	}
+	if (Frame.Mode != EOneBrahamMatchMode::Ascent)
+	{
+		return;
+	}
+
+	if (Frame.Phase == EOneBrahamMatchPhase::Warmup)
+	{
+		Frame.Objective = OneBrahamHUDStrings::Get(TEXT("HUD_Objective_SignIn"));
+		return;
+	}
+
+	switch (Frame.ExtractionState)
+	{
+	case EOneBrahamExtractionState::Broadcast:
+	case EOneBrahamExtractionState::Arriving:
+		Frame.Objective = OneBrahamHUDStrings::Get(TEXT("HUD_Objective_Winch"));
+		Frame.ObjectiveDetail = FloorsToGo();
+		return;
+	case EOneBrahamExtractionState::Holding:
+		Frame.Objective = OneBrahamHUDStrings::Get(TEXT("HUD_Objective_Hold"));
+		Frame.ObjectiveDetail = FloorsToGo();
+		return;
+	default:
+		break;
+	}
+
+	switch (Building.Stage)
+	{
+	case EOneBrahamLockdownStage::PreLockdown:
+	case EOneBrahamLockdownStage::Lockdown:
+		Frame.Objective = NSLOCTEXT("OneBraham", "HUD_Obj_Lockdown", "The lift lobby is closed. Use the stairs.");
+		break;
+	case EOneBrahamLockdownStage::Purge:
+		Frame.Objective = FText::Format(NSLOCTEXT("OneBraham", "HUD_Obj_Purge", "Get above Level {0}. Now."),
+			FText::AsNumber(Building.PurgeCeiling));
+		break;
+	default:
+		Frame.Objective = Here >= Target
+			? NSLOCTEXT("OneBraham", "HUD_Obj_Arrived", "Call the extraction from the Skydeck terminal")
+			: FText::Format(NSLOCTEXT("OneBraham", "HUD_Obj_Ascend", "{0}  ·  Level {1}"),
+				OneBrahamHUDStrings::Get(TEXT("HUD_Objective_Ascend")), FText::AsNumber(Target));
+		break;
+	}
+	Frame.ObjectiveDetail = FloorsToGo();
+}
+
+// ==========================================================================
+//  The replay: what this machine saw, every two seconds
+// ==========================================================================
+void UOneBrahamHUDComponent::RecordReplay(float DeltaTime)
+{
+	const UWorld* World = GetWorld();
+	const AOneBrahamGameState* GS = World != nullptr ? World->GetGameState<AOneBrahamGameState>() : nullptr;
+	if (GS == nullptr)
+	{
+		return;
+	}
+
+	// A new game state is a new match.
+	if (ReplayGameState.Get() != GS)
+	{
+		ReplayGameState = GS;
+		Replay.Reset();
+		ReplayKillKeys.Reset();
+		ReplayAccumulator = FOneBrahamMatchReplay::SampleSeconds;
+	}
+
+	const bool bLive = GS->MatchPhase == EOneBrahamMatchPhase::Active || GS->MatchPhase == EOneBrahamMatchPhase::Extraction;
+	if (!bLive)
+	{
+		return;
+	}
+
+	const float Now = GS->PhaseElapsedSeconds;
+	Replay.DurationSeconds = FMath::Max(Replay.DurationSeconds, Now);
+	Replay.PurgeCeiling = Frame.Building.PurgeCeiling;
+	if (Frame.Building.Stage == EOneBrahamLockdownStage::Purge && Replay.PurgeAtSeconds < 0.f)
+	{
+		Replay.PurgeAtSeconds = Now;
+	}
+
+	// Kills by the local squad, each once, on the floor the killer was on.
+	for (const FOneBrahamKillFeedEntry& Entry : GS->KillFeed)
+	{
+		const FString Key = FString::Printf(TEXT("%s>%s@%.1f"), *Entry.KillerName, *Entry.VictimName, Entry.Timestamp);
+		if (ReplayKillKeys.Contains(Key))
+		{
+			continue;
+		}
+		ReplayKillKeys.Add(Key);
+		for (const FOneBrahamSquadMarker& Mate : Frame.Building.Squad)
+		{
+			if (Mate.Name == Entry.KillerName && Mate.Floor != INDEX_NONE)
+			{
+				FOneBrahamReplayKill& Kill = Replay.Kills.AddDefaulted_GetRef();
+				Kill.MatchSeconds = Now;
+				Kill.KillerId = Mate.PlayerId;
+				Kill.Floor = Mate.Floor;
+			}
+		}
+	}
+
+	ReplayAccumulator += DeltaTime;
+	if (ReplayAccumulator < FOneBrahamMatchReplay::SampleSeconds)
+	{
+		return;
+	}
+	ReplayAccumulator = 0.f;
+
+	FOneBrahamReplaySample& Sample = Replay.Samples.AddDefaulted_GetRef();
+	Sample.MatchSeconds = Now;
+	Sample.bPurge = Frame.Building.Stage == EOneBrahamLockdownStage::Purge;
+	Sample.SealCeiling = Sample.bPurge ? Frame.Building.PurgeCeiling : Frame.Building.SealCeiling;
+
+	const AOneBrahamPlayerController* PC = OwningController.Get();
+	const AOneBrahamPlayerState* LocalState = PC != nullptr ? PC->GetPlayerState<AOneBrahamPlayerState>() : nullptr;
+
+	for (const APlayerState* Base : GS->PlayerArray)
+	{
+		const AOneBrahamPlayerState* Other = Cast<AOneBrahamPlayerState>(Base);
+		const AOneBrahamCharacter* Pawn = Other != nullptr ? Cast<AOneBrahamCharacter>(Other->GetPawn()) : nullptr;
+		if (Other == nullptr || Pawn == nullptr || Other->IsEliminated())
+		{
+			continue;
+		}
+
+		Sample.Floors.Emplace(Other->GetPlayerId(), Pawn->GetCurrentFloorIndex());
+
+		if (Replay.FindPerson(Other->GetPlayerId()) == nullptr)
+		{
+			FOneBrahamReplayPerson& Person = Replay.People.AddDefaulted_GetRef();
+			Person.PlayerId = Other->GetPlayerId();
+			Person.Name = Other->GetPlayerName();
+			Person.SquadId = Other->SquadId;
+			Person.bLocal = Other == LocalState;
+			Person.bLocalSquad = LocalState != nullptr && LocalState->SquadId != INDEX_NONE && Other->SquadId == LocalState->SquadId;
+		}
+	}
+}
+
+// ==========================================================================
+//  The building's screens say what the tannoy says
+// ==========================================================================
+void UOneBrahamHUDComponent::SyncBuildingDisplays(const FText& Headline, const FText& Subline, EOneBrahamLockdownStage Stage, float HoldSeconds)
+{
+	// Every escalator, ceiling and reception OLED in the building shows the
+	// line on the same frame the card goes up. The displays are client-side
+	// actors, so each machine drives its own copies; nothing replicates.
+	const UWorld* World = GetWorld();
+	if (World == nullptr || World->GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	FOneBrahamDisplaySlide Slide;
+	Slide.Eyebrow = FText::FromString(FString::Printf(TEXT("ONE BRAHAM  ·  ALL FLOORS  ·  %s"), *Frame.DuskClock));
+	Slide.Headline = Headline;
+	Slide.Subline = Subline;
+	UOneBrahamUIStyle::StageField(Stage, Slide.ColourA, Slide.ColourB);
+
+	int32 Count = 0;
+	for (TActorIterator<AOneBrahamDisplay> It(GetWorld()); It; ++It)
+	{
+		// AOneBrahamDisplay::PushOverride (the front end's title designer) is
+		// the call; until it lands the displays keep their own slides.
+		++Count;
+	}
+	(void)HoldSeconds;
+
+	UE_LOG(LogOneBrahamUI, Verbose, TEXT("[OB.UI] Announcement on %d building displays: %s"), Count, *Headline.ToString());
+}
+
+// ==========================================================================
+//  Dev: demonstration states, for screenshots of moments a run cannot reach
+// ==========================================================================
+void UOneBrahamHUDComponent::DevDemo(const FString& State)
+{
+#if !UE_BUILD_SHIPPING
+	const UWorld* World = GetWorld();
+	DemoState = State.ToLower();
+	DemoStartedAt = World != nullptr ? World->GetTimeSeconds() : 0.0;
+	bDemoOneShotsDone = false;
+
+	if (DemoState == TEXT("off"))
+	{
+		DemoState.Reset();
+		if (MatchEndWidget != nullptr && (MatchEndGameState.Get() == nullptr || MatchEndGameState.Get() == World->GetGameState()))
+		{
+			CloseMatchEndScreen();
+		}
+		SetScoreboardVisible(false);
+		SetFloorPlanVisible(false);
+		SetDeathScreenVisible(false);
+		if (AOneBrahamPlayerController* Controller = OwningController.Get())
+		{
+			Controller->SetPauseMenuOpen(false);
+		}
+		return;
+	}
+
+	// Each demonstration starts from a living player: the accident book from a
+	// previous "death" would otherwise sit over every state that follows.
+	if (DemoState != TEXT("death"))
+	{
+		SetDeathScreenVisible(false);
+	}
+	if (DemoState != TEXT("plan"))
+	{
+		SetFloorPlanVisible(false);
+	}
+	if (DemoState != TEXT("scoreboard"))
+	{
+		SetScoreboardVisible(false);
+	}
+
+	if (DemoState == TEXT("scoreboard"))
+	{
+		SetScoreboardVisible(true);
+	}
+	else if (DemoState == TEXT("pause"))
+	{
+		if (AOneBrahamPlayerController* Controller = OwningController.Get())
+		{
+			Controller->SetPauseMenuOpen(true);
+		}
+	}
+	else if (DemoState == TEXT("plan"))
+	{
+		SetFloorPlanVisible(true);
+	}
+	else if (DemoState == TEXT("death"))
+	{
+		SetDeathScreenVisible(true, FText::FromString(TEXT(
+			"Priya Shah - MP7, headshot\n\n"
+			"Priya Shah - 4 hits, 112 damage (1 head, 3 body) at 18 m\n"
+			"Dave Okafor - 1 hit, 22 damage (1 limb) at 31 m\n"
+			"Priya Shah had 64 health left")));
+	}
+	else if (DemoState == TEXT("matchend"))
+	{
+		// The end screen over the live match, fed a fabricated day: three
+		// squads climbing, the lockdown rising under them, a purge at the end.
+		AOneBrahamPlayerController* Controller = OwningController.Get();
+		if (Controller != nullptr && MatchEndWidget == nullptr)
+		{
+			FOneBrahamMatchReplay Demo;
+			Demo.DurationSeconds = 600.f;
+			Demo.PurgeAtSeconds = 470.f;
+			Demo.PurgeCeiling = 14;
+			for (int32 Person = 0; Person < 12; ++Person)
+			{
+				FOneBrahamReplayPerson& P = Demo.People.AddDefaulted_GetRef();
+				P.PlayerId = 900 + Person;
+				P.Name = FString::Printf(TEXT("Colleague %d"), Person + 1);
+				P.SquadId = Person / 4;
+				P.bLocalSquad = P.SquadId == 0;
+				P.bLocal = Person == 0;
+			}
+			for (float T = 0.f; T <= 600.f; T += 2.f)
+			{
+				FOneBrahamReplaySample& Sample = Demo.Samples.AddDefaulted_GetRef();
+				Sample.MatchSeconds = T;
+				Sample.bPurge = T >= 470.f;
+				Sample.SealCeiling = Sample.bPurge ? 14 : (T > 310.f ? 8 : (T > 160.f ? 3 : INDEX_NONE));
+				for (const FOneBrahamReplayPerson& P : Demo.People)
+				{
+					const float Pace = 0.026f + 0.006f * P.SquadId + 0.0015f * (P.PlayerId % 4);
+					const int32 Floor = FMath::Clamp(FMath::FloorToInt(T * Pace + FMath::Sin(T * 0.03f + P.PlayerId) * 0.8f), 0, 15);
+					const bool bGone = (P.SquadId == 2 && T > 420.f) || (P.SquadId == 1 && P.PlayerId % 4 == 3 && T > 280.f);
+					if (!bGone)
+					{
+						Sample.Floors.Emplace(P.PlayerId, Floor);
+					}
+				}
+			}
+			for (const float T : { 140.f, 251.f, 333.f, 402.f, 515.f, 560.f })
+			{
+				FOneBrahamReplayKill& Kill = Demo.Kills.AddDefaulted_GetRef();
+				Kill.MatchSeconds = T;
+				Kill.KillerId = 900 + static_cast<int32>(T) % 4;
+				Kill.Floor = FMath::Clamp(FMath::FloorToInt(T * 0.027f), 0, 15);
+			}
+
+			SetHUDVisible(false);
+			MatchEndWidget = CreateWidget<UOneBrahamMatchEndWidget>(Controller, UOneBrahamMatchEndWidget::StaticClass());
+			if (MatchEndWidget != nullptr)
+			{
+				MatchEndWidget->AddToPlayerScreen(MatchEndZOrder);
+				MatchEndWidget->SetReplay(Demo, Frame);
+				MatchEndWidget->DevSetDemoEnding(true);
+				MatchEndWidget->ShowMatchEnd();
+			}
+		}
+	}
+
+	UE_LOG(LogOneBrahamUI, Log, TEXT("[OB.UI] HUD demo: %s"), *DemoState);
+#else
+	(void)State;
+#endif
+}
+
+void UOneBrahamHUDComponent::ApplyDevDemo()
+{
+#if !UE_BUILD_SHIPPING
+	if (DemoState.IsEmpty() || DemoState == TEXT("scoreboard") || DemoState == TEXT("pause") || DemoState == TEXT("matchend"))
+	{
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	const double Now = World != nullptr ? World->GetTimeSeconds() : 0.0;
+	const float Age = static_cast<float>(Now - DemoStartedAt);
+	const AOneBrahamPlayerController* PC = OwningController.Get();
+	const FVector Eye = PC != nullptr && PC->PlayerCameraManager != nullptr ? PC->PlayerCameraManager->GetCameraLocation() : FVector::ZeroVector;
+	const FRotator View = PC != nullptr && PC->PlayerCameraManager != nullptr ? PC->PlayerCameraManager->GetCameraRotation() : FRotator::ZeroRotator;
+	const FVector Forward = FRotator(0.f, View.Yaw, 0.f).Vector();
+	const FVector Right = FRotator(0.f, View.Yaw + 90.f, 0.f).Vector();
+
+	// --- the stage, the floor, the seal line ---------------------------------------------
+	FOneBrahamBuildingStatus& B = Frame.Building;
+	int32 Local = 7;
+	B.Mode = EOneBrahamMatchMode::Ascent;
+	B.Stage = EOneBrahamLockdownStage::Normal;
+	B.bDirectorRunning = true;
+	B.SecondsToNextStage = FMath::Max(0.f, 161.f - Age);
+	B.SealCeiling = INDEX_NONE;
+	B.NextSealCeiling = 5;
+	B.PurgeCeiling = 14;
+	Frame.Mode = EOneBrahamMatchMode::Ascent;
+	Frame.Phase = EOneBrahamMatchPhase::Active;
+	Frame.ExtractionState = EOneBrahamExtractionState::Inactive;
+
+	if (DemoState == TEXT("lockdown") || DemoState == TEXT("critical") || DemoState == TEXT("plan"))
+	{
+		B.Stage = EOneBrahamLockdownStage::Lockdown;
+		B.SealCeiling = 4;
+		B.NextSealCeiling = DemoState == TEXT("plan") ? 14 : 6;
+		B.SecondsToNextStage = FMath::Max(0.f, 24.f - Age * 0.25f);
+		Local = DemoState == TEXT("critical") ? 9 : 6;
+	}
+	else if (DemoState == TEXT("purge") || DemoState == TEXT("downed"))
+	{
+		B.Stage = EOneBrahamLockdownStage::Purge;
+		B.SealCeiling = INDEX_NONE;
+		B.NextSealCeiling = INDEX_NONE;
+		B.SecondsToNextStage = 0.f;
+		Local = 13;
+	}
+	else if (DemoState == TEXT("extraction"))
+	{
+		B.Stage = EOneBrahamLockdownStage::Lockdown;
+		B.SealCeiling = 11;
+		B.NextSealCeiling = 14;
+		B.SecondsToNextStage = 48.f;
+		Local = 15;
+		Frame.ExtractionState = EOneBrahamExtractionState::Holding;
+		Frame.ExtractionSeconds = FMath::Max(0.f, 27.f - Age);
+		Frame.ExtractionProgress01 = FMath::Clamp(0.1f + Age / 30.f, 0.f, 1.f);
+		Frame.bExtractionContested = true;
+	}
+	else if (DemoState == TEXT("firedrill"))
+	{
+		Frame.Mode = B.Mode = EOneBrahamMatchMode::FireDrill;
+		B.Stage = EOneBrahamLockdownStage::Normal;
+		B.bDirectorRunning = false;
+		B.NextSealCeiling = INDEX_NONE;
+		Local = 9;
+		Frame.TimeRemaining = 372.f;
+		Frame.ScoreOurs = 212;
+		Frame.ScoreTheirs = 187;
+		Frame.Points.Reset();
+		const TCHAR* Names[3] = { TEXT("Reception"), TEXT("Server Floor 9"), TEXT("Skydeck") };
+		const int32 Floors[3] = { 1, 9, 15 };
+		for (int32 Index = 0; Index < 3; ++Index)
+		{
+			FOneBrahamPointView& Point = Frame.Points.AddDefaulted_GetRef();
+			Point.Letter = FString::Chr(TEXT('A') + Index);
+			Point.Name = Names[Index];
+			Point.Floor = Floors[Index];
+			Point.bYoursPresent = Floors[Index] == Local;
+		}
+	}
+
+	// The plate's split-flap: the demo arrives on the floor below, then climbs.
+	B.LocalFloor = Age < 1.2f ? Local - 1 : Local;
+	B.HighestOccupiedFloor = Local;
+
+	// --- the squad -------------------------------------------------------------------------------
+	struct FMate { const TCHAR* Name; int32 Floor; EOneBrahamLifeState Life; float Health; bool bTalk; FVector Offset; };
+	const bool bDrill = Frame.Mode == EOneBrahamMatchMode::FireDrill;
+	TArray<FMate> Mates = {
+		{ TEXT("Priya Shah"), Local, EOneBrahamLifeState::Alive, 0.82f, true, Forward * 900.f + Right * -300.f },
+		{ TEXT("Dave Okafor"), Local + 2, DemoState == TEXT("lockdown") || DemoState == TEXT("plan") ? EOneBrahamLifeState::Downed : EOneBrahamLifeState::Alive, 0.35f, false, Forward * -400.f + Right * 1200.f },
+		{ TEXT("BOT Brennan"), FMath::Max(0, Local - 3), DemoState == TEXT("purge") ? EOneBrahamLifeState::Dead : EOneBrahamLifeState::Alive, 1.f, false, Forward * 1500.f + Right * 700.f },
+	};
+	if (bDrill)
+	{
+		Mates.Add({ TEXT("BOT Kowalski"), 1, EOneBrahamLifeState::Alive, 0.6f, false, Forward * 2000.f });
+		Mates.Add({ TEXT("BOT Lindqvist"), 15, EOneBrahamLifeState::Alive, 0.9f, false, Right * -1800.f });
+	}
+
+	Frame.Squad.Reset();
+	B.Squad.Reset();
+	{
+		FOneBrahamSquadMarker& Me = B.Squad.AddDefaulted_GetRef();
+		Me.Name = Frame.PlayerName;
+		Me.Floor = B.LocalFloor;
+		Me.bLocal = true;
+		Me.PlayerId = -1;
+		FOneBrahamSquadRowView& Row = Frame.Squad.AddDefaulted_GetRef();
+		Row.Name = Frame.PlayerName;
+		Row.bLocal = true;
+		Row.Floor = B.LocalFloor;
+	}
+	for (int32 Index = 0; Index < Mates.Num(); ++Index)
+	{
+		const FMate& Mate = Mates[Index];
+		FOneBrahamSquadRowView& Row = Frame.Squad.AddDefaulted_GetRef();
+		Row.PlayerId = 800 + Index;
+		Row.Name = Mate.Name;
+		Row.Floor = Mate.Floor;
+		Row.LifeState = Mate.Life;
+		Row.HealthFraction = Mate.Health;
+		Row.BleedOutRemaining = 24.f - Age;
+		Row.bTransmitting = Mate.bTalk && FMath::Fmod(Age, 5.f) < 3.f;
+		Row.bKeycard = Index == 0;
+
+		if (Mate.Life == EOneBrahamLifeState::Dead)
+		{
+			continue;
+		}
+		FOneBrahamSquadMarker& Marker = B.Squad.AddDefaulted_GetRef();
+		Marker.PlayerId = Row.PlayerId;
+		Marker.Name = Mate.Name;
+		Marker.Floor = Mate.Floor;
+		Marker.bDowned = Mate.Life == EOneBrahamLifeState::Downed;
+		Marker.Location = Eye + Mate.Offset + FVector(0.f, 0.f, (Mate.Floor - Local) * OneBrahamConstants::FloorHeightCm);
+		Marker.bHasLocation = true;
+	}
+
+	// The floors, re-derived from the demo's line with the same rule.
+	for (FOneBrahamFloorStatus& Floor : B.Floors)
+	{
+		Floor.Condition = bDrill ? EOneBrahamFloorCondition::Open
+			: FOneBrahamBuildingStatus::ConditionFor(B.Stage, Floor.FloorIndex, B.SealCeiling, B.NextSealCeiling, B.PurgeCeiling);
+		Floor.bLocal = Floor.FloorIndex == B.LocalFloor;
+		Floor.bExtraction = !bDrill && Floor.FloorIndex == B.ExtractionFloor;
+		Floor.Mates = 0;
+		Floor.MatesDowned = 0;
+		for (const FOneBrahamSquadMarker& Marker : B.Squad)
+		{
+			if (!Marker.bLocal && Marker.Floor == Floor.FloorIndex)
+			{
+				++Floor.Mates;
+				Floor.MatesDowned += Marker.bDowned ? 1 : 0;
+			}
+		}
+	}
+
+	// --- the compass ------------------------------------------------------------------------------
+	Frame.Compass.Reset();
+	for (const FOneBrahamSquadMarker& Marker : B.Squad)
+	{
+		if (Marker.bLocal || !Marker.bHasLocation)
+		{
+			continue;
+		}
+		FOneBrahamCompassMarkView& Mark = Frame.Compass.AddDefaulted_GetRef();
+		Mark.Type = EOneBrahamCompassMark::Squad;
+		Mark.WorldLocation = Marker.Location;
+		FString Clean = Marker.Name;
+		Clean.RemoveFromStart(TEXT("BOT "));
+		Mark.Label = Clean.Left(2).ToUpper();
+		Mark.FloorDelta = Marker.Floor - B.LocalFloor;
+		Mark.bAlert = Marker.bDowned;
+		Mark.DistanceCm = (Marker.Location - Eye).Size();
+	}
+	if (!bDrill)
+	{
+		FOneBrahamCompassMarkView& Exit = Frame.Compass.AddDefaulted_GetRef();
+		Exit.Type = EOneBrahamCompassMark::Extraction;
+		Exit.WorldLocation = Eye + Forward * 3000.f + Right * 1600.f;
+		Exit.FloorDelta = B.ExtractionFloor - B.LocalFloor;
+		Exit.DistanceCm = 6200.f;
+		FOneBrahamCompassMarkView& Ping = Frame.Compass.AddDefaulted_GetRef();
+		Ping.Type = EOneBrahamCompassMark::Ping;
+		Ping.WorldLocation = Eye + Forward * 1200.f + Right * -900.f;
+		Ping.FloorDelta = 1;
+		Ping.SpawnTime = static_cast<float>(Now) - FMath::Fmod(Age, 5.f);
+		if (OneBrahamHUDStyle::StageBand(B.Stage) > 0)
+		{
+			FOneBrahamCompassMarkView& Stair = Frame.Compass.AddDefaulted_GetRef();
+			Stair.Type = EOneBrahamCompassMark::Stair;
+			Stair.WorldLocation = Eye + Forward * 800.f + Right * 500.f;
+			Stair.Label = TEXT("STAIR A");
+			Stair.bStruck = B.Stage == EOneBrahamLockdownStage::Purge;
+		}
+	}
+
+	// --- the sign-out log -----------------------------------------------------------------------------
+	Frame.Kills.Reset();
+	auto AddDemoKill = [&](const TCHAR* Time, const TCHAR* Killer, const TCHAR* Victim, const TCHAR* Weapon, bool bHead, bool bBuilding, bool bKSquad, bool bVSquad, float Ago)
+	{
+		FOneBrahamKillRowView& Row = Frame.Kills.AddDefaulted_GetRef();
+		Row.Time = Time;
+		Row.Killer = Killer;
+		Row.Victim = Victim;
+		Row.Weapon = Weapon;
+		Row.bHeadshot = bHead;
+		Row.bBuilding = bBuilding;
+		Row.bKillerSquad = bKSquad;
+		Row.bVictimSquad = bVSquad;
+		Row.Stage = B.Stage;
+		Row.EventTime = static_cast<float>(Now) - FMath::Fmod(Ago + Age, 6.5f);
+	};
+	AddDemoKill(TEXT("18:02"), TEXT("Marcus Hale"), TEXT("Tom Reid"), TEXT("M4 CARBINE"), false, false, false, false, 5.f);
+	AddDemoKill(TEXT("18:04"), TEXT("Priya Shah"), TEXT("Ana Lopes"), TEXT("MP7"), true, false, true, false, 3.f);
+	if (B.Stage != EOneBrahamLockdownStage::Normal)
+	{
+		AddDemoKill(TEXT("18:06"), TEXT(""), TEXT("BOT Castell"), TEXT(""), false, true, false, false, 1.5f);
+	}
+	AddDemoKill(TEXT("18:06"), TEXT("Dave Okafor"), TEXT("BOT Patel"), TEXT("SPAS-12"), false, false, true, false, 0.2f);
+
+	// --- the objective, the dusk ----------------------------------------------------------------------
+	Frame.DuskClock = B.Stage == EOneBrahamLockdownStage::Purge ? TEXT("18:38") : (B.Stage == EOneBrahamLockdownStage::Normal ? TEXT("17:52") : TEXT("18:06"));
+	if (Frame.RoleLabel.IsEmpty())
+	{
+		Frame.RoleLabel = TEXT("IT OPERATIONS");
+	}
+	if (Frame.WeaponCategory.IsEmpty())
+	{
+		Frame.WeaponCategory = TEXT("CARBINE");
+	}
+	if (Frame.FireModes.Num() < 2)
+	{
+		Frame.FireModes = { EOneBrahamFireMode::Single, EOneBrahamFireMode::Burst, EOneBrahamFireMode::Auto };
+	}
+	if (const AOneBrahamGameState* GS = World != nullptr ? World->GetGameState<AOneBrahamGameState>() : nullptr)
+	{
+		BuildObjective(GS);
+		if (bDrill)
+		{
+			Frame.Objective = FText::GetEmpty();
+		}
+	}
+
+	// --- the player ------------------------------------------------------------------------------------
+	Data.bShowFloorIndicator = true;
+	Data.FragCount = 2;
+	Data.MedkitCount = 1;
+	Data.FlashCount = DemoState == TEXT("calm") ? 1 : 0;
+	Data.Armour = 50.f;
+	Data.MaxArmour = 50.f;
+	Data.Health = 82.f;
+	Data.MaxHealth = 100.f;
+	Data.LifeState = EOneBrahamLifeState::Alive;
+	Data.bLocalTransmitting = DemoState == TEXT("calm") || DemoState == TEXT("firedrill");
+	Data.VoiceChannel = EOneBrahamVoiceChannel::Proximity;
+	Frame.VoiceRangeMetres = 35;
+	Data.HighestKeycardTier = EOneBrahamAccessTier::Staff;
+
+	if (DemoState == TEXT("critical"))
+	{
+		// A hit from 61 to 23: the ghost, the nudge, the critical breath.
+		Data.Health = Age < 0.6f ? 61.f : 23.f;
+		Data.Armour = Age < 0.6f ? 12.f : 0.f;
+		Data.AmmoInMagazine = Age < 0.6f ? 9 : 7;
+	}
+	else if (DemoState == TEXT("downed"))
+	{
+		Data.LifeState = EOneBrahamLifeState::Downed;
+		Data.Health = 0.f;
+		Data.BleedOutRemaining = FMath::Max(0.f, 24.f - Age);
+		Data.ReviveProgress01 = FMath::Clamp((Age - 2.f) / 4.5f, 0.f, 1.f);
+	}
+
+	if (DemoState == TEXT("extraction"))
+	{
+		Data.bHasInteractionTarget = true;
+		Data.InteractionPrompt = FText::FromString(TEXT("Hold E - Hold the winch"));
+		Data.InteractionHoldProgress01 = FMath::Fmod(Age * 0.35f, 1.f);
+		Data.bInteractionBlocked = false;
+	}
+	else if (DemoState == TEXT("lockdown"))
+	{
+		Data.bHasInteractionTarget = true;
+		Data.InteractionPrompt = FText::FromString(TEXT("Executive badge required"));
+		Data.InteractionBlockedReason = Data.InteractionPrompt;
+		Data.bInteractionBlocked = true;
+	}
+	else if (DemoState == TEXT("calm"))
+	{
+		Data.bHasInteractionTarget = true;
+		Data.InteractionPrompt = FText::FromString(TEXT("Hold E - Executive Suite"));
+		Data.InteractionHoldProgress01 = FMath::Clamp((Age - 1.f) * 0.3f, 0.f, 0.72f);
+		Data.bInteractionBlocked = false;
+	}
+
+	// One-shot moments, on the demo's first tick.
+	if (HUDWidget != nullptr && !bDemoOneShotsDone)
+	{
+		bDemoOneShotsDone = true;
+		if (DemoState == TEXT("lockdown"))
+		{
+			HUDWidget->ShowStageCard(EOneBrahamStageCard::Lockdown);
+			HUDWidget->PushAnnouncement(FText::FromString(TEXT("Fire shutters are closing below Level 6.")),
+				FText::FromString(TEXT("The lifts are thinking about what they've done.")), EOneBrahamLockdownStage::Lockdown, 6.f);
+			HUDWidget->ShowSubtitle(FText::FromString(TEXT("Fire shutters are closing on all floors below 6. Lifts are out of service. Please use the stairwell nearest to you.")),
+				FString(), 7.f);
+		}
+		else if (DemoState == TEXT("purge"))
+		{
+			HUDWidget->ShowStageCard(EOneBrahamStageCard::Purge);
+		}
+		else if (DemoState == TEXT("extraction"))
+		{
+			HUDWidget->PushAnnouncement(FText::FromString(TEXT("The Skydeck winch is holding.")),
+				FText::FromString(TEXT("Please mind the gap.")), EOneBrahamLockdownStage::Lockdown, 6.f);
+		}
+		else if (DemoState == TEXT("calm"))
+		{
+			HUDWidget->PushAnnouncement(FText::FromString(TEXT("The lift lobby is open. Ascend.")),
+				FText::FromString(TEXT("Thank you for choosing One Braham.")), EOneBrahamLockdownStage::Normal, 6.f);
+			HUDWidget->ShowSubtitle(FText::FromString(TEXT("Contact, two. Coming up the east stair.")), TEXT("Priya Shah"), 6.f);
+		}
+		else if (DemoState == TEXT("critical"))
+		{
+			HUDWidget->PushDamage(38.f, Eye + Right * 900.f + FVector(0.f, 0.f, OneBrahamConstants::FloorHeightCm), true, 1);
+			HUDWidget->PushDamage(14.f, Eye + Forward * -800.f + Right * -400.f, true, 0);
+		}
+	}
+	if (HUDWidget != nullptr && DemoState == TEXT("critical") && FMath::Fmod(Age, 1.1f) < 0.07f && Age > 0.5f)
+	{
+		HUDWidget->PushDamage(24.f, Eye + Right * 900.f + FVector(0.f, 0.f, OneBrahamConstants::FloorHeightCm), true, 1);
+	}
+#endif
+}
+
+#if !UE_BUILD_SHIPPING
+namespace OneBrahamHUDDev
+{
+	UOneBrahamHUDComponent* FindHUD(UWorld* World)
+	{
+		if (World == nullptr)
+		{
+			return nullptr;
+		}
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			if (APlayerController* PC = It->Get(); PC != nullptr && PC->IsLocalController())
+			{
+				if (UOneBrahamHUDComponent* HUD = PC->FindComponentByClass<UOneBrahamHUDComponent>())
+				{
+					return HUD;
+				}
+			}
+		}
+		return nullptr;
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs DemoCommand(
+		TEXT("ob.hud.demo"),
+		TEXT("Dev: puts the HUD in a demonstration state (calm, lockdown, purge, extraction, critical, downed, death, firedrill, scoreboard, pause, plan, matchend, off)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			if (UOneBrahamHUDComponent* HUD = FindHUD(World))
+			{
+				HUD->DevDemo(Args.Num() > 0 ? Args[0] : FString(TEXT("calm")));
+			}
+		}));
+
+	FAutoConsoleCommandWithWorldAndArgs ShotCommand(
+		TEXT("ob.hud.shot"),
+		TEXT("Dev: saves a screenshot with the UI to Saved/Screenshots/<platform>/<name>.png."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			const FString Name = Args.Num() > 0 ? Args[0] : FString(TEXT("hud"));
+			const FString Path = FPaths::ScreenShotDir() / (Name + TEXT(".png"));
+			FScreenshotRequest::RequestScreenshot(Path, /*bInShowUI*/ true, /*bAddUniqueSuffix*/ false);
+			UE_LOG(LogOneBrahamUI, Log, TEXT("[OB.UI] HUD screenshot requested: %s"), *Path);
+		}));
+
+	/** The local pawn, for the staging commands. */
+	APawn* LocalPawn(UWorld* World, APlayerController*& OutController)
+	{
+		OutController = nullptr;
+		if (World == nullptr)
+		{
+			return nullptr;
+		}
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			if (APlayerController* PC = It->Get(); PC != nullptr && PC->IsLocalController())
+			{
+				OutController = PC;
+				return PC->GetPawn();
+			}
+		}
+		return nullptr;
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs TeleportCommand(
+		TEXT("ob.hud.tp"),
+		TEXT("Dev: ob.hud.tp <x> <y> <z> moves the local pawn there (staging HUD screenshots)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			APlayerController* PC = nullptr;
+			APawn* Pawn = LocalPawn(World, PC);
+			if (Pawn != nullptr && Args.Num() >= 3)
+			{
+				const FVector To(FCString::Atof(*Args[0]), FCString::Atof(*Args[1]), FCString::Atof(*Args[2]));
+				Pawn->SetActorLocation(To, /*bSweep*/ false, nullptr, ETeleportType::TeleportPhysics);
+				UE_LOG(LogOneBrahamUI, Log, TEXT("[OB.UI] HUD staging: pawn to %s"), *To.ToString());
+			}
+		}));
+
+	FAutoConsoleCommandWithWorldAndArgs LookCommand(
+		TEXT("ob.hud.look"),
+		TEXT("Dev: ob.hud.look <yaw> <pitch> turns the local view (staging HUD screenshots)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			APlayerController* PC = nullptr;
+			LocalPawn(World, PC);
+			if (PC != nullptr && Args.Num() >= 1)
+			{
+				PC->SetControlRotation(FRotator(Args.Num() >= 2 ? FCString::Atof(*Args[1]) : 0.f, FCString::Atof(*Args[0]), 0.f));
+			}
+		}));
+
+	FAutoConsoleCommandWithWorldAndArgs AfterCommand(
+		TEXT("ob.hud.after"),
+		TEXT("Dev: ob.hud.after <seconds> <command...> runs a console command after a delay (for -ExecCmds scripts)."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
+		{
+			if (World == nullptr || Args.Num() < 2)
+			{
+				return;
+			}
+			const float Delay = FMath::Max(0.01f, FCString::Atof(*Args[0]));
+			TArray<FString> Rest = Args;
+			Rest.RemoveAt(0);
+			const FString Command = FString::Join(Rest, TEXT(" "));
+			// Counted in the world's own time, which is the clock the HUD animates
+			// on: a hitch (a teleport's streaming) clamps the world's delta, and a
+			// script on the wall clock would photograph a card that, as far as
+			// the HUD is concerned, has not had time to arrive. While the world is
+			// paused (a standalone pause menu) the wall clock stands in, so a
+			// script that pauses and then photographs still moves on.
+			const TWeakObjectPtr<UWorld> WeakWorld = World;
+			TSharedRef<float> Remaining = MakeShared<float>(Delay);
+			TSharedRef<double> LastWorld = MakeShared<double>(World->GetTimeSeconds());
+			FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakWorld, Command, Remaining, LastWorld](float RealDelta)
+			{
+				if (UWorld* Live = WeakWorld.Get())
+				{
+					const double WorldNow = Live->GetTimeSeconds();
+					const float WorldDelta = static_cast<float>(WorldNow - *LastWorld);
+					*LastWorld = WorldNow;
+					*Remaining -= (Live->IsPaused() || WorldDelta < 0.f) ? RealDelta : WorldDelta;
+				}
+				else
+				{
+					*Remaining -= RealDelta;
+				}
+				if (*Remaining > 0.f)
+				{
+					return true;
+				}
+
+				if (UWorld* Live = WeakWorld.Get(); Live != nullptr && GEngine != nullptr)
+				{
+					// Through the local player, so player-controller and cheat
+					// commands ("god", "slomo") reach the controller as typed.
+					if (ULocalPlayer* Player = GEngine->GetFirstGamePlayer(Live))
+					{
+						Player->Exec(Live, *Command, *GLog);
+					}
+					else
+					{
+						GEngine->Exec(Live, *Command);
+					}
+				}
+				else if (GEngine != nullptr)
+				{
+					GEngine->Exec(nullptr, *Command);
+				}
+				return false;
+			}));
+		}));
+}
+#endif

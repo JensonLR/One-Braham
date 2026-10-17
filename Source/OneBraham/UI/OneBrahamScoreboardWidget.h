@@ -2,8 +2,10 @@
 //
 // OneBrahamScoreboardWidget.h
 // ---------------------------------------------------------------------------
-// The hold-Tab scoreboard. Styled as the directory board in a lobby: who is in
-// the building, which squad they report to, and whether they are still on site.
+// The hold-Tab scoreboard: TENANT DIRECTORY. The black board in a lobby that
+// lists who is in the building, which firm they report to, and whether they
+// are still on site - baffle black, one Primary-blue bar down its left edge,
+// hairlines, and the squads listed as tenants ("SQUAD A  ·  L07  ·  3 IN").
 //
 // WHAT IT SHOWS
 //   * A header: the mode, the phase, the clock (remaining in a timed mode,
@@ -56,6 +58,10 @@ struct FOneBrahamScoreboardRowWidgets
 	UPROPERTY() TObjectPtr<UTextBlock> Name = nullptr;
 	UPROPERTY() TObjectPtr<UTextBlock> Archetype = nullptr;
 	UPROPERTY() TObjectPtr<UTextBlock> Status = nullptr;
+	/** The status tag's frame: outlined for IN, filled red for DOWN. */
+	UPROPERTY() TObjectPtr<UBorder> StatusTag = nullptr;
+	/** Row index, for the opening stagger. */
+	int32 Index = 0;
 	UPROPERTY() TObjectPtr<UTextBlock> Kills = nullptr;
 	UPROPERTY() TObjectPtr<UTextBlock> Deaths = nullptr;
 	UPROPERTY() TObjectPtr<UTextBlock> Assists = nullptr;
@@ -140,6 +146,9 @@ protected:
 
 	void ToggleMute(TWeakObjectPtr<APlayerState> Target);
 
+	/** A text block in a design-system face. */
+	UTextBlock* Label(const FText& Text, const FSlateFontInfo& Font, const FLinearColor& Colour);
+
 	// --- layout -------------------------------------------------------------
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_ServerLine = nullptr;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_Mode = nullptr;
@@ -147,6 +156,15 @@ protected:
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_Clock = nullptr;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_ClockCaption = nullptr;
 	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_Score = nullptr;
+	/** FIRE DRILL: the two scores in the LED face, either side of the board. */
+	UPROPERTY(Transient) TObjectPtr<UWidget> ScoreRow = nullptr;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_ScoreHome = nullptr;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_ScoreAway = nullptr;
+	/** The stage chip beside the mode. */
+	UPROPERTY(Transient) TObjectPtr<UBorder> StageChip = nullptr;
+	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_Stage = nullptr;
+	/** The board itself, for the opening drop. */
+	UPROPERTY(Transient) TObjectPtr<UWidget> Board = nullptr;
 	UPROPERTY(Transient) TObjectPtr<UVerticalBox> RowList = nullptr;
 
 	UPROPERTY(Transient) TArray<FOneBrahamScoreboardRowWidgets> Rows;
@@ -161,4 +179,12 @@ protected:
 
 	FTSTicker::FDelegateHandle RefreshHandle;
 	bool bOpen = false;
+
+	/** Real time the board opened: an 8 px drop and a fade in 140 ms, rows 12 ms apart. */
+	double OpenedAt = 0.0;
+
+public:
+	virtual int32 NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
+		const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements,
+		int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
 };

@@ -13,12 +13,17 @@
 #include "Components/OverlaySlot.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
+#include "Components/SizeBoxSlot.h"
 #include "Components/Spacer.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamPlayerState.h"
+#include "Characters/OneBrahamCharacter.h"
+#include "Lockdown/OneBrahamLockdownComponent.h"
+#include "UI/HUD/OneBrahamBuildingStatus.h"
+#include "UI/HUD/OneBrahamHUDPaint.h"
 #include "Voice/OneBrahamProximityVoiceComponent.h"
 #include "Voice/OneBrahamVoiceSubsystem.h"
 
@@ -26,17 +31,17 @@ namespace OneBrahamScoreboard
 {
 	// Column widths, in the order the cells are added. The headings and every
 	// row read from this one table, which is the whole of the column alignment.
-	constexpr float Lamp		= 22.f;
-	constexpr float Name		= 236.f;
-	constexpr float Archetype	= 190.f;
-	constexpr float Status		= 126.f;
-	constexpr float Stat		= 46.f;
-	constexpr float Objective	= 62.f;
-	constexpr float Ping		= 58.f;
-	constexpr float Mute		= 92.f;
+	constexpr float Lamp		= 26.f;
+	constexpr float Name		= 300.f;
+	constexpr float Archetype	= 220.f;
+	constexpr float Status		= 150.f;
+	constexpr float Stat		= 58.f;
+	constexpr float Objective	= 72.f;
+	constexpr float Ping		= 72.f;
+	constexpr float Mute		= 98.f;
 
-	constexpr float PanelWidth	= 1040.f;
-	constexpr float RowHeight	= 30.f;
+	constexpr float PanelWidth	= 1228.f;
+	constexpr float RowHeight	= 34.f;
 
 	/** The squads' signage names. Team enum, not squad id, because the squad's
 	 *  letter is what is painted on its spawn entrance. */
@@ -89,6 +94,31 @@ namespace OneBrahamScoreboard
 	{
 		return FLinearColor(Colour.R, Colour.G, Colour.B, Alpha);
 	}
+
+	FSlateFontInfo Type(EOneBrahamType Token, float Px, int32 Tracking = 0)
+	{
+		return UOneBrahamUIStyle::TypeFont(Token, Px, Tracking);
+	}
+
+	/** A tag's frame: outlined, or filled. Rounded 2 px, as the HUD's tags. */
+	FSlateBrush TagBrush(const FLinearColor& Colour, bool bFilled, float Radius = 2.f)
+	{
+		FSlateBrush Brush;
+		Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+		Brush.TintColor = FSlateColor(bFilled ? Colour : FLinearColor(Colour.R, Colour.G, Colour.B, 0.f));
+		Brush.OutlineSettings = FSlateBrushOutlineSettings(FVector4(Radius, Radius, Radius, Radius));
+		Brush.OutlineSettings.Color = FSlateColor(Colour);
+		Brush.OutlineSettings.Width = bFilled ? 0.f : 1.f;
+		Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+		return Brush;
+	}
+}
+
+UTextBlock* UOneBrahamScoreboardWidget::Label(const FText& Text, const FSlateFontInfo& Font, const FLinearColor& Colour)
+{
+	UTextBlock* Block = MakeLabel(Text, EOneBrahamTextSize::Small, Colour);
+	Block->SetFont(Font);
+	return Block;
 }
 
 UOneBrahamScoreboardWidget::UOneBrahamScoreboardWidget(const FObjectInitializer& ObjectInitializer)
@@ -170,6 +200,7 @@ void UOneBrahamScoreboardWidget::SetScoreboardOpen(bool bInOpen)
 
 	if (bOpen)
 	{
+		OpenedAt = FPlatformTime::Seconds();
 		RefreshNow();
 
 		if (!RefreshHandle.IsValid())
@@ -308,7 +339,7 @@ void UOneBrahamScoreboardWidget::RefreshHeader(const AOneBrahamGameState* GameSt
 	if (Text_ServerLine != nullptr)
 	{
 		Text_ServerLine->SetText(FText::Format(
-			NSLOCTEXT("OneBraham", "Scoreboard_ServerLine", "DIRECTORY  /  {0}  /  {1} PERSONNEL"),
+			NSLOCTEXT("OneBraham", "Scoreboard_ServerLine", "ONE BRAHAM  ·  TODAY  ·  {0}  ·  {1} ON SITE"),
 			FText::FromString(GameState->ServerName.ToUpper()), FText::AsNumber(Personnel)));
 	}
 
@@ -322,35 +353,51 @@ void UOneBrahamScoreboardWidget::RefreshHeader(const AOneBrahamGameState* GameSt
 		Text_Phase->SetText(PhaseLabel(GameState->MatchPhase));
 	}
 
+	// The stage chip: the building's state in the board's corner, in its colour.
+	if (StageChip != nullptr && Text_Stage != nullptr)
+	{
+		const UOneBrahamLockdownComponent* Lockdown = GameState->GetLockdownComponent();
+		const EOneBrahamLockdownStage Stage = Lockdown != nullptr && GameState->MatchMode == EOneBrahamMatchMode::Ascent
+			? Lockdown->GetStage() : EOneBrahamLockdownStage::Normal;
+		const int32 Band = OneBrahamHUDStyle::StageBand(Stage);
+		const FLinearColor Colour = Band == 2 ? OneBrahamHUDStyle::EmergencyRed() : (Band == 1 ? OneBrahamHUDStyle::SafetyYellow() : OneBrahamHUDStyle::LightGrey());
+		Text_Stage->SetText(Band == 2 ? NSLOCTEXT("OneBraham", "Scoreboard_StagePurge", "PURGE")
+			: (Band == 1 ? NSLOCTEXT("OneBraham", "Scoreboard_StageLockdown", "LOCKDOWN") : NSLOCTEXT("OneBraham", "Scoreboard_StageNormal", "SYSTEM NORMAL")));
+		Text_Stage->SetColorAndOpacity(FSlateColor(Band == 1 ? OneBrahamHUDStyle::Navy() : (Band == 2 ? OneBrahamHUDStyle::White() : Colour)));
+		StageChip->SetBrush(TagBrush(Colour, Band > 0));
+	}
+
 	// A timed mode counts down to its deadline, which is what a player wants to
-	// know; ASCENT has no deadline, so it shows how long this phase has run.
+	// know; ASCENT has no deadline, so it shows the building's own clock.
 	const bool bTimed = GameState->MatchTimeLimitSeconds > 0.f;
 
 	if (Text_Clock != nullptr)
 	{
-		Text_Clock->SetText(UOneBrahamUIStyle::ClockLabel(bTimed
-			? FMath::Max(0.f, GameState->MatchTimeLimitSeconds - GameState->PhaseElapsedSeconds)
-			: GameState->PhaseElapsedSeconds));
+		Text_Clock->SetText(bTimed
+			? UOneBrahamUIStyle::ClockLabel(FMath::Max(0.f, GameState->MatchTimeLimitSeconds - GameState->PhaseElapsedSeconds))
+			: OneBrahamDuskClock::Now(GetWorld()));
 	}
 
 	if (Text_ClockCaption != nullptr)
 	{
 		Text_ClockCaption->SetText(bTimed
 			? NSLOCTEXT("OneBraham", "Scoreboard_ClockRemaining", "REMAINING")
-			: NSLOCTEXT("OneBraham", "Scoreboard_ClockElapsed", "ELAPSED"));
+			: FText::Format(NSLOCTEXT("OneBraham", "Scoreboard_ClockElapsed", "ON SITE {0}"), UOneBrahamUIStyle::ClockLabel(GameState->PhaseElapsedSeconds)));
 	}
 
+	const bool bFireDrill = GameState->MatchMode == EOneBrahamMatchMode::FireDrill;
+	if (ScoreRow != nullptr)
+	{
+		ScoreRow->SetVisibility(bFireDrill ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	}
+	if (bFireDrill && Text_ScoreHome != nullptr && Text_ScoreAway != nullptr)
+	{
+		Text_ScoreHome->SetText(FText::AsNumber(TeamScore(GameState, 0)));
+		Text_ScoreAway->SetText(FText::AsNumber(TeamScore(GameState, 1)));
+	}
 	if (Text_Score != nullptr)
 	{
-		const bool bFireDrill = GameState->MatchMode == EOneBrahamMatchMode::FireDrill;
-		Text_Score->SetVisibility(bFireDrill ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
-
-		if (bFireDrill)
-		{
-			Text_Score->SetText(FText::Format(
-				NSLOCTEXT("OneBraham", "Scoreboard_FireDrillScore", "INTERNAL STAFF   {0}   :   {1}   EXTERNAL CONTRACTORS"),
-				FText::AsNumber(TeamScore(GameState, 0)), FText::AsNumber(TeamScore(GameState, 1))));
-		}
+		Text_Score->SetVisibility(ESlateVisibility::Collapsed);
 	}
 }
 
@@ -367,7 +414,7 @@ void UOneBrahamScoreboardWidget::BuildLayout()
 	// A light dim over the world: the match is still running behind the board,
 	// and a player should be able to see a muzzle flash through it.
 	UImage* Dim = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass());
-	Dim->SetBrush(UOneBrahamUIStyle::SolidBrush(WithAlpha(UOneBrahamUIStyle::Navy(), 0.35f)));
+	Dim->SetBrush(UOneBrahamUIStyle::SolidBrush(WithAlpha(OneBrahamHUDStyle::Navy(), 0.35f)));
 	if (UOverlaySlot* DimSlot = Root->AddChildToOverlay(Dim))
 	{
 		DimSlot->SetHorizontalAlignment(HAlign_Fill);
@@ -376,43 +423,78 @@ void UOneBrahamScoreboardWidget::BuildLayout()
 
 	UVerticalBox* Column = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
 
-	// --- header ------------------------------------------------------------
+	// --- header: the board's sign ------------------------------------------------------
 	UHorizontalBox* Header = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
 
 	UVerticalBox* TitleStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-	Text_ServerLine = MakeLabel(FText::GetEmpty(), EOneBrahamTextSize::Micro, InkMuted());
-	Text_Mode = MakeLabel(FText::GetEmpty(), EOneBrahamTextSize::Header, Ink(), true);
-	Text_Phase = MakeLabel(FText::GetEmpty(), EOneBrahamTextSize::Small, InkMuted());
-	TitleStack->AddChildToVerticalBox(Text_ServerLine)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
-	TitleStack->AddChildToVerticalBox(Text_Mode);
-	TitleStack->AddChildToVerticalBox(Text_Phase)->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
+	Text_ServerLine = Label(FText::GetEmpty(), Type(EOneBrahamType::Eyebrow, 12.f, 180), InkMuted());
+	UTextBlock* Title = Label(NSLOCTEXT("OneBraham", "Scoreboard_Title", "TENANT DIRECTORY"), Type(EOneBrahamType::Title, 40.f, -10), Ink());
+	TitleStack->AddChildToVerticalBox(Text_ServerLine)->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+	TitleStack->AddChildToVerticalBox(Title);
 
 	UHorizontalBoxSlot* TitleSlot = Header->AddChildToHorizontalBox(TitleStack);
 	TitleSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 	TitleSlot->SetVerticalAlignment(VAlign_Bottom);
 
-	UVerticalBox* ClockStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-	Text_Clock = MakeLabel(FText::GetEmpty(), EOneBrahamTextSize::Large, Ink(), true, ETextJustify::Right);
-	Text_ClockCaption = MakeLabel(FText::GetEmpty(), EOneBrahamTextSize::Micro, InkMuted(), false, ETextJustify::Right);
-	ClockStack->AddChildToVerticalBox(Text_Clock)->SetHorizontalAlignment(HAlign_Right);
-	ClockStack->AddChildToVerticalBox(Text_ClockCaption)->SetHorizontalAlignment(HAlign_Right);
-	Header->AddChildToHorizontalBox(ClockStack)->SetVerticalAlignment(VAlign_Bottom);
+	// Right: mode · stage chip · clock.
+	UVerticalBox* Right = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
+	UHorizontalBox* ModeLine = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+	Text_Mode = Label(FText::GetEmpty(), Type(EOneBrahamType::Telemetry, 13.f, 120), Ink());
+	ModeLine->AddChildToHorizontalBox(Text_Mode)->SetVerticalAlignment(VAlign_Center);
+	StageChip = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+	StageChip->SetPadding(FMargin(8.f, 2.f));
+	Text_Stage = Label(FText::GetEmpty(), Type(EOneBrahamType::Telemetry, 11.f, 120), Ink());
+	StageChip->SetContent(Text_Stage);
+	ModeLine->AddChildToHorizontalBox(StageChip)->SetPadding(FMargin(12.f, 0.f, 12.f, 0.f));
+	Text_Clock = Label(FText::GetEmpty(), Type(EOneBrahamType::TelemetryStrong, 22.f), Ink());
+	ModeLine->AddChildToHorizontalBox(Text_Clock)->SetVerticalAlignment(VAlign_Center);
+	Right->AddChildToVerticalBox(ModeLine)->SetHorizontalAlignment(HAlign_Right);
+	UHorizontalBox* PhaseLine = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+	Text_Phase = Label(FText::GetEmpty(), Type(EOneBrahamType::Telemetry, 11.f, 120), InkMuted());
+	Text_ClockCaption = Label(FText::GetEmpty(), Type(EOneBrahamType::Telemetry, 11.f, 120), InkMuted());
+	PhaseLine->AddChildToHorizontalBox(Text_Phase)->SetPadding(FMargin(0.f, 0.f, 14.f, 0.f));
+	PhaseLine->AddChildToHorizontalBox(Text_ClockCaption);
+	Right->AddChildToVerticalBox(PhaseLine)->SetHorizontalAlignment(HAlign_Right);
+	Header->AddChildToHorizontalBox(Right)->SetVerticalAlignment(VAlign_Bottom);
 
 	Column->AddChildToVerticalBox(Header);
 
+	// FIRE DRILL: the two scores as LED numerals, the way the building shows a
+	// count, with the departments named under them.
+	UHorizontalBox* Scores = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+	auto ScoreBlock = [this](const FText& Team, UTextBlock*& OutNumber, const FLinearColor& Colour, EHorizontalAlignment Align)
+	{
+		UVerticalBox* Block = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
+		OutNumber = Label(FText::AsNumber(0), Type(EOneBrahamType::LED, 72.f), Colour);
+		Block->AddChildToVerticalBox(OutNumber)->SetHorizontalAlignment(Align);
+		Block->AddChildToVerticalBox(Label(Team, Type(EOneBrahamType::Eyebrow, 12.f, 180), InkMuted()))->SetHorizontalAlignment(Align);
+		return Block;
+	};
+	UTextBlock* Home = nullptr;
+	UTextBlock* Away = nullptr;
+	Scores->AddChildToHorizontalBox(ScoreBlock(NSLOCTEXT("OneBraham", "Scoreboard_TeamInternalShort", "INTERNAL STAFF"), Home, Accent(), HAlign_Left));
+	UHorizontalBoxSlot* Gap = Scores->AddChildToHorizontalBox(WidgetTree->ConstructWidget<USpacer>(USpacer::StaticClass()));
+	Gap->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+	Scores->AddChildToHorizontalBox(ScoreBlock(NSLOCTEXT("OneBraham", "Scoreboard_TeamExternalShort", "EXTERNAL CONTRACTORS"), Away, Ink(), HAlign_Right));
+	Text_ScoreHome = Home;
+	Text_ScoreAway = Away;
+	ScoreRow = Scores;
+	Scores->SetVisibility(ESlateVisibility::Collapsed);
+	Column->AddChildToVerticalBox(Scores)->SetPadding(FMargin(0.f, 18.f, 0.f, 0.f));
+
 	Text_Score = MakeLabel(FText::GetEmpty(), EOneBrahamTextSize::Medium, Ink(), true);
 	Text_Score->SetVisibility(ESlateVisibility::Collapsed);
-	Column->AddChildToVerticalBox(Text_Score)->SetPadding(FMargin(0.f, 14.f, 0.f, 0.f));
+	Column->AddChildToVerticalBox(Text_Score);
 
 	// --- table ---------------------------------------------------------------
-	Column->AddChildToVerticalBox(MakeRule(InkFaint()))->SetPadding(FMargin(0.f, 18.f, 0.f, 8.f));
+	Column->AddChildToVerticalBox(MakeRule(WithAlpha(Ink(), 0.12f)))->SetPadding(FMargin(0.f, 20.f, 0.f, 8.f));
 	Column->AddChildToVerticalBox(MakeColumnHeadings());
-	Column->AddChildToVerticalBox(MakeRule(InkFaint()))->SetPadding(FMargin(0.f, 8.f, 0.f, 4.f));
+	Column->AddChildToVerticalBox(MakeRule(WithAlpha(Ink(), 0.12f)))->SetPadding(FMargin(0.f, 8.f, 0.f, 4.f));
 
 	USizeBox* ListFrame = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 	// Sixteen rows and four headers fit without scrolling at 1080p; a custom
 	// lobby larger than that scrolls rather than pushing the footer off screen.
-	ListFrame->SetMaxDesiredHeight(640.f);
+	ListFrame->SetMaxDesiredHeight(560.f);
 
 	UScrollBox* Scroll = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass());
 	Scroll->SetScrollbarThickness(FVector2D(2.f, 2.f));
@@ -422,21 +504,28 @@ void UOneBrahamScoreboardWidget::BuildLayout()
 	Column->AddChildToVerticalBox(ListFrame);
 
 	// --- footer ------------------------------------------------------------
-	Column->AddChildToVerticalBox(MakeRule(InkFaint()))->SetPadding(FMargin(0.f, 6.f, 0.f, 10.f));
-	Column->AddChildToVerticalBox(MakeLabel(
+	Column->AddChildToVerticalBox(MakeRule(WithAlpha(Ink(), 0.12f)))->SetPadding(FMargin(0.f, 6.f, 0.f, 10.f));
+	Column->AddChildToVerticalBox(Label(
 		NSLOCTEXT("OneBraham", "Scoreboard_Footer",
-			"Muting applies to you alone and lasts until the end of the match. The lamp beside a name is lit while they transmit."),
-		EOneBrahamTextSize::Micro, InkFaint()));
+			"Muting applies to you alone, until the end of the match. A lamp beside a name is lit while they transmit."),
+		Type(EOneBrahamType::Aside, 16.f), InkMuted()));
 
-	UBorder* Panel = MakePanel(Column, 0.94f, FMargin(32.f, 26.f, 32.f, 22.f));
+	UBorder* Panel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+	// Near-opaque: the board is read while the HUD's own cards keep painting
+	// underneath it, and an announcement ghosting through the rows is noise.
+	Panel->SetBrush(TagBrush(WithAlpha(OneBrahamHUDStyle::BaffleBlack(), 0.96f), true, 4.f));
+	Panel->SetPadding(FMargin(36.f, 28.f, 36.f, 22.f));
+	Panel->SetContent(Column);
 
-	// The left edge carries the one accent: a bar, as on a floor directory.
+	// The left edge carries the one accent: a Primary-blue bar, as on a floor
+	// directory.
 	UHorizontalBox* Framed = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-	UHorizontalBoxSlot* BarSlot = Framed->AddChildToHorizontalBox(MakeSwatch(Accent(), FVector2D(4.f, 4.f)));
+	UHorizontalBoxSlot* BarSlot = Framed->AddChildToHorizontalBox(MakeSwatch(OneBrahamHUDStyle::Primary(), FVector2D(6.f, 6.f)));
 	BarSlot->SetVerticalAlignment(VAlign_Fill);
 	Framed->AddChildToHorizontalBox(Panel)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 
 	USizeBox* PanelFrame = MakeCell(Framed, PanelWidth);
+	Board = PanelFrame;
 
 	if (UOverlaySlot* PanelSlot = Root->AddChildToOverlay(PanelFrame))
 	{
@@ -456,8 +545,9 @@ UWidget* UOneBrahamScoreboardWidget::MakeColumnHeadings()
 
 	auto Heading = [this, Headings](const FText& Text, float Width, ETextJustify::Type Justify)
 	{
-		Headings->AddChildToHorizontalBox(MakeCell(
-			MakeLabel(Text, EOneBrahamTextSize::Micro, InkMuted(), true, Justify), Width));
+		UTextBlock* Cell = Label(Text, Type(EOneBrahamType::Telemetry, 10.f, 160), InkMuted());
+		Cell->SetJustification(Justify);
+		Headings->AddChildToHorizontalBox(MakeCell(Cell, Width));
 	};
 
 	Heading(FText::GetEmpty(), Lamp, ETextJustify::Left);
@@ -484,25 +574,45 @@ UWidget* UOneBrahamScoreboardWidget::MakeRowCells(FOneBrahamScoreboardRowWidgets
 	// ledger is set, so the digits line up down the column.
 	auto AddCell = [this, Cells](UWidget* Content, float Width)
 	{
-		UHorizontalBoxSlot* CellSlot = Cells->AddChildToHorizontalBox(MakeCell(Content, Width, RowHeight));
+		// A size box fills its child to the row's height and sets it at the top:
+		// centre it instead, so a name, a tag and a number share one middle line.
+		USizeBox* Cell = MakeCell(Content, Width, RowHeight);
+		if (USizeBoxSlot* Inner = Cast<USizeBoxSlot>(Cell->GetContentSlot()))
+		{
+			Inner->SetVerticalAlignment(VAlign_Center);
+		}
+		UHorizontalBoxSlot* CellSlot = Cells->AddChildToHorizontalBox(Cell);
 		CellSlot->SetVerticalAlignment(VAlign_Center);
 	};
 
-	// The lamp: a small square, lit in the accent while the player transmits.
-	Row.MicLamp = MakeSwatch(InkFaint(), FVector2D(8.f, 8.f));
-	USizeBox* LampBox = MakeCell(Row.MicLamp, 8.f, 8.f);
-	UHorizontalBoxSlot* LampSlot = Cells->AddChildToHorizontalBox(MakeCell(LampBox, Lamp, RowHeight));
+	// The lamp: a small round light, lit in the accent while the player transmits.
+	Row.MicLamp = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass());
+	FSlateBrush LampBrush = TagBrush(FLinearColor::White, true, 4.f);
+	LampBrush.ImageSize = FVector2D(8.f, 8.f);
+	Row.MicLamp->SetBrush(LampBrush);
+	Row.MicLamp->SetVisibility(ESlateVisibility::HitTestInvisible);
+	UHorizontalBox* LampAlign = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+	UHorizontalBoxSlot* LampInner = LampAlign->AddChildToHorizontalBox(Row.MicLamp);
+	LampInner->SetVerticalAlignment(VAlign_Center);
+	LampInner->SetHorizontalAlignment(HAlign_Left);
+	LampInner->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+	UHorizontalBoxSlot* LampSlot = Cells->AddChildToHorizontalBox(MakeCell(LampAlign, Lamp, RowHeight));
 	LampSlot->SetVerticalAlignment(VAlign_Center);
-	LampBox->SetVisibility(ESlateVisibility::HitTestInvisible);
 
-	Row.Name = MakeLabel(FText::GetEmpty(), EOneBrahamTextSize::Small, Ink(), true);
-	Row.Archetype = MakeLabel(FText::GetEmpty(), EOneBrahamTextSize::Small, InkMuted());
-	Row.Status = MakeLabel(FText::GetEmpty(), EOneBrahamTextSize::Small, Ink());
-	Row.Kills = MakeLabel(FText::GetEmpty(), EOneBrahamTextSize::Small, Ink(), false, ETextJustify::Right);
-	Row.Deaths = MakeLabel(FText::GetEmpty(), EOneBrahamTextSize::Small, Ink(), false, ETextJustify::Right);
-	Row.Assists = MakeLabel(FText::GetEmpty(), EOneBrahamTextSize::Small, Ink(), false, ETextJustify::Right);
-	Row.Objective = MakeLabel(FText::GetEmpty(), EOneBrahamTextSize::Small, Ink(), true, ETextJustify::Right);
-	Row.Ping = MakeLabel(FText::GetEmpty(), EOneBrahamTextSize::Small, InkMuted(), false, ETextJustify::Right);
+	Row.Name = Label(FText::GetEmpty(), Type(EOneBrahamType::Label, 15.f, 20), Ink());
+	Row.Archetype = Label(FText::GetEmpty(), Type(EOneBrahamType::Telemetry, 10.f, 120), InkMuted());
+	Row.Status = Label(FText::GetEmpty(), Type(EOneBrahamType::Label, 10.f, 120), Ink());
+	auto Number = [this]()
+	{
+		UTextBlock* Cell = Label(FText::GetEmpty(), Type(EOneBrahamType::Telemetry, 15.f), Ink());
+		Cell->SetJustification(ETextJustify::Right);
+		return Cell;
+	};
+	Row.Kills = Number();
+	Row.Deaths = Number();
+	Row.Assists = Number();
+	Row.Objective = Number();
+	Row.Ping = Number();
 
 	// Long names are clipped at the column rather than wrapping a row to two
 	// lines: a directory board has one line per name.
@@ -511,7 +621,15 @@ UWidget* UOneBrahamScoreboardWidget::MakeRowCells(FOneBrahamScoreboardRowWidgets
 
 	AddCell(Row.Name, Name);
 	AddCell(Row.Archetype, Archetype);
-	AddCell(Row.Status, Status);
+
+	// The status, as the in/out board's tags: a word in a frame.
+	Row.StatusTag = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+	Row.StatusTag->SetPadding(FMargin(6.f, 1.f));
+	Row.StatusTag->SetContent(Row.Status);
+	UHorizontalBox* TagAlign = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+	TagAlign->AddChildToHorizontalBox(Row.StatusTag)->SetVerticalAlignment(VAlign_Center);
+	AddCell(TagAlign, Status);
+
 	AddCell(Row.Kills, Stat);
 	AddCell(Row.Deaths, Stat);
 	AddCell(Row.Assists, Stat);
@@ -526,6 +644,10 @@ UWidget* UOneBrahamScoreboardWidget::MakeRowCells(FOneBrahamScoreboardRowWidgets
 		[this, Target]() { ToggleMute(Target); },
 		EOneBrahamTextSize::Micro, false, &MuteText, FMargin(10.f, 3.f));
 	Row.MuteLabel = MuteText;
+	if (Row.MuteLabel != nullptr)
+	{
+		Row.MuteLabel->SetFont(Type(EOneBrahamType::Telemetry, 10.f, 120));
+	}
 
 	USizeBox* MuteCell = MakeCell(nullptr, Mute, RowHeight);
 	UHorizontalBox* MuteAlign = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
@@ -555,34 +677,36 @@ void UOneBrahamScoreboardWidget::RebuildRows(const TArray<TPair<int32, TArray<AO
 	}
 
 	const AOneBrahamPlayerState* LocalState = GetOwningPlayerState<AOneBrahamPlayerState>();
+	int32 RowIndex = 0;
 
 	for (int32 GroupIndex = 0; GroupIndex < Groups.Num(); ++GroupIndex)
 	{
 		const TPair<int32, TArray<AOneBrahamPlayerState*>>& Group = Groups[GroupIndex];
 		const bool bLocalGroup = LocalState != nullptr && Group.Value.Contains(LocalState);
 
-		// --- group header: the squad's sign -----------------------------------
+		// --- group header: the tenant's sign -------------------------------------
 		FOneBrahamScoreboardGroupWidgets& HeaderWidgets = GroupHeaders.AddDefaulted_GetRef();
 		HeaderWidgets.GroupKey = Group.Key;
 
 		UHorizontalBox* HeaderRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-		HeaderWidgets.Title = MakeLabel(FText::GetEmpty(), EOneBrahamTextSize::Small,
-			bLocalGroup ? Accent() : Ink(), true);
-		HeaderWidgets.Detail = MakeLabel(FText::GetEmpty(), EOneBrahamTextSize::Micro, InkMuted(), false, ETextJustify::Right);
+		HeaderWidgets.Title = Label(FText::GetEmpty(), Type(EOneBrahamType::Label, 14.f, 120), bLocalGroup ? Accent() : Ink());
+		HeaderWidgets.Detail = Label(FText::GetEmpty(), Type(EOneBrahamType::Telemetry, 11.f, 120), InkMuted());
+		HeaderWidgets.Detail->SetJustification(ETextJustify::Right);
 
 		UHorizontalBoxSlot* TitleSlot = HeaderRow->AddChildToHorizontalBox(HeaderWidgets.Title);
 		TitleSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		TitleSlot->SetVerticalAlignment(VAlign_Bottom);
 		HeaderRow->AddChildToHorizontalBox(HeaderWidgets.Detail)->SetVerticalAlignment(VAlign_Bottom);
 
-		RowList->AddChildToVerticalBox(HeaderRow)->SetPadding(FMargin(0.f, GroupIndex == 0 ? 6.f : 18.f, 0.f, 4.f));
-		RowList->AddChildToVerticalBox(MakeRule(bLocalGroup ? Accent() : InkFaint()))->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+		RowList->AddChildToVerticalBox(HeaderRow)->SetPadding(FMargin(0.f, GroupIndex == 0 ? 8.f : 22.f, 0.f, 6.f));
+		RowList->AddChildToVerticalBox(MakeRule(bLocalGroup ? Accent() : WithAlpha(Ink(), 0.12f)))->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
 
 		// --- members -------------------------------------------------------
 		for (AOneBrahamPlayerState* Member : Group.Value)
 		{
 			FOneBrahamScoreboardRowWidgets& Row = Rows.AddDefaulted_GetRef();
 			Row.Player = Member;
+			Row.Index = RowIndex++;
 
 			Row.Root = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
 			Row.Root->SetPadding(FMargin(0.f));
@@ -591,7 +715,7 @@ void UOneBrahamScoreboardWidget::RebuildRows(const TArray<TPair<int32, TArray<AO
 			// look for first, and the tint finds it before the name does.
 			const bool bLocal = Member == LocalState;
 			Row.Root->SetBrush(UOneBrahamUIStyle::SolidBrush(bLocal
-				? WithAlpha(Accent(), 0.16f)
+				? WithAlpha(Accent(), 0.14f)
 				: FLinearColor(0.f, 0.f, 0.f, 0.f)));
 
 			Row.Root->SetContent(MakeRowCells(Row));
@@ -625,16 +749,38 @@ void UOneBrahamScoreboardWidget::UpdateGroupHeader(FOneBrahamScoreboardGroupWidg
 
 	if (GameState->MatchMode == EOneBrahamMatchMode::FireDrill)
 	{
+		// The two departments are the drill's zones: RED ZONE and BLUE ZONE on
+		// the assembly-point signs, which is how a player finds their side.
 		Group.Title->SetText(Group.GroupKey == 0
-			? NSLOCTEXT("OneBraham", "Scoreboard_TeamInternal", "INTERNAL STAFF")
-			: NSLOCTEXT("OneBraham", "Scoreboard_TeamExternal", "EXTERNAL CONTRACTORS"));
+			? NSLOCTEXT("OneBraham", "Scoreboard_TeamInternal", "BLUE ZONE  ·  INTERNAL STAFF")
+			: NSLOCTEXT("OneBraham", "Scoreboard_TeamExternal", "RED ZONE  ·  EXTERNAL CONTRACTORS"));
 		Group.Detail->SetText(FText::Format(NSLOCTEXT("OneBraham", "Scoreboard_TeamScore", "SCORE  {0}"),
 			FText::AsNumber(TeamScore(GameState, Group.GroupKey))));
 		return;
 	}
 
+	// ASCENT: the squad as a tenant - "SQUAD A  ·  L07  ·  3 IN". The floor is
+	// only shown for the player's own squad: the board is not a radar.
 	const FOneBrahamSquadInfo Squad = GameState->GetSquadInfo(Group.GroupKey);
-	Group.Title->SetText(SquadName(Squad.Team, Group.GroupKey));
+	int32 Inside = 0;
+	for (const FOneBrahamSquadMemberInfo& Member : Squad.Members)
+	{
+		Inside += Member.LifeState == EOneBrahamLifeState::Alive || Member.LifeState == EOneBrahamLifeState::Downed ? 1 : 0;
+	}
+
+	const AOneBrahamPlayerState* LocalState = GetOwningPlayerState<AOneBrahamPlayerState>();
+	const bool bOwn = LocalState != nullptr && LocalState->SquadId == Group.GroupKey;
+	FString Floor;
+	if (bOwn)
+	{
+		if (const AOneBrahamCharacter* Pawn = Cast<AOneBrahamCharacter>(LocalState->GetPawn()))
+		{
+			Floor = FString::Printf(TEXT("  ·  L%02d"), Pawn->GetCurrentFloorIndex());
+		}
+	}
+
+	const FString Letter = FString::Chr(TEXT('A') + FMath::Clamp(Group.GroupKey, 0, 25));
+	Group.Title->SetText(FText::FromString(FString::Printf(TEXT("SQUAD %s%s  ·  %d IN"), *Letter, *Floor, Inside)));
 
 	FText Detail = Squad.SquadName.ToUpper();
 	if (Squad.bEliminated)
@@ -662,38 +808,42 @@ void UOneBrahamScoreboardWidget::UpdateRow(FOneBrahamScoreboardRowWidgets& Row, 
 	const bool bLocal = State == LocalState;
 	const bool bSignedOut = State->IsEliminated();
 
-	// Signed-out players fade rather than change colour: monochrome, one accent.
-	const FLinearColor Body = bSignedOut ? InkFaint() : Ink();
-	const FLinearColor Secondary = bSignedOut ? InkFaint() : InkMuted();
+	// Signed-out rows fade to 35% rather than changing colour: the strike is
+	// the word OUT and the faded line, not a hue.
+	if (Row.Root != nullptr)
+	{
+		Row.Root->SetContentColorAndOpacity(FLinearColor(1.f, 1.f, 1.f, bSignedOut ? 0.35f : 1.f));
+	}
 
 	Row.Name->SetText(FText::FromString(State->GetPlayerName()));
-	Row.Name->SetColorAndOpacity(FSlateColor(bLocal ? Accent() : Body));
+	Row.Name->SetColorAndOpacity(FSlateColor(bLocal ? Accent() : Ink()));
 
 	Row.Archetype->SetText(ArchetypeLabel(State->ArchetypeTag));
-	Row.Archetype->SetColorAndOpacity(FSlateColor(Secondary));
 
-	// Downed is the one state that changes what a colleague should do next, so
-	// it is the one set in bold white rather than body grey.
+	// The status tag: IN outlined, DOWN filled red (the one state that changes
+	// what a colleague does next), OUT plain, EXTRACTED outlined yellow.
 	const bool bDowned = State->LifeState == EOneBrahamLifeState::Downed;
+	const bool bExtracted = State->LifeState == EOneBrahamLifeState::Extracted;
 	Row.Status->SetText(LifeStateLabel(State->LifeState));
-	Row.Status->SetFont(UOneBrahamUIStyle::Font(EOneBrahamTextSize::Small, bDowned));
-	Row.Status->SetColorAndOpacity(FSlateColor(bDowned ? FLinearColor::White : Secondary));
+	const FLinearColor TagColour = bDowned ? OneBrahamHUDStyle::EmergencyRed()
+		: (bExtracted ? OneBrahamHUDStyle::SafetyYellow() : WithAlpha(Ink(), 0.7f));
+	Row.Status->SetColorAndOpacity(FSlateColor(bDowned ? OneBrahamHUDStyle::White() : TagColour));
+	if (Row.StatusTag != nullptr)
+	{
+		Row.StatusTag->SetBrush(TagBrush(TagColour, bDowned));
+	}
 
 	Row.Kills->SetText(FText::AsNumber(State->Kills));
 	Row.Deaths->SetText(FText::AsNumber(State->Deaths));
 	Row.Assists->SetText(FText::AsNumber(State->Assists));
 	Row.Objective->SetText(FText::AsNumber(State->ObjectiveScore));
 
-	for (UTextBlock* Number : { Row.Kills.Get(), Row.Deaths.Get(), Row.Assists.Get(), Row.Objective.Get() })
-	{
-		Number->SetColorAndOpacity(FSlateColor(Body));
-	}
-
 	// Bots have no connection and no ping worth showing. "BOT" is said plainly:
 	// a player deciding whether to trust a squadmate deserves to know.
 	Row.Ping->SetText(State->IsABot()
 		? NSLOCTEXT("OneBraham", "Scoreboard_PingBot", "BOT")
 		: FText::AsNumber(FMath::RoundToInt(State->GetPingInMilliseconds())));
+	Row.Ping->SetColorAndOpacity(FSlateColor(InkMuted()));
 
 	// --- voice -------------------------------------------------------------
 	UOneBrahamVoiceSubsystem* Voice = UOneBrahamVoiceSubsystem::Get(GetOwningPlayer());
@@ -712,7 +862,7 @@ void UOneBrahamScoreboardWidget::UpdateRow(FOneBrahamScoreboardRowWidgets& Row, 
 
 	// A muted player's lamp stays dark: you have asked not to hear them, and a
 	// light flickering beside their name is them being heard by other means.
-	Row.MicLamp->SetColorAndOpacity(bTransmitting && !bMuted ? Accent() : WithAlpha(Ink(), 0.12f));
+	Row.MicLamp->SetColorAndOpacity(bTransmitting && !bMuted ? Accent() : WithAlpha(Ink(), 0.14f));
 
 	// --- mute button -------------------------------------------------------
 	// Nobody mutes themselves from here (that is the self-mute key), and a bot
@@ -730,6 +880,34 @@ void UOneBrahamScoreboardWidget::UpdateRow(FOneBrahamScoreboardRowWidgets& Row, 
 		// at a glance down the column.
 		Row.MuteButton->SetStyle(BrandButtonStyle(bMuted));
 	}
+}
+
+int32 UOneBrahamScoreboardWidget::NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
+	const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements,
+	int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
+{
+	// The board drops 8 px into place and fades in over 140 ms; the rows
+	// follow 12 ms apart. On the real clock: Tab can be held over a pause.
+	if (bOpen && Board != nullptr)
+	{
+		const double Now = FPlatformTime::Seconds();
+		const bool bFlat = UOneBrahamUIStyle::ReduceMotion();
+		const float In = bFlat ? 1.f : UOneBrahamUIStyle::Ease(EOneBrahamEase::Ribbon, static_cast<float>(Now - OpenedAt) / 0.14f);
+		Board->SetRenderOpacity(In);
+		Board->SetRenderTranslation(FVector2D(0.f, -8.f * (1.f - In)));
+
+		for (const FOneBrahamScoreboardRowWidgets& Row : Rows)
+		{
+			if (Row.Root != nullptr)
+			{
+				const float RowIn = bFlat ? 1.f : UOneBrahamUIStyle::Ease(EOneBrahamEase::Ribbon,
+					static_cast<float>(Now - OpenedAt - 0.06 - Row.Index * 0.012) / 0.14f);
+				Row.Root->SetRenderOpacity(RowIn);
+			}
+		}
+	}
+
+	return Super::NativePaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
 }
 
 void UOneBrahamScoreboardWidget::ToggleMute(TWeakObjectPtr<APlayerState> Target)

@@ -67,9 +67,20 @@ game and a legal review that ends one.
 
 ## Fonts
 
+The type system (Docs/08; `UOneBrahamUIStyle::Font`). Every face is under the
+SIL Open Font License 1.1, which permits bundling in a commercial game; the
+licence travels with the font files in `SourceArt/Fonts/<Family>/OFL.txt`,
+and each family is named in the in-game credits (VISITORS' BOOK, "TYPE").
+Imported by `build_frontend.import_fonts` as `/Game/OneBraham/UI/Fonts/FF_*`.
+The reserved font names are not used for anything we modify: the Doto
+instances are generated, not edited, and keep their names.
+
 | Item | Source | Licence | Notes |
 | --- | --- | --- | --- |
-| `F_OneBrahamSans` faces | **TBC** | must be an open or commercially licensed grotesque | the store page must not use a font whose licence forbids commercial use. Check before the capsule art is cut, not after |
+| [Archivo](https://github.com/Omnibus-Type/Archivo) | Omnibus-Type, static TTFs (`fonts/ttf/`) | SIL OFL 1.1 | Expanded Black / Bold, SemiCondensed Bold / SemiBold / Medium / Regular, Regular: titles, verbs, labels, eyebrows, body |
+| [IBM Plex Mono](https://github.com/google/fonts/tree/main/ofl/ibmplexmono) | google/fonts | SIL OFL 1.1 | SemiBold, Medium, Regular: every number that changes |
+| [Doto](https://github.com/google/fonts/tree/main/ofl/doto) | google/fonts (variable `Doto[ROND,wght].ttf`) | SIL OFL 1.1 | instanced offline with fonttools `varLib.instancer` at wght 700 / 500, ROND 0 into `Doto-Bold.ttf` / `Doto-Medium.ttf`: LED counters only, 28 px and up |
+| [Instrument Serif](https://github.com/google/fonts/tree/main/ofl/instrumentserif) | google/fonts | SIL OFL 1.1 | Italic only: the building's own voice |
 
 ## Software
 

@@ -73,7 +73,11 @@ __pycache__/
 # source file. It is written on the machine that runs the build, and every
 # machine that has run one has its own.
 Tools/Python/onebraham_build_manifest.json
-SourceArt/
+SourceArt/*
+# The UI typefaces are small and OFL-licensed (redistribution allowed): kept in
+# the repo with their licences so a clean checkout builds the UI.
+!SourceArt/Fonts/
+Build/MacShipping/
 
 # Epic's UE5 mannequins: copied from the engine by fetch_open_assets.py.
 Content/Characters/Mannequins/

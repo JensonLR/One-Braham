@@ -25,7 +25,101 @@
 #include "Styling/SlateBrush.h"
 #include "Styling/SlateTypes.h"
 #include "Fonts/SlateFontInfo.h"
+#include "Core/OneBrahamTypes.h"
 #include "OneBrahamUIStyle.generated.h"
+
+/**
+ * The type system's faces (Docs/08, "THE BUILDING SPEAKS"). Four open-licence
+ * families, each in a fixed role:
+ *   Archivo        Title (Expanded Black), Verb (Expanded Bold), Label
+ *                  (SemiCondensed Bold), Eyebrow (SemiCondensed SemiBold),
+ *                  Hint (SemiCondensed Medium), Caption (SemiCondensed
+ *                  Regular), Body (Regular). Never italic.
+ *   IBM Plex Mono  every number that changes: Telemetry (Medium),
+ *                  TelemetryStrong (SemiBold), TelemetryLight (Regular)
+ *   Doto           LED (Bold) and LEDMedium: only what the building shows on
+ *                  an LED panel, and never below 28 px
+ *   Instrument Serif Italic   Aside: the building's own voice, sentence case
+ */
+UENUM(BlueprintType)
+enum class EOneBrahamType : uint8
+{
+	Title,
+	Verb,
+	Label,
+	Eyebrow,
+	Hint,
+	Caption,
+	Body,
+	Telemetry,
+	TelemetryStrong,
+	TelemetryLight,
+	LED,
+	LEDMedium,
+	Aside
+};
+
+/**
+ * Colour tokens, as the eye sees them. The brand values in DefaultEngine.ini
+ * are sRGB intent stored in FLinearColor fields; read as linear they wash out
+ * (the #22476A slab the first menu was). Colour() converts once, so every
+ * token here is the hex in the design spec, on screen.
+ */
+UENUM(BlueprintType)
+enum class EOneBrahamColour : uint8
+{
+	/** #0070C0: the scoreboard accent bar, the team channel. */
+	Primary,
+	/** #041025: HUD plates, panels, text on yellow and paper. */
+	Navy,
+	/** #1485FF: focus, "yours", squad, pings, prompts. */
+	SignalBlue,
+	/** #FFCD00: Lockdown, sealing, extraction, low ammo, LED counters. */
+	SafetyYellow,
+	/** #DD1E1F: damage, critical, downed, Purge. Honours the colour-blind mode. */
+	EmergencyRed,
+	/** #E0E5EB: secondary text; hairlines at 8/12/20/35%. */
+	LightGrey,
+	/** #000000: letterbox, loading, a screen switched off. */
+	OLEDBlack,
+	/** #0B0C0F: the scoreboard, the fire panel's face. */
+	BaffleBlack,
+	/** #F4F6F8: the floor plate, inverted rows, the badge card. */
+	SignageWhite,
+	/** #E9ECEF: the accident book. */
+	Paper,
+	/** #6A1BFF -> #1485FF: the ribbon, only on things the building lights. */
+	RibbonA,
+	RibbonB,
+	/** #FFCD00 -> #B37400 and #DD1E1F -> #5A0A0C: the stage fields. */
+	LockdownFieldA,
+	LockdownFieldB,
+	PurgeFieldA,
+	PurgeFieldB,
+	/** #12160F / #D8F27A: the fire panel's LCD strip only. */
+	LCDField,
+	LCDInk,
+	/** #8F1418: the fire panel's housing at rest. */
+	FireHousing,
+	/** #FFFFFF: text and one-frame flashes. */
+	White
+};
+
+/** The motion curves (Docs/08). One library, so every screen moves alike. */
+UENUM(BlueprintType)
+enum class EOneBrahamEase : uint8
+{
+	/** Ease-in-out cubic: camera blends, panels opening. */
+	Lift,
+	/** Ease-out expo, cubic-bezier(0.16,1,0.3,1): entries, underlines, wipes. */
+	Ribbon,
+	/** Ease-in cubic, cubic-bezier(0.32,0,0.67,0): exits, ~0.6x the entry. */
+	Exit,
+	/** Ease-out back 1.2: prompt success only. */
+	Reader,
+	/** Counters, stage cross-fades, data rolls. */
+	Linear
+};
 
 /** Type scale. Fixed sizes, no auto-fitting, because fitting is what makes UI look cheap. */
 UENUM(BlueprintType)
@@ -121,7 +215,7 @@ public:
 	 * function so no widget needs to change.
 	 */
 	UFUNCTION(BlueprintPure, Category = "One Braham|UI|Style")
-	static FSlateFontInfo Font(EOneBrahamTextSize Size, bool bBold = false);
+	static FSlateFontInfo Font(EOneBrahamTextSize Size, bool bBold = false, int32 TrackingThousandths = 0);
 
 	/** Text style with sensible tracking for the type scale. */
 	UFUNCTION(BlueprintPure, Category = "One Braham|UI|Style")
@@ -143,4 +237,57 @@ public:
 	/** Floor label: "15 - SKYDECK", "G - PLAZA", "9 - OPEN PLAN OFFICE". */
 	UFUNCTION(BlueprintPure, Category = "One Braham|UI|Style")
 	static FText FloorLabel(int32 FloorIndex);
+
+	// ======================================================================
+	//  The design system (spec: palette_and_motion, typography)
+	// ======================================================================
+
+	/**
+	 * A face of the type system at a size in pixels at 1080p (the DPI curve
+	 * scales it from there), tracked in thousandths of an em, optionally with
+	 * the HUD's 1 px #000 60% outline. Falls back to the engine's Roboto at the
+	 * nearest weight when the faces have not been imported, so a clean
+	 * checkout still renders text. Named apart from Font(), the old type
+	 * scale, which stays as a wrapper over it while screens migrate.
+	 */
+	UFUNCTION(BlueprintPure, Category = "One Braham|UI|Style")
+	static FSlateFontInfo TypeFont(EOneBrahamType Token, float Px, int32 TrackingThousandths = 0, bool bOutline = false);
+
+	/** True once the imported faces resolve (false on a checkout without them). */
+	static bool HasBrandFaces();
+
+	/** A token at an alpha, display-correct (see EOneBrahamColour). */
+	UFUNCTION(BlueprintPure, Category = "One Braham|UI|Style")
+	static FLinearColor Colour(EOneBrahamColour Token, float Alpha = 1.f);
+
+	/** "#RRGGBB" (or "RRGGBB") as a display-correct colour. */
+	static FLinearColor Hex(const TCHAR* Hex, float Alpha = 1.f);
+
+	/** An ini brand float (sRGB intent stored linear) as a display colour. */
+	static FLinearColor FromBrandFloat(const FLinearColor& IniColour, float Alpha = 1.f);
+
+	/** The stage's accent: blue before the lockdown, yellow in it, red in the Purge. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|UI|Style")
+	static FLinearColor StageAccent(EOneBrahamLockdownStage Stage);
+
+	/** Neutral hairlines per stage: #E0E5EB 20%, #FFCD00 25%, #DD1E1F 30%. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|UI|Style")
+	static FLinearColor StageHairline(EOneBrahamLockdownStage Stage);
+
+	/** The stage's announcement field, two colours (A at the left). */
+	static void StageField(EOneBrahamLockdownStage Stage, FLinearColor& OutA, FLinearColor& OutB);
+
+	/** Evaluates a motion curve at T in [0, 1] (clamped). */
+	UFUNCTION(BlueprintPure, Category = "One Braham|UI|Style")
+	static float Ease(EOneBrahamEase Curve, float T);
+
+	/** Progress of a tween that started at StartSeconds, eased: 0 before, 1 after. */
+	static float Tween(double NowSeconds, double StartSeconds, float DurationSeconds, EOneBrahamEase Curve);
+
+	/** The player's Reduce Motion setting. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|UI|Style")
+	static bool ReduceMotion();
+
+	/** Clock text for the real local time: "17:42" or "17:42:09". */
+	static FText LocalClock(bool bSeconds);
 };

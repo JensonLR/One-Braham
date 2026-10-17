@@ -2,7 +2,12 @@
 //
 // OneBrahamSettingsWidget.h
 // ---------------------------------------------------------------------------
-// The in-match settings screen: GRAPHICS, AUDIO, VOICE, GAMEPLAY, CONTROLS.
+// The settings screen, FACILITIES: one class for the main menu and the pause
+// menu. A floor directory down the left (G GRAPHICS, 1 AUDIO, 2 VOICE,
+// 3 GAMEPLAY, 4 CONTROLS, 5 ACCESSIBILITY), rows on the right: painted
+// sliders with the ribbon fill, pill toggles that also say ON or OFF, "<  ULTRA
+// >" choices, a segmented microphone meter. The focused setting's description
+// sits at the foot of the panel in the building's serif.
 //
 // HOW A CHANGE TRAVELS
 //   Every control writes straight into UOneBrahamGameUserSettings, through the
@@ -29,12 +34,15 @@
 
 #include "CoreMinimal.h"
 #include "UI/OneBrahamMenuWidget.h"
+#include "UI/FrontEnd/OneBrahamPaint.h"
 #include "OneBrahamSettingsWidget.generated.h"
 
 class APlayerController;
 struct FKey;
 class UOneBrahamGameUserSettings;
+class UOneBrahamPaintedControl;
 class UImage;
+class UScrollBox;
 class UTextBlock;
 class UVerticalBox;
 class UWidgetSwitcher;
@@ -102,7 +110,8 @@ protected:
 	virtual void BuildLayout() override;
 
 	// --- page construction -------------------------------------------------
-	UVerticalBox* AddPage(const FText& TabName);
+	/** A floor of the directory: its number ("G", "1"...) and name. */
+	UVerticalBox* AddPage(const FText& Floor, const FText& TabName);
 
 	void AddSection(UVerticalBox* Page, const FText& Title);
 
@@ -111,24 +120,26 @@ protected:
 	void AddSlider(UVerticalBox* Page, const FText& Label, float Min, float Max, float Step,
 		TFunction<float(const UOneBrahamGameUserSettings&)> Get,
 		TFunction<void(UOneBrahamGameUserSettings&, float)> Set,
-		TFunction<FText(float)> Format);
+		TFunction<FText(float)> Format, const FText& Description = FText::GetEmpty());
 
 	void AddToggle(UVerticalBox* Page, const FText& Label,
 		TFunction<bool(const UOneBrahamGameUserSettings&)> Get,
-		TFunction<void(UOneBrahamGameUserSettings&, bool)> Set);
+		TFunction<void(UOneBrahamGameUserSettings&, bool)> Set, const FText& Description = FText::GetEmpty());
 
 	void AddChoice(UVerticalBox* Page, const FText& Label, const TArray<FText>& Options,
 		TFunction<int32(const UOneBrahamGameUserSettings&)> Get,
-		TFunction<void(UOneBrahamGameUserSettings&, int32)> Set);
+		TFunction<void(UOneBrahamGameUserSettings&, int32)> Set, const FText& Description = FText::GetEmpty());
 
-	/** Label | control | value, the three columns every setting is set in. */
-	void AddSettingRow(UVerticalBox* Page, const FText& Label, UWidget* Control, UTextBlock* Value);
+	/** A 52 px row: the label left, the painted control right. */
+	UOneBrahamPaintedControl* AddRow(UVerticalBox* Page, const FText& Label, const FText& Description,
+		TFunction<void(const OneBrahamPaint::FPainter&, const FVector2D&, const FVector2D&, float)> PaintControl);
 
 	void BuildGraphicsPage();
 	void BuildAudioPage();
 	void BuildVoicePage();
 	void BuildGameplayPage();
 	void BuildControlsPage();
+	void BuildAccessibilityPage();
 
 	/**
 	 * (Re)fills the Controls tab's rows from GatherBindings. Run when the page is
@@ -147,20 +158,24 @@ protected:
 	TArray<TFunction<void()>> Syncers;
 
 	UPROPERTY(Transient) TObjectPtr<UWidgetSwitcher> Pages = nullptr;
-	UPROPERTY(Transient) TArray<TObjectPtr<UButton>> TabButtons;
-	UPROPERTY(Transient) TArray<TObjectPtr<UImage>> TabUnderlines;
-	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_Status = nullptr;
+	UPROPERTY(Transient) TArray<TObjectPtr<UOneBrahamPaintedControl>> TabButtons;
+	UPROPERTY(Transient) TObjectPtr<UVerticalBox> TabRail = nullptr;
+	TArray<FString> TabNames;
+	FText StatusText;
+	FText FocusedDescription;
+	double DescriptionAt = 0.0;
 
-	// Voice tab live readouts.
-	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_MicPermission = nullptr;
-	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_MicDevice = nullptr;
-	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_MicActivity = nullptr;
-	UPROPERTY(Transient) TObjectPtr<UImage> MicLamp = nullptr;
-	UPROPERTY(Transient) TObjectPtr<class USizeBox> MicMeterFill = nullptr;
-	UPROPERTY(Transient) TObjectPtr<class USpacer> MicGateOffset = nullptr;
-	UPROPERTY(Transient) TObjectPtr<UImage> MicMeterBar = nullptr;
+	// Voice tab live readouts (read by paint).
+	mutable FText MicPermission;
+	mutable FText MicDevice;
+	mutable float MicLevel = 0.f;
+	mutable float MicGate = 0.f;
+	mutable float MicPeak = 0.f;
+	mutable double MicPeakAt = 0.0;
+	mutable bool bMicTransmitting = false;
 
 	int32 ActiveTab = 0;
+	double TabChangedAt = 0.0;
 	int32 VoiceTabIndex = INDEX_NONE;
 	int32 ControlsTabIndex = INDEX_NONE;
 

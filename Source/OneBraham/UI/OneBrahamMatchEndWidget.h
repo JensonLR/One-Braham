@@ -2,30 +2,30 @@
 //
 // OneBrahamMatchEndWidget.h
 // ---------------------------------------------------------------------------
-// The end of a match: what happened, to whom, and where everybody is going.
+// The end of a match: END OF DAY REPORT.
 //
-// WHAT IT SHOWS
-//   * A context line: the mode, the duration, the final score in FIRE DRILL.
-//   * The ending as a headline - EXTRACTED, LAST SQUAD STANDING, NO SURVIVORS,
-//     TIME OUT, DRILL COMPLETE, DRAW - and the winner under it.
-//   * The local player's own squad's fate in one line: whether they got out.
-//   * The tannoy's last word, quoted: the building has the last word, as it
-//     has had every other one.
-//   * Every squad (FIRE DRILL: both teams), the local one first, with its fate
-//     and each member's kills, downs, deaths and assists and whether they got
-//     out. Squad-focused, not a leaderboard (Docs/08 section 4).
-//   * A footer with the countdown to the menu, the reload, or the next match.
+// THE LOOK
+//   The picture letterboxes to 2.39:1, as the front end's films do. The left
+//   40% is the tower in section turned on its side - floors down, time across -
+//   replaying the match in four seconds: the lockdown rising floor by floor
+//   under hatching, each squad's route climbing as a line (yours in signal
+//   blue), the kills your squad made as small crossed boxes. The right side is
+//   the report: an eyebrow (EXTRACTION CONFIRMED, NO SURVIVORS, ASSEMBLY POINT
+//   REPORT), the headline typed on a word at a time in the building's words
+//   ("Signed out at 18:41."; or, for a loss, the serif line on a red field),
+//   the player's day in four numbers counting up, every squad's fate, and two
+//   rows in the front end's directory style: CONTINUE and SIGN OUT. The
+//   tannoy's last word sits in the top bar; where everybody goes, and when, in
+//   the bottom one.
 //
 // WHERE THE FACTS COME FROM
 //   The ending and the winning squad from UOneBrahamExtractionComponent (which
 //   the server records it on, replicated); the numbers from the game state's
-//   MatchResult; who is still standing from the replicated squad list. The
-//   widget refreshes twice a second from the core ticker while it is up, so a
-//   result that replicates a moment after the phase change fills itself in.
-//
-// THE LOOK
-//   The scoreboard's: a directory board at the end of the day. Navy, light-grey
-//   type, one accent bar, signal blue for what is yours.
+//   MatchResult; who is still standing from the replicated squad list; the
+//   chart from what this machine recorded (FOneBrahamMatchReplay, handed over
+//   by the HUD component). The widget refreshes twice a second from the core
+//   ticker while it is up, so a result that replicates a moment after the
+//   phase change fills itself in.
 
 #pragma once
 
@@ -34,11 +34,12 @@
 #include "Core/OneBrahamTypes.h"
 #include "Extraction/OneBrahamMatchEnding.h"
 #include "UI/OneBrahamMenuWidget.h"
+#include "UI/HUD/OneBrahamHUDFrame.h"
+#include "UI/HUD/OneBrahamMatchReplay.h"
 #include "OneBrahamMatchEndWidget.generated.h"
 
 class AOneBrahamGameState;
-class UTextBlock;
-class UVerticalBox;
+class UOneBrahamPaintedControl;
 
 UCLASS()
 class ONEBRAHAM_API UOneBrahamMatchEndWidget : public UOneBrahamMenuWidget
@@ -64,6 +65,17 @@ public:
 	/** The ending the screen is showing, for the smoke run's log. */
 	EOneBrahamMatchEnding GetShownEnding() const { return ShownEnding; }
 
+	/** What this machine saw of the match (the chart) and the HUD's last frame
+	 *  (the clock, the player, the building), handed over as the match ends. */
+	void SetReplay(const FOneBrahamMatchReplay& InReplay, const FOneBrahamHUDFrame& InFrame)
+	{
+		Replay = InReplay;
+		LastFrame = InFrame;
+	}
+
+	/** Dev: shows a fabricated ending when the live match has none. */
+	void DevSetDemoEnding(bool bDemo) { bDemoEnding = bDemo; }
+
 	// --- pure helpers (tested) ----------------------------------------------
 	/**
 	 * A squad's fate in two or three words. bWinner is the ending's winning
@@ -84,6 +96,9 @@ public:
 	/** The footer: where everybody goes, and when. */
 	static FText LeaveLine(float SecondsLeft, EOneBrahamPostMatchAction Action);
 
+	/** The report's eyebrow for an ending. */
+	static FText EyebrowFor(EOneBrahamMatchEnding Ending, EOneBrahamMatchMode Mode, bool bOwnSquadWon);
+
 	/** Seconds between refreshes while it is up. */
 	static constexpr float RefreshIntervalSeconds = 0.5f;
 
@@ -92,21 +107,63 @@ protected:
 
 	bool HandleRefreshTick(float DeltaTime);
 
-	/** Rebuilds the squad blocks for the current result. */
-	void RebuildSquads(const AOneBrahamGameState* GameState, EOneBrahamMatchEnding Ending, int32 WinningSquadId);
+	/** Everything the painted report draws, refreshed twice a second. */
+	struct FMemberLine
+	{
+		FString Name;
+		int32 Kills = 0;
+		int32 Downs = 0;
+		int32 Deaths = 0;
+		int32 Assists = 0;
+		EOneBrahamLifeState State = EOneBrahamLifeState::Alive;
+		bool bYou = false;
+	};
 
-	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_Context = nullptr;
-	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_Headline = nullptr;
-	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_Winner = nullptr;
-	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_Verdict = nullptr;
-	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_Tannoy = nullptr;
-	UPROPERTY(Transient) TObjectPtr<UTextBlock> Text_Footer = nullptr;
-	UPROPERTY(Transient) TObjectPtr<UVerticalBox> SquadList = nullptr;
+	struct FSquadLine
+	{
+		FString Name;
+		FString Fate;
+		bool bOwn = false;
+		bool bWinner = false;
+		bool bOut = false;
+		TArray<FMemberLine> Members;
+	};
 
-	/** What the squad blocks were built from; a change rebuilds them. */
-	FString SquadSignature;
+	struct FReport
+	{
+		FString Eyebrow;
+		FString Headline;
+		/** A loss: the serif line on the red field. */
+		bool bLoss = false;
+		FString WinnerLine;
+		FString Verdict;
+		FString Tannoy;
+		FString Leave;
+		FString Context;
+		TArray<TPair<FString, float>> Stats;
+		TArray<FSquadLine> Squads;
+	};
+
+	FReport Report;
+
+	/** Paints the whole report (the chart, the words, the bars). */
+	void PaintReport(struct FOneBrahamPainter& P, double Now) const;
+
+	/** The chart's routes and seal line from the replay. */
+	void BuildChart(struct FOneBrahamSectionParams& Params) const;
+
+	UPROPERTY(Transient) TObjectPtr<UOneBrahamPaintedControl> Row_Continue = nullptr;
+	UPROPERTY(Transient) TObjectPtr<UOneBrahamPaintedControl> Row_SignOut = nullptr;
 
 	EOneBrahamMatchEnding ShownEnding = EOneBrahamMatchEnding::None;
+
+	FOneBrahamMatchReplay Replay;
+	FOneBrahamHUDFrame LastFrame;
+	bool bDemoEnding = false;
+
+	/** Real time the screen went up: the replay, the typing and the counting
+	 *  are functions of it. */
+	double ShownAt = 0.0;
 
 	FTSTicker::FDelegateHandle RefreshHandle;
 	bool bShowing = false;

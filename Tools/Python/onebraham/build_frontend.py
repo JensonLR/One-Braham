@@ -40,6 +40,21 @@ L_LOADING
     load. Empty and black is correct for both; its WorldSettings names the
     engine's own GameModeBase, so opening it directly never starts a match.
 
+THE TYPE (editor)
+    import_fonts() brings the four open-licence families the design system is
+    set in (SourceArt/Fonts/<Family>/, each with its OFL.txt) into
+    /Game/OneBraham/UI/Fonts as UFontFace assets, FF_ + the file name:
+      Archivo         Expanded Black / Bold, SemiCondensed Bold / SemiBold /
+                      Medium / Regular, Regular        (Omnibus-Type, OFL 1.1)
+      IBM Plex Mono   SemiBold, Medium, Regular       (google/fonts, OFL 1.1)
+      Doto            Bold, Medium - instanced offline from the variable font
+                      (fonttools varLib.instancer wght=700|500 ROND=0)
+      Instrument Serif Italic                          (google/fonts, OFL 1.1)
+    Every face is Inline: its data cooks into the asset, so the loading page
+    (painted on the movie player's thread) never waits on a file. The
+    composites are built in code (UOneBrahamUIStyle::Font), one typeface per
+    token, so no UFont asset is needed. /Game/OneBraham/UI is always cooked.
+
 CREDITS (text only, no editor)
     check_credits() reads Docs/LICENCES.md and fails when a credit it asks for
     is missing from UOneBrahamMainMenuWidget::Credits(): the OpenStreetMap
@@ -135,7 +150,7 @@ INTERIOR_INSET_CM = 70.0
 # ===========================================================================
 
 # The LICENCES.md sections whose assets the credits name one by one.
-CREDITED_SECTIONS = ("OpenStreetMap", "Poly Haven", "ambientCG", "Epic Games")
+CREDITED_SECTIONS = ("OpenStreetMap", "Poly Haven", "ambientCG", "Epic Games", "Fonts")
 # Phrases the credits must carry whatever the table says.
 REQUIRED_PHRASES = (
     ("OpenStreetMap contributors", "the ODbL attribution"),
@@ -144,7 +159,45 @@ REQUIRED_PHRASES = (
     ("Poly Haven", "the skies and textures"),
     ("ambientCG", "the textures"),
     ("Epic Games", "the mannequins and template weapons"),
+    ("SIL Open Font License", "the four typefaces' licence"),
 )
+
+# The faces the UI style resolves (UOneBrahamUIStyle.cpp's FaceFor table).
+FONT_SOURCE = os.path.join(REPO_ROOT, "SourceArt", "Fonts")
+FONT_FOLDER = C.UI + "/Fonts"
+FONT_FACES = (
+    ("Archivo", "ArchivoExpanded-Black.ttf"),
+    ("Archivo", "ArchivoExpanded-Bold.ttf"),
+    ("Archivo", "ArchivoSemiCondensed-Bold.ttf"),
+    ("Archivo", "ArchivoSemiCondensed-SemiBold.ttf"),
+    ("Archivo", "ArchivoSemiCondensed-Medium.ttf"),
+    ("Archivo", "ArchivoSemiCondensed-Regular.ttf"),
+    ("Archivo", "Archivo-Regular.ttf"),
+    ("IBMPlexMono", "IBMPlexMono-SemiBold.ttf"),
+    ("IBMPlexMono", "IBMPlexMono-Medium.ttf"),
+    ("IBMPlexMono", "IBMPlexMono-Regular.ttf"),
+    ("Doto", "Doto-Bold.ttf"),
+    ("Doto", "Doto-Medium.ttf"),
+    ("InstrumentSerif", "InstrumentSerif-Italic.ttf"),
+)
+
+
+def font_asset_name(filename):
+    """'ArchivoExpanded-Black.ttf' -> 'FF_ArchivoExpanded_Black'."""
+    return "FF_" + os.path.splitext(filename)[0].replace("-", "_")
+
+
+def missing_font_sources():
+    """[(path, why)] for faces or licences missing from SourceArt/Fonts."""
+    missing = []
+    for family, filename in FONT_FACES:
+        path = os.path.join(FONT_SOURCE, family, filename)
+        if not os.path.isfile(path):
+            missing.append((path, "face"))
+        licence = os.path.join(FONT_SOURCE, family, "OFL.txt")
+        if not os.path.isfile(licence) and (licence, "licence") not in missing:
+            missing.append((licence, "licence"))
+    return missing
 
 
 def _sections(markdown):
@@ -205,6 +258,10 @@ def check_credits():
 
     for what, why in missing_credits(markdown, source):
         report.failed(what, u"not in UOneBrahamMainMenuWidget::Credits() ({0})".format(why))
+
+    # The faces the UI is set in, and the licence each family ships with.
+    for path, why in missing_font_sources():
+        report.failed(os.path.relpath(path, REPO_ROOT), u"missing ({0}): the type system needs it".format(why))
 
     if report.ok():
         C.log(u"  credits: {0} assets and {1} phrases from Docs/LICENCES.md are on the credits page".format(
@@ -271,6 +328,58 @@ def _save(report, path):
         report.failed(path, u"could not save: {0}".format(exc))
         return False
     return True
+
+
+def import_fonts(report):
+    """The type system's faces, as Inline UFontFace assets in /Game/OneBraham/UI/Fonts."""
+    if not unreal.EditorAssetLibrary.does_directory_exist(FONT_FOLDER):
+        unreal.EditorAssetLibrary.make_directory(FONT_FOLDER)
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    # UFontFace's import touches the Slate application, which a commandlet
+    # (BuildContent.sh's -run=pythonscript) does not have: there the faces are
+    # kept as imported, and a missing one says how to bring it in.
+    commandlet = "-run=" in unreal.SystemLibrary.get_command_line().lower()
+    imported = 0
+    for family, filename in FONT_FACES:
+        source = os.path.join(FONT_SOURCE, family, filename)
+        if not os.path.isfile(source):
+            report.failed(source, "missing - see SourceArt/Fonts")
+            continue
+        name = font_asset_name(filename)
+        if commandlet:
+            path = "{0}/{1}".format(FONT_FOLDER, name)
+            if unreal.EditorAssetLibrary.does_asset_exist(path):
+                report.skipped_asset(path, "already imported (a commandlet cannot import fonts)")
+            else:
+                report.failed(path, "not imported: run UnrealEditor OneBraham.uproject "
+                                    "-ExecutePythonScript=Tools/Python/onebraham/build_frontend.py (not -Cmd)")
+            continue
+        task = unreal.AssetImportTask()
+        task.set_editor_property("filename", source)
+        task.set_editor_property("destination_path", FONT_FOLDER)
+        task.set_editor_property("destination_name", name)
+        task.set_editor_property("automated", True)
+        task.set_editor_property("replace_existing", True)
+        task.set_editor_property("save", False)
+        factory = getattr(unreal, "FontFileImportFactory", None)
+        if factory is not None:
+            task.set_editor_property("factory", factory())
+        tools.import_asset_tasks([task])
+        path = "{0}/{1}".format(FONT_FOLDER, name)
+        face = unreal.EditorAssetLibrary.load_asset(path)
+        if face is None or not isinstance(face, unreal.FontFace):
+            report.failed(path, "the import did not produce a FontFace")
+            continue
+        try:
+            face.set_editor_property("loading_policy", unreal.FontLoadingPolicy.INLINE)
+            face.set_editor_property("hinting", unreal.FontHinting.DEFAULT)
+        except Exception as exc:  # noqa: BLE001
+            report.failed(path + " policy", str(exc))
+        unreal.EditorAssetLibrary.save_asset(path, only_if_is_dirty=False)
+        report.created_asset(path)
+        imported += 1
+    C.log(u"  fonts: {0} of {1} faces imported into {2}".format(imported, len(FONT_FACES), FONT_FOLDER))
+    return imported
 
 
 def build_loading_level(report):
@@ -504,9 +613,11 @@ def build_all():
     if not unreal.EditorAssetLibrary.does_directory_exist(C.MAPS):
         unreal.EditorAssetLibrary.make_directory(C.MAPS)
 
-    C.step(1, 2, "L_Loading")
+    C.step(1, 3, "Fonts")
+    C.guard(report, FONT_FOLDER, import_fonts, report)
+    C.step(2, 3, "L_Loading")
     C.guard(report, C.MAP_LOADING, build_loading_level, report)
-    C.step(2, 2, "L_MainMenu")
+    C.step(3, 3, "L_MainMenu")
     C.guard(report, MAP_MAIN_MENU, build_main_menu_level, report)
 
     C.log(report.summary())
