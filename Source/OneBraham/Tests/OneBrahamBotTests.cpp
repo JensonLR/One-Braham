@@ -7,7 +7,10 @@
 // by default, how `?Bots=N` and the match settings combine, how a fill spreads
 // over the squads, which squad gives a bot up when a human joins, when the
 // match ends because no human is left in it, and the stall test that walks a
-// stuck bot out of a dead end.
+// stuck bot out of a dead end. And the climb (UOneBrahamBotClimbDirector's
+// rules): which way up each squad takes, the tower points it walks to, when it
+// leaves the plaza, how far ahead of its squad a bot may get, when a jam is a
+// jam, when the lockdown makes the climb urgent, and when a fight is broken off.
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
@@ -223,6 +226,275 @@ bool FOneBrahamBotSettingsFieldsTest::RunTest(const FString& Parameters)
 		}
 		TestTrue(TEXT("MaxBots reads as fill-all or a sane cap"), MaxBots >= FillAllSlots && MaxBots <= 64);
 	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamBotClimbRouteTest, "OneBraham.Bots.ClimbRoutes",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamBotClimbRouteTest::RunTest(const FString& Parameters)
+{
+	using namespace OneBrahamBotRules;
+
+	// Each squad leaves the ground floor its own way, the set with the shortest
+	// total walk. Rows are squads, columns stair A, spiral B, escalators - the
+	// solo-ASCENT spawns: Alpha by the escalators, Bravo in reception's east
+	// end, Charlie north of the core.
+	{
+		const TArray<TArray<float>> Distances = {
+			{ 1900.f, 2700.f, 700.f },
+			{ 3100.f, 2400.f, 3500.f },
+			{ 1100.f, 1100.f, 2900.f } };
+		const TArray<EClimbRoute> Opening = AssignOpeningRoutes(Distances);
+		TestEqual(TEXT("one opening route per squad"), Opening.Num(), 3);
+		TestTrue(TEXT("Alpha, by the escalators, takes them"), Opening[0] == EClimbRoute::Escalators);
+		TestTrue(TEXT("Bravo, east, takes the spiral"), Opening[1] == EClimbRoute::SpiralB);
+		TestTrue(TEXT("Charlie takes the stair left over"), Opening[2] == EClimbRoute::FireStairA);
+	}
+	{
+		// Two squads nearest the same stair: one of them goes the other way.
+		const TArray<TArray<float>> Distances = { { 500.f, 2000.f, 3000.f }, { 600.f, 2500.f, 2600.f } };
+		const TArray<EClimbRoute> Opening = AssignOpeningRoutes(Distances);
+		TestTrue(TEXT("two squads never share a way up while a third is free"), Opening[0] != Opening[1]);
+		TestTrue(TEXT("the cheaper split overall, not first come first served"), Opening[0] == EClimbRoute::SpiralB && Opening[1] == EClimbRoute::FireStairA);
+	}
+	{
+		// Four squads, three ways: exactly one is shared.
+		const TArray<TArray<float>> Distances = { { 100.f, 900.f, 900.f }, { 900.f, 100.f, 900.f }, { 900.f, 900.f, 100.f }, { 200.f, 900.f, 900.f } };
+		const TArray<EClimbRoute> Opening = AssignOpeningRoutes(Distances);
+		TSet<EClimbRoute> Used(Opening);
+		TestEqual(TEXT("four squads use all three ways up"), Used.Num(), 3);
+		TestEqual(TEXT("no squads, no plan"), AssignOpeningRoutes({}).Num(), 0);
+	}
+
+	// Above the ground a squad keeps favouring its stair; an escalator squad has no favourite.
+	TestTrue(TEXT("the opening route is favoured on the ground"), PreferredRoute(EClimbRoute::Escalators, 0) == EClimbRoute::Escalators);
+	TestTrue(TEXT("an escalator squad has no favourite above"), PreferredRoute(EClimbRoute::Escalators, 4) == EClimbRoute::None);
+	TestTrue(TEXT("a stair squad keeps its stair"), PreferredRoute(EClimbRoute::SpiralB, 9) == EClimbRoute::SpiralB);
+
+	auto Option = [](EClimbRoute Route, float Distance, int32 Enemies = 0, int32 Bodies = 0, int32 Friends = 0, float Blocked = 0.f, bool bUsable = true)
+	{
+		FClimbRouteOption Out;
+		Out.Route = Route;
+		Out.DistanceCm = Distance;
+		Out.Enemies = Enemies;
+		Out.Bodies = Bodies;
+		Out.Friends = Friends;
+		Out.RecentBlockSeconds = Blocked;
+		Out.bUsable = bUsable;
+		return Out;
+	};
+
+	// The squad's own stair wins a close call...
+	{
+		const FClimbRouteOption Options[] = { Option(EClimbRoute::FireStairA, 1400.f), Option(EClimbRoute::SpiralB, 900.f) };
+		TestEqual(TEXT("the preferred stair wins a close call"), PickClimbRoute(Options, EClimbRoute::FireStairA, EClimbRoute::None), 0);
+		TestEqual(TEXT("with no preference the nearer one wins"), PickClimbRoute(Options, EClimbRoute::None, EClimbRoute::None), 1);
+	}
+
+	// ...but not a doorway full of enemies or plugged by a body.
+	{
+		const FClimbRouteOption Enemies[] = { Option(EClimbRoute::FireStairA, 900.f, 3), Option(EClimbRoute::SpiralB, 1500.f) };
+		TestEqual(TEXT("three enemies in the preferred door: the other stair"), PickClimbRoute(Enemies, EClimbRoute::FireStairA, EClimbRoute::None), 1);
+
+		const FClimbRouteOption Body[] = { Option(EClimbRoute::FireStairA, 900.f, 0, 1), Option(EClimbRoute::SpiralB, 1400.f) };
+		TestEqual(TEXT("a body in the preferred door: the other stair"), PickClimbRoute(Body, EClimbRoute::FireStairA, EClimbRoute::None), 1);
+
+		const FClimbRouteOption Friends[] = { Option(EClimbRoute::FireStairA, 900.f, 0, 0, 3), Option(EClimbRoute::SpiralB, 1500.f) };
+		TestEqual(TEXT("team-mates queueing in it do not turn a squad away"), PickClimbRoute(Friends, EClimbRoute::FireStairA, EClimbRoute::None), 0);
+	}
+
+	// A shut way in is never taken; nothing open is "no way up".
+	{
+		const FClimbRouteOption Shut[] = { Option(EClimbRoute::FireStairA, 100.f, 0, 0, 0, 0.f, false), Option(EClimbRoute::SpiralB, 4000.f, 2, 1) };
+		TestEqual(TEXT("a shutter down or a locked door is never chosen"), PickClimbRoute(Shut, EClimbRoute::FireStairA, EClimbRoute::FireStairA), 1);
+
+		const FClimbRouteOption AllShut[] = { Option(EClimbRoute::FireStairA, 100.f, 0, 0, 0, 0.f, false), Option(EClimbRoute::SpiralB, 100.f, 0, 0, 0, 0.f, false) };
+		TestEqual(TEXT("every way shut: none"), PickClimbRoute(AllShut, EClimbRoute::None, EClimbRoute::None), static_cast<int32>(INDEX_NONE));
+		TestEqual(TEXT("no options: none"), PickClimbRoute(TConstArrayView<FClimbRouteOption>(), EClimbRoute::None, EClimbRoute::None), static_cast<int32>(INDEX_NONE));
+	}
+
+	// A remembered stall turns a squad away, and the memory fades.
+	{
+		const FClimbRouteOption Fresh[] = { Option(EClimbRoute::SpiralB, 900.f, 0, 0, 0, RouteBlockMemorySeconds), Option(EClimbRoute::FireStairA, 1700.f) };
+		TestEqual(TEXT("a fresh stall on the current stair: re-route"), PickClimbRoute(Fresh, EClimbRoute::SpiralB, EClimbRoute::SpiralB), 1);
+
+		const FClimbRouteOption Faded[] = { Option(EClimbRoute::SpiralB, 900.f, 0, 0, 0, 1.f), Option(EClimbRoute::FireStairA, 1700.f) };
+		TestEqual(TEXT("a stall nearly forgotten: stay"), PickClimbRoute(Faded, EClimbRoute::SpiralB, EClimbRoute::SpiralB), 0);
+	}
+
+	// Stickiness: a small difference does not flip a squad between stairs.
+	{
+		const FClimbRouteOption Options[] = { Option(EClimbRoute::FireStairA, 1000.f), Option(EClimbRoute::SpiralB, 700.f) };
+		TestEqual(TEXT("the stair the squad is on survives a small difference"), PickClimbRoute(Options, EClimbRoute::None, EClimbRoute::FireStairA), 0);
+	}
+
+	// Which routes climb from where.
+	TestTrue(TEXT("the escalators climb from the ground floor"), RouteClimbsFromFloor(EClimbRoute::Escalators, 0));
+	TestFalse(TEXT("the escalators stop at floor 1"), RouteClimbsFromFloor(EClimbRoute::Escalators, 1));
+	TestTrue(TEXT("the fire stair climbs from floor 9"), RouteClimbsFromFloor(EClimbRoute::FireStairA, 9));
+	TestFalse(TEXT("nothing climbs from the roof"), RouteClimbsFromFloor(EClimbRoute::SpiralB, OneBrahamConstants::FloorTop));
+	TestFalse(TEXT("None is not a route"), RouteClimbsFromFloor(EClimbRoute::None, 3));
+
+	// Legs: two floors, never past the objective; the escalators go to floor 1.
+	TestEqual(TEXT("a leg is two floors"), ClimbTargetFloor(EClimbRoute::SpiralB, 4, 15), 6);
+	TestEqual(TEXT("the last leg stops at the objective"), ClimbTargetFloor(EClimbRoute::FireStairA, 14, 15), 15);
+	TestEqual(TEXT("on the objective's floor: stay"), ClimbTargetFloor(EClimbRoute::FireStairA, 15, 15), 15);
+	TestEqual(TEXT("the escalators go to floor 1"), ClimbTargetFloor(EClimbRoute::Escalators, 0, 15), 1);
+
+	// The tower points: the doors where the map builder put them.
+	{
+		TestEqual(TEXT("floor 1's slab is on the origin"), FloorBaseZ(1), 0.f);
+		TestEqual(TEXT("the ground floor is a storey below"), FloorBaseZ(0), -400.f);
+
+		const FVector A = RouteDoorPoint(EClimbRoute::FireStairA, 5);
+		const FVector B = RouteDoorPoint(EClimbRoute::SpiralB, 5);
+		TestEqual(TEXT("stair A's door is at -x"), A.X, static_cast<double>(-StairDoorX));
+		TestEqual(TEXT("stair B's door is at +x"), B.X, static_cast<double>(StairDoorX));
+		TestEqual(TEXT("door points are on their floor"), OneBrahamConstants::FloorIndexForZ(A.Z), 5);
+
+		const FVector Landing = RouteLandingPoint(EClimbRoute::SpiralB, 7, 2);
+		TestTrue(TEXT("a stair's landing is inside its stairwell"), IsOnRoute(EClimbRoute::SpiralB, Landing));
+		TestEqual(TEXT("a stair's landing is on the floor asked for"), OneBrahamConstants::FloorIndexForZ(Landing.Z), 7);
+		TestFalse(TEXT("B's landing is not in A"), IsOnRoute(EClimbRoute::FireStairA, Landing));
+
+		const FVector Entry = RouteEntryPoint(EClimbRoute::FireStairA, 3, 1);
+		TestTrue(TEXT("a stair's way in is out on the floor, not in the stairwell"), RouteAt(Entry) == EClimbRoute::None);
+		TestTrue(TEXT("a stair's way in is in front of its door"), FVector::Dist2D(Entry, A) < 200.f);
+
+		const FVector Top = RouteLandingPoint(EClimbRoute::Escalators, 0, 3);
+		TestEqual(TEXT("the escalators arrive on floor 1"), OneBrahamConstants::FloorIndexForZ(Top.Z), 1);
+		TestTrue(TEXT("on the escalators half way up is on the route"),
+			IsOnRoute(EClimbRoute::Escalators, FVector(EscalatorLaneX(1), (EscalatorFootY + EscalatorTopY) * 0.5f, -200.f)));
+		TestTrue(TEXT("the lift hall is on no route"), RouteAt(FVector(0.f, 0.f, 90.f)) == EClimbRoute::None);
+
+		TSet<float> Lanes;
+		for (int32 Slot = 0; Slot < 4; ++Slot)
+		{
+			const float X = EscalatorLaneX(Slot);
+			TestTrue(TEXT("a lane is on the escalators"), X > EscalatorMinX && X < EscalatorMaxX);
+			Lanes.Add(X);
+		}
+		TestEqual(TEXT("a squad of four uses all four lanes"), Lanes.Num(), 4);
+	}
+
+	TestEqual(TEXT("route names read in the log"), FString(ClimbRouteName(EClimbRoute::SpiralB)), FString(TEXT("SpiralB")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamBotClimbSquadTest, "OneBraham.Bots.ClimbSquad",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamBotClimbSquadTest::RunTest(const FString& Parameters)
+{
+	using namespace OneBrahamBotRules;
+
+	// Departures: Alpha first, squads apart, members in a file, nobody waits long.
+	TestEqual(TEXT("Alpha's first bot goes at once"), DepartureDelaySeconds(0, 0), 0.f);
+	TestTrue(TEXT("Bravo leaves after Alpha"), DepartureDelaySeconds(1, 0) > DepartureDelaySeconds(0, 0));
+	TestTrue(TEXT("Charlie leaves after Bravo"), DepartureDelaySeconds(2, 0) > DepartureDelaySeconds(1, 0));
+	TestTrue(TEXT("a squad's members leave one after another"), DepartureDelaySeconds(1, 1) > DepartureDelaySeconds(1, 0));
+	for (int32 Squad = 0; Squad < 3; ++Squad)
+	{
+		for (int32 Ordinal = 0; Ordinal < 4; ++Ordinal)
+		{
+			TestTrue(TEXT("nobody stands on the plaza for more than ten seconds"), DepartureDelaySeconds(Squad, Ordinal) <= 10.f);
+		}
+	}
+
+	// A shared way off the ground floor: the later squad holds until the earlier one is through the door.
+	{
+		const TArray<int32> Ids = { 0, 1, 2 };
+		const TArray<EClimbRoute> Own = { EClimbRoute::FireStairA, EClimbRoute::SpiralB, EClimbRoute::Escalators };
+		const TArray<float> Walks = { 2100.f, 2500.f, 1100.f };
+		for (const float Hold : SharedOpeningHolds(Ids, Own, Walks))
+		{
+			TestEqual(TEXT("a squad with a door of its own does not hold"), Hold, 0.f);
+		}
+
+		// The solo-ASCENT spawns with the escalators a dead end: Bravo and Charlie share the spiral.
+		const TArray<EClimbRoute> Shared = { EClimbRoute::FireStairA, EClimbRoute::SpiralB, EClimbRoute::SpiralB };
+		const TArray<float> Holds = SharedOpeningHolds(Ids, Shared, Walks);
+		TestEqual(TEXT("Alpha, alone on its stair, does not hold"), Holds[0], 0.f);
+		TestEqual(TEXT("Bravo, first to the shared door, does not hold"), Holds[1], 0.f);
+		TestTrue(TEXT("Charlie, nearer the shared door but later, holds"), Holds[2] > 0.f);
+		TestEqual(TEXT("Charlie reaches the door the gap behind Bravo's last bot"),
+			OpeningArrivalSeconds(2, 0, Walks[2], Holds[2]),
+			OpeningArrivalSeconds(1, OneBrahamConstants::SquadSize - 1, Walks[1], Holds[1]) + SharedOpeningGapSeconds, 0.01f);
+
+		// The order squads are listed in does not matter.
+		const TArray<float> Reversed = SharedOpeningHolds({ 2, 1, 0 }, { EClimbRoute::SpiralB, EClimbRoute::SpiralB, EClimbRoute::FireStairA }, { 1100.f, 2500.f, 2100.f });
+		TestEqual(TEXT("the same hold whatever the order"), Reversed[0], Holds[2], 0.01f);
+		TestEqual(TEXT("the earlier squad still does not hold"), Reversed[1], 0.f);
+
+		// A squad already behind does not hold; nobody holds longer than the cap.
+		const TArray<float> Behind = SharedOpeningHolds({ 0, 1 }, { EClimbRoute::SpiralB, EClimbRoute::SpiralB }, { 0.f, 6000.f });
+		TestEqual(TEXT("a squad that arrives well behind anyway does not hold"), Behind[1], 0.f);
+		const TArray<float> Capped = SharedOpeningHolds({ 0, 1 }, { EClimbRoute::SpiralB, EClimbRoute::SpiralB }, { 6000.f, 0.f });
+		TestEqual(TEXT("the lockdown is coming: the hold is capped"), Capped[1], MaxSharedOpeningHoldSeconds);
+		TestEqual(TEXT("no squads, no holds"), SharedOpeningHolds({}, {}, {}).Num(), 0);
+	}
+
+	// The squad: three floors ahead of the last climber, wait - for a while.
+	TestFalse(TEXT("two floors ahead: climb on"), ShouldWaitForSquad(6, 4, 0.f, false));
+	TestTrue(TEXT("three floors ahead: wait"), ShouldWaitForSquad(7, 4, 0.f, false));
+	TestFalse(TEXT("waited long enough on this floor: climb on"), ShouldWaitForSquad(7, 4, MaxSquadWaitSeconds, false));
+	TestFalse(TEXT("the lockdown is coming: never wait"), ShouldWaitForSquad(9, 2, 0.f, true));
+	TestFalse(TEXT("nobody left to wait for"), ShouldWaitForSquad(9, INDEX_NONE, 0.f, false));
+	TestFalse(TEXT("the last climber does not wait for itself"), ShouldWaitForSquad(4, 4, 0.f, false));
+
+	// A jam is a jam only after the window, and only standing still.
+	TestFalse(TEXT("too soon to call a jam"), IsClimbBlocked(0.f, ClimbBlockedSeconds - 0.5f));
+	TestTrue(TEXT("four seconds pressed into a door is a jam"), IsClimbBlocked(30.f, ClimbBlockedSeconds));
+	TestFalse(TEXT("climbing is not a jam"), IsClimbBlocked(400.f, ClimbBlockedSeconds));
+	TestTrue(TEXT("a jam is called before the controller's own stall"), ClimbBlockedSeconds < StallSeconds);
+
+	// The lockdown: urgent below the highest occupied floor when the next stage is close.
+	TestFalse(TEXT("no director, no hurry"), IsClimbUrgent(false, false, 0.f, 2, 9, false));
+	TestFalse(TEXT("the next stage a long way off: no hurry"), IsClimbUrgent(true, false, 80.f, 2, 9, false));
+	TestTrue(TEXT("the next stage close, below the leaders: hurry"), IsClimbUrgent(true, false, LockdownUrgencySeconds - 1.f, 2, 9, false));
+	TestTrue(TEXT("the warning playing, below the leaders: hurry"), IsClimbUrgent(true, true, 50.f, 2, 9, false));
+	TestFalse(TEXT("the leaders themselves are not sealed under anyone"), IsClimbUrgent(true, true, 5.f, 9, 9, false));
+	TestTrue(TEXT("a purged floor is always urgent"), IsClimbUrgent(false, false, 0.f, 9, 9, true));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamBotStalemateTest, "OneBraham.Bots.ClimbStalemate",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamBotStalemateTest::RunTest(const FString& Parameters)
+{
+	using namespace OneBrahamBotRules;
+
+	// A fight gets its chance.
+	TestFalse(TEXT("a fresh fight is fought"), ShouldBreakOffFight(2.f, 2.f, false));
+	TestFalse(TEXT("a short quiet spell early on is not a stalemate"), ShouldBreakOffFight(MinFightSecondsBeforeBreakOff - 1.f, StalemateQuietSeconds + 1.f, false));
+
+	// A stalemate in a doorway is broken off.
+	TestTrue(TEXT("ten seconds in, nobody hit for eight: break off"), ShouldBreakOffFight(MinFightSecondsBeforeBreakOff, StalemateQuietSeconds, false));
+	TestFalse(TEXT("hits still landing: keep fighting"), ShouldBreakOffFight(20.f, 1.f, false));
+
+	// Nothing goes on forever, but a live exchange is finished first.
+	TestTrue(TEXT("a long fight with a lull is broken off"), ShouldBreakOffFight(MaxFightSeconds, ActiveExchangeSeconds, false));
+	TestFalse(TEXT("a long fight still trading hits is not"), ShouldBreakOffFight(MaxFightSeconds + 5.f, 0.5f, false));
+
+	// The lockdown waits for nobody.
+	TestFalse(TEXT("urgent: a few seconds of fighting first"), ShouldBreakOffFight(UrgentFightSeconds - 1.f, 5.f, true));
+	TestTrue(TEXT("urgent: then go"), ShouldBreakOffFight(UrgentFightSeconds, ActiveExchangeSeconds, true));
+	TestFalse(TEXT("urgent but mid-exchange: finish it"), ShouldBreakOffFight(UrgentFightSeconds + 3.f, 0.5f, true));
+
+	// Close and in sight: stand and fight. Far, or out of sight: shoot on the way past.
+	TestTrue(TEXT("an enemy across the lobby is fought"), ShouldStandAndFight(600.f, true));
+	TestFalse(TEXT("an enemy across the floor is shot at on the move"), ShouldStandAndFight(StandAndFightRangeCm + 300.f, true));
+	TestFalse(TEXT("an enemy out of sight is not stood for"), ShouldStandAndFight(400.f, false));
+
+	// Ordering of the knobs the director relies on.
+	TestTrue(TEXT("a break-off climbs long enough to leave the doorway"), BreakOffSeconds >= 6.f);
+	TestTrue(TEXT("urgency cuts a fight shorter than a stalemate"), UrgentFightSeconds < MinFightSecondsBeforeBreakOff);
+	TestTrue(TEXT("the hard cap is longer than the stalemate test"), MaxFightSeconds > MinFightSecondsBeforeBreakOff + StalemateQuietSeconds);
 
 	return true;
 }

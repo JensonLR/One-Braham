@@ -174,8 +174,15 @@ protected:
 	/** Runs the fade-out and destroys the corpse actor's visual components. */
 	void BeginFadeOut();
 
-	/** Replaces capsule collision with bone collision so bodies stack properly. */
+	/**
+	 * Replaces capsule collision with bone collision so bodies stack properly.
+	 * Runs on the server (EnterRagdoll) and on every client (OnRep_Ragdolling):
+	 * a capsule left blocking on one machine is an invisible wall there.
+	 */
 	void SwapToCorpseCollision();
+
+	/** The ragdoll body's collision: rounds yes, pawns and the interact trace no. */
+	static void ApplyCorpseMeshCollision(USkeletalMeshComponent* Mesh);
 
 	/** Restores capsule collision on revive/respawn. */
 	void RestoreLivingCollision();

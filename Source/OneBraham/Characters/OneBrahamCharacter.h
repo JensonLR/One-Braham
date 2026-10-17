@@ -28,6 +28,7 @@
 #include "OneBrahamCharacter.generated.h"
 
 class UCameraComponent;
+class UCapsuleComponent;
 class USkeletalMeshComponent;
 class UOneBrahamCharacterMovementComponent;
 class UOneBrahamHealthComponent;
@@ -273,6 +274,38 @@ public:
 	 */
 	static FText BuildDeathCauseText(const FOneBrahamKillFeedEntry& Entry);
 
+	/**
+	 * The capsule's collision for a life state, as data. Pure so a test can hold
+	 * the rule without a world; ApplyCapsuleCollisionForLifeState is the only
+	 * writer, and the ragdoll component asks it too.
+	 */
+	struct FCapsuleCollisionRule
+	{
+		/** NoCollision for anyone who is no longer a body in the fight. */
+		ECollisionEnabled::Type Enabled = ECollisionEnabled::QueryAndPhysics;
+
+		/** Whether other pawns (people, bots) are stopped by this capsule. */
+		ECollisionResponse PawnResponse = ECR_Block;
+
+		/** Downed bodies block the interact trace (that is what makes them revivable). */
+		ECollisionResponse InteractableResponse = ECR_Overlap;
+
+		/** Weapon rounds: the hitboxes take them first, the capsule is the fallback. */
+		ECollisionResponse WeaponResponse = ECR_Block;
+	};
+
+	static FCapsuleCollisionRule GetCapsuleCollisionRule(EOneBrahamLifeState State);
+
+	/** Writes GetCapsuleCollisionRule(State) onto Capsule (profile first, then the rule's responses). */
+	static void ApplyCapsuleCollisionForLifeState(UCapsuleComponent* Capsule, EOneBrahamLifeState State);
+
+	/**
+	 * Whether a client may take NewState from a notify other than the body's own
+	 * OnRep_LifeState (the PlayerState's, the downed component's). A corpse is
+	 * never stood back up that way: only the server's word on the body does it.
+	 */
+	static bool CanClientApplyLifeState(EOneBrahamLifeState NewState, bool bBodyIsCorpse);
+
 	// ======================================================================
 	//  Weapon trace origin (server-side hit validation uses this exact value)
 	// ======================================================================
@@ -288,7 +321,12 @@ public:
 	UPROPERTY(ReplicatedUsing = OnRep_Appearance, BlueprintReadOnly, Category = "One Braham|Character")
 	FOneBrahamCharacterAppearance Appearance;
 
-	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Character")
+	/**
+	 * Replicated with a notify so the capsule follows the life state on every
+	 * machine: a corpse that stops blocking only on the server is an invisible
+	 * wall on every client's predicted movement.
+	 */
+	UPROPERTY(ReplicatedUsing = OnRep_LifeState, BlueprintReadOnly, Category = "One Braham|Character")
 	EOneBrahamLifeState LifeState = EOneBrahamLifeState::Alive;
 
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "One Braham|Character")
@@ -354,6 +392,9 @@ public:
 protected:
 	UFUNCTION()
 	void OnRep_Appearance();
+
+	UFUNCTION()
+	void OnRep_LifeState(EOneBrahamLifeState OldState);
 
 	UFUNCTION()
 	void HandleHealthChanged(float NewHealth, float MaxHealth, float Delta);

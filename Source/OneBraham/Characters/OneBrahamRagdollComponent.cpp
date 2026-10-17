@@ -101,8 +101,7 @@ void UOneBrahamRagdollComponent::EnterRagdoll(FName HitBone, const FVector& Shot
 	Mesh->SetSimulatePhysics(true);
 	Mesh->WakeAllRigidBodies();
 	Mesh->bBlendPhysics = true;
-	Mesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-	Mesh->SetCollisionProfileName(TEXT("OneBrahamRagdoll"));
+	ApplyCorpseMeshCollision(Mesh);
 
 	// Add the impulse at the bone that was hit: a shot to the shoulder spins the
 	// body, a shot to the pelvis drops it.
@@ -182,8 +181,11 @@ void UOneBrahamRagdollComponent::OnRep_Ragdolling()
 		Mesh->SetAllBodiesSimulatePhysics(true);
 		Mesh->WakeAllRigidBodies();
 		Mesh->bBlendPhysics = true;
-		Mesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-		Mesh->SetCollisionProfileName(TEXT("OneBrahamRagdoll"));
+
+		// The capsule goes on this machine too, not only on the server: LifeState
+		// carries the same rule, but whichever of the two notifies lands first, a
+		// client never walks its own prediction into a body that is no longer there.
+		SwapToCorpseCollision();
 
 		// Clients replay the same impulse so the body lands where the server's
 		// authority says it did (within Chaos determinism limits).
@@ -272,17 +274,26 @@ void UOneBrahamRagdollComponent::SwapToCorpseCollision()
 	// The capsule must stop blocking: a corpse blocking a doorway is a trap for
 	// the living, and ONE BRAHAM's chokepoints (lift lobbies, stairwell doors)
 	// would become permanently unusable.
-	if (UCapsuleComponent* Capsule = Character->GetCapsuleComponent())
+	AOneBrahamCharacter::ApplyCapsuleCollisionForLifeState(Character->GetCapsuleComponent(), EOneBrahamLifeState::Dead);
+
+	ApplyCorpseMeshCollision(GetTargetMesh());
+}
+
+void UOneBrahamRagdollComponent::ApplyCorpseMeshCollision(USkeletalMeshComponent* Mesh)
+{
+	if (Mesh == nullptr)
 	{
-		Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		return;
 	}
 
-	if (USkeletalMeshComponent* Mesh = GetTargetMesh())
-	{
-		Mesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-		Mesh->SetCollisionProfileName(TEXT("OneBrahamRagdoll"));
-		Mesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
-	}
+	// The profile says all of this already (OneBrahamRagdoll: PhysicsBody that
+	// blocks Weapon, ignores Pawn and Interactable). The two responses are set
+	// again after it because the profile resets every override and is edited in
+	// an .ini: a body in a doorway must stay scenery even if the profile drifts.
+	Mesh->SetCollisionProfileName(TEXT("OneBrahamRagdoll"));
+	Mesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	Mesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	Mesh->SetCollisionResponseToChannel((ECollisionChannel)EOneBrahamTraceChannel::Interactable, ECR_Ignore);
 }
 
 void UOneBrahamRagdollComponent::RestoreLivingCollision()
@@ -293,11 +304,9 @@ void UOneBrahamRagdollComponent::RestoreLivingCollision()
 		return;
 	}
 
-	if (UCapsuleComponent* Capsule = Character->GetCapsuleComponent())
-	{
-		Capsule->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-		Capsule->SetCollisionProfileName(TEXT("OneBrahamCharacter"));
-	}
+	// Whatever the character's life state now says (Alive on a respawn): the
+	// one rule, not a second copy of the living capsule here.
+	AOneBrahamCharacter::ApplyCapsuleCollisionForLifeState(Character->GetCapsuleComponent(), Character->LifeState);
 
 	if (USkeletalMeshComponent* Mesh = GetTargetMesh())
 	{

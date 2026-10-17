@@ -1189,44 +1189,146 @@ void AOneBrahamCharacter::SetInteractionHighlight_Implementation(bool bHighlight
 	Body->SetCustomDepthStencilValue(bHighlighted ? 2 : 0);
 }
 
-void AOneBrahamCharacter::ApplyLifeStateVisuals(EOneBrahamLifeState NewState)
+namespace OneBrahamBodyCollision
 {
-	const EOneBrahamLifeState OldState = LifeState;
-	LifeState = NewState;
+	/** The client's word on a body, so a LAN smoke can show there is no invisible wall where somebody lies. */
+	static void LogClientBodyCollision(const AOneBrahamCharacter* Character, EOneBrahamLifeState OldState, EOneBrahamLifeState NewState)
+	{
+		const UCapsuleComponent* Capsule = Character->GetCapsuleComponent();
+		const bool bOn = Capsule != nullptr && Capsule->IsCollisionEnabled();
+		UE_LOG(LogOneBrahamNet, Log, TEXT("[OB.NET] Body: '%s' %s -> %s here; capsule %s, pawns %s"),
+			*Character->GetName(), *UEnum::GetValueAsString(OldState), *UEnum::GetValueAsString(NewState),
+			bOn ? TEXT("on") : TEXT("off"),
+			bOn && Capsule->GetCollisionResponseToChannel(ECC_Pawn) == ECR_Block ? TEXT("blocked") : TEXT("pass"));
+	}
+}
+using OneBrahamBodyCollision::LogClientBodyCollision;
 
-	// Collision follows the life state: a corpse must not block bullets into an
-	// ongoing fight, but it should still be shootable for the "shot a body"
-	// comedy stat and for hit reactions from stray rounds.
-	switch (NewState)
+AOneBrahamCharacter::FCapsuleCollisionRule AOneBrahamCharacter::GetCapsuleCollisionRule(EOneBrahamLifeState State)
+{
+	FCapsuleCollisionRule Rule;
+
+	switch (State)
 	{
 	case EOneBrahamLifeState::Alive:
-		GetCapsuleComponent()->SetCollisionProfileName(TEXT("OneBrahamCharacter"));
-		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		// The profile as authored: a person on their feet is a solid thing, and
+		// the Interactable channel stays on Overlap so a colleague standing in
+		// front of a door never hides it.
 		break;
 
 	case EOneBrahamLifeState::Downed:
-		GetCapsuleComponent()->SetCollisionProfileName(TEXT("OneBrahamCharacter"));
 		// A body on the floor blocks the interaction trace: that is what makes it
-		// aimable. The profile has this channel on Overlap so that a player who is
-		// *standing* never hides the door behind them (invariant: a person is
-		// something you interact with when they are on the carpet, and nothing but
-		// scenery when they are on their feet), and returning to Alive below
-		// restores it by re-applying the profile.
-		GetCapsuleComponent()->SetCollisionResponseToChannel(
-			(ECollisionChannel)EOneBrahamTraceChannel::Interactable, ECR_Block);
+		// aimable for a revive or an execution (invariant: a person is something
+		// you interact with when they are on the carpet, and nothing but scenery
+		// when they are on their feet). It still takes rounds, through the
+		// hitboxes first and this capsule as the fallback.
+		//
+		// It does not block other people. The crawl capsule is already down at
+		// crouch height, but in a 150 cm stair door or a 120 cm spiral landing a
+		// crawling body that is a wall is a plug: the squad behind it cannot reach
+		// the stair, and neither can its own medic. Pawns step over and past it.
+		Rule.InteractableResponse = ECR_Block;
+		Rule.PawnResponse = ECR_Ignore;
 		break;
 
 	case EOneBrahamLifeState::Dead:
 	case EOneBrahamLifeState::Spectating:
 	case EOneBrahamLifeState::Extracted:
 	default:
-		// Ragdolls are handled by UOneBrahamRagdollComponent; the capsule is
-		// disabled so it does not catch on geometry while the body flops.
-		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		// The ragdoll (UOneBrahamRagdollComponent) is the body now, on the
+		// OneBrahamRagdoll profile that takes rounds and ignores pawns. The capsule
+		// goes entirely, so it neither catches on geometry while the body flops nor
+		// stands in a doorway as an invisible wall where the body used to be.
+		Rule.Enabled = ECollisionEnabled::NoCollision;
+		Rule.PawnResponse = ECR_Ignore;
+		Rule.InteractableResponse = ECR_Ignore;
+		Rule.WeaponResponse = ECR_Ignore;
 		break;
 	}
 
+	return Rule;
+}
+
+void AOneBrahamCharacter::ApplyCapsuleCollisionForLifeState(UCapsuleComponent* Capsule, EOneBrahamLifeState State)
+{
+	if (Capsule == nullptr)
+	{
+		return;
+	}
+
+	const FCapsuleCollisionRule Rule = GetCapsuleCollisionRule(State);
+
+	// The profile first, every time: it resets any per-channel override the last
+	// state left behind (Downed's pawn and interact responses), so a revive is a
+	// return to the authored capsule rather than to whatever the carpet set.
+	Capsule->SetCollisionProfileName(TEXT("OneBrahamCharacter"));
+	Capsule->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+	if (Rule.Enabled == ECollisionEnabled::NoCollision)
+	{
+		Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		return;
+	}
+
+	Capsule->SetCollisionResponseToChannel(ECC_Pawn, Rule.PawnResponse);
+	Capsule->SetCollisionResponseToChannel((ECollisionChannel)EOneBrahamTraceChannel::Interactable, Rule.InteractableResponse);
+	Capsule->SetCollisionResponseToChannel((ECollisionChannel)EOneBrahamTraceChannel::Weapon, Rule.WeaponResponse);
+	Capsule->SetCollisionEnabled(Rule.Enabled);
+}
+
+bool AOneBrahamCharacter::CanClientApplyLifeState(EOneBrahamLifeState NewState, bool bBodyIsCorpse)
+{
+	// A ragdolling body is a corpse until the server says otherwise, and the
+	// server says so on the body itself (bRagdolling and LifeState, one bunch,
+	// OnRep_LifeState). A PlayerState that has moved on to a respawned pawn can
+	// still point at the corpse on a client for a few packets (the two actors
+	// replicate in no fixed order): its Alive must not stand the corpse back up
+	// as a solid capsule where it fell - an invisible wall nothing ever clears,
+	// because the corpse's own LifeState never changes again to correct it.
+	return !bBodyIsCorpse || (NewState != EOneBrahamLifeState::Alive && NewState != EOneBrahamLifeState::Downed);
+}
+
+void AOneBrahamCharacter::ApplyLifeStateVisuals(EOneBrahamLifeState NewState)
+{
+	const EOneBrahamLifeState OldState = LifeState;
+
+	if (!HasAuthority()
+		&& !CanClientApplyLifeState(NewState, RagdollComponent != nullptr && RagdollComponent->IsRagdolling()))
+	{
+		UE_LOG(LogOneBrahamNet, Log, TEXT("[OB.NET] Body: '%s' is a corpse here; %s from a stale PlayerState ignored"),
+			*GetName(), *UEnum::GetValueAsString(NewState));
+		return;
+	}
+
+	LifeState = NewState;
+
+	// Collision follows the life state, on the server here and on every client
+	// through OnRep_LifeState and the downed/ragdoll notifies.
+	ApplyCapsuleCollisionForLifeState(GetCapsuleComponent(), NewState);
+
+	if (!HasAuthority() && OldState != NewState)
+	{
+		// Clients get here from the PlayerState's and the downed component's
+		// notifies, usually before OnRep_LifeState (which then has nothing left
+		// to change).
+		LogClientBodyCollision(this, OldState, NewState);
+	}
+
 	OnLifeStateChanged.Broadcast(OldState, NewState);
+}
+
+void AOneBrahamCharacter::OnRep_LifeState(EOneBrahamLifeState OldState)
+{
+	// The replicated value has already landed in LifeState; the capsule and the
+	// listeners catch up with it. Downed and Alive also arrive via the downed
+	// component's notify, which may have applied them first: applying twice is
+	// idempotent, and Dead has no other way onto a client's capsule.
+	ApplyCapsuleCollisionForLifeState(GetCapsuleComponent(), LifeState);
+
+	if (OldState != LifeState)
+	{
+		LogClientBodyCollision(this, OldState, LifeState);
+		OnLifeStateChanged.Broadcast(OldState, LifeState);
+	}
 }
 
 void AOneBrahamCharacter::OnRep_Appearance()

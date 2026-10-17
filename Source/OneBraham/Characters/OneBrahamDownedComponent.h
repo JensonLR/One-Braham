@@ -16,6 +16,10 @@
 //   * You cannot shoot, sprint, mantle, slide, use a terminal or open a door.
 //   * You CAN be revived through one penetrable surface (cubicle wall), which
 //     produces the single best clip moment in the game.
+//   * You are not a wall: the crawl capsule (crouch height) ignores other
+//     pawns, so a body in a stair door or on the spiral landing is stepped
+//     past, while rounds and the interact trace still stop on it
+//     (AOneBrahamCharacter::GetCapsuleCollisionRule).
 
 #pragma once
 

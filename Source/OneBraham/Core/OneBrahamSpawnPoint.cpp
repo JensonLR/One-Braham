@@ -151,6 +151,15 @@ bool AOneBrahamSpawnPoint::IsClearForPawn(float CapsuleRadius, float CapsuleHalf
 
 	const FCollisionShape Capsule = FCollisionShape::MakeCapsule(CapsuleRadius,
 		FMath::Max(CapsuleRadius, CapsuleHalfHeight - FloorSlackCm * 0.5f));
-	return !World->OverlapBlockingTestByChannel(GetActorLocation() + FVector(0.f, 0.f, FloorSlackCm * 0.5f),
-		FQuat::Identity, ECC_Pawn, Capsule, Params);
+	const FVector TestLocation = GetActorLocation() + FVector(0.f, 0.f, FloorSlackCm * 0.5f);
+	if (World->OverlapBlockingTestByChannel(TestLocation, FQuat::Identity, ECC_Pawn, Capsule, Params))
+	{
+		return false;
+	}
+
+	// A downed player's capsule ignores the Pawn channel (others step past a
+	// crawler), so the test above no longer sees one; it is still a Pawn
+	// object, and nobody should spawn on top of it.
+	return !World->OverlapAnyTestByObjectType(TestLocation, FQuat::Identity,
+		FCollisionObjectQueryParams(ECC_Pawn), Capsule, Params);
 }
