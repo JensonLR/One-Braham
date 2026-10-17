@@ -4,9 +4,15 @@
 // ---------------------------------------------------------------------------
 // Owns everything that survives a level transition:
 //   * the local player profile (UOneBrahamSaveSettings)
-//   * the Steam/online session used for matchmaking and the server browser
 //   * the cached match settings assets for each mode
 //   * the pending travel intent (which mode + which listen/dedicated host)
+//   * the journey between the front end and a match, both ways: solo, host,
+//     join, and back to L_MainMenu when a player leaves, a match ends or a
+//     connection drops (with a line for the menu saying which)
+//
+// The sessions themselves - create, find, join, destroy - are
+// UOneBrahamSessionSubsystem's. This class decides when to ask for one and
+// where to travel once it has answered.
 //
 // Dedicated servers never create a profile or a client session: every entry
 // point checks IsDedicatedServer() first.
@@ -15,46 +21,14 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
-#include "Interfaces/OnlineSessionInterface.h"
+#include "Engine/EngineBaseTypes.h"
 #include "Core/OneBrahamTypes.h"
+#include "Core/OneBrahamSessionSubsystem.h"
 #include "OneBrahamGameInstance.generated.h"
 
+class UNetDriver;
 class UOneBrahamSaveSettings;
 class UOneBrahamMatchSettingsAsset;
-
-/** One row in the server browser / matchmaking list. */
-USTRUCT(BlueprintType)
-struct FOneBrahamServerInfo
-{
-	GENERATED_BODY()
-
-	UPROPERTY(BlueprintReadOnly, Category = "Server")
-	FString ServerName;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Server")
-	FString MapName;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Server")
-	EOneBrahamMatchMode Mode = EOneBrahamMatchMode::Ascent;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Server")
-	int32 CurrentPlayers = 0;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Server")
-	int32 MaxPlayers = 12;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Server")
-	int32 PingMs = 0;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Server")
-	bool bPasswordProtected = false;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Server")
-	FString Region;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Server")
-	int32 SearchResultIndex = INDEX_NONE;
-};
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOneBrahamSessionCreated, bool, bWasSuccessful);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOneBrahamSessionJoined, bool, bWasSuccessful, const FString&, TravelURL);
@@ -112,27 +86,35 @@ public:
 	void SetPendingMatchSettingsOverride(UOneBrahamMatchSettingsAsset* Settings);
 
 	// ======================================================================
-	//  Sessions - listen server + matchmaking
+	//  Sessions - solo, listen server, browser, matchmaking
 	// ======================================================================
 
+	/** A match on this machine alone: no session, no listen socket, bots in
+	 *  every other slot. What PLAY on the main menu does. */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Session")
+	void StartSoloMatch(EOneBrahamMatchMode Mode);
+
 	/**
-	 * Hosts a listen-server match on the local machine. FIRE DRILL and private
-	 * ASCENT lobbies use this; ranked/automatch games use a dedicated server.
+	 * Hosts a listen-server match on the local machine: creates the session
+	 * (LAN, or online where the subsystem can), then travels with ?listen.
+	 * A session that cannot be created still hosts - direct IP works without
+	 * one - and the log says so.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Session")
 	void HostListenServer(EOneBrahamMatchMode Mode, int32 MaxPlayers, bool bLAN, const FString& ServerName);
 
-	/** Starts matchmaking: finds or creates a Steam session for the mode. */
+	/** Starts matchmaking: finds an online session for the mode, or hosts one. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Session")
 	void StartMatchmaking(EOneBrahamMatchMode Mode);
 
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Session")
 	void CancelMatchmaking();
 
-	/** Fires a one-shot async Steam session search for the server browser. */
+	/** Searches for sessions; OnServerListUpdated reports. LAN only under NULL. */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Session")
 	void RefreshServerBrowser(bool bLANOnly = false);
 
+	/** Joins a row of the last search (FOneBrahamServerInfo::SearchResultIndex). */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Session")
 	void JoinServerByIndex(int32 SearchResultIndex);
 
@@ -146,17 +128,27 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Session")
 	void TravelToAddress(const FString& Address, int32 Port, const FString& Options);
 
+	/** The session subsystem, or null on a dedicated server. */
+	UOneBrahamSessionSubsystem* GetSessions() const;
+
 	// ======================================================================
 	//  Travel / flow
 	// ======================================================================
 
+	/**
+	 * Back to the front end. A client disconnects; a listen host sends its
+	 * guests home first ("The host has closed the floor."); a standalone game
+	 * just loads the menu; a dedicated server has no menu, so it sends every
+	 * client home and restarts its map for the next lobby.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Flow")
 	void TravelToMainMenu();
 
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Flow")
 	void TravelToMatchMap(const FString& Options = FString());
 
-	/** Shows the branded ONE BRAHAM loading screen (uses the engine movie player). */
+	/** Shows the branded loading screen on the next map load (the engine movie
+	 *  player: a black page, the title and one line of status). */
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Flow")
 	void ShowLoadingScreen(const FText& StatusText, float Progress);
 
@@ -165,6 +157,20 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "One Braham|Flow")
 	bool IsLoadingScreenUp() const { return bLoadingScreenActive; }
+
+	/** A line for the main menu to show once, on arrival: why the player is
+	 *  back ("Connection lost. The host left the building."). Empty if none. */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Flow")
+	FText ConsumeMenuNotice();
+
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Flow")
+	void SetMenuNotice(const FText& Notice);
+
+	/** The front end's map, as a travel URL. */
+	static const TCHAR* MainMenuMapPath() { return TEXT("/Game/OneBraham/Maps/L_MainMenu"); }
+
+	/** The engine's ClientReturnToMainMenu path lands here: keeps the reason. */
+	virtual void ReturnToMainMenu() override;
 
 	// ======================================================================
 	//  Delegates (UI binds to these)
@@ -175,7 +181,8 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "One Braham|Profile") FOneBrahamProfileLoaded OnProfileLoaded;
 	UPROPERTY(BlueprintAssignable, Category = "One Braham|Session") FOneBrahamMatchmakingStatus OnMatchmakingStatus;
 
-	/** Session name used for every ONE BRAHAM game session. */
+	/** Session name used for every ONE BRAHAM game session: the engine's own
+	 *  NAME_GameSession, so AGameSession registers players against it. */
 	static const FName SessionName;
 
 	// ======================================================================
@@ -191,22 +198,40 @@ public:
 	int32 PendingMaxPlayers = ONE_BRAHAM_MAX_PLAYERS;
 
 protected:
-	// --- Online subsystem callbacks ---------------------------------------
-	void HandleCreateSessionComplete(FName InSessionName, bool bWasSuccessful);
-	void HandleFindSessionsComplete(bool bWasSuccessful);
-	void HandleJoinSessionComplete(FName InSessionName, EOnJoinSessionCompleteResult::Type Result);
-	void HandleDestroySessionComplete(FName InSessionName, bool bWasSuccessful);
+	// --- Session subsystem callbacks ---------------------------------------
+	void HandleSessionCreated(bool bWasSuccessful, bool bLAN);
+	void HandleSessionsFound(bool bWasSuccessful, const TArray<FOneBrahamServerInfo>& Servers);
+	void HandleSessionJoined(bool bWasSuccessful, const FString& TravelURL, const FText& Reason);
+
+	// --- Engine failures: recorded for the menu ------------------------------
+	void HandleNetworkFailure(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString);
+	void HandleTravelFailure(UWorld* World, ETravelFailure::Type FailureType, const FString& ErrorString);
 
 	/** Logs which online subsystem actually started (Steam, or the NULL fallback
 	 *  a dev machine without the Steam client gets) and why it differs from the
 	 *  configured default. Called once from Init. */
 	void LogOnlineSubsystemInUse() const;
 
+	/** The travel request for the pending mode, profile and server name. */
+	FOneBrahamTravelRequest BuildTravelRequest(bool bListen) const;
+
 	/** Builds the option string the GameMode reads for mode/roster config. */
 	FString BuildTravelOptions() const;
 
-	/** Shared session settings builder so host + matchmaking agree. */
-	TSharedPtr<class FOnlineSessionSettings> BuildSessionSettings(EOneBrahamMatchMode Mode, int32 MaxPlayers, bool bLAN, const FString& ServerName) const;
+	/** The bindings to the session subsystem's delegates, made once in Init. */
+	void BindSessionDelegates();
+
+	FDelegateHandle SessionCreatedHandle;
+	FDelegateHandle SessionsFoundHandle;
+	FDelegateHandle SessionJoinedHandle;
+	FDelegateHandle NetworkFailureHandle;
+	FDelegateHandle TravelFailureHandle;
+
+	/** Set while HostListenServer waits on the create: the travel follows it. */
+	bool bHostTravelPending = false;
+
+	/** A failure seen this session, shown by the menu on arrival. */
+	FText PendingMenuNotice;
 
 	UPROPERTY()
 	TObjectPtr<UOneBrahamSaveSettings> Profile = nullptr;
@@ -222,9 +247,6 @@ protected:
 
 	/** UGameInstance has no timer manager of its own; this resolves the world's. */
 	FTimerManager* GetOBTimerManager() const;
-
-	/** Live search handle kept alive while the async search runs. */
-	TSharedPtr<FOnlineSessionSearch> ActiveSearch;
 
 	bool bMatchmakingActive = false;
 	bool bLoadingScreenActive = false;
@@ -243,6 +265,13 @@ protected:
 
 	/** Re-applies the world-bound saved settings (colour-blind mode, bus volumes...). */
 	void HandleWorldBeginPlay(TWeakObjectPtr<UWorld> World);
+
+	/** On a listen host: closes the session to joins once the match is
+	 *  decided (OneBrahamSessionRules::ShouldCloseToJoins). Polled once a
+	 *  second, because the server's phase change broadcasts nothing (the
+	 *  GameState's OnMatchPhaseChanged fires from OnRep, on clients only). */
+	void WatchMatchForSessionClose(UWorld* World);
+	FTimerHandle SessionWatchHandle;
 
 	FDelegateHandle WorldInitializedActorsHandle;
 };

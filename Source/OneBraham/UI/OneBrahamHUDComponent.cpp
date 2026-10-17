@@ -19,6 +19,8 @@
 #include "Interaction/OneBrahamInteractComponent.h"
 #include "UI/OneBrahamFloorPlanWidget.h"
 #include "UI/OneBrahamHUDWidget.h"
+#include "UI/OneBrahamMatchEndWidget.h"
+#include "Engine/GameViewportClient.h"
 #include "UI/OneBrahamPauseMenuWidget.h"
 #include "UI/OneBrahamScoreboardWidget.h"
 #include "UI/OneBrahamQuickLineWidget.h"
@@ -106,6 +108,19 @@ void UOneBrahamHUDComponent::CreateHUD(AOneBrahamPlayerController* InOwningContr
 		return;
 	}
 
+	// A new match's controller starts with the game taking the input. The last
+	// match's end screen left the shared game viewport ignoring it (UI only),
+	// and a restart that replaces the controller - a dedicated server going
+	// round again - tears the old one down after this one has the player, too
+	// late for it to hand the input back itself.
+	if (const UWorld* World = GetWorld())
+	{
+		if (UGameViewportClient* Viewport = World->GetGameViewport(); Viewport != nullptr && Viewport->IgnoreInput())
+		{
+			RestoreGameInput();
+		}
+	}
+
 	// Prefer the authored Blueprint (BP_OneBrahamHUD) so a designer owns the
 	// layout; the C++ class builds an equivalent HUD from scratch when the
 	// Blueprint is absent, which is what keeps a clean checkout playable.
@@ -164,6 +179,29 @@ void UOneBrahamHUDComponent::DestroyHUD()
 	{
 		PauseMenuWidget->RemoveFromParent();
 		PauseMenuWidget = nullptr;
+	}
+
+	if (MatchEndWidget != nullptr)
+	{
+		MatchEndWidget->RemoveFromParent();
+		MatchEndWidget = nullptr;
+		MatchEndGameState.Reset();
+
+		// The screen's UI-only input lives on the game viewport, which outlives
+		// this controller: a restart that brings a new controller (a dedicated
+		// server going round again) otherwise began the next match with the
+		// keyboard and the pad still ignored by the game.
+		RestoreGameInput();
+	}
+}
+
+void UOneBrahamHUDComponent::RestoreGameInput()
+{
+	if (AOneBrahamPlayerController* Controller = OwningController.Get())
+	{
+		Controller->FlushPressedKeys();
+		Controller->SetInputMode(FInputModeGameOnly());
+		Controller->bShowMouseCursor = false;
 	}
 }
 
@@ -359,6 +397,88 @@ void UOneBrahamHUDComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 	AnnounceStateChanges();
 
 	HUDWidget->ApplyHUDData(Data);
+
+	UpdateMatchEndScreen();
+}
+
+void UOneBrahamHUDComponent::UpdateMatchEndScreen()
+{
+	const UWorld* World = GetWorld();
+	const AOneBrahamGameState* GS = World != nullptr ? World->GetGameState<AOneBrahamGameState>() : nullptr;
+	AOneBrahamPlayerController* Controller = OwningController.Get();
+	const bool bMatchOver = GS != nullptr
+		&& (GS->MatchPhase == EOneBrahamMatchPhase::Complete || GS->MatchPhase == EOneBrahamMatchPhase::PostMatch);
+
+	if (MatchEndWidget != nullptr)
+	{
+		// A seamless restart (a dedicated server going round again) keeps this
+		// controller, this component and the screen on it: the widget belongs to
+		// the controller, so the world change does not take it down. Without
+		// this the next match was played - or rather not played - behind the
+		// last one's results, with the input still the screen's. Between the
+		// maps there is no game state, and the screen stays up over the loading.
+		if (GS != nullptr && (GS != MatchEndGameState.Get() || !bMatchOver))
+		{
+			CloseMatchEndScreen();
+		}
+		return;
+	}
+
+	if (!bMatchOver || Controller == nullptr)
+	{
+		return;
+	}
+
+	// Everything the player had open goes: the end screen is the only thing
+	// left to read, and a pause menu over it would hold the input.
+	SetScoreboardVisible(false);
+	SetFloorPlanVisible(false);
+	SetQuickLineMenuVisible(false);
+	SetDeathScreenVisible(false);
+	if (PauseMenuWidget != nullptr)
+	{
+		PauseMenuWidget->CloseMenu();
+	}
+	SetHUDVisible(false);
+
+	MatchEndWidget = CreateWidget<UOneBrahamMatchEndWidget>(Controller, UOneBrahamMatchEndWidget::StaticClass());
+	if (MatchEndWidget == nullptr)
+	{
+		UE_LOG(LogOneBrahamUI, Warning, TEXT("[OB.UI] Failed to create the end screen."));
+		return;
+	}
+
+	MatchEndGameState = GS;
+	MatchEndWidget->AddToPlayerScreen(MatchEndZOrder);
+	MatchEndWidget->ShowMatchEnd();
+
+	// The screen takes the input: the fight is over on the server, and a
+	// trigger held under the results should not be shooting at anybody.
+	FInputModeUIOnly InputMode;
+	InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+	Controller->SetInputMode(InputMode);
+	Controller->bShowMouseCursor = false;
+
+	UE_LOG(LogOneBrahamUI, Log, TEXT("[OB.UI] End screen up for '%s' (%s)."), *Controller->GetName(),
+		*OneBrahamMatchEnd::LogNameFor(MatchEndWidget->GetShownEnding()));
+}
+
+void UOneBrahamHUDComponent::CloseMatchEndScreen()
+{
+	if (MatchEndWidget == nullptr)
+	{
+		return;
+	}
+
+	MatchEndWidget->RemoveFromParent();
+	MatchEndWidget = nullptr;
+	MatchEndGameState.Reset();
+
+	// The HUD and the game's input come back for the new match.
+	SetHUDVisible(true);
+	RestoreGameInput();
+
+	UE_LOG(LogOneBrahamUI, Log, TEXT("[OB.UI] End screen closed: a new match has begun."));
 }
 
 void UOneBrahamHUDComponent::Announce(FName Key, float DurationSeconds, FLinearColor Colour)

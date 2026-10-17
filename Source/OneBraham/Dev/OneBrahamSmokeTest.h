@@ -56,6 +56,27 @@
 //                stands between them; the line logs the distance and whether
 //                a visibility trace reaches them (and what blocks it if not)
 //
+// A WHOLE MATCH (-OBSmokeFullMatch)
+//   After the screenshots, instead of the verdict: the local player is taken
+//   out of the fight (AOneBrahamGameMode::DevWithdrawToSpectator - a bot takes
+//   the slot, the camera follows the highest living bot) and the run waits for
+//   the match to end, logging its progress every 30 s. Then:
+//     result       one line: the ending, the winner, the duration, the score
+//     squad        one line per squad: members, in the fight, extracted
+//     end screen   FAIL when UOneBrahamMatchEndWidget is not up on this machine
+//     shot end     a screenshot of the end screen
+//     coherent     OneBrahamMatchEnd::IsResultCoherent; FAIL with its reason
+//     after        waits for the post-match travel (the menu, or a reload of
+//                  the map while the menu is not built) and logs where it went;
+//                  FAIL when nobody left the end screen
+//   PASS only if the match reached Complete with a coherent result. The budget
+//   defaults to MaxTimeoutSeconds; compress the match with the dev console
+//   variables (Docs/18), e.g.
+//       -OBSmoke -OBSmokeFullMatch -OBSmokeShots=1 -ExecCmds="ob.Match.WarmupSeconds 5,
+//        ob.Lockdown.StageSeconds 40, ob.Extraction.ArrivalSeconds 10, ob.Match.PostMatchSeconds 12"
+//   On a client the player is not withdrawn (only the server can do that): the
+//   run waits for the server's match to end the same way.
+//
 // HOLDING (-OBSmokeHold=S)
 //   After the verdict, stay up for at most S more seconds instead of quitting,
 //   and quit as soon as a server has no client connections left. A listen host
@@ -107,10 +128,15 @@ struct ONEBRAHAM_API FOneBrahamSmokeOptions
 	 *  after the verdict while clients are still connected. */
 	float HoldSeconds = 0.f;
 
+	/** -OBSmokeFullMatch: watch the match to its end before the verdict. The
+	 *  budget defaults to MaxTimeoutSeconds unless -OBSmokeTimeout says. */
+	bool bFullMatch = false;
+
 	static constexpr int32 MaxShots = 16;
 	static constexpr int32 MaxExpectPlayers = 32;
 	static constexpr float MinTimeoutSeconds = 15.f;
-	static constexpr float MaxTimeoutSeconds = 900.f;
+	/** Long enough for an uncompressed ASCENT: 35 minutes and the end screen. */
+	static constexpr float MaxTimeoutSeconds = 2400.f;
 
 	/** Reads the switches above from a command line. Pure, for tests. */
 	static FOneBrahamSmokeOptions Parse(const TCHAR* CommandLine);
@@ -143,6 +169,11 @@ private:
 		Measuring,
 		Shooting,
 		Flushing,
+		WatchingMatch,
+		EndScreen,
+		EndFlushing,
+		AwaitingTravel,
+		NextMatch,
 		Holding,
 		Done
 	};
@@ -171,6 +202,25 @@ private:
 
 	/** Gives the last screenshot time to land, then checks the files. */
 	void TickFlushing();
+
+	/** -OBSmokeFullMatch: out of the fight, then wait for the end. */
+	void BeginWatchingMatch(UWorld* World, APlayerController* PC);
+
+	/** Waits for the match to reach Complete, logging its progress. */
+	void TickWatchingMatch(UWorld* World);
+
+	/** The end screen: logs the result, checks it, photographs it. */
+	void TickEndScreen(UWorld* World, APlayerController* PC);
+
+	/** Gives the end screenshot time to land. */
+	void TickEndFlushing();
+
+	/** Waits for the post-match travel to take everybody somewhere. */
+	void TickAwaitingTravel();
+
+	/** After a restart or a reload of the same map: the next match has begun and
+	 *  the last one's end screen has gone, with the game's input back. */
+	void TickNextMatch();
 
 	/** Logs the verdict, then holds (-OBSmokeHold) or quits. */
 	void Finish();
@@ -234,6 +284,16 @@ private:
 
 	/** Network and travel failures, kept across re-possession (see above). */
 	TArray<FString> NetFailures;
+
+	/** -OBSmokeFullMatch: the world the match was played in, the last progress
+	 *  line, and how long to wait for the travel after the end screen. */
+	TWeakObjectPtr<UWorld> MatchWorld;
+	/** The match's game state: a seamless restart of the same map can keep the
+	 *  world and replace everything in it. */
+	TWeakObjectPtr<AActor> MatchGameState;
+	FString MatchMapName;
+	double LastProgressSeconds = 0.0;
+	double TravelDeadlineSeconds = 0.0;
 
 	FDelegateHandle NetworkFailureHandle;
 	FDelegateHandle TravelFailureHandle;

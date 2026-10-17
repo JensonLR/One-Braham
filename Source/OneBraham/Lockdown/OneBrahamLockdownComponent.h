@@ -32,6 +32,12 @@
 //   clock. Every machine subtracts the game state's server world time from the
 //   one replicated end time instead, so a player who joins mid-Purge reads the
 //   same number as the host.
+//
+// THE END OF A MATCH
+//   The game mode stops the director when the match ends (StopDirector): the
+//   purge stops pulsing under the end screen and the shutters open. A settings
+//   asset with bLockdownEnabled off never starts it. Outside Shipping,
+//   ob.Lockdown.StageSeconds compresses every stage for a full-match test run.
 
 #pragma once
 

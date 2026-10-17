@@ -6,9 +6,12 @@
 #include "Core/OneBrahamGameSettings.h"
 #include "Core/OneBrahamGameUserSettings.h"
 #include "Core/OneBrahamSaveSettings.h"
+#include "Core/OneBrahamGameState.h"
 #include "Data/OneBrahamMatchSettingsAsset.h"
+#include "UI/OneBrahamUIStyle.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
+#include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Interfaces/OnlineIdentityInterface.h"
@@ -22,8 +25,12 @@
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/Parse.h"
 #include "Misc/App.h"
+#include "Styling/CoreStyle.h"
+#include "Widgets/Layout/SBorder.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/Text/STextBlock.h"
 
-const FName UOneBrahamGameInstance::SessionName(TEXT("OneBrahamMatch"));
+const FName UOneBrahamGameInstance::SessionName(NAME_GameSession);
 
 UOneBrahamGameInstance::UOneBrahamGameInstance()
 {
@@ -60,6 +67,16 @@ void UOneBrahamGameInstance::Init()
 
 		LoadProfile();
 
+		BindSessionDelegates();
+
+		// A dropped connection or a failed join ends with the engine loading
+		// GameDefaultMap - the menu - and the menu says why.
+		if (GEngine != nullptr)
+		{
+			NetworkFailureHandle = GEngine->OnNetworkFailure().AddUObject(this, &UOneBrahamGameInstance::HandleNetworkFailure);
+			TravelFailureHandle = GEngine->OnTravelFailure().AddUObject(this, &UOneBrahamGameInstance::HandleTravelFailure);
+		}
+
 		// Steam persona name lands asynchronously; seed from the command line so
 		// a launch with -PlayerName=Alex still shows the right name immediately.
 		FString CommandLineName;
@@ -71,7 +88,15 @@ void UOneBrahamGameInstance::Init()
 		{
 			const IOnlineSubsystem* OnlineSubsystem = IOnlineSubsystem::Get();
 			const IOnlineIdentityPtr Identity = OnlineSubsystem ? OnlineSubsystem->GetIdentityInterface() : nullptr;
-			if (Identity.IsValid())
+			static const FName NullName(TEXT("NULL"));
+			if (OnlineSubsystem != nullptr && OnlineSubsystem->GetSubsystemName() == NullName)
+			{
+				// NULL's "nickname" is the machine's host name and a hash, which is
+				// what a LAN JOIN list would show as the host's floor. The account
+				// name reads as a person.
+				ApplyPlatformDisplayName(FPlatformProcess::UserName(false));
+			}
+			else if (Identity.IsValid())
 			{
 				ApplyPlatformDisplayName(Identity->GetPlayerNickname(0));
 			}
@@ -127,6 +152,19 @@ void UOneBrahamGameInstance::Shutdown()
 	FWorldDelegates::OnWorldInitializedActors.Remove(WorldInitializedActorsHandle);
 	WorldInitializedActorsHandle.Reset();
 
+	if (GEngine != nullptr)
+	{
+		GEngine->OnNetworkFailure().Remove(NetworkFailureHandle);
+		GEngine->OnTravelFailure().Remove(TravelFailureHandle);
+	}
+
+	if (UOneBrahamSessionSubsystem* Sessions = GetSessions())
+	{
+		Sessions->OnSessionCreated.Remove(SessionCreatedHandle);
+		Sessions->OnSessionsFound.Remove(SessionsFoundHandle);
+		Sessions->OnSessionJoined.Remove(SessionJoinedHandle);
+	}
+
 	if (!IsDedicatedServerInstance())
 	{
 		SaveProfile();
@@ -164,6 +202,34 @@ void UOneBrahamGameInstance::HandleWorldBeginPlay(TWeakObjectPtr<UWorld> World)
 	{
 		UserSettings->ApplyWorldBoundSettings(BeganWorld);
 	}
+
+	if (BeganWorld->GetNetMode() == NM_ListenServer)
+	{
+		WatchMatchForSessionClose(BeganWorld);
+	}
+}
+
+void UOneBrahamGameInstance::WatchMatchForSessionClose(UWorld* World)
+{
+	// Without this, the listing outlives the match: a colleague who joins in
+	// the end-of-match screen loads the whole tower and is sent straight home
+	// with the host. The timer is the world's, so it dies with the match.
+	TWeakObjectPtr<UWorld> WeakWorld(World);
+	World->GetTimerManager().SetTimer(SessionWatchHandle, FTimerDelegate::CreateWeakLambda(this, [this, WeakWorld]()
+	{
+		UWorld* MatchWorld = WeakWorld.Get();
+		const AOneBrahamGameState* GameState = MatchWorld != nullptr ? MatchWorld->GetGameState<AOneBrahamGameState>() : nullptr;
+		if (GameState == nullptr || !OneBrahamSessionRules::ShouldCloseToJoins(GameState->MatchPhase))
+		{
+			return;
+		}
+
+		if (UOneBrahamSessionSubsystem* Sessions = GetSessions())
+		{
+			Sessions->CloseToJoins();
+		}
+		MatchWorld->GetTimerManager().ClearTimer(SessionWatchHandle);
+	}), 1.f, true);
 }
 
 // ==========================================================================
@@ -385,41 +451,41 @@ void UOneBrahamGameInstance::SetPendingMatchSettingsOverride(UOneBrahamMatchSett
 // ==========================================================================
 //  Sessions
 // ==========================================================================
-TSharedPtr<FOnlineSessionSettings> UOneBrahamGameInstance::BuildSessionSettings(EOneBrahamMatchMode Mode, int32 MaxPlayers, bool bLAN, const FString& ServerName) const
+UOneBrahamSessionSubsystem* UOneBrahamGameInstance::GetSessions() const
 {
-	TSharedPtr<FOnlineSessionSettings> Settings = MakeShared<FOnlineSessionSettings>();
+	return GetSubsystem<UOneBrahamSessionSubsystem>();
+}
 
-	Settings->bIsLANMatch = bLAN;
-	Settings->bUsesPresence = !bLAN;
-	Settings->bAllowJoinViaPresence = !bLAN;
-	Settings->bAllowJoinViaPresenceFriendsOnly = false;
-	Settings->bAllowInvites = true;
-	Settings->bAllowJoinInProgress = false;	// ASCENT is one life; joining mid-match is off.
-	Settings->bShouldAdvertise = true;
-	Settings->bUseLobbiesIfAvailable = !bLAN;
-	Settings->bUseLobbiesVoiceChatIfAvailable = false;	// ONE BRAHAM owns its own voice path
-	Settings->NumPublicConnections = FMath::Clamp(MaxPlayers, 2, ONE_BRAHAM_MAX_PLAYERS);
-	Settings->NumPrivateConnections = 0;
-	Settings->bUsesStats = false;
-	Settings->bAntiCheatProtected = true;
+void UOneBrahamGameInstance::BindSessionDelegates()
+{
+	UOneBrahamSessionSubsystem* Sessions = GetSessions();
+	if (Sessions == nullptr || SessionCreatedHandle.IsValid())
+	{
+		return;
+	}
 
-	// Custom keys read back by the server browser.
-	const FString ModeKey = StaticEnum<EOneBrahamMatchMode>()->GetNameStringByValue(static_cast<int64>(Mode));
-	Settings->Set(FName(TEXT("OB_MODE")), ModeKey, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-	Settings->Set(FName(TEXT("OB_SERVERNAME")), ServerName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-	Settings->Set(FName(TEXT("OB_VERSION")), FString(ONE_BRAHAM_DISPLAY_NAME), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-	Settings->Set(FName(TEXT("OB_PROTOCOL")), ONE_BRAHAM_NET_PROTOCOL_VERSION, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-	Settings->Set(FName(TEXT("OB_MAP")), FString(TEXT("L_Persistent_OneBraham")), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
-	Settings->Set(FName(TEXT("OB_REGION")), Profile ? Profile->PreferredRegion : FString(TEXT("EU-West")), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+	SessionCreatedHandle = Sessions->OnSessionCreated.AddUObject(this, &UOneBrahamGameInstance::HandleSessionCreated);
+	SessionsFoundHandle = Sessions->OnSessionsFound.AddUObject(this, &UOneBrahamGameInstance::HandleSessionsFound);
+	SessionJoinedHandle = Sessions->OnSessionJoined.AddUObject(this, &UOneBrahamGameInstance::HandleSessionJoined);
+}
 
-	return Settings;
+void UOneBrahamGameInstance::StartSoloMatch(EOneBrahamMatchMode Mode)
+{
+	SetPendingMatchMode(Mode);
+	bPendingLAN = false;
+	PendingServerName = TEXT("Solo");
+
+	// Nothing to advertise and nobody to let in: the match runs standalone and
+	// the bots take every other desk (the mode's own fill rule).
+	DestroyCurrentSession();
+	OB_LOG("Solo %s from the front end.", *OneBrahamSessionRules::ModeKey(Mode));
+	TravelToMatchMap(BuildTravelOptions());
 }
 
 void UOneBrahamGameInstance::HostListenServer(EOneBrahamMatchMode Mode, int32 MaxPlayers, bool bLAN, const FString& ServerName)
 {
 	SetPendingMatchMode(Mode);
 	PendingMaxPlayers = MaxPlayers;
-	bPendingLAN = bLAN;
 	PendingServerName = ServerName.IsEmpty() ? TEXT("One Braham - Private") : ServerName;
 
 	if (IsDedicatedServerInstance())
@@ -429,154 +495,217 @@ void UOneBrahamGameInstance::HostListenServer(EOneBrahamMatchMode Mode, int32 Ma
 		return;
 	}
 
-	IOnlineSubsystem* OnlineSubsystem = IOnlineSubsystem::Get();
-	if (OnlineSubsystem == nullptr || bLAN)
+	UOneBrahamSessionSubsystem* Sessions = GetSessions();
+	const FName SubsystemName = Sessions != nullptr ? Sessions->GetSubsystemName() : NAME_None;
+	bPendingLAN = OneBrahamSessionRules::ResolveLAN(bLAN, SubsystemName);
+
+	FOneBrahamHostRequest Request;
+	Request.Mode = Mode;
+	Request.MaxPlayers = MaxPlayers;
+	Request.bLAN = bPendingLAN;
+	Request.ServerName = PendingServerName;
+	Request.Port = FURL().Port;
+	if (const UOneBrahamMatchSettingsAsset* Settings = GetMatchSettings(Mode))
 	{
-		// LAN / offline: skip session services entirely and listen directly.
-		TravelToMatchMap(FString::Printf(TEXT("%s?listen"), *BuildTravelOptions()));
+		if (!Settings->MapName.IsNone())
+		{
+			Request.MapName = Settings->MapName.ToString();
+		}
+	}
+	if (Profile != nullptr && !Profile->PreferredRegion.IsEmpty())
+	{
+		Request.Region = Profile->PreferredRegion;
+	}
+
+	bHostTravelPending = true;
+	if (Sessions == nullptr || !Sessions->HostSession(Request))
+	{
+		// No session interface at all: a listen server still takes direct IP.
+		OB_WARN("No session could be created - hosting a listen server anyone can reach by address.");
+		bHostTravelPending = false;
+		TravelToMatchMap(BuildTravelOptions() + TEXT("?listen"));
+		OnSessionCreated.Broadcast(false);
+	}
+}
+
+void UOneBrahamGameInstance::HandleSessionCreated(bool bWasSuccessful, bool bLAN)
+{
+	OnSessionCreated.Broadcast(bWasSuccessful);
+
+	if (!bHostTravelPending)
+	{
+		// A session created for matchmaking's host fallback goes the same way.
 		return;
 	}
+	bHostTravelPending = false;
+	bPendingLAN = bLAN;
 
-	const IOnlineSessionPtr Sessions = OnlineSubsystem->GetSessionInterface();
-	if (!Sessions.IsValid())
+	if (!bWasSuccessful)
 	{
-		OB_WARN("No online session interface - hosting an offline listen server instead.");
-		TravelToMatchMap(FString::Printf(TEXT("%s?listen"), *BuildTravelOptions()));
-		return;
+		OB_WARN("CreateSession failed - hosting a listen server reachable by address only.");
 	}
 
-	// Destroy any previous session so a re-host does not fail with "already exists".
-	if (Sessions->GetNamedSession(SessionName) != nullptr)
-	{
-		Sessions->DestroySession(SessionName);
-	}
-
-	ShowLoadingScreen(NSLOCTEXT("OneBraham", "CreatingSession", "Creating session..."), 0.1f);
-
-	const TSharedPtr<FOnlineSessionSettings> Settings = BuildSessionSettings(Mode, MaxPlayers, bLAN, PendingServerName);
-	Sessions->OnCreateSessionCompleteDelegates.AddUObject(this, &UOneBrahamGameInstance::HandleCreateSessionComplete);
-	Sessions->CreateSession(0, SessionName, *Settings);
+	TravelToMatchMap(BuildTravelOptions() + TEXT("?listen"));
 }
 
 void UOneBrahamGameInstance::StartMatchmaking(EOneBrahamMatchMode Mode)
 {
 	SetPendingMatchMode(Mode);
-	bMatchmakingActive = true;
 
-	OnMatchmakingStatus.Broadcast(
-		NSLOCTEXT("OneBraham", "MatchmakingSearching", "Searching for available matches..."), 0.15f);
-	ShowLoadingScreen(NSLOCTEXT("OneBraham", "MatchmakingSearching", "Searching for available matches..."), 0.15f);
+	UOneBrahamSessionSubsystem* Sessions = GetSessions();
+	const int32 Expected = GetMatchSettings(Mode) ? GetMatchSettings(Mode)->GetExpectedPlayerCount() : 12;
 
-	IOnlineSubsystem* OnlineSubsystem = IOnlineSubsystem::Get();
-	const IOnlineSessionPtr Sessions = OnlineSubsystem ? OnlineSubsystem->GetSessionInterface() : nullptr;
-
-	if (OnlineSubsystem == nullptr || !Sessions.IsValid())
+	if (Sessions == nullptr || Sessions->IsLANOnly())
 	{
-		// No online services (offline Steam, no network): host our own. The player
-		// still gets a game, and bot practice fills the empty roster.
-		OB_WARN("Matchmaking called with no online session interface - hosting a local match.");
-		bMatchmakingActive = false;
-		HostListenServer(Mode, GetMatchSettings(Mode) ? GetMatchSettings(Mode)->GetExpectedPlayerCount() : 12, true, TEXT("One Braham - Offline"));
+		// No online services (no Steam, no network): host our own. The player
+		// still gets a game, and the bots fill the empty roster.
+		OB_WARN("Matchmaking with no online sessions - hosting a local match.");
+		HostListenServer(Mode, Expected, true, TEXT("One Braham - Offline"));
 		return;
 	}
 
-	ActiveSearch = MakeShared<FOnlineSessionSearch>();
-	ActiveSearch->MaxSearchResults = 64;
-	ActiveSearch->bIsLanQuery = false;
-	ActiveSearch->QuerySettings.Set(SEARCH_LOBBIES, true, EOnlineComparisonOp::Equals);
+	bMatchmakingActive = true;
+	OnMatchmakingStatus.Broadcast(NSLOCTEXT("OneBraham", "MatchmakingSearching", "Looking for a match..."), 0.15f);
 
-	Sessions->OnFindSessionsCompleteDelegates.AddUObject(this, &UOneBrahamGameInstance::HandleFindSessionsComplete);
-	Sessions->FindSessions(0, ActiveSearch.ToSharedRef());
+	if (!Sessions->FindSessions(false))
+	{
+		bMatchmakingActive = false;
+		HostListenServer(Mode, Expected, false, TEXT("One Braham - Auto"));
+		return;
+	}
 
 	// If nothing suitable shows up in time we host, so matchmaking never hangs.
 	if (FTimerManager* TimerManager = GetOBTimerManager())
 	{
-	TimerManager->SetTimer(MatchmakingTimeoutHandle, FTimerDelegate::CreateWeakLambda(this, [this, Mode]()
-	{
-		if (!bMatchmakingActive)
+		TimerManager->SetTimer(MatchmakingTimeoutHandle, FTimerDelegate::CreateWeakLambda(this, [this, Mode, Expected]()
 		{
-			return;
-		}
-		OB_LOG("Matchmaking timed out after %.0fs - hosting a fresh match.", MatchmakingTimeoutSeconds);
-		bMatchmakingActive = false;
-		HostListenServer(Mode, GetMatchSettings(Mode) ? GetMatchSettings(Mode)->GetExpectedPlayerCount() : 12, false, TEXT("One Braham - Auto"));
-	}), MatchmakingTimeoutSeconds, false);
+			if (!bMatchmakingActive)
+			{
+				return;
+			}
+			OB_LOG("Matchmaking timed out after %.0fs - hosting a fresh match.", MatchmakingTimeoutSeconds);
+			bMatchmakingActive = false;
+			if (UOneBrahamSessionSubsystem* Subsystem = GetSessions())
+			{
+				Subsystem->CancelFindSessions();
+			}
+			HostListenServer(Mode, Expected, false, TEXT("One Braham - Auto"));
+		}), MatchmakingTimeoutSeconds, false);
 	}
 }
 
 void UOneBrahamGameInstance::CancelMatchmaking()
 {
-	if (!bMatchmakingActive && ActiveSearch == nullptr)
+	if (!bMatchmakingActive)
 	{
 		return;
 	}
 
 	bMatchmakingActive = false;
-	ActiveSearch.Reset();
+	if (UOneBrahamSessionSubsystem* Sessions = GetSessions())
+	{
+		Sessions->CancelFindSessions();
+	}
 	if (FTimerManager* TimerManager = GetOBTimerManager())
 	{
 		TimerManager->ClearTimer(MatchmakingTimeoutHandle);
 	}
-	HideLoadingScreen();
 	OnMatchmakingStatus.Broadcast(NSLOCTEXT("OneBraham", "MatchmakingCancelled", "Matchmaking cancelled."), 0.f);
 }
 
 void UOneBrahamGameInstance::RefreshServerBrowser(bool bLANOnly)
 {
-	IOnlineSubsystem* OnlineSubsystem = IOnlineSubsystem::Get();
-	const IOnlineSessionPtr Sessions = OnlineSubsystem ? OnlineSubsystem->GetSessionInterface() : nullptr;
-	if (!Sessions.IsValid())
+	UOneBrahamSessionSubsystem* Sessions = GetSessions();
+	if (Sessions == nullptr || !Sessions->FindSessions(bLANOnly))
 	{
-		// Offline: report the built-in "host a LAN game" entry so the browser is
-		// never an empty dead end for the player.
-		TArray<FOneBrahamServerInfo> Fallback;
-		FOneBrahamServerInfo Local;
-		Local.ServerName = TEXT("Host a local match");
-		Local.MapName = TEXT("L_Persistent_OneBraham");
-		Local.Mode = PendingMatchMode;
-		Local.MaxPlayers = 12;
-		Local.PingMs = 0;
-		Local.Region = TEXT("Local");
-		Fallback.Add(Local);
-		OnServerListUpdated.Broadcast(Fallback);
+		// Offline: an empty list, said as such, rather than a spinner forever.
+		OnServerListUpdated.Broadcast(TArray<FOneBrahamServerInfo>());
+	}
+}
+
+void UOneBrahamGameInstance::HandleSessionsFound(bool bWasSuccessful, const TArray<FOneBrahamServerInfo>& Servers)
+{
+	OnServerListUpdated.Broadcast(Servers);
+
+	if (!bMatchmakingActive)
+	{
 		return;
 	}
 
-	ActiveSearch = MakeShared<FOnlineSessionSearch>();
-	ActiveSearch->MaxSearchResults = 200;
-	ActiveSearch->bIsLanQuery = bLANOnly;
-	ActiveSearch->QuerySettings.Set(SEARCH_LOBBIES, true, EOnlineComparisonOp::Equals);
-	ActiveSearch->QuerySettings.Set(FName(TEXT("OB_PROTOCOL")), ONE_BRAHAM_NET_PROTOCOL_VERSION, EOnlineComparisonOp::Equals);
+	// Matchmaking path: join the best result immediately.
+	bMatchmakingActive = false;
+	if (FTimerManager* TimerManager = GetOBTimerManager())
+	{
+		TimerManager->ClearTimer(MatchmakingTimeoutHandle);
+	}
 
-	Sessions->OnFindSessionsCompleteDelegates.AddUObject(this, &UOneBrahamGameInstance::HandleFindSessionsComplete);
-	Sessions->FindSessions(0, ActiveSearch.ToSharedRef());
+	if (Servers.Num() > 0 && Servers[0].PingMs <= MaxAcceptablePingMs)
+	{
+		OnMatchmakingStatus.Broadcast(
+			FText::Format(NSLOCTEXT("OneBraham", "MatchmakingFound", "Joining {0} ({1} ms)..."),
+				FText::FromString(Servers[0].ServerName), FText::AsNumber(Servers[0].PingMs)), 0.5f);
+		JoinServerByIndex(Servers[0].SearchResultIndex);
+		return;
+	}
+
+	OB_LOG("Matchmaking found no suitable match (%d results) - hosting.", Servers.Num());
+	HostListenServer(PendingMatchMode, GetMatchSettings(PendingMatchMode) ? GetMatchSettings(PendingMatchMode)->GetExpectedPlayerCount() : 12,
+		false, TEXT("One Braham - Auto"));
 }
 
 void UOneBrahamGameInstance::JoinServerByIndex(int32 SearchResultIndex)
 {
-	if (!ActiveSearch.IsValid() || !ActiveSearch->SearchResults.IsValidIndex(SearchResultIndex))
+	UOneBrahamSessionSubsystem* Sessions = GetSessions();
+
+	if (Sessions != nullptr)
 	{
-		OB_WARN("JoinServerByIndex: index %d is not in the current search results.", SearchResultIndex);
+		for (const FOneBrahamServerInfo& Row : Sessions->GetLastResults())
+		{
+			if (Row.SearchResultIndex == SearchResultIndex)
+			{
+				SetPendingMatchMode(Row.Mode);
+				PendingMaxPlayers = Row.MaxPlayers;
+				break;
+			}
+		}
+	}
+
+	// The joiner's own options: the host's GameMode reads Name and Archetype
+	// from the URL the client arrives with.
+	FOneBrahamTravelRequest Request = BuildTravelRequest(false);
+	Request.ServerName.Reset();
+	const FString Options = OneBrahamSessionRules::MakeTravelOptions(Request);
+
+	// A refusal by the subsystem comes back through HandleSessionJoined like
+	// any other answer; only "no subsystem at all" is said here.
+	if (Sessions == nullptr)
+	{
 		OnSessionJoined.Broadcast(false, FString());
 		return;
 	}
+	Sessions->JoinSession(SearchResultIndex, Options);
+}
 
-	IOnlineSubsystem* OnlineSubsystem = IOnlineSubsystem::Get();
-	const IOnlineSessionPtr Sessions = OnlineSubsystem ? OnlineSubsystem->GetSessionInterface() : nullptr;
-	if (!Sessions.IsValid())
+void UOneBrahamGameInstance::HandleSessionJoined(bool bWasSuccessful, const FString& TravelURL, const FText& Reason)
+{
+	OnSessionJoined.Broadcast(bWasSuccessful, TravelURL);
+
+	if (!bWasSuccessful)
 	{
-		OnSessionJoined.Broadcast(false, FString());
+		// Not a menu notice: the player is on the JOIN page, which says why
+		// itself. A notice kept now would surface after some later match, and
+		// (first reason wins) hide the reason that match really ended.
+		OB_WARN("Join failed: %s", *Reason.ToString());
 		return;
 	}
 
-	ShowLoadingScreen(NSLOCTEXT("OneBraham", "Joining", "Joining match..."), 0.3f);
+	ShowLoadingScreen(NSLOCTEXT("OneBraham", "Joining", "Joining the match..."), 0.3f);
 
-	// Remember the address so the LAN rejoin path and QA scripts can reuse it.
-	const FOnlineSessionSearchResult& Result = ActiveSearch->SearchResults[SearchResultIndex];
-	PendingMaxPlayers = Result.Session.SessionSettings.NumPublicConnections;
-
-	Sessions->OnJoinSessionCompleteDelegates.AddUObject(this, &UOneBrahamGameInstance::HandleJoinSessionComplete);
-	Sessions->JoinSession(0, SessionName, Result);
+	OB_LOG("Client travel to %s", *TravelURL);
+	if (APlayerController* PC = GetFirstLocalPlayerController())
+	{
+		PC->ClientTravel(TravelURL, TRAVEL_Absolute);
+	}
 }
 
 void UOneBrahamGameInstance::JoinServerByAddress(const FString& Address, int32 Port)
@@ -588,8 +717,8 @@ void UOneBrahamGameInstance::JoinServerByAddress(const FString& Address, int32 P
 		SaveProfile();
 	}
 
-	ShowLoadingScreen(NSLOCTEXT("OneBraham", "Joining", "Joining match..."), 0.3f);
-	TravelToAddress(Address, Port, FString());
+	ShowLoadingScreen(NSLOCTEXT("OneBraham", "Joining", "Joining the match..."), 0.3f);
+	TravelToAddress(Address, Port, OneBrahamSessionRules::MakeTravelOptions(BuildTravelRequest(false)));
 }
 
 void UOneBrahamGameInstance::TravelToAddress(const FString& Address, int32 Port, const FString& Options)
@@ -600,19 +729,8 @@ void UOneBrahamGameInstance::TravelToAddress(const FString& Address, int32 Port,
 		return;
 	}
 
-	// Strip the port from the address if the player pasted "ip:port".
-	FString Host = Address;
-	FString PortPart;
-	if (Host.Split(TEXT(":"), &Host, &PortPart) && !PortPart.IsEmpty())
-	{
-		Port = FCString::Atoi(*PortPart);
-	}
-
-	const FString URL = FString::Printf(TEXT("%s:%d%s%s"),
-		*Host.TrimStartAndEnd(),
-		Port,
-		Options.IsEmpty() ? TEXT("") : TEXT("?"),
-		*Options);
+	// "ip:port" pasted whole wins over the port argument.
+	const FString URL = OneBrahamSessionRules::BuildJoinURL(Address, Port, Options);
 
 	OB_LOG("Client travel to %s", *URL);
 	APlayerController* PC = World->GetFirstPlayerController();
@@ -624,178 +742,131 @@ void UOneBrahamGameInstance::TravelToAddress(const FString& Address, int32 Port,
 
 void UOneBrahamGameInstance::DestroyCurrentSession()
 {
-	IOnlineSubsystem* OnlineSubsystem = IOnlineSubsystem::Get();
-	const IOnlineSessionPtr Sessions = OnlineSubsystem ? OnlineSubsystem->GetSessionInterface() : nullptr;
-	if (Sessions.IsValid() && Sessions->GetNamedSession(SessionName) != nullptr)
+	if (UOneBrahamSessionSubsystem* Sessions = GetSessions())
 	{
-		Sessions->OnDestroySessionCompleteDelegates.AddUObject(this, &UOneBrahamGameInstance::HandleDestroySessionComplete);
-		Sessions->DestroySession(SessionName);
+		if (Sessions->HasSession())
+		{
+			Sessions->DestroySession();
+		}
 	}
 }
 
-// --- Online callbacks -----------------------------------------------------
-void UOneBrahamGameInstance::HandleCreateSessionComplete(FName InSessionName, bool bWasSuccessful)
+// --- Failures, kept for the menu -------------------------------------------
+void UOneBrahamGameInstance::HandleNetworkFailure(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString)
 {
-	if (bWasSuccessful)
-	{
-		OB_LOG("Created session '%s'. Travelling into the match map with 'listen'.",
-			*InSessionName.ToString());
-		TravelToMatchMap(FString::Printf(TEXT("%s?listen"), *BuildTravelOptions()));
-	}
-	else
-	{
-		OB_WARN("CreateSession failed - hosting an offline listen server as a fallback.");
-		TravelToMatchMap(FString::Printf(TEXT("%s?listen"), *BuildTravelOptions()));
-	}
-
-	OnSessionCreated.Broadcast(bWasSuccessful);
-}
-
-void UOneBrahamGameInstance::HandleFindSessionsComplete(bool bWasSuccessful)
-{
-	if (!ActiveSearch.IsValid())
+	if (World != nullptr && World->GetGameInstance() != this)
 	{
 		return;
 	}
 
-	TArray<FOneBrahamServerInfo> Servers;
-
-	if (bWasSuccessful)
+	// The engine reports a guest's dropped connection to the host too (the
+	// same ConnectionTimeout a client gets). For a host that is one empty
+	// desk, not a reason to tear down its own session - which would unlist the
+	// match mid-game - or to greet it in the menu later with "connection
+	// lost". The engine's own rule (UEngine::HandleNetworkFailure): hosts do
+	// not travel for a client's failures, so neither does anything here.
+	const bool bHostSide = NetDriver != nullptr && NetDriver->GetNetMode() != NM_Client;
+	if (bHostSide)
 	{
-		for (int32 Index = 0; Index < ActiveSearch->SearchResults.Num(); ++Index)
+		switch (FailureType)
 		{
-			const FOnlineSessionSearchResult& Result = ActiveSearch->SearchResults[Index];
-
-			FOneBrahamServerInfo Info;
-			Info.SearchResultIndex = Index;
-			Info.CurrentPlayers = Result.Session.SessionSettings.NumPublicConnections - Result.Session.NumOpenPublicConnections;
-			Info.MaxPlayers = Result.Session.SessionSettings.NumPublicConnections;
-			Info.PingMs = Result.PingInMs;
-			Info.bPasswordProtected = Result.Session.SessionSettings.bUsesPresence == false && !Result.Session.SessionSettings.bShouldAdvertise;
-
-			FString ModeString;
-			if (Result.Session.SessionSettings.Get(FName(TEXT("OB_MODE")), ModeString))
-			{
-				if (const UEnum* ModeEnum = StaticEnum<EOneBrahamMatchMode>())
-				{
-					const int64 Value = ModeEnum->GetValueByNameString(ModeString);
-					Info.Mode = Value != INDEX_NONE ? static_cast<EOneBrahamMatchMode>(Value) : PendingMatchMode;
-				}
-			}
-
-			Result.Session.SessionSettings.Get(FName(TEXT("OB_SERVERNAME")), Info.ServerName);
-			Result.Session.SessionSettings.Get(FName(TEXT("OB_MAP")), Info.MapName);
-			Result.Session.SessionSettings.Get(FName(TEXT("OB_REGION")), Info.Region);
-
-			if (Info.ServerName.IsEmpty())
-			{
-				Info.ServerName = Result.Session.OwningUserName + TEXT("'s One Braham");
-			}
-
-			Servers.Add(Info);
-		}
-
-		// Lowest ping first: the whole point of a matchmaker in a 12-player
-		// shooter is that the fastest server wins.
-		Servers.Sort([](const FOneBrahamServerInfo& A, const FOneBrahamServerInfo& B)
-		{
-			return A.PingMs < B.PingMs;
-		});
-	}
-
-	OnServerListUpdated.Broadcast(Servers);
-
-	// Matchmaking path: join the best result immediately.
-	if (bMatchmakingActive)
-	{
-		bMatchmakingActive = false;
-		if (FTimerManager* TimerManager = GetOBTimerManager())
-		{
-			TimerManager->ClearTimer(MatchmakingTimeoutHandle);
-		}
-
-		if (Servers.Num() > 0 && Servers[0].PingMs <= MaxAcceptablePingMs)
-		{
-			OnMatchmakingStatus.Broadcast(
-				FText::Format(NSLOCTEXT("OneBraham", "MatchmakingFound", "Joining {0} ({1}ms)..."),
-					FText::FromString(Servers[0].ServerName), FText::AsNumber(Servers[0].PingMs)), 0.5f);
-			JoinServerByIndex(Servers[0].SearchResultIndex);
+		case ENetworkFailure::ConnectionLost:
+		case ENetworkFailure::ConnectionTimeout:
+		case ENetworkFailure::NetGuidMismatch:
+		case ENetworkFailure::NetChecksumMismatch:
+		case ENetworkFailure::OutdatedClient:
+		case ENetworkFailure::OutdatedServer:
+			OB_LOG("A guest's connection failed (%s): %s", ENetworkFailure::ToString(FailureType), *ErrorString);
 			return;
+		default:
+			break;
 		}
-
-		// Nothing suitable: host.
-		OB_LOG("Matchmaking found no suitable server (%d results) - hosting.", Servers.Num());
-		HostListenServer(PendingMatchMode, GetMatchSettings(PendingMatchMode) ? GetMatchSettings(PendingMatchMode)->GetExpectedPlayerCount() : 12, false, TEXT("One Braham - Auto"));
 	}
+
+	OB_WARN("Network failure (%s): %s", ENetworkFailure::ToString(FailureType), *ErrorString);
+
+	switch (FailureType)
+	{
+	case ENetworkFailure::ConnectionLost:
+	case ENetworkFailure::ConnectionTimeout:
+		SetMenuNotice(NSLOCTEXT("OneBraham", "Notice_ConnectionLost", "Connection lost. The host may have left the building."));
+		break;
+	case ENetworkFailure::OutdatedClient:
+	case ENetworkFailure::OutdatedServer:
+		SetMenuNotice(NSLOCTEXT("OneBraham", "Notice_Version", "That match is running a different version of the game."));
+		break;
+	case ENetworkFailure::PendingConnectionFailure:
+		SetMenuNotice(NSLOCTEXT("OneBraham", "Notice_CouldNotConnect", "Could not reach the host."));
+		break;
+	case ENetworkFailure::NetDriverListenFailure:
+		SetMenuNotice(NSLOCTEXT("OneBraham", "Notice_ListenFailed", "Could not open the floor. Another game may be using the port."));
+		break;
+	default:
+		SetMenuNotice(NSLOCTEXT("OneBraham", "Notice_NetFailure", "Disconnected from the match."));
+		break;
+	}
+
+	DestroyCurrentSession();
 }
 
-void UOneBrahamGameInstance::HandleJoinSessionComplete(FName InSessionName, EOnJoinSessionCompleteResult::Type Result)
+void UOneBrahamGameInstance::HandleTravelFailure(UWorld* World, ETravelFailure::Type FailureType, const FString& ErrorString)
 {
-	if (Result != EOnJoinSessionCompleteResult::Success)
+	if (World != nullptr && World->GetGameInstance() != this)
 	{
-		const TCHAR* Reason = TEXT("Unknown");
-		switch (Result)
-		{
-		case EOnJoinSessionCompleteResult::SessionIsFull: Reason = TEXT("the match is full"); break;
-		case EOnJoinSessionCompleteResult::SessionDoesNotExist: Reason = TEXT("the match no longer exists"); break;
-		case EOnJoinSessionCompleteResult::CouldNotRetrieveAddress: Reason = TEXT("the host address could not be retrieved"); break;
-		case EOnJoinSessionCompleteResult::AlreadyInSession: Reason = TEXT("already in that session"); break;
-		case EOnJoinSessionCompleteResult::UnknownError: Reason = TEXT("an unknown session error"); break;
-		default: break;
-		}
-
-		OB_WARN("JoinSession failed: %s.", Reason);
-		HideLoadingScreen();
-		OnSessionJoined.Broadcast(false, FString());
 		return;
 	}
 
-	IOnlineSubsystem* OnlineSubsystem = IOnlineSubsystem::Get();
-	const IOnlineSessionPtr Sessions = OnlineSubsystem ? OnlineSubsystem->GetSessionInterface() : nullptr;
-	FString ConnectString;
-	if (!Sessions.IsValid() || !Sessions->GetResolvedConnectString(InSessionName, ConnectString))
-	{
-		OB_ERROR("JoinSession reported success but no connect string was resolved.");
-		HideLoadingScreen();
-		OnSessionJoined.Broadcast(false, FString());
-		return;
-	}
-
-	// Append our travel options so the receiving GameMode knows the mode and the
-	// player's chosen archetype straight away.
-	const FString FullURL = FString::Printf(TEXT("%s?%s"), *ConnectString, *BuildTravelOptions());
-
-	OB_LOG("Joining match at %s", *ConnectString);
-	if (APlayerController* PC = GetFirstLocalPlayerController())
-	{
-		PC->ClientTravel(FullURL, TRAVEL_Absolute);
-	}
-
-	OnSessionJoined.Broadcast(true, FullURL);
+	OB_WARN("Travel failure (%s): %s", ETravelFailure::ToString(FailureType), *ErrorString);
+	SetMenuNotice(NSLOCTEXT("OneBraham", "Notice_TravelFailed", "The match could not be reached."));
+	DestroyCurrentSession();
 }
 
-void UOneBrahamGameInstance::HandleDestroySessionComplete(FName InSessionName, bool bWasSuccessful)
+FText UOneBrahamGameInstance::ConsumeMenuNotice()
 {
-	OB_LOG("DestroySession('%s') %s.", *InSessionName.ToString(), bWasSuccessful ? TEXT("succeeded") : TEXT("failed"));
+	FText Notice = PendingMenuNotice;
+	PendingMenuNotice = FText::GetEmpty();
+	return Notice;
+}
+
+void UOneBrahamGameInstance::SetMenuNotice(const FText& Notice)
+{
+	// The first reason wins: a lost connection is followed by a travel failure
+	// back to the default map, and the first one is the one the player needs.
+	if (PendingMenuNotice.IsEmpty())
+	{
+		PendingMenuNotice = Notice;
+	}
 }
 
 // ==========================================================================
 //  Travel / flow
 // ==========================================================================
-FString UOneBrahamGameInstance::BuildTravelOptions() const
+FOneBrahamTravelRequest UOneBrahamGameInstance::BuildTravelRequest(bool bListen) const
 {
-	const FString ModeKey = StaticEnum<EOneBrahamMatchMode>()->GetNameStringByValue(static_cast<int64>(PendingMatchMode));
-	const FString PlayerName = Profile != nullptr ? Profile->PlayerName : FString();
-	const FString LoadoutArchetype = (Profile != nullptr && Profile->Loadouts.IsValidIndex(Profile->SelectedLoadoutIndex))
+	FOneBrahamTravelRequest Request;
+	Request.Mode = PendingMatchMode;
+	Request.PlayerName = Profile != nullptr ? Profile->PlayerName : FString();
+	Request.Archetype = (Profile != nullptr && Profile->Loadouts.IsValidIndex(Profile->SelectedLoadoutIndex))
 		? Profile->Loadouts[Profile->SelectedLoadoutIndex].ArchetypeId.ToString()
 		: FString(TEXT("BusinessAnalyst"));
+	Request.ServerName = PendingServerName;
+	Request.bLAN = bPendingLAN;
+	Request.bListen = bListen;
+	return Request;
+}
 
-	return FString::Printf(TEXT("Mode=%s?Name=%s?Archetype=%s?ServerName=%s?LAN=%d"),
-		*ModeKey,
-		*PlayerName,
-		*LoadoutArchetype,
-		*PendingServerName,
-		bPendingLAN ? 1 : 0);
+FString UOneBrahamGameInstance::BuildTravelOptions() const
+{
+	return OneBrahamSessionRules::MakeTravelOptions(BuildTravelRequest(false));
+}
+
+void UOneBrahamGameInstance::ReturnToMainMenu()
+{
+	// ClientReturnToMainMenuWithTextReason ends here, and so does a kick. The
+	// engine drops the reason on the floor; the menu at least says why.
+	SetMenuNotice(NSLOCTEXT("OneBraham", "Notice_Returned", "The match has ended for you."));
+	DestroyCurrentSession();
+	Super::ReturnToMainMenu();
 }
 
 void UOneBrahamGameInstance::TravelToMainMenu()
@@ -806,18 +877,62 @@ void UOneBrahamGameInstance::TravelToMainMenu()
 		return;
 	}
 
+	const ENetMode NetMode = World->GetNetMode();
+
+	// Everyone connected to this machine goes home first, with a reason, while
+	// their connections are still open to carry it.
+	if (NetMode == NM_ListenServer || NetMode == NM_DedicatedServer)
+	{
+		const FText Reason = NetMode == NM_DedicatedServer
+			? NSLOCTEXT("OneBraham", "Notice_MatchOver", "The match is over.")
+			: NSLOCTEXT("OneBraham", "Notice_HostClosed", "The host has closed the floor.");
+
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			APlayerController* Controller = It->Get();
+			if (Controller != nullptr && !Controller->IsLocalController() && Controller->GetNetConnection() != nullptr)
+			{
+				Controller->ClientReturnToMainMenuWithTextReason(Reason);
+			}
+		}
+	}
+
+	if (NetMode == NM_DedicatedServer)
+	{
+		// No menu on a server: the map starts over for the next lobby. A short
+		// wait lets the return-to-menu RPCs leave before the connections close.
+		OB_LOG("Match over on the dedicated server - restarting the map.");
+		if (FTimerManager* TimerManager = GetOBTimerManager())
+		{
+			FTimerHandle Restart;
+			TimerManager->SetTimer(Restart, FTimerDelegate::CreateWeakLambda(this, [this]()
+			{
+				if (UWorld* ServerWorld = GetWorld())
+				{
+					ServerWorld->ServerTravel(TEXT("?restart"), false);
+				}
+			}), 2.f, false);
+		}
+		return;
+	}
+
+	ShowLoadingScreen(NSLOCTEXT("OneBraham", "ReturningToMenu", "Signing out..."), 0.6f);
+
+	if (NetMode == NM_Client)
+	{
+		// The engine's disconnect: destroys NAME_GameSession, closes the
+		// connection and loads GameDefaultMap, which is the menu.
+		DestroyCurrentSession();
+		GetEngine()->HandleDisconnect(World, World->GetNetDriver());
+		return;
+	}
+
 	DestroyCurrentSession();
 
-	ShowLoadingScreen(NSLOCTEXT("OneBraham", "ReturningToMenu", "Returning to One Braham..."), 0.6f);
-
-	if (APlayerController* PC = World->GetFirstPlayerController())
-	{
-		PC->ClientTravel(TEXT("/Game/OneBraham/Maps/L_MainMenu"), TRAVEL_Absolute);
-	}
-	else
-	{
-		UGameplayStatics::OpenLevel(World, TEXT("L_MainMenu"));
-	}
+	// Standalone or the listen host: a fresh load of the menu, without ?listen,
+	// which also closes the host's net driver.
+	OB_LOG("Travelling to the main menu.");
+	UGameplayStatics::OpenLevel(World, FName(MainMenuMapPath()), true);
 }
 
 void UOneBrahamGameInstance::TravelToMatchMap(const FString& Options)
@@ -832,24 +947,23 @@ void UOneBrahamGameInstance::TravelToMatchMap(const FString& Options)
 	const FString MapName = Settings != nullptr && !Settings->MapName.IsNone()
 		? Settings->MapName.ToString()
 		: FString(TEXT("L_Persistent_OneBraham"));
-
-	const FString URL = Options.IsEmpty()
-		? FString::Printf(TEXT("/Game/OneBraham/Maps/%s"), *MapName)
-		: FString::Printf(TEXT("/Game/OneBraham/Maps/%s?%s"), *MapName, *Options);
+	const FString MapPath = FString::Printf(TEXT("%s/%s"), *OneBrahamSessionRules::MapsFolder, *MapName);
 
 	ShowLoadingScreen(NSLOCTEXT("OneBraham", "LoadingBuilding", "Entering One Braham..."), 0.75f);
 
-	OB_LOG("Server travel to %s", *URL);
+	OB_LOG("Travel to %s%s%s", *MapPath, Options.IsEmpty() ? TEXT("") : TEXT("?"), *Options);
 
 	if (World->GetNetMode() == NM_DedicatedServer || World->GetNetMode() == NM_ListenServer)
 	{
+		const FString URL = Options.IsEmpty() ? MapPath : FString::Printf(TEXT("%s?%s"), *MapPath, *Options);
 		World->ServerTravel(URL, /*bAbsolute*/ true);
 	}
 	else
 	{
-		// Client: OpenLevel with the same option string keeps the flow identical
-		// between a listen host and a player who started from the main menu.
-		UGameplayStatics::OpenLevel(World, FName(*MapName), true, Options);
+		// From the front end (standalone): a hard load with the same options,
+		// "?listen" among them when hosting, so the flow is the same for a
+		// listen host and a solo player.
+		UGameplayStatics::OpenLevel(World, FName(*MapPath), true, Options);
 	}
 }
 
@@ -858,32 +972,54 @@ void UOneBrahamGameInstance::TravelToMatchMap(const FString& Options)
 // ==========================================================================
 void UOneBrahamGameInstance::ShowLoadingScreen(const FText& StatusText, float Progress)
 {
-	if (IsDedicatedServerInstance())
+	if (IsDedicatedServerInstance() || !IsMoviePlayerEnabled() || GetMoviePlayer() == nullptr)
 	{
 		return;
 	}
 
 	bLoadingScreenActive = true;
 
-	// A lightweight movie-player screen: the branded slate is created in
-	// Tools/Python/create_ui_assets.py (WBP_LoadingScreen) and the texture
-	// T_Loading_OneBraham is generated by the art pass. Until those exist the
-	// engine shows its own loading screen, so this is safe on a code-only sync.
-	FLoadingScreenAttributes LoadingScreen;
-	LoadingScreen.MinimumLoadingScreenDisplayTime = 1.0f;
-	LoadingScreen.bAutoCompleteWhenLoadingCompletes = false;
-	LoadingScreen.bMoviesAreSkippable = true;
-	LoadingScreen.bWaitForManualStop = false;
+	// The engine movie player puts this on screen at the next map load
+	// (PreLoadMap) and takes it down when the map has loaded: a black page,
+	// the title and one line of status, drawn by Slate on its own thread so it
+	// keeps up while the game thread is busy loading.
+	const FLinearColor Grey = UOneBrahamUIStyle::LightGrey();
+	const FLinearColor Faint(Grey.R, Grey.G, Grey.B, 0.55f);
 
-	if (const UOneBrahamMatchSettingsAsset* Settings = GetMatchSettings(PendingMatchMode))
-	{
-		// The mode briefing doubles as the loading-screen caption ("ASCENT. Twelve
-		// people. One lift lobby. Don't be the one who takes the stairs alone.").
-		LoadingScreen.PlaybackType = MT_LoadingLoop;
-	}
+	TSharedRef<SWidget> Page =
+		SNew(SBorder)
+		.BorderImage(FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox")))
+		.BorderBackgroundColor(FLinearColor::Black)
+		.Padding(FMargin(96.f, 0.f, 96.f, 88.f))
+		.HAlign(HAlign_Left)
+		.VAlign(VAlign_Bottom)
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(ONE_BRAHAM_DISPLAY_NAME))
+				.Font(UOneBrahamUIStyle::Font(EOneBrahamTextSize::Header, true))
+				.ColorAndOpacity(Grey)
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 8.f, 0.f, 0.f)
+			[
+				SNew(STextBlock)
+				.Text(StatusText)
+				.Font(UOneBrahamUIStyle::Font(EOneBrahamTextSize::Small, false))
+				.ColorAndOpacity(Faint)
+			]
+		];
+
+	FLoadingScreenAttributes LoadingScreen;
+	LoadingScreen.WidgetLoadingScreen = Page;
+	LoadingScreen.MinimumLoadingScreenDisplayTime = 0.5f;
+	LoadingScreen.bAutoCompleteWhenLoadingCompletes = true;
+	LoadingScreen.bMoviesAreSkippable = false;
+	LoadingScreen.bWaitForManualStop = false;
+	LoadingScreen.PlaybackType = MT_Normal;
 
 	GetMoviePlayer()->SetupLoadingScreen(LoadingScreen);
-	GetMoviePlayer()->PlayMovie();
 }
 
 void UOneBrahamGameInstance::HideLoadingScreen()
@@ -894,7 +1030,7 @@ void UOneBrahamGameInstance::HideLoadingScreen()
 	}
 
 	bLoadingScreenActive = false;
-	if (GetMoviePlayer() != nullptr && GetMoviePlayer()->IsMovieCurrentlyPlaying())
+	if (IsMoviePlayerEnabled() && GetMoviePlayer() != nullptr && GetMoviePlayer()->IsMovieCurrentlyPlaying())
 	{
 		GetMoviePlayer()->StopMovie();
 	}

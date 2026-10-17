@@ -16,6 +16,26 @@
 // Every mode with a time limit (ASCENT's hard end at 35 minutes included) is
 // ended by the server when the limit runs out - see DecideTimeOutOutcome.
 //
+// THE END (Docs/06 section 7). Every ending goes through FinishMatch, once:
+// the ending is decided by the pure rules in Extraction/OneBrahamMatchEnding.h
+// (eliminations are re-checked twice a second against a squad list rebuilt from
+// the player states, not only when somebody dies), recorded on the extraction
+// component so every machine's end screen names it, announced, and the
+// building is frozen - pawns off, purge stopped, winch still. After
+// PostMatchSeconds a listen server or a standalone game goes back to the main
+// menu (the map is reloaded while the menu map is not in the build) and a
+// dedicated server restarts the match.
+//
+// FIRE DRILL scores kills and its three control points (floors 1, 9 and 15):
+// a team alone on a point for its capture time takes it, and a point scores for
+// its holder every second they are on it and nobody else is.
+//
+// DEV (compiled out of Shipping): ob.Match.WarmupSeconds, TimeLimit,
+// PostMatchSeconds, ScoreToWin compress a match; ob.Match.FollowBots puts a
+// player without a pawn behind the living bots; DevWithdrawToSpectator takes the
+// local player out of the fight so a match of bots can be watched to its end
+// (-OBSmokeFullMatch).
+//
 // The GameMode owns: squad assignment, spawn selection, respawn logic, scoring,
 // match phase transitions, seamless travel and the bots that fill empty slots.
 
@@ -24,6 +44,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
 #include "Core/OneBrahamTypes.h"
+#include "Extraction/OneBrahamMatchEnding.h"
 #include "OneBrahamGameMode.generated.h"
 
 class UOneBrahamMatchSettingsAsset;
@@ -166,6 +187,22 @@ public:
 	/** QA hook for ob.endmatch. WinningTeamIndex -1 = no survivors. */
 	void DebugForceMatchResult(int32 WinningTeamIndex);
 
+	/** The ending the match reached; None while it runs. */
+	EOneBrahamMatchEnding GetMatchEnding() const { return MatchEnding; }
+
+	bool IsMatchFinished() const { return bMatchFinished; }
+
+	/** Each squad's members, how many are in the fight and how many extracted, from the player states. */
+	void GatherSquadStandings(TArray<FOneBrahamSquadStanding>& OutSquads) const;
+
+	/**
+	 * Dev (does nothing in Shipping): takes a player out of the match - no squad,
+	 * no pawn, spectating the bots - and fills the slot with a bot, so a match
+	 * can be watched to its end by the -OBSmokeFullMatch run without the
+	 * player's own death deciding it.
+	 */
+	void DevWithdrawToSpectator(APlayerController* Player);
+
 	// ======================================================================
 	//  Squads
 	// ======================================================================
@@ -280,9 +317,31 @@ protected:
 	// ======================================================================
 	void StartWarmup();
 	void StartActiveMatch();
-	/** AnnouncementOverride, when not empty, replaces the Tannoy line FinishMatch would pick. */
-	void FinishMatch(EOneBrahamTeam WinningTeam, const FString& WinningSquadName, bool bNoSurvivors, int32 ExtractedCount,
-		EOneBrahamExtractionFailReason FailReason, const FText& AnnouncementOverride = FText::GetEmpty());
+
+	/**
+	 * The one way a match ends. Ignored once the match has finished, so a kill
+	 * landing under the end screen cannot end it again (and restart the clock to
+	 * the lobby). WinningSquadId is the squad (FIRE DRILL: the team index).
+	 */
+	void FinishMatch(EOneBrahamMatchEnding Ending, int32 WinningSquadId, int32 ExtractedCount);
+
+	/** Squad id -> the name the results use ("Braham Compliance"). */
+	FString GetWinnerName(int32 WinningSquadId) const;
+
+	/** Marks the winning squad's players still on their feet as on the wire. */
+	int32 MarkSquadExtracted(int32 SquadId);
+
+	/** Under the end screen: every pawn stops, takes no damage and fires nothing. */
+	void FreezeMatchActors();
+
+	/** The post-match window closed: the menu, a reload or a restart. */
+	void HandlePostMatchTimeUp();
+
+	/** Server, FIRE DRILL: control point captures and holding score, once a second. */
+	void TickControlPoints(float DeltaSeconds);
+
+	/** Dev overrides (warm-up, time limit), read every tick so -ExecCmds applies. */
+	void ApplyDevOverrides();
 
 	/** Applies the settings-derived defaults to the GameMode's player classes. */
 	void ConfigureClassesFromSettings();
@@ -432,6 +491,31 @@ protected:
 
 	/** Clock for re-trying bots that could not spawn (a crowded start). */
 	float BotSpawnRetryAccumulator = 0.f;
+
+	/** How the match ended (FinishMatch). */
+	EOneBrahamMatchEnding MatchEnding = EOneBrahamMatchEnding::None;
+
+	/** Decided once, when the match ends, so the end screen's countdown and the
+	 *  travel agree about where everybody is going. */
+	EOneBrahamPostMatchAction PostMatchAction = EOneBrahamPostMatchAction::ReloadMap;
+
+	/** Squad list refresh + end check cadence while the match runs. */
+	float SquadRefreshAccumulator = 0.f;
+
+	/** One FIRE DRILL point's state: who holds it, who is taking it. */
+	struct FControlPointState
+	{
+		int32 OwnerTeam = INDEX_NONE;
+		int32 CapturingTeam = INDEX_NONE;
+		float CaptureProgressSeconds = 0.f;
+		bool bLocated = false;
+		FBox Bounds = FBox(ForceInit);
+	};
+	TArray<FControlPointState> ControlPointStates;
+	float ControlPointAccumulator = 0.f;
+
+	/** Fractional per-second score carried between control point ticks, per team. */
+	TArray<float> ControlPointScoreCarry;
 
 	/** Parsed from the travel options. */
 	FString PendingModeString;

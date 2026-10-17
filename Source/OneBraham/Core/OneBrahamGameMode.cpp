@@ -40,6 +40,78 @@
 #include "TimerManager.h"
 #include "Engine/Engine.h"
 #include "Core/OneBrahamSpawnRules.h"
+#include "Misc/ConfigCacheIni.h"
+#include "Misc/PackageName.h"
+#include "GameFramework/CharacterMovementComponent.h"
+
+// ==========================================================================
+//  Dev acceleration (Docs/18): compress a match into minutes for the
+//  -OBSmokeFullMatch run. Read every tick, so -ExecCmds after the map loads
+//  still applies. None of it exists in Shipping.
+// ==========================================================================
+#if !UE_BUILD_SHIPPING
+namespace OneBrahamMatchDev
+{
+	TAutoConsoleVariable<float> CVarWarmupSeconds(TEXT("ob.Match.WarmupSeconds"), -1.f,
+		TEXT("Dev: the warm-up ends this many seconds after it began (-1 = match settings)."), ECVF_Cheat);
+	TAutoConsoleVariable<float> CVarTimeLimit(TEXT("ob.Match.TimeLimit"), -1.f,
+		TEXT("Dev: the match time limit in seconds, 0 for none (-1 = match settings)."), ECVF_Cheat);
+	TAutoConsoleVariable<float> CVarPostMatchSeconds(TEXT("ob.Match.PostMatchSeconds"), -1.f,
+		TEXT("Dev: seconds of end screen before everybody leaves (-1 = match settings)."), ECVF_Cheat);
+	TAutoConsoleVariable<int32> CVarScoreToWin(TEXT("ob.Match.ScoreToWin"), -1,
+		TEXT("Dev: FIRE DRILL points to win (-1 = match settings)."), ECVF_Cheat);
+	TAutoConsoleVariable<int32> CVarFollowBots(TEXT("ob.Match.FollowBots"), 0,
+		TEXT("Dev: 1 = a local player with no pawn watches the highest living bot."), ECVF_Cheat);
+}
+#endif
+
+namespace
+{
+	/** FIRE DRILL's points to win: the settings, or the dev override. */
+	int32 OBResolveScoreToWin(const UOneBrahamMatchSettingsAsset* Settings)
+	{
+		int32 Score = Settings != nullptr ? Settings->ScoreToWin : 200;
+#if !UE_BUILD_SHIPPING
+		if (OneBrahamMatchDev::CVarScoreToWin.GetValueOnGameThread() > 0)
+		{
+			Score = OneBrahamMatchDev::CVarScoreToWin.GetValueOnGameThread();
+		}
+#endif
+		return FMath::Max(1, Score);
+	}
+
+	/** Seconds of end screen: the settings, or the dev override. */
+	float OBResolvePostMatchSeconds(const UOneBrahamMatchSettingsAsset* Settings)
+	{
+		float Seconds = Settings != nullptr ? static_cast<float>(Settings->PostMatchSeconds) : 45.f;
+#if !UE_BUILD_SHIPPING
+		if (OneBrahamMatchDev::CVarPostMatchSeconds.GetValueOnGameThread() >= 0.f)
+		{
+			Seconds = OneBrahamMatchDev::CVarPostMatchSeconds.GetValueOnGameThread();
+		}
+#endif
+		return FMath::Max(1.f, Seconds);
+	}
+
+	/** Seamless travel needs the transition map; without it a travel is a hard one. */
+	bool OBTransitionMapExists()
+	{
+		FString TransitionMap;
+		if (GConfig == nullptr || !GConfig->GetString(TEXT("/Script/EngineSettings.GameMapsSettings"), TEXT("TransitionMap"), TransitionMap, GEngineIni)
+			|| TransitionMap.IsEmpty())
+		{
+			return false;
+		}
+
+		return FPackageName::DoesPackageExist(FPackageName::ObjectPathToPackageName(TransitionMap));
+	}
+
+	/** How often the squad list is rebuilt and the endings re-checked while a match runs. */
+	constexpr float OBSquadRefreshSeconds = 0.5f;
+
+	/** Seconds the host waits after telling its clients to leave, so the order reaches them. */
+	constexpr float OBHostLeaveDelaySeconds = 1.5f;
+}
 
 AOneBrahamGameMode::AOneBrahamGameMode()
 {
@@ -269,6 +341,34 @@ void AOneBrahamGameMode::Tick(float DeltaSeconds)
 			Local->SetViewTarget(BotControllers[WatchIndex]->GetPawn());
 		}
 	}
+
+	// ob.Match.FollowBots: a player without a pawn (withdrawn by the full-match
+	// smoke run, or between lives) watches the living bot highest in the tower,
+	// moving on when that one goes down.
+	if (OneBrahamMatchDev::CVarFollowBots.GetValueOnGameThread() != 0 && !bMatchFinished)
+	{
+		APlayerController* Local = GetWorld() != nullptr ? GetWorld()->GetFirstPlayerController() : nullptr;
+		const APawn* Watched = Local != nullptr ? Cast<APawn>(Local->GetViewTarget()) : nullptr;
+		if (Local != nullptr && Local->GetPawn() == nullptr && (Watched == nullptr || IsPawnDeadForRespawn(Watched)))
+		{
+			APawn* Best = nullptr;
+			for (AOneBrahamBotController* Bot : BotControllers)
+			{
+				APawn* BotPawn = IsValid(Bot) ? Bot->GetPawn() : nullptr;
+				if (BotPawn != nullptr && !IsPawnDeadForRespawn(BotPawn)
+					&& (Best == nullptr || BotPawn->GetActorLocation().Z > Best->GetActorLocation().Z))
+				{
+					Best = BotPawn;
+				}
+			}
+			if (Best != nullptr)
+			{
+				Local->SetViewTarget(Best);
+			}
+		}
+	}
+
+	ApplyDevOverrides();
 #endif
 
 	if (bBotFloorGraphPending)
@@ -309,11 +409,82 @@ void AOneBrahamGameMode::Tick(float DeltaSeconds)
 		HandleMatchTimeLimitReached();
 	}
 
+	const bool bRunning = GS != nullptr && !bMatchFinished
+		&& (GS->MatchPhase == EOneBrahamMatchPhase::Active || GS->MatchPhase == EOneBrahamMatchPhase::Extraction);
+
+	if (bRunning)
+	{
+		// The phase follows the winch: Extraction while an attempt is live, so
+		// the music, the scoreboard and the bots' spawn rules all agree.
+		if (const UOneBrahamExtractionComponent* Extraction = GS->GetExtractionComponent())
+		{
+			const bool bLive = Extraction->IsExtractionActive();
+			if (bLive && GS->MatchPhase == EOneBrahamMatchPhase::Active)
+			{
+				SetMatchPhase(EOneBrahamMatchPhase::Extraction);
+			}
+			else if (!bLive && GS->MatchPhase == EOneBrahamMatchPhase::Extraction)
+			{
+				SetMatchPhase(EOneBrahamMatchPhase::Active);
+			}
+		}
+
+		// The squad list is the replicated picture of who is still in it, and it
+		// was only rebuilt on joins and spawns: a death changed the player state
+		// and nothing else, so the HUD showed the dead as on site and the end
+		// checks (which read the list) never saw a squad wiped. Rebuilt twice a
+		// second, and the endings re-checked against it, whatever killed whom.
+		SquadRefreshAccumulator += DeltaSeconds;
+		if (SquadRefreshAccumulator >= OBSquadRefreshSeconds)
+		{
+			SquadRefreshAccumulator = 0.f;
+			EvaluateMatchEndConditions();
+		}
+
+		if (!bMatchFinished)
+		{
+			TickControlPoints(DeltaSeconds);
+		}
+	}
+
 	// Keep the survivor count fresh for the HUD.
 	if (GS != nullptr && (GS->MatchPhase == EOneBrahamMatchPhase::Active || GS->MatchPhase == EOneBrahamMatchPhase::Extraction))
 	{
 		GS->SurvivorsRemaining = GS->GetAlivePlayerCount();
 	}
+}
+
+void AOneBrahamGameMode::ApplyDevOverrides()
+{
+#if !UE_BUILD_SHIPPING
+	AOneBrahamGameState* GS = GetOBGameState();
+	if (GS == nullptr || MatchSettings == nullptr)
+	{
+		return;
+	}
+
+	// The time limit lives on the game state, where the HUD counts it down from,
+	// so the override moves the clock everybody reads.
+	const float TimeLimit = OneBrahamMatchDev::CVarTimeLimit.GetValueOnGameThread();
+	if (TimeLimit >= 0.f && !FMath::IsNearlyEqual(GS->MatchTimeLimitSeconds, TimeLimit))
+	{
+		GS->MatchTimeLimitSeconds = TimeLimit;
+		GS->ForceNetUpdate();
+		OB_MATCH_LOG("Dev: time limit set to %.0f s (ob.Match.TimeLimit).", TimeLimit);
+	}
+
+	const float Warmup = OneBrahamMatchDev::CVarWarmupSeconds.GetValueOnGameThread();
+	if (Warmup >= 0.f && GS->MatchPhase == EOneBrahamMatchPhase::Warmup && GetWorld() != nullptr)
+	{
+		const float WarmupStart = WarmupEndTime - static_cast<float>(MatchSettings->WarmupSeconds);
+		if (GetWorld()->GetTimeSeconds() - WarmupStart >= Warmup)
+		{
+			OB_MATCH_LOG("Dev: warm-up cut to %.0f s (ob.Match.WarmupSeconds).", Warmup);
+			GetWorldTimerManager().ClearTimer(MatchPhaseTimerHandle);
+			StartActiveMatch();
+		}
+	}
+#endif
 }
 
 // ==========================================================================
@@ -437,13 +608,13 @@ void AOneBrahamGameMode::BindGameStateComponents()
 	// the game mode owns the consequence. One bind, both directions handled.
 	if (UOneBrahamExtractionComponent* Extraction = GS->GetExtractionComponent())
 	{
-		Extraction->OnExtractionComplete.AddDynamic(this, &AOneBrahamGameMode::HandleExtractionComplete);
-		Extraction->OnExtractionFailed.AddDynamic(this, &AOneBrahamGameMode::HandleExtractionFailed);
+		Extraction->OnExtractionComplete.AddUniqueDynamic(this, &AOneBrahamGameMode::HandleExtractionComplete);
+		Extraction->OnExtractionFailed.AddUniqueDynamic(this, &AOneBrahamGameMode::HandleExtractionFailed);
 	}
 
 	if (UOneBrahamLockdownComponent* Lockdown = GS->GetLockdownComponent())
 	{
-		Lockdown->OnStageChanged.AddDynamic(this, &AOneBrahamGameMode::HandleLockdownStageChanged);
+		Lockdown->OnStageChanged.AddUniqueDynamic(this, &AOneBrahamGameMode::HandleLockdownStageChanged);
 	}
 
 	UpdateObjectiveState();
@@ -451,38 +622,23 @@ void AOneBrahamGameMode::BindGameStateComponents()
 
 void AOneBrahamGameMode::HandleExtractionComplete(int32 WinningSquadId, EOneBrahamTeam WinningTeam)
 {
-	AOneBrahamGameState* GS = GetOBGameState();
-	if (GS == nullptr || bMatchFinished)
+	if (GetOBGameState() == nullptr || bMatchFinished)
 	{
 		return;
 	}
 
-	// Count who actually made it onto the wire: a squad that extracts with two of
-	// its four players has still won, and the result screen says so.
-	int32 ExtractedCount = 0;
-	const FOneBrahamSquadInfo Squad = GS->GetSquadInfo(WinningSquadId);
-	for (const FOneBrahamSquadMemberInfo& Member : Squad.Members)
-	{
-		if (Member.LifeState == EOneBrahamLifeState::Alive || Member.LifeState == EOneBrahamLifeState::Extracted)
-		{
-			++ExtractedCount;
-		}
-	}
+	// FinishMatch puts the squad's players who are on their feet on the wire and
+	// counts them: a squad that extracts with two of its four has still won, and
+	// the result screen says so.
+	OB_MATCH_LOG("Extraction complete: squad %d (%s) is on the wire.", WinningSquadId, *GetWinnerName(WinningSquadId));
 
-	const FString SquadName = Squad.SquadName.IsEmpty()
-		? GetSquadDisplayName(WinningSquadId)
-		: Squad.SquadName.ToString();
-
-	OB_MATCH_LOG("Extraction complete: squad %d (%s) left the building with %d aboard.",
-		WinningSquadId, *SquadName, ExtractedCount);
-
-	CompleteMatchWithExtraction(WinningTeam, SquadName, FMath::Max(1, ExtractedCount));
+	FinishMatch(EOneBrahamMatchEnding::Extracted, WinningSquadId, 0);
 }
 
 void AOneBrahamGameMode::HandleExtractionFailed(int32 SquadId, EOneBrahamExtractionFailReason Reason)
 {
 	AOneBrahamGameState* GS = GetOBGameState();
-	if (GS == nullptr)
+	if (GS == nullptr || bMatchFinished)
 	{
 		return;
 	}
@@ -514,6 +670,11 @@ void AOneBrahamGameMode::HandleExtractionFailed(int32 SquadId, EOneBrahamExtract
 	Announce(Announcement, true);
 
 	OB_MATCH_LOG("Extraction failed for squad %d (%s)", SquadId, *UEnum::GetValueAsString(Reason));
+
+	// The attempt was the only thing holding the match open in two endings: the
+	// last squad standing on the wire, and a wipe during the arrival. Neither
+	// waits for somebody else to die before it is noticed.
+	EvaluateMatchEndConditions();
 }
 
 void AOneBrahamGameMode::HandleLockdownStageChanged(EOneBrahamLockdownStage NewStage)
@@ -594,7 +755,9 @@ void AOneBrahamGameMode::CompleteMatchWithExtraction(EOneBrahamTeam WinningTeam,
 		return;
 	}
 
-	FinishMatch(WinningTeam, WinningSquadName, /*bNoSurvivors*/ false, ExtractedCount, EOneBrahamExtractionFailReason::None);
+	const int32 SquadId = SquadToTeamMap.IndexOfByKey(WinningTeam);
+	OB_MATCH_LOG("Extraction completed for '%s' (squad %d).", *WinningSquadName, SquadId);
+	FinishMatch(EOneBrahamMatchEnding::Extracted, SquadId, ExtractedCount);
 }
 
 void AOneBrahamGameMode::CompleteMatchNoSurvivors()
@@ -604,13 +767,169 @@ void AOneBrahamGameMode::CompleteMatchNoSurvivors()
 		return;
 	}
 
-	FinishMatch(EOneBrahamTeam::None, FString(), /*bNoSurvivors*/ true, 0, EOneBrahamExtractionFailReason::CallersEliminated);
+	FinishMatch(EOneBrahamMatchEnding::NoSurvivors, INDEX_NONE, 0);
 }
 
-void AOneBrahamGameMode::FinishMatch(EOneBrahamTeam WinningTeam, const FString& WinningSquadName, bool bNoSurvivors, int32 ExtractedCount,
-	EOneBrahamExtractionFailReason FailReason, const FText& AnnouncementOverride)
+FString AOneBrahamGameMode::GetWinnerName(int32 WinningSquadId) const
 {
+	if (WinningSquadId == INDEX_NONE)
+	{
+		return FString();
+	}
+
+	const AOneBrahamGameState* GS = GetOBGameState();
+	if (GS != nullptr && GS->Squads.IsValidIndex(WinningSquadId) && !GS->Squads[WinningSquadId].SquadName.IsEmpty())
+	{
+		return GS->Squads[WinningSquadId].SquadName.ToString();
+	}
+
+	return GetSquadDisplayName(WinningSquadId);
+}
+
+void AOneBrahamGameMode::GatherSquadStandings(TArray<FOneBrahamSquadStanding>& OutSquads) const
+{
+	OutSquads.Reset();
+	for (int32 SquadId = 0; SquadId < SquadToTeamMap.Num(); ++SquadId)
+	{
+		FOneBrahamSquadStanding& Standing = OutSquads.AddDefaulted_GetRef();
+		Standing.SquadId = SquadId;
+	}
+
+	// From the player states, which are the truth: the replicated squad list is
+	// a copy of them, and a copy can be a frame behind.
+	const AOneBrahamGameState* GS = GetOBGameState();
+	if (GS == nullptr)
+	{
+		return;
+	}
+
+	const UOneBrahamLockdownComponent* Lockdown = GS->GetLockdownComponent();
+
+	for (const APlayerState* BaseState : GS->PlayerArray)
+	{
+		const AOneBrahamPlayerState* State = Cast<AOneBrahamPlayerState>(BaseState);
+		if (State == nullptr || !OutSquads.IsValidIndex(State->SquadId))
+		{
+			continue;
+		}
+
+		FOneBrahamSquadStanding& Standing = OutSquads[State->SquadId];
+		++Standing.Members;
+		Standing.Extracted += State->LifeState == EOneBrahamLifeState::Extracted ? 1 : 0;
+
+		if (State->LifeState == EOneBrahamLifeState::Alive || State->LifeState == EOneBrahamLifeState::Downed)
+		{
+			++Standing.InFight;
+
+			const APawn* Pawn = State->GetPawn();
+			if (Lockdown != nullptr && Pawn != nullptr
+				&& Lockdown->IsFloorBeingPurged(OneBrahamConstants::FloorIndexForZ(Pawn->GetActorLocation().Z)))
+			{
+				++Standing.OnPurgedFloor;
+			}
+		}
+	}
+}
+
+int32 AOneBrahamGameMode::MarkSquadExtracted(int32 SquadId)
+{
+	const AOneBrahamGameState* GS = GetOBGameState();
+	if (GS == nullptr || SquadId == INDEX_NONE)
+	{
+		return 0;
+	}
+
+	// Who is standing goes up the wire. A downed squadmate is carried - the
+	// winch takes a stretcher - because leaving them on the deck after thirty
+	// seconds of holding it for them is not the ending anybody played for.
+	int32 Extracted = 0;
+	for (APlayerState* BaseState : GS->PlayerArray)
+	{
+		AOneBrahamPlayerState* State = Cast<AOneBrahamPlayerState>(BaseState);
+		if (State == nullptr || State->SquadId != SquadId)
+		{
+			continue;
+		}
+
+		if (State->LifeState == EOneBrahamLifeState::Alive || State->LifeState == EOneBrahamLifeState::Downed
+			|| State->LifeState == EOneBrahamLifeState::Extracted)
+		{
+			State->LifeState = EOneBrahamLifeState::Extracted;
+			State->ForceNetUpdate();
+			++Extracted;
+		}
+	}
+
+	return Extracted;
+}
+
+void AOneBrahamGameMode::FreezeMatchActors()
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	// The fight is over under the end screen. Bots stop thinking (their
+	// controller's tick is their whole brain) and walking; every pawn is made
+	// untouchable for longer than the end screen lasts, so a last burst cannot
+	// kill somebody who has already been counted as a survivor. Players' own
+	// input is the end screen's: it takes the keyboard on their machine.
+	for (FConstControllerIterator It = World->GetControllerIterator(); It; ++It)
+	{
+		AController* Controller = It->Get();
+		if (Controller == nullptr)
+		{
+			continue;
+		}
+
+		const bool bBot = Cast<APlayerController>(Controller) == nullptr;
+		if (bBot)
+		{
+			Controller->StopMovement();
+			Controller->SetActorTickEnabled(false);
+		}
+
+		AOneBrahamCharacter* Character = Cast<AOneBrahamCharacter>(Controller->GetPawn());
+		if (Character == nullptr)
+		{
+			continue;
+		}
+
+		if (UOneBrahamHealthComponent* Health = Character->GetHealthComponent())
+		{
+			if (Health->IsAlive())
+			{
+				Health->GrantInvulnerability(OBResolvePostMatchSeconds(MatchSettings) + 60.f);
+			}
+		}
+
+		if (bBot)
+		{
+			if (UCharacterMovementComponent* Movement = Character->GetCharacterMovement())
+			{
+				Movement->StopMovementImmediately();
+				Movement->DisableMovement();
+			}
+		}
+	}
+}
+
+void AOneBrahamGameMode::FinishMatch(EOneBrahamMatchEnding Ending, int32 WinningSquadId, int32 ExtractedCount)
+{
+	// Once. A FIRE DRILL kill landing under the end screen used to call this
+	// again on every point over the limit, and each call restarted the timer
+	// back to the lobby: a busy end screen never ended.
+	if (bMatchFinished)
+	{
+		OB_MATCH_LOG("FinishMatch(%s) ignored: the match already ended as %s.",
+			*OneBrahamMatchEnd::LogNameFor(Ending), *OneBrahamMatchEnd::LogNameFor(MatchEnding));
+		return;
+	}
+
 	bMatchFinished = true;
+	MatchEnding = Ending;
 	SetMatchPhase(EOneBrahamMatchPhase::Complete);
 
 	AOneBrahamGameState* GS = GetOBGameState();
@@ -619,46 +938,157 @@ void AOneBrahamGameMode::FinishMatch(EOneBrahamTeam WinningTeam, const FString& 
 		return;
 	}
 
-	GS->MatchResult = BuildMatchResult(WinningTeam, WinningSquadName, bNoSurvivors, ExtractedCount);
+	const EOneBrahamMatchMode Mode = GetMatchMode();
+	const bool bHasWinner = OneBrahamMatchEnd::HasWinner(Ending)
+		|| (Ending == EOneBrahamMatchEnding::TimeOut && Mode == EOneBrahamMatchMode::FireDrill);
+	const int32 Winner = bHasWinner && SquadToTeamMap.IsValidIndex(WinningSquadId) ? WinningSquadId : INDEX_NONE;
+	const EOneBrahamTeam WinningTeam = Winner != INDEX_NONE ? GetTeamForSquad(Winner) : EOneBrahamTeam::None;
+	const FString WinnerName = GetWinnerName(Winner);
+
+	if (Ending == EOneBrahamMatchEnding::Extracted)
+	{
+		ExtractedCount = FMath::Max(ExtractedCount, MarkSquadExtracted(Winner));
+	}
+
+	// Pending respawns and the building's escalation stop with the match.
+	PendingRespawns.Reset();
+	if (UOneBrahamLockdownComponent* Lockdown = GS->GetLockdownComponent())
+	{
+		Lockdown->StopDirector();
+	}
+	FreezeMatchActors();
+	RebuildSquadInfo();
+
+	// Everybody lost in ASCENT unless somebody won it: the results say so
+	// rather than ranking the squad that happened to be highest in the tower.
+	const bool bNobodyWon = Winner == INDEX_NONE && Mode != EOneBrahamMatchMode::FireDrill;
+	GS->MatchResult = BuildMatchResult(WinningTeam, WinnerName, bNobodyWon, ExtractedCount);
+	GS->ForceNetUpdate();
 	GS->OnMatchResultReady.Broadcast(GS->MatchResult);
 
-	// End-of-match announcements: the Tannoy gets the last word, as it should.
-	FText Announcement;
-	if (!AnnouncementOverride.IsEmpty())
+	const float PostMatchSeconds = OBResolvePostMatchSeconds(MatchSettings);
+	PostMatchAction = OneBrahamMatchEnd::DecidePostMatchAction(GetNetMode() == NM_DedicatedServer,
+		FPackageName::DoesPackageExist(OneBrahamMatchEnd::MainMenuMapPath()));
+	if (UOneBrahamExtractionComponent* Extraction = GS->GetExtractionComponent())
 	{
-		Announcement = AnnouncementOverride;
-	}
-	else if (bNoSurvivors)
-	{
-		Announcement = FText::FromString(TEXT("All staff accounted for. There are no survivors. Please await further instruction."));
-	}
-	else if (WinningTeam != EOneBrahamTeam::None)
-	{
-		Announcement = FText::Format(
-			FText::FromString(TEXT("{0} has been extracted. Thank you for visiting One Braham.")),
-			FText::FromString(WinningSquadName.IsEmpty() ? TEXT("A squad") : WinningSquadName));
-	}
-	else
-	{
-		Announcement = FText::FromString(TEXT("The extraction has failed. Security has been notified."));
+		Extraction->ServerRecordMatchEnding(Ending, Winner, GS->GetServerWorldTimeSeconds() + PostMatchSeconds, PostMatchAction);
 	}
 
-	Announce(Announcement, true);
+	// The tannoy gets the last word, as it should.
+	Announce(OneBrahamMatchEnd::AnnouncementFor(Ending, WinnerName), true);
 
-	OB_MATCH_LOG("MATCH COMPLETE: winner=%s squad='%s' noSurvivors=%d extracted=%d duration=%.1fs reason=%s",
-		*UEnum::GetValueAsString(WinningTeam), *WinningSquadName, bNoSurvivors ? 1 : 0, ExtractedCount,
-		GetWorld()->GetTimeSeconds() - MatchStartTime,
-		*UEnum::GetValueAsString(FailReason));
-
-	// Award cosmetics/achievements (client-side, cosmetic only) then travel back
-	// to the lobby after the post-match window.
-	GetWorldTimerManager().SetTimer(MatchPhaseTimerHandle, FTimerDelegate::CreateWeakLambda(this, [this]()
+	TArray<FOneBrahamSquadStanding> Standings;
+	GatherSquadStandings(Standings);
+	FString PerSquad;
+	for (const FOneBrahamSquadStanding& Standing : Standings)
 	{
-		if (UOneBrahamGameInstance* GameInstance = GetGameInstance<UOneBrahamGameInstance>())
+		PerSquad += FString::Printf(TEXT("%s%d:%d/%d in, %d out"), PerSquad.IsEmpty() ? TEXT("") : TEXT("  "),
+			Standing.SquadId, Standing.InFight, Standing.Members, Standing.Extracted);
+	}
+
+	OB_MATCH_LOG("MATCH COMPLETE: ending=%s winner=%s squad=%d '%s' extracted=%d duration=%.1fs scores=[%s] squads [%s]; leaving in %.0f s",
+		*OneBrahamMatchEnd::LogNameFor(Ending), *UEnum::GetValueAsString(WinningTeam), Winner, *WinnerName, ExtractedCount,
+		GS->MatchResult.MatchDurationSeconds,
+		*FString::JoinBy(GS->TeamScores, TEXT(","), [](int32 Score) { return FString::FromInt(Score); }),
+		*PerSquad, PostMatchSeconds);
+
+	GetWorldTimerManager().SetTimer(MatchPhaseTimerHandle, this, &AOneBrahamGameMode::HandlePostMatchTimeUp,
+		PostMatchSeconds, false);
+}
+
+void AOneBrahamGameMode::HandlePostMatchTimeUp()
+{
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	SetMatchPhase(EOneBrahamMatchPhase::PostMatch);
+
+	// What FinishMatch decided and the end screen has been counting down to.
+	const EOneBrahamPostMatchAction Action = PostMatchAction;
+
+	switch (Action)
+	{
+	case EOneBrahamPostMatchAction::ReturnToMenu:
+	{
+		// The clients first, while their connections are open to carry it: a
+		// host that leaves first takes the server with it, and its clients would
+		// read the match's end as a lost connection. The return-to-menu path (not
+		// a bare ClientTravel to the menu map) is the one that destroys the
+		// client's online session, so a Steam guest can host or join again
+		// without "a session already exists"; it lands on GameDefaultMap, the menu.
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
 		{
-			GameInstance->TravelToMainMenu();
+			APlayerController* PlayerController = It->Get();
+			if (PlayerController != nullptr && !PlayerController->IsLocalController() && PlayerController->GetNetConnection() != nullptr)
+			{
+				PlayerController->ClientReturnToMainMenuWithTextReason(
+					NSLOCTEXT("OneBraham", "Notice_MatchConcluded", "The match is over."));
+			}
 		}
-	}), static_cast<float>(MatchSettings->PostMatchSeconds), false);
+
+		OB_MATCH_LOG("Post-match: everybody to the main menu (%s).", OneBrahamMatchEnd::MainMenuMapPath());
+
+		FTimerHandle LeaveHandle;
+		GetWorldTimerManager().SetTimer(LeaveHandle, FTimerDelegate::CreateWeakLambda(this, [this]()
+		{
+			if (UOneBrahamGameInstance* GameInstance = GetGameInstance<UOneBrahamGameInstance>())
+			{
+				GameInstance->TravelToMainMenu();
+			}
+			else if (GetWorld() != nullptr)
+			{
+				UGameplayStatics::OpenLevel(GetWorld(), FName(OneBrahamMatchEnd::MainMenuMapPath()));
+			}
+		}), GetNetMode() == NM_Standalone ? 0.01f : OBHostLeaveDelaySeconds, false);
+		break;
+	}
+
+	case EOneBrahamPostMatchAction::ReloadMap:
+	case EOneBrahamPostMatchAction::RestartMatch:
+	default:
+	{
+		// The same map with the same options, and everybody connected comes with
+		// it. Seamless travel needs the transition map; until it is in the build
+		// the travel is a hard one (the clients reconnect), which works without it.
+		FString URL = TEXT("?Restart");
+		if (!OBTransitionMapExists())
+		{
+			URL += TEXT("?NoSeamlessTravel");
+		}
+
+		OB_MATCH_LOG("Post-match: %s (%s).", Action == EOneBrahamPostMatchAction::RestartMatch
+			? TEXT("the dedicated server restarts the match")
+			: TEXT("no main menu map in this build - reloading the map"), *URL);
+
+		// The bots go first, properly: a bot's player state is not carried
+		// through seamless travel (GetSeamlessTravelActorList), and left in the
+		// game state's player list it was a null entry by the transition map,
+		// which the engine's checkpoint dereferenced - the dedicated server
+		// crashed on its first restart. Destroying the controller logs it out
+		// and takes its player state out of the list.
+		for (AOneBrahamBotController* Bot : BotControllers)
+		{
+			if (!IsValid(Bot))
+			{
+				continue;
+			}
+			if (APawn* Pawn = Bot->GetPawn())
+			{
+				Bot->UnPossess();
+				Pawn->Destroy();
+			}
+			Bot->Destroy();
+		}
+		BotControllers.Reset();
+		PendingRespawns.Reset();
+
+		World->ServerTravel(URL, /*bAbsolute*/ false);
+		break;
+	}
+	}
 }
 
 FOneBrahamMatchResult AOneBrahamGameMode::BuildMatchResult(EOneBrahamTeam WinningTeam, const FString& WinningSquadName, bool bNoSurvivors, int32 ExtractedCount) const
@@ -671,24 +1101,34 @@ FOneBrahamMatchResult AOneBrahamGameMode::BuildMatchResult(EOneBrahamTeam Winnin
 	Result.ExtractedCount = ExtractedCount;
 	Result.MatchDurationSeconds = GetWorld() && MatchStartTime > 0.f ? GetWorld()->GetTimeSeconds() - MatchStartTime : 0.f;
 
-	if (const AOneBrahamGameState* GS = GetOBGameState())
+	// From the player states: they carry assists, revives and damage, which the
+	// squad list does not. Squad by squad, so the end screen reads in order.
+	const AOneBrahamGameState* GS = GetOBGameState();
+	if (GS == nullptr)
 	{
-		for (const FOneBrahamSquadInfo& Squad : GS->Squads)
+		return Result;
+	}
+
+	TArray<const AOneBrahamPlayerState*> Players;
+	for (const APlayerState* BaseState : GS->PlayerArray)
+	{
+		const AOneBrahamPlayerState* State = Cast<AOneBrahamPlayerState>(BaseState);
+		if (State != nullptr && State->SquadId != INDEX_NONE)
 		{
-			for (const FOneBrahamSquadMemberInfo& Member : Squad.Members)
-			{
-				FOneBrahamPlayerSummary Summary;
-				Summary.PlayerName = Member.PlayerName;
-				Summary.ArchetypeTag = Member.ArchetypeTag;
-				Summary.Team = Squad.Team;
-				Summary.Kills = Member.Kills;
-				Summary.Downs = Member.Downs;
-				Summary.Deaths = Member.Deaths;
-				Summary.FloorsClimbed = 0;
-				Summary.bExtracted = (Member.LifeState == EOneBrahamLifeState::Extracted);
-				Result.PlayerSummaries.Add(Summary);
-			}
+			Players.Add(State);
 		}
+	}
+
+	Players.Sort([](const AOneBrahamPlayerState& A, const AOneBrahamPlayerState& B)
+	{
+		if (A.SquadId != B.SquadId) { return A.SquadId < B.SquadId; }
+		if (A.Kills != B.Kills) { return A.Kills > B.Kills; }
+		return A.GetPlayerName() < B.GetPlayerName();
+	});
+
+	for (const AOneBrahamPlayerState* State : Players)
+	{
+		Result.PlayerSummaries.Add(State->MakeSummary());
 	}
 
 	return Result;
@@ -849,7 +1289,9 @@ FOneBrahamKillFeedEntry AOneBrahamGameMode::RegisterKill(AActor* Victim, AContro
 	// Credit. Personal score always - the scoreboard is the player's own record
 	// of the match - and team score only in the mode that wins on points, because
 	// in ASCENT the win condition is the winch and a kill count is not a score.
-	if (KillerState != nullptr && !bSelfKill && !bKilledByBuilding)
+	// Nothing counts once the match is over: a burst under the end screen is not
+	// a kill on anybody's record, and in FIRE DRILL it would be a point.
+	if (KillerState != nullptr && !bSelfKill && !bKilledByBuilding && !bMatchFinished)
 	{
 		const int32 ScorePerKill = MatchSettings != nullptr ? MatchSettings->ScorePerKill : 1;
 
@@ -874,18 +1316,18 @@ FOneBrahamKillFeedEntry AOneBrahamGameMode::RegisterKill(AActor* Victim, AContro
 void AOneBrahamGameMode::AddTeamScoreByIndex(int32 TeamIndex, int32 Amount)
 {
 	AOneBrahamGameState* GS = GetOBGameState();
-	if (GS == nullptr || !GS->TeamScores.IsValidIndex(TeamIndex))
+	if (GS == nullptr || !GS->TeamScores.IsValidIndex(TeamIndex) || bMatchFinished)
 	{
 		return;
 	}
 
 	GS->TeamScores[TeamIndex] += Amount;
 
-	if (GS->TeamScores[TeamIndex] >= MatchSettings->ScoreToWin)
+	const int32 ScoreToWin = OBResolveScoreToWin(MatchSettings);
+	if (GS->TeamScores[TeamIndex] >= ScoreToWin)
 	{
-		const EOneBrahamTeam WinningTeam = TeamIndex == 0 ? EOneBrahamTeam::InternalStaff : EOneBrahamTeam::ExternalContractors;
-		FinishMatch(WinningTeam, WinningTeam == EOneBrahamTeam::InternalStaff ? TEXT("Internal Staff") : TEXT("External Contractors"),
-			false, 0, EOneBrahamExtractionFailReason::None);
+		OB_MATCH_LOG("Team %d reached %d of %d points.", TeamIndex, GS->TeamScores[TeamIndex], ScoreToWin);
+		FinishMatch(EOneBrahamMatchEnding::ScoreLimit, TeamIndex, 0);
 	}
 }
 
@@ -961,18 +1403,9 @@ void AOneBrahamGameMode::HandleMatchTimeLimitReached()
 		GS != nullptr ? GS->MatchTimeLimitSeconds : 0.f, *UEnum::GetValueAsString(Mode),
 		*UEnum::GetValueAsString(Outcome.WinningTeam), Outcome.bDraw ? 1 : 0, Outcome.bNoSurvivors ? 1 : 0);
 
-	FText Announcement;
-	if (Outcome.bNoSurvivors)
-	{
-		Announcement = FText::FromString(TEXT("The building is now closed. Nobody has been extracted. Please await further instruction."));
-	}
-	else if (Outcome.bDraw)
-	{
-		Announcement = FText::FromString(TEXT("The fire drill has ended. Both departments are level. Please return to your desks."));
-	}
-
-	FinishMatch(Outcome.WinningTeam, Outcome.WinningSquadName, Outcome.bNoSurvivors, 0,
-		EOneBrahamExtractionFailReason::None, Announcement);
+	// FIRE DRILL's teams are its squads 0 and 1 (AddTeamScoreByIndex).
+	const int32 WinningSquad = Outcome.WinningTeam == EOneBrahamTeam::None ? INDEX_NONE : SquadToTeamMap.IndexOfByKey(Outcome.WinningTeam);
+	FinishMatch(OneBrahamMatchEnd::EndingForTimeOut(Mode, Outcome.bDraw), WinningSquad, 0);
 }
 
 void AOneBrahamGameMode::EvaluateMatchEndConditions()
@@ -982,62 +1415,54 @@ void AOneBrahamGameMode::EvaluateMatchEndConditions()
 		return;
 	}
 
-	// ASCENT ends in "no survivors" when every squad is eliminated before any
-	// extraction. FIRE DRILL never ends this way because players respawn.
-	if (MatchSettings->Mode != EOneBrahamMatchMode::Ascent)
-	{
-		return;
-	}
-
-	// Only a match in progress ends. In the warmup everyone is parked as a
-	// spectator, so a player leaving the lobby read as "every squad wiped".
+	// FIRE DRILL respawns and ends on points or the clock; only ASCENT ends by
+	// elimination. Only a match in progress ends: in the warmup everyone is
+	// parked as a spectator, so a player leaving the lobby read as a wipe.
 	const EOneBrahamMatchPhase Phase = GetMatchPhase();
-	if (Phase != EOneBrahamMatchPhase::Active && Phase != EOneBrahamMatchPhase::Extraction)
+	if (MatchSettings->Mode != EOneBrahamMatchMode::Ascent
+		|| (Phase != EOneBrahamMatchPhase::Active && Phase != EOneBrahamMatchPhase::Extraction))
 	{
 		return;
 	}
 
-	const AOneBrahamGameState* GS = GetOBGameState();
-	if (GS == nullptr || GS->Squads.Num() == 0)
+	AOneBrahamGameState* GS = GetOBGameState();
+	if (GS == nullptr)
 	{
 		return;
 	}
 
-	const bool bExtractionActive = GS->GetExtractionComponent() != nullptr &&
-		GS->GetExtractionComponent()->IsExtractionActive();
+	// The squad list first: the HUD reads it, and so does the winch.
+	RebuildSquadInfo();
+
+	TArray<FOneBrahamSquadStanding> Standings;
+	GatherSquadStandings(Standings);
 
 	// The match is for its humans. With bots filling the squads, a solo player
-	// who died used to watch the bots until the purge or the 35-minute clock
-	// (they cannot extract, so neither came soon), and a server whose players
-	// had all died ran on for nobody. When no human is left in the fight, the
-	// extraction has failed for everyone who mattered to it. (A player who
-	// leaves is still in the array while Logout evaluates, so leaving does not
-	// end the match for the others.)
+	// who died used to watch the bots until the purge or the clock. (A player
+	// who leaves is still in the array while Logout evaluates, so leaving does
+	// not end the match for the others.)
 	int32 HumansInSquads = 0;
 	int32 HumansInFight = 0;
 	int32 BotsInFight = 0;
 	CountInFight(HumansInSquads, HumansInFight, BotsInFight);
-	if (OneBrahamBotRules::ShouldEndWithNoHumansLeft(HumansInSquads, HumansInFight, BotsInFight, bExtractionActive))
+
+	const UOneBrahamExtractionComponent* Extraction = GS->GetExtractionComponent();
+	const int32 ExtractionSquad = Extraction != nullptr && Extraction->IsExtractionActive()
+		? Extraction->GetClaimingSquadId() : INDEX_NONE;
+
+	const FOneBrahamEndVerdict Verdict = OneBrahamMatchEnd::DecideEliminationEnding(MatchSettings->Mode, Standings,
+		ExtractionSquad, HumansInSquads, HumansInFight, BotsInFight);
+
+	if (!Verdict.bEnds)
 	{
-		OB_MATCH_LOG("Every human in a squad is out with %d bot(s) still in the fight: the match ends.", BotsInFight);
-		FinishMatch(EOneBrahamTeam::None, FString(), /*bNoSurvivors*/ false, 0, EOneBrahamExtractionFailReason::CallersEliminated);
 		return;
 	}
 
-	bool bAnySquadAlive = false;
-	for (const FOneBrahamSquadInfo& Squad : GS->Squads)
-	{
-		if (Squad.IsAlive())
-		{
-			bAnySquadAlive = true;
-			break;
-		}
-	}
+	OB_MATCH_LOG("Elimination: %s (squad %d; %d human(s) in squads, %d in the fight, %d bot(s) in the fight, winch squad %d).",
+		*OneBrahamMatchEnd::LogNameFor(Verdict.Ending), Verdict.WinningSquadId, HumansInSquads, HumansInFight,
+		BotsInFight, ExtractionSquad);
 
-	if (!bAnySquadAlive && !bExtractionActive)
-	{
-		CompleteMatchNoSurvivors();
-	}
+	FinishMatch(Verdict.Ending, Verdict.WinningSquadId, 0);
 }
 
 void AOneBrahamGameMode::DebugForceMatchResult(int32 WinningTeamIndex)
@@ -1048,16 +1473,9 @@ void AOneBrahamGameMode::DebugForceMatchResult(int32 WinningTeamIndex)
 		return;
 	}
 
-	const AOneBrahamGameState* GS = GetOBGameState();
-	const FString SquadName = GS != nullptr && GS->Squads.IsValidIndex(WinningTeamIndex) && !GS->Squads[WinningTeamIndex].SquadName.IsEmpty()
-		? GS->Squads[WinningTeamIndex].SquadName.ToString()
-		: FString::Printf(TEXT("Squad %d"), WinningTeamIndex + 1);
-
-	const EOneBrahamTeam Team = GS != nullptr && GS->Squads.IsValidIndex(WinningTeamIndex)
-		? GS->Squads[WinningTeamIndex].Team
-		: EOneBrahamTeam::Alpha;
-
-	FinishMatch(Team, SquadName, false, MatchSettings ? MatchSettings->PlayersPerTeam : 4, EOneBrahamExtractionFailReason::None);
+	// QA: FIRE DRILL's win is points, ASCENT's the winch.
+	FinishMatch(GetMatchMode() == EOneBrahamMatchMode::FireDrill ? EOneBrahamMatchEnding::ScoreLimit : EOneBrahamMatchEnding::Extracted,
+		WinningTeamIndex, 0);
 }
 
 // ==========================================================================
@@ -1498,7 +1916,7 @@ bool AOneBrahamGameMode::IsPawnDeadForRespawn(const APawn* Pawn)
 
 void AOneBrahamGameMode::QueueRespawn(AController* Controller, float DelaySeconds)
 {
-	if (Controller == nullptr)
+	if (Controller == nullptr || bMatchFinished)
 	{
 		return;
 	}
@@ -1511,6 +1929,15 @@ bool AOneBrahamGameMode::PlayerCanRestart_Implementation(APlayerController* Play
 	if (Player == nullptr || bMatchFinished)
 	{
 		return false;
+	}
+
+	// Withdrawn, or a full lobby's spectator: they watch.
+	if (const AOneBrahamPlayerState* Watching = Player->GetPlayerState<AOneBrahamPlayerState>())
+	{
+		if (Watching->Team == EOneBrahamTeam::Spectator)
+		{
+			return false;
+		}
 	}
 
 	// ASCENT is one life: a dead player stays dead. FIRE DRILL respawns.
@@ -1820,7 +2247,7 @@ APawn* AOneBrahamGameMode::SpawnPawnAtOrBeside(AController* Controller, AActor* 
 
 void AOneBrahamGameMode::RestartPlayer(AController* NewPlayer)
 {
-	if (NewPlayer == nullptr || NewPlayer->IsPendingKillPending())
+	if (NewPlayer == nullptr || NewPlayer->IsPendingKillPending() || bMatchFinished)
 	{
 		return;
 	}
@@ -2786,4 +3213,173 @@ bool AOneBrahamGameMode::FindBotObjective(int32 SquadId, int32 OrdinalInSquad, F
 	default:
 		return false;
 	}
+}
+
+// ==========================================================================
+//  FIRE DRILL control points
+// ==========================================================================
+void AOneBrahamGameMode::TickControlPoints(float DeltaSeconds)
+{
+	AOneBrahamGameState* GS = GetOBGameState();
+	if (GS == nullptr || MatchSettings == nullptr || MatchSettings->Mode != EOneBrahamMatchMode::FireDrill
+		|| GS->MatchPhase != EOneBrahamMatchPhase::Active || GetWorld() == nullptr)
+	{
+		return;
+	}
+
+	// The three points were defined, sent the bots, and scored nothing: FIRE
+	// DRILL was a kill count against a 200-point limit that a ten-minute drill
+	// could not reach. Once a second is the resolution the definitions are in.
+	ControlPointAccumulator += DeltaSeconds;
+	if (ControlPointAccumulator < 1.f)
+	{
+		return;
+	}
+	const float Step = ControlPointAccumulator;
+	ControlPointAccumulator = 0.f;
+
+	const TArray<FOneBrahamControlPointDef>& Points = MatchSettings->ControlPoints;
+	ControlPointStates.SetNum(Points.Num());
+	if (ControlPointScoreCarry.Num() != 2)
+	{
+		ControlPointScoreCarry.Init(0.f, 2);
+	}
+
+	for (int32 Index = 0; Index < Points.Num() && !bMatchFinished; ++Index)
+	{
+		const FOneBrahamControlPointDef& Point = Points[Index];
+		FControlPointState& State = ControlPointStates[Index];
+
+		// The point's volume when the map has one; otherwise the whole floor is
+		// the point (the tower's FIRE DRILL has no volumes yet).
+		if (!State.bLocated)
+		{
+			State.bLocated = true;
+			if (!Point.VolumeActorTag.IsNone())
+			{
+				for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+				{
+					if (It->ActorHasTag(Point.VolumeActorTag))
+					{
+						State.Bounds = It->GetComponentsBoundingBox(/*bNonColliding*/ true).ExpandBy(FVector(150.f, 150.f, 0.f));
+						break;
+					}
+				}
+			}
+		}
+
+		int32 Present[2] = { 0, 0 };
+		for (const APlayerState* BaseState : GS->PlayerArray)
+		{
+			const AOneBrahamPlayerState* PS = Cast<AOneBrahamPlayerState>(BaseState);
+			const APawn* Pawn = PS != nullptr ? PS->GetPawn() : nullptr;
+			if (Pawn == nullptr || !PS->IsAlive())
+			{
+				continue;
+			}
+
+			const int32 TeamIndex = PS->Team == EOneBrahamTeam::InternalStaff ? 0
+				: PS->Team == EOneBrahamTeam::ExternalContractors ? 1 : INDEX_NONE;
+			const FVector Location = Pawn->GetActorLocation();
+			if (TeamIndex == INDEX_NONE || OneBrahamConstants::FloorIndexForZ(Location.Z) != Point.FloorIndex
+				|| (State.Bounds.IsValid && !State.Bounds.IsInsideXY(Location)))
+			{
+				continue;
+			}
+
+			++Present[TeamIndex];
+		}
+
+		const bool bContested = Present[0] > 0 && Present[1] > 0;
+		const int32 Alone = bContested ? INDEX_NONE : (Present[0] > 0 ? 0 : (Present[1] > 0 ? 1 : INDEX_NONE));
+
+		if (Alone != INDEX_NONE && Alone != State.OwnerTeam)
+		{
+			if (State.CapturingTeam != Alone)
+			{
+				State.CapturingTeam = Alone;
+				State.CaptureProgressSeconds = 0.f;
+			}
+
+			State.CaptureProgressSeconds += Step;
+			if (State.CaptureProgressSeconds >= Point.CaptureSeconds)
+			{
+				State.OwnerTeam = Alone;
+				State.CapturingTeam = INDEX_NONE;
+				State.CaptureProgressSeconds = 0.f;
+
+				const FString TeamName = GetSquadDisplayName(Alone);
+				OB_MATCH_LOG("Control point '%s' taken by %s.", *Point.PointId.ToString(), *TeamName);
+				Announce(FText::Format(NSLOCTEXT("OneBraham", "FireDrill_PointTaken", "{0} is now held by {1}."),
+					Point.DisplayName, FText::FromString(TeamName)), /*bTannoy*/ false);
+
+				AddTeamScoreByIndex(Alone, MatchSettings->ScorePerCapture);
+				continue;
+			}
+		}
+		else if (Alone == INDEX_NONE && !bContested)
+		{
+			// Walked away from: a half-taken point drifts back.
+			State.CaptureProgressSeconds = FMath::Max(0.f, State.CaptureProgressSeconds - Step);
+		}
+
+		// A held point earns for its holder every second somebody of theirs is
+		// standing on it and nobody else is: holding is presence. (Scoring a
+		// point nobody stood on made the 200-point drill a ninety-second one.)
+		if (State.OwnerTeam != INDEX_NONE && Alone == State.OwnerTeam)
+		{
+			float& Carry = ControlPointScoreCarry[State.OwnerTeam];
+			Carry += Point.ScorePerSecond * Step;
+			const int32 Whole = FMath::FloorToInt(Carry);
+			if (Whole > 0)
+			{
+				Carry -= static_cast<float>(Whole);
+				AddTeamScoreByIndex(State.OwnerTeam, Whole);
+			}
+		}
+	}
+}
+
+// ==========================================================================
+//  Dev: watch a match to its end
+// ==========================================================================
+void AOneBrahamGameMode::DevWithdrawToSpectator(APlayerController* Player)
+{
+#if !UE_BUILD_SHIPPING
+	AOneBrahamPlayerState* State = Player != nullptr ? Player->GetPlayerState<AOneBrahamPlayerState>() : nullptr;
+	if (State == nullptr || bMatchFinished)
+	{
+		return;
+	}
+
+	PendingRespawns.Remove(Player);
+	FailedSpawnsOf.Remove(Player);
+
+	if (APawn* Pawn = Player->GetPawn())
+	{
+		Player->UnPossess();
+		Pawn->Destroy();
+	}
+
+	const int32 OldSquad = State->SquadId;
+	State->SquadId = INDEX_NONE;
+	State->Team = EOneBrahamTeam::Spectator;
+	State->LifeState = EOneBrahamLifeState::Spectating;
+	State->bIsSquadLeader = false;
+	State->ForceNetUpdate();
+	RebuildSquadInfo();
+
+	// A bot takes the slot, so the match is the full roster it would have been.
+	if (BotLimit != 0)
+	{
+		PopulateWithBots(BotLimit);
+	}
+
+	if (IConsoleVariable* Follow = IConsoleManager::Get().FindConsoleVariable(TEXT("ob.Match.FollowBots")))
+	{
+		Follow->Set(1, ECVF_SetByCode);
+	}
+
+	OB_MATCH_LOG("Dev: '%s' withdrawn from squad %d to watch the match (%d bots).", *State->GetPlayerName(), OldSquad, GetBotCount());
+#endif
 }

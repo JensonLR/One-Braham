@@ -9,7 +9,9 @@
 #include "Core/OneBrahamPlayerState.h"
 #include "Data/OneBrahamMatchSettingsAsset.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
+#include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
 #include "OneBraham.h"
@@ -31,6 +33,38 @@ namespace
 
 	/** Replicated countdown is written at 4 Hz; clients interpolate between packets. */
 	constexpr float OBReplicationInterval = 0.25f;
+
+	/** ob.Extraction.Fast: the arrival and the hold, in seconds. */
+	constexpr float OBFastSeconds = 3.f;
+
+#if !UE_BUILD_SHIPPING
+	// Dev only: compress the winch for a full-match test run. -1 = the match
+	// settings' value. Read when used, so -ExecCmds after the map loads applies.
+	TAutoConsoleVariable<float> CVarBroadcastSeconds(TEXT("ob.Extraction.BroadcastSeconds"), -1.f,
+		TEXT("Dev: seconds of head start after a winch call (-1 = match settings)."), ECVF_Cheat);
+	TAutoConsoleVariable<float> CVarArrivalSeconds(TEXT("ob.Extraction.ArrivalSeconds"), -1.f,
+		TEXT("Dev: seconds of helicopter arrival (-1 = match settings)."), ECVF_Cheat);
+	TAutoConsoleVariable<float> CVarHoldSeconds(TEXT("ob.Extraction.HoldSeconds"), -1.f,
+		TEXT("Dev: seconds of uncontested hold to extract (-1 = match settings)."), ECVF_Cheat);
+	TAutoConsoleVariable<float> CVarLoiterSeconds(TEXT("ob.Extraction.LoiterSeconds"), -1.f,
+		TEXT("Dev: seconds the helicopter waits over the pad (-1 = match settings)."), ECVF_Cheat);
+	TAutoConsoleVariable<int32> CVarBotCalls(TEXT("ob.Extraction.BotCalls"), 1,
+		TEXT("Dev: 0 stops bots calling the winch from the pad (to see the other endings)."), ECVF_Cheat);
+
+	/** A dev override when one is set, else the value given. */
+	float OBTiming(const TAutoConsoleVariable<float>& Override, float Value)
+	{
+		const float Forced = Override.GetValueOnGameThread();
+		return Forced >= 0.f ? Forced : Value;
+	}
+
+	/** ob.Extraction.Fast, registered by the module (OneBraham.cpp). */
+	bool OBFastExtraction()
+	{
+		static const IConsoleVariable* const Fast = IConsoleManager::Get().FindConsoleVariable(TEXT("ob.Extraction.Fast"));
+		return Fast != nullptr && Fast->GetInt() != 0;
+	}
+#endif
 }
 
 UOneBrahamExtractionComponent::UOneBrahamExtractionComponent()
@@ -70,6 +104,59 @@ void UOneBrahamExtractionComponent::GetLifetimeReplicatedProps(TArray<FLifetimeP
 	DOREPLIFETIME(UOneBrahamExtractionComponent, HelipadLocation);
 	DOREPLIFETIME(UOneBrahamExtractionComponent, HoldRadiusCm);
 	DOREPLIFETIME(UOneBrahamExtractionComponent, BroadcastDurationSeconds);
+	DOREPLIFETIME(UOneBrahamExtractionComponent, MatchEnding);
+	DOREPLIFETIME(UOneBrahamExtractionComponent, EndingWinningSquadId);
+	DOREPLIFETIME(UOneBrahamExtractionComponent, LeaveServerTime);
+	DOREPLIFETIME(UOneBrahamExtractionComponent, PostMatchAction);
+}
+
+// ===========================================================================
+//  Timings
+// ===========================================================================
+
+float UOneBrahamExtractionComponent::GetBroadcastSeconds() const
+{
+	const AOneBrahamGameState* GS = CachedGameState.Get();
+	const UOneBrahamMatchSettingsAsset* Settings = GS ? GS->GetMatchSettings() : nullptr;
+	float Seconds = Settings != nullptr && Settings->ExtractionBroadcastSeconds > 0.f ? Settings->ExtractionBroadcastSeconds : OBFallbackBroadcastSeconds;
+#if !UE_BUILD_SHIPPING
+	Seconds = OBTiming(CVarBroadcastSeconds, Seconds);
+#endif
+	return FMath::Max(0.f, Seconds);
+}
+
+float UOneBrahamExtractionComponent::GetArrivalSeconds() const
+{
+	const AOneBrahamGameState* GS = CachedGameState.Get();
+	const UOneBrahamMatchSettingsAsset* Settings = GS ? GS->GetMatchSettings() : nullptr;
+	float Seconds = Settings != nullptr ? Settings->HelicopterArrivalSeconds : OBFallbackArrivalSeconds;
+#if !UE_BUILD_SHIPPING
+	Seconds = OBFastExtraction() ? OBFastSeconds : OBTiming(CVarArrivalSeconds, Seconds);
+#endif
+	return FMath::Max(0.f, Seconds);
+}
+
+float UOneBrahamExtractionComponent::GetHoldSeconds() const
+{
+	const AOneBrahamGameState* GS = CachedGameState.Get();
+	const UOneBrahamMatchSettingsAsset* Settings = GS ? GS->GetMatchSettings() : nullptr;
+	float Seconds = Settings != nullptr ? Settings->ExtractionHoldSeconds : OBFallbackHoldSeconds;
+#if !UE_BUILD_SHIPPING
+	Seconds = OBFastExtraction() ? OBFastSeconds : OBTiming(CVarHoldSeconds, Seconds);
+#endif
+	return FMath::Max(1.f, Seconds);
+}
+
+float UOneBrahamExtractionComponent::GetLoiterSeconds() const
+{
+	const AOneBrahamGameState* GS = CachedGameState.Get();
+	const UOneBrahamMatchSettingsAsset* Settings = GS ? GS->GetMatchSettings() : nullptr;
+	float Seconds = Settings != nullptr ? Settings->HelicopterLoiterSeconds : OBFallbackLoiterSeconds;
+#if !UE_BUILD_SHIPPING
+	Seconds = OBTiming(CVarLoiterSeconds, Seconds);
+#endif
+	// The pilot always waits at least as long as a clean hold takes.
+	return FMath::Max(GetHoldSeconds() + 1.f, Seconds);
 }
 
 // ===========================================================================
@@ -95,7 +182,7 @@ void UOneBrahamExtractionComponent::TickComponent(float DeltaTime, ELevelTick Ti
 		{
 			SecondsRemainingInState = FMath::Max(0.f, SecondsRemainingInState - DeltaTime);
 
-			const float ArrivalWindow = static_cast<float>(BroadcastDurationSeconds) + OBFallbackArrivalSeconds;
+			const float ArrivalWindow = static_cast<float>(BroadcastDurationSeconds) + GetArrivalSeconds();
 			if (ExtractionState == EOneBrahamExtractionState::Broadcast || ExtractionState == EOneBrahamExtractionState::Arriving)
 			{
 				ArrivalAlpha01 = FMath::Clamp(ArrivalAlpha01 + DeltaTime / FMath::Max(1.f, ArrivalWindow), 0.f, 1.f);
@@ -110,17 +197,33 @@ void UOneBrahamExtractionComponent::TickComponent(float DeltaTime, ELevelTick Ti
 
 	ApplyLocalExtractionAudio();
 
+	// The match is over: the winch stays where the ending left it.
+	if (MatchEnding != EOneBrahamMatchEnding::None)
+	{
+		return;
+	}
+
 	TimeInState += DeltaTime;
 	ReplicationAccumulator += DeltaTime;
 
-	const UOneBrahamMatchSettingsAsset* Settings = GS->GetMatchSettings();
-	const int32 ArrivalSeconds = FMath::RoundToInt(Settings ? Settings->HelicopterArrivalSeconds : OBFallbackArrivalSeconds);
-	const float HoldSeconds = Settings ? FMath::Max(1.f, Settings->ExtractionHoldSeconds) : OBFallbackHoldSeconds;
-	const float LoiterSeconds = Settings ? FMath::Max(1.f, Settings->HelicopterLoiterSeconds) : OBFallbackLoiterSeconds;
+	const float ArrivalSeconds = GetArrivalSeconds();
+	const float LoiterSeconds = GetLoiterSeconds();
+
+	// The squad that called it is gone, in whichever live state: during the
+	// broadcast and the arrival too, not only on the pad. An attempt nobody can
+	// finish otherwise held the match open until the helicopter loitered out.
+	if (IsExtractionActive() && !IsClaimingSquadAlive())
+	{
+		ServerAbortExtraction(EOneBrahamExtractionFailReason::CallersEliminated);
+		return;
+	}
 
 	switch (ExtractionState)
 	{
 	case EOneBrahamExtractionState::Inactive:
+		ServerConsiderBotCalls(DeltaTime);
+		return;
+
 	case EOneBrahamExtractionState::Complete:
 		return;
 
@@ -137,9 +240,9 @@ void UOneBrahamExtractionComponent::TickComponent(float DeltaTime, ELevelTick Ti
 
 	case EOneBrahamExtractionState::Arriving:
 	{
-		const float ArrivalWindow = FMath::Max(1.f, static_cast<float>(BroadcastDurationSeconds) + static_cast<float>(ArrivalSeconds));
+		const float ArrivalWindow = FMath::Max(1.f, static_cast<float>(BroadcastDurationSeconds) + ArrivalSeconds);
 		const float Elapsed = static_cast<float>(BroadcastDurationSeconds) + TimeInState;
-		const float Remaining = static_cast<float>(ArrivalSeconds) - TimeInState;
+		const float Remaining = ArrivalSeconds - TimeInState;
 
 		if (Remaining <= 0.f)
 		{
@@ -166,13 +269,6 @@ void UOneBrahamExtractionComponent::TickComponent(float DeltaTime, ELevelTick Ti
 		if (TimeInState >= LoiterSeconds)
 		{
 			ServerAbortExtraction(EOneBrahamExtractionFailReason::LoiterExpired);
-			return;
-		}
-
-		// The claiming squad is on the floor. Nobody is left to walk onto the wire.
-		if (GS->IsSquadEliminated(ClaimingSquadId))
-		{
-			ServerAbortExtraction(EOneBrahamExtractionFailReason::CallersEliminated);
 			return;
 		}
 
@@ -208,7 +304,7 @@ void UOneBrahamExtractionComponent::TickComponent(float DeltaTime, ELevelTick Ti
 			Published = FMath::Max(0.f, static_cast<float>(BroadcastDurationSeconds) - TimeInState);
 			break;
 		case EOneBrahamExtractionState::Arriving:
-			Published = FMath::Max(0.f, static_cast<float>(ArrivalSeconds) - TimeInState);
+			Published = FMath::Max(0.f, ArrivalSeconds - TimeInState);
 			break;
 		case EOneBrahamExtractionState::Holding:
 			Published = FMath::Max(0.f, LoiterSeconds - TimeInState);
@@ -288,8 +384,13 @@ bool UOneBrahamExtractionComponent::ServerCallExtraction(int32 SquadId, AOneBrah
 		}
 	}
 
+	// The head start is fixed at the call, so the countdown every machine draws
+	// is the one this call was given.
+	BroadcastDurationSeconds = FMath::Max(1, FMath::RoundToInt(GetBroadcastSeconds()));
+
 	ClaimingSquadId = SquadId;
 	HoldingSquadId = INDEX_NONE;
+	BotPadSeconds.Reset();
 	HoldProgress01 = 0.f;
 	ArrivalAlpha01 = 0.f;
 	UncontestedHoldTime = 0.f;
@@ -410,20 +511,12 @@ void UOneBrahamExtractionComponent::ServerSetState(EOneBrahamExtractionState New
 		SecondsRemainingInState = static_cast<float>(BroadcastDurationSeconds);
 		break;
 	case EOneBrahamExtractionState::Arriving:
-	{
-		const AOneBrahamGameState* GS = CachedGameState.Get();
-		const UOneBrahamMatchSettingsAsset* Settings = GS ? GS->GetMatchSettings() : nullptr;
-		SecondsRemainingInState = Settings ? Settings->HelicopterArrivalSeconds : OBFallbackArrivalSeconds;
+		SecondsRemainingInState = GetArrivalSeconds();
 		break;
-	}
 	case EOneBrahamExtractionState::Holding:
-	{
-		const AOneBrahamGameState* GS = CachedGameState.Get();
-		const UOneBrahamMatchSettingsAsset* Settings = GS ? GS->GetMatchSettings() : nullptr;
-		SecondsRemainingInState = Settings ? Settings->HelicopterLoiterSeconds : OBFallbackLoiterSeconds;
+		SecondsRemainingInState = GetLoiterSeconds();
 		HoldingSquadId = ClaimingSquadId;
 		break;
-	}
 	case EOneBrahamExtractionState::Complete:
 		SecondsRemainingInState = 0.f;
 		ArrivalAlpha01 = 1.f;
@@ -466,8 +559,7 @@ void UOneBrahamExtractionComponent::ServerEvaluateHold(float DeltaTime)
 		return;
 	}
 
-	const UOneBrahamMatchSettingsAsset* Settings = GS->GetMatchSettings();
-	const float HoldSeconds = Settings ? FMath::Max(1.f, Settings->ExtractionHoldSeconds) : OBFallbackHoldSeconds;
+	const float HoldSeconds = GetHoldSeconds();
 
 	CountPlayersInZone(ClaimantsInZone, ContestersInZone);
 
@@ -513,6 +605,124 @@ bool UOneBrahamExtractionComponent::IsClaimingSquadAlive() const
 	}
 
 	return !GS->IsSquadEliminated(ClaimingSquadId);
+}
+
+void UOneBrahamExtractionComponent::ServerConsiderBotCalls(float DeltaTime)
+{
+	const AOneBrahamGameState* GS = CachedGameState.Get();
+	if (GS == nullptr || GS->MatchPhase != EOneBrahamMatchPhase::Active)
+	{
+		BotPadSeconds.Reset();
+		return;
+	}
+
+#if !UE_BUILD_SHIPPING
+	if (CVarBotCalls.GetValueOnGameThread() == 0)
+	{
+		return;
+	}
+#endif
+
+	const UOneBrahamMatchSettingsAsset* Settings = GS->GetMatchSettings();
+	if (Settings != nullptr && !Settings->bExtractionEnabled)
+	{
+		return;
+	}
+
+	// One bot per squad on the pad is enough to call it; the first squad to have
+	// stood there long enough calls it, and only one squad can.
+	TMap<int32, AOneBrahamPlayerState*> OnPad;
+	const float RadiusSquared = HoldRadiusCm * HoldRadiusCm;
+
+	for (APlayerState* BaseState : GS->PlayerArray)
+	{
+		AOneBrahamPlayerState* PS = Cast<AOneBrahamPlayerState>(BaseState);
+		const AController* Owner = PS != nullptr ? Cast<AController>(PS->GetOwner()) : nullptr;
+		const bool bBot = PS != nullptr && (PS->IsABot() || (Owner != nullptr && Cast<APlayerController>(Owner) == nullptr));
+		if (!bBot || !PS->IsAlive())
+		{
+			continue;
+		}
+
+		const APawn* Pawn = PS->GetPawn();
+		if (Pawn == nullptr)
+		{
+			continue;
+		}
+
+		const FVector Delta = Pawn->GetActorLocation() - HelipadLocation;
+		if (FVector::DistSquared2D(Delta, FVector::ZeroVector) > RadiusSquared
+			|| FMath::Abs(Delta.Z) > OneBrahamConstants::FloorHeightCm)
+		{
+			continue;
+		}
+
+		const int32 SquadId = GS->GetSquadIdForPlayer(PS->GetPlayerId());
+		if (SquadId != INDEX_NONE && !GS->IsSquadEliminated(SquadId))
+		{
+			OnPad.Add(SquadId, PS);
+		}
+	}
+
+	for (auto It = BotPadSeconds.CreateIterator(); It; ++It)
+	{
+		if (!OnPad.Contains(It.Key()))
+		{
+			It.RemoveCurrent();
+		}
+	}
+
+	for (const TPair<int32, AOneBrahamPlayerState*>& Pair : OnPad)
+	{
+		float& Seconds = BotPadSeconds.FindOrAdd(Pair.Key);
+		Seconds += DeltaTime;
+		if (Seconds < BotCallSeconds)
+		{
+			continue;
+		}
+
+		FText Refusal;
+		if (ServerCallExtraction(Pair.Key, Pair.Value, Refusal))
+		{
+			OB_EXTRACT_LOG("Bot '%s' keyed the winch from the pad for squad %d.", *Pair.Value->GetPlayerName(), Pair.Key);
+			return;
+		}
+
+		// Refused (a lockout, a squad the server no longer has): try again later
+		// rather than every tick.
+		Seconds = 0.f;
+		OB_EXTRACT_LOG("Bot '%s' could not call the winch: %s", *Pair.Value->GetPlayerName(), *Refusal.ToString());
+	}
+}
+
+void UOneBrahamExtractionComponent::ServerRecordMatchEnding(EOneBrahamMatchEnding Ending, int32 WinningSquadId, double InLeaveServerTime,
+	EOneBrahamPostMatchAction InPostMatchAction)
+{
+	if (GetOwnerRole() != ROLE_Authority)
+	{
+		return;
+	}
+
+	MatchEnding = Ending;
+	EndingWinningSquadId = WinningSquadId;
+	LeaveServerTime = InLeaveServerTime;
+	PostMatchAction = static_cast<uint8>(InPostMatchAction);
+	BotPadSeconds.Reset();
+
+	// An attempt still in the air ends with the match, quietly: the ending has
+	// been announced, and a "winch withdrawn" after it would contradict it.
+	if (IsExtractionActive() || ExtractionState == EOneBrahamExtractionState::Failed)
+	{
+		bContested = false;
+		ServerSetState(EOneBrahamExtractionState::Inactive);
+	}
+
+	if (AActor* OwnerActor = GetOwner())
+	{
+		OwnerActor->ForceNetUpdate();
+	}
+
+	OB_EXTRACT_LOG("Match ending recorded: %s (winning squad %d).", *OneBrahamMatchEnd::LogNameFor(Ending), WinningSquadId);
 }
 
 void UOneBrahamExtractionComponent::CountPlayersInZone(int32& OutClaimants, int32& OutContesters) const

@@ -24,7 +24,9 @@ public class OneBrahamTarget : TargetRules
 		bUseChecksInShipping = false;
 
 		// Steam build: build with -cryptokeys & pak signing in PackageClient.ps1.
-		bUsesSteam = false; // Steamworks is loaded through OnlineSubsystemSteam plugin.
+		// Steamworks comes in through the OnlineSubsystemSteam plugin; the old
+		// TargetRules.bUsesSteam switch is obsolete since UE 5.5 (a CS0618
+		// warning on every UAT run) and does nothing, so it is not set here.
 
 		if (Target.Platform == UnrealTargetPlatform.Win64)
 		{

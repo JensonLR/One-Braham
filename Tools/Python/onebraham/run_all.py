@@ -10,6 +10,9 @@ ORDER MATTERS, AND THIS IS WHY
     1. generate_input_ini   text only; it can fail before the editor is even open
     2. materials            everything else references MI_* and PM_OB_*
     3. environment          the map: floors, rooms, doors, shutters, the pad
+       frontend             L_MainMenu (the tower over Aldgate at dusk) and
+                            L_Loading; after environment, whose district
+                            meshes, facade and materials it reuses
     4. props                blueprints + the dressing manifest
     5. weapons              data assets, blueprints, the registry
     6. match_settings       DA_MatchSettings_<Mode>; loot tables come from EnsureDefaults()
@@ -124,10 +127,15 @@ STEPS = [
      "names, every gameplay tag either claimed by an emitter or written down as "
      "waiting, every verb against the montage it plays, and every class's own "
      "overrides against the interface's signatures"),
+    ("frontend_credits", "onebraham.build_frontend:check_credits", False,
+     "the credits page against Docs/LICENCES.md: the OpenStreetMap notice the "
+     "ODbL requires, and every Poly Haven, ambientCG and Epic asset it names"),
     ("materials", "onebraham.build_materials", True,
      "master materials, physical materials, surface and brand instances"),
     ("environment", "onebraham.build_environment", True,
      "the map: plaza to Skydeck, rooms, doors, shutters, extraction pad"),
+    ("frontend", "onebraham.build_frontend", True,
+     "L_MainMenu (the tower over Aldgate at dusk, the menu camera) and L_Loading"),
     ("props", "onebraham.build_props", True,
      "gameplay blueprints and the prop dressing manifest"),
     ("weapons", "onebraham.build_weapons", True,
@@ -183,21 +191,26 @@ def _select_steps(only, skip, text_only):
 
 
 def _run_step(name, module_name, purpose):
-    """Imports and runs one step's build_all(). Returns (ok, seconds, detail)."""
+    """Imports and runs one step's build_all() - or, for "module:function",
+    that function, so one module can carry an editor step and a text-only
+    one. Returns (ok, seconds, detail)."""
     started = time.time()
 
     C.log(u"")
     C.log(u"--- {0}: {1} ---".format(name, purpose))
 
+    module_name, _sep, function_name = module_name.partition(":")
+    function_name = function_name or "build_all"
+
     try:
-        module = __import__(module_name, fromlist=["build_all"])
+        module = __import__(module_name, fromlist=[function_name])
     except Exception as exc:  # noqa: BLE001
         return u"failed", time.time() - started, u"import failed: {0}".format(exc)
 
-    build_all = getattr(module, "build_all", None)
+    build_all = getattr(module, function_name, None)
 
     if build_all is None:
-        return u"failed", time.time() - started, u"{0} has no build_all()".format(module_name)
+        return u"failed", time.time() - started, u"{0} has no {1}()".format(module_name, function_name)
 
     try:
         report = build_all()

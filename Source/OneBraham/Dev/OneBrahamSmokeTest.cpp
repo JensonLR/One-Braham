@@ -7,6 +7,7 @@
 #include "Misc/Parse.h"
 
 #if !UE_BUILD_SHIPPING
+#include "Core/OneBrahamGameMode.h"
 #include "Core/OneBrahamGameSettings.h"
 #include "Core/OneBrahamGameState.h"
 #include "Core/OneBrahamPlayerController.h"
@@ -14,8 +15,15 @@
 #include "Core/OneBrahamTypes.h"
 #include "Data/OneBrahamMatchSettingsAsset.h"
 #include "EnhancedInputSubsystems.h"
+#include "Extraction/OneBrahamExtractionComponent.h"
+#include "Extraction/OneBrahamMatchEnding.h"
+#include "HAL/IConsoleManager.h"
+#include "Lockdown/OneBrahamLockdownComponent.h"
+#include "UI/OneBrahamHUDComponent.h"
+#include "UI/OneBrahamMatchEndWidget.h"
 #include "EnhancedPlayerInput.h"
 #include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/NetConnection.h"
@@ -86,6 +94,39 @@ namespace
 	/** The first screenshot's pitch towards another player is clamped to this,
 	 *  so a player on the floor above does not make a shot of the ceiling. */
 	constexpr float MaxFacingPitchDegrees = 30.f;
+
+	/** -OBSmokeFullMatch: a progress line this often while the match runs. */
+	constexpr double ProgressSeconds = 30.0;
+
+	/** After Complete, how long before the end screen is read and photographed:
+	 *  the result replicates and the widget fills itself in on its own refresh. */
+	constexpr double EndScreenSettleSeconds = 3.0;
+
+	/** After the end screenshot, the post-match window plus this before a run
+	 *  that never left the end screen fails. */
+	constexpr double TravelGraceSeconds = 45.0;
+
+	/** The squads as the end rules see them, from the replicated squad list. */
+	void SmokeGatherStandings(const AOneBrahamGameState* GameState, TArray<FOneBrahamSquadStanding>& Out)
+	{
+		Out.Reset();
+		if (GameState == nullptr)
+		{
+			return;
+		}
+
+		for (const FOneBrahamSquadInfo& Squad : GameState->Squads)
+		{
+			FOneBrahamSquadStanding& Standing = Out.AddDefaulted_GetRef();
+			Standing.SquadId = Squad.SquadId;
+			Standing.Members = Squad.Members.Num();
+			for (const FOneBrahamSquadMemberInfo& Member : Squad.Members)
+			{
+				Standing.InFight += (Member.LifeState == EOneBrahamLifeState::Alive || Member.LifeState == EOneBrahamLifeState::Downed) ? 1 : 0;
+				Standing.Extracted += Member.LifeState == EOneBrahamLifeState::Extracted ? 1 : 0;
+			}
+		}
+	}
 
 	/** Human players in the game state: bots are not who a LAN test waits for. */
 	int32 SmokeCountHumanPlayers(const UWorld* World)
@@ -196,6 +237,14 @@ FOneBrahamSmokeOptions FOneBrahamSmokeOptions::Parse(const TCHAR* CommandLine)
 		Out.HoldSeconds = FMath::Clamp(Hold, 0.f, MaxTimeoutSeconds);
 	}
 
+	// A whole match is a long run: the most the budget allows, unless the
+	// command line set one.
+	Out.bFullMatch = FParse::Param(CommandLine, TEXT("OBSmokeFullMatch"));
+	if (Out.bFullMatch && !FParse::Value(CommandLine, TEXT("OBSmokeTimeout="), Timeout))
+	{
+		Out.TimeoutSeconds = MaxTimeoutSeconds;
+	}
+
 	return Out;
 }
 
@@ -251,8 +300,9 @@ void UOneBrahamSmokeTestSubsystem::Initialize(FSubsystemCollectionBase& Collecti
 		TravelFailureHandle = GEngine->OnTravelFailure().AddUObject(this, &UOneBrahamSmokeTestSubsystem::HandleTravelFailure);
 	}
 
-	OB_SMOKE_LOG("start: %d shot(s), %.0fs budget, %d player(s) expected, %.0fs hold, build %s",
+	OB_SMOKE_LOG("start: %d shot(s), %.0fs budget, %d player(s) expected, %.0fs hold%s, build %s",
 		Options.Shots, Options.TimeoutSeconds, Options.ExpectPlayers, Options.HoldSeconds,
+		Options.bFullMatch ? TEXT(", full match") : TEXT(""),
 		LexToString(FApp::GetBuildConfiguration()));
 #endif
 }
@@ -302,7 +352,10 @@ bool UOneBrahamSmokeTestSubsystem::Tick(float DeltaTime)
 	if (Now - StartSeconds > Options.TimeoutSeconds)
 	{
 		static const TCHAR* PhaseNames[] = { TEXT("a pawn"), TEXT("the players"), TEXT("the frame sample"),
-			TEXT("the screenshots"), TEXT("the screenshots to be written"), TEXT("nothing"), TEXT("nothing") };
+			TEXT("the screenshots"), TEXT("the screenshots to be written"), TEXT("the match to end"),
+			TEXT("the end screen"), TEXT("the end screenshot to be written"), TEXT("the post-match travel"),
+			TEXT("the next match to clear the end screen"), TEXT("nothing"), TEXT("nothing") };
+		static_assert(UE_ARRAY_COUNT(PhaseNames) == static_cast<int32>(EPhase::Done) + 1, "one name per phase");
 
 		FString Waiting = PhaseNames[static_cast<uint8>(Phase)];
 
@@ -408,6 +461,26 @@ bool UOneBrahamSmokeTestSubsystem::Tick(float DeltaTime)
 
 	case EPhase::Flushing:
 		TickFlushing();
+		break;
+
+	case EPhase::WatchingMatch:
+		TickWatchingMatch(World);
+		break;
+
+	case EPhase::EndScreen:
+		TickEndScreen(World, PC);
+		break;
+
+	case EPhase::EndFlushing:
+		TickEndFlushing();
+		break;
+
+	case EPhase::AwaitingTravel:
+		TickAwaitingTravel();
+		break;
+
+	case EPhase::NextMatch:
+		TickNextMatch();
 		break;
 
 	default:
@@ -961,7 +1034,328 @@ void UOneBrahamSmokeTestSubsystem::TickFlushing()
 			*FPaths::GetPath(ShotPaths[0]));
 	}
 
+	if (Options.bFullMatch)
+	{
+		UWorld* World = GetPlayerWorld();
+		APlayerController* PC = World != nullptr && GetGameInstance() != nullptr ? GetGameInstance()->GetFirstLocalPlayerController(World) : nullptr;
+		BeginWatchingMatch(World, PC);
+		return;
+	}
+
 	Finish();
+}
+
+// ==========================================================================
+//  -OBSmokeFullMatch
+// ==========================================================================
+void UOneBrahamSmokeTestSubsystem::BeginWatchingMatch(UWorld* World, APlayerController* PC)
+{
+	if (World == nullptr)
+	{
+		Fail(TEXT("no game world to watch a match in"));
+		Finish();
+		return;
+	}
+
+	MatchWorld = World;
+	MatchMapName = World->GetMapName();
+	LastProgressSeconds = FPlatformTime::Seconds();
+	Phase = EPhase::WatchingMatch;
+	PhaseStartSeconds = LastProgressSeconds;
+
+	// The player's own death would decide the match ("staff withdrawn"), so on
+	// the server they leave the fight and a bot takes their place. A client
+	// cannot do that, and waits for the server's match to end as it stands.
+	if (AOneBrahamGameMode* GameMode = World->GetAuthGameMode<AOneBrahamGameMode>())
+	{
+		GameMode->DevWithdrawToSpectator(PC);
+		OB_SMOKE_LOG("full match: the local player is watching; the bots play it out");
+	}
+	else
+	{
+		OB_SMOKE_LOG("full match: a client - watching the server's match as a player");
+	}
+}
+
+void UOneBrahamSmokeTestSubsystem::TickWatchingMatch(UWorld* World)
+{
+	if (World == nullptr)
+	{
+		// Mid-travel or between maps: the match world went away before its end.
+		if (!MatchWorld.IsValid())
+		{
+			Fail(TEXT("the match's world went away before the match ended"));
+			Finish();
+		}
+		return;
+	}
+
+	if (World != MatchWorld.Get())
+	{
+		Fail(FString::Printf(TEXT("travelled to %s before the match ended"), *World->GetMapName()));
+		Finish();
+		return;
+	}
+
+	const AOneBrahamGameState* GameState = World->GetGameState<AOneBrahamGameState>();
+	if (GameState == nullptr)
+	{
+		return;
+	}
+
+	const double Now = FPlatformTime::Seconds();
+
+	if (GameState->MatchPhase == EOneBrahamMatchPhase::Complete || GameState->MatchPhase == EOneBrahamMatchPhase::PostMatch)
+	{
+		OB_SMOKE_LOG("match: complete after %.0fs of watching", Now - PhaseStartSeconds);
+		Phase = EPhase::EndScreen;
+		PhaseStartSeconds = Now;
+		return;
+	}
+
+	if (Now - LastProgressSeconds < ProgressSeconds)
+	{
+		return;
+	}
+	LastProgressSeconds = Now;
+
+	TArray<FOneBrahamSquadStanding> Standings;
+	SmokeGatherStandings(GameState, Standings);
+	FString Squads;
+	for (const FOneBrahamSquadStanding& Standing : Standings)
+	{
+		Squads += FString::Printf(TEXT("%s%d:%d/%d"), Squads.IsEmpty() ? TEXT("") : TEXT(" "), Standing.SquadId, Standing.InFight, Standing.Members);
+	}
+
+	const UOneBrahamLockdownComponent* Lockdown = GameState->GetLockdownComponent();
+	const UOneBrahamExtractionComponent* Extraction = GameState->GetExtractionComponent();
+
+	OB_SMOKE_LOG("progress: %s %.0f of %.0fs, lockdown %s (highest floor %d), winch %s (squad %d, %.0f%%), squads in fight [%s], scores [%s]",
+		*StaticEnum<EOneBrahamMatchPhase>()->GetNameStringByValue(static_cast<int64>(GameState->MatchPhase)),
+		GameState->PhaseElapsedSeconds, GameState->MatchTimeLimitSeconds,
+		Lockdown != nullptr ? *StaticEnum<EOneBrahamLockdownStage>()->GetNameStringByValue(static_cast<int64>(Lockdown->GetStage())) : TEXT("-"),
+		Lockdown != nullptr ? Lockdown->GetHighestOccupiedFloor() : -1,
+		Extraction != nullptr ? *StaticEnum<EOneBrahamExtractionState>()->GetNameStringByValue(static_cast<int64>(Extraction->GetExtractionState())) : TEXT("-"),
+		Extraction != nullptr ? Extraction->GetClaimingSquadId() : -1,
+		Extraction != nullptr ? Extraction->GetHoldProgress01() * 100.f : 0.f,
+		*Squads,
+		*FString::JoinBy(GameState->TeamScores, TEXT(","), [](int32 Score) { return FString::FromInt(Score); }));
+}
+
+void UOneBrahamSmokeTestSubsystem::TickEndScreen(UWorld* World, APlayerController* PC)
+{
+	const double Now = FPlatformTime::Seconds();
+	if (Now - PhaseStartSeconds < EndScreenSettleSeconds)
+	{
+		return;
+	}
+
+	const AOneBrahamGameState* GameState = World != nullptr ? World->GetGameState<AOneBrahamGameState>() : nullptr;
+	if (GameState == nullptr || PC == nullptr)
+	{
+		Fail(TEXT("no game state or player at the end of the match"));
+		Finish();
+		return;
+	}
+
+	// result ---------------------------------------------------------------
+	const FOneBrahamMatchResult& Result = GameState->MatchResult;
+	const UOneBrahamExtractionComponent* Extraction = GameState->GetExtractionComponent();
+	const EOneBrahamMatchEnding Ending = Extraction != nullptr ? Extraction->GetMatchEnding() : EOneBrahamMatchEnding::None;
+	const int32 WinningSquadId = Extraction != nullptr ? Extraction->GetEndingWinningSquadId() : INDEX_NONE;
+
+	OB_SMOKE_LOG("result: ending '%s', winner %s (squad %d, %s), duration %.0fs, extracted %d, mode %s, scores [%s]",
+		*OneBrahamMatchEnd::LogNameFor(Ending),
+		Result.WinningSquadName.IsEmpty() ? TEXT("nobody") : *Result.WinningSquadName.ToString(), WinningSquadId,
+		*StaticEnum<EOneBrahamTeam>()->GetNameStringByValue(static_cast<int64>(Result.WinningTeam)),
+		Result.MatchDurationSeconds, Result.ExtractedCount,
+		*StaticEnum<EOneBrahamMatchMode>()->GetNameStringByValue(static_cast<int64>(GameState->MatchMode)),
+		*FString::JoinBy(GameState->TeamScores, TEXT(","), [](int32 Score) { return FString::FromInt(Score); }));
+
+	TArray<FOneBrahamSquadStanding> Standings;
+	SmokeGatherStandings(GameState, Standings);
+	for (const FOneBrahamSquadStanding& Standing : Standings)
+	{
+		const FText Name = GameState->Squads.IsValidIndex(Standing.SquadId) ? GameState->Squads[Standing.SquadId].SquadName : FText::GetEmpty();
+		int32 Kills = 0;
+		int32 Downs = 0;
+		for (const FOneBrahamPlayerSummary& Summary : Result.PlayerSummaries)
+		{
+			if (GameState->Squads.IsValidIndex(Standing.SquadId) && Summary.Team == GameState->Squads[Standing.SquadId].Team)
+			{
+				Kills += Summary.Kills;
+				Downs += Summary.Downs;
+			}
+		}
+
+		OB_SMOKE_LOG("squad %d '%s': %d member(s), %d alive, %d extracted, %d kill(s), %d down(s)%s",
+			Standing.SquadId, *Name.ToString(), Standing.Members, Standing.InFight, Standing.Extracted, Kills, Downs,
+			Standing.SquadId == WinningSquadId ? TEXT(" - WINNER") : TEXT(""));
+	}
+
+	// coherent -------------------------------------------------------------
+	int32 ScoreToWin = 200;
+	if (const UOneBrahamMatchSettingsAsset* Settings = GameState->GetMatchSettings())
+	{
+		ScoreToWin = Settings->ScoreToWin;
+	}
+	if (const IConsoleVariable* Override = IConsoleManager::Get().FindConsoleVariable(TEXT("ob.Match.ScoreToWin")))
+	{
+		ScoreToWin = Override->GetInt() > 0 ? Override->GetInt() : ScoreToWin;
+	}
+
+	FString Problem;
+	if (OneBrahamMatchEnd::IsResultCoherent(Ending, GameState->MatchMode, WinningSquadId, Result.ExtractedCount,
+		Standings, GameState->TeamScores, ScoreToWin, Problem))
+	{
+		OB_SMOKE_LOG("coherent: yes");
+	}
+	else
+	{
+		OB_SMOKE_LOG("coherent: NO - %s", *Problem);
+		Fail(FString::Printf(TEXT("incoherent result: %s"), *Problem));
+	}
+
+	if (Result.MatchDurationSeconds <= 0.f)
+	{
+		Fail(TEXT("the result has no duration"));
+	}
+
+	// end screen -------------------------------------------------------------
+	const UOneBrahamHUDComponent* HUD = PC->FindComponentByClass<UOneBrahamHUDComponent>();
+	const UOneBrahamMatchEndWidget* EndScreen = HUD != nullptr ? HUD->GetMatchEndWidget() : nullptr;
+	if (EndScreen == nullptr || !EndScreen->IsShowing())
+	{
+		OB_SMOKE_LOG("end screen: NOT up");
+		Fail(TEXT("the end screen is not up"));
+	}
+	else
+	{
+		OB_SMOKE_LOG("end screen: up, showing '%s'", *OneBrahamMatchEnd::LogNameFor(EndScreen->GetShownEnding()));
+		if (EndScreen->GetShownEnding() != Ending)
+		{
+			Fail(TEXT("the end screen shows a different ending from the server's"));
+		}
+	}
+
+	// shot ----------------------------------------------------------------------
+	static const FString Stamp = FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S"));
+	const ENetMode NetMode = World->GetNetMode();
+	const TCHAR* Side = NetMode == NM_Client ? TEXT("_client") : NetMode == NM_ListenServer ? TEXT("_host") : TEXT("");
+	const FString Path = FPaths::ConvertRelativePathToFull(
+		FPaths::ScreenShotDir() / FString::Printf(TEXT("OBSmoke_%s%s_end.png"), *Stamp, Side));
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(Path), /*Tree=*/true);
+	FScreenshotRequest::RequestScreenshot(Path, /*bInShowUI=*/true, /*bAddUniqueSuffix=*/false);
+	ShotPaths.Add(Path);
+	OB_SMOKE_LOG("shot end -> %s", *Path);
+
+	// How long to wait for the travel: the post-match window as the server set
+	// it, and a grace on top.
+	const double LeaveIn = Extraction != nullptr && Extraction->GetLeaveServerTime() > 0.0
+		? Extraction->GetLeaveServerTime() - GameState->GetServerWorldTimeSeconds() : 60.0;
+	TravelDeadlineSeconds = Now + FMath::Max(0.0, LeaveIn) + TravelGraceSeconds;
+	MatchGameState = const_cast<AOneBrahamGameState*>(GameState);
+
+	Phase = EPhase::EndFlushing;
+	PhaseStartSeconds = Now;
+}
+
+void UOneBrahamSmokeTestSubsystem::TickEndFlushing()
+{
+	const double Now = FPlatformTime::Seconds();
+	const FString& Path = ShotPaths.Last();
+
+	if (!IFileManager::Get().FileExists(*Path) && Now - PhaseStartSeconds < FlushSeconds)
+	{
+		return;
+	}
+
+	if (!IFileManager::Get().FileExists(*Path))
+	{
+		Fail(FString::Printf(TEXT("end screenshot not written: %s"), *FPaths::GetCleanFilename(Path)));
+	}
+
+	OB_SMOKE_LOG("after: waiting up to %.0fs for the post-match travel", TravelDeadlineSeconds - Now);
+	Phase = EPhase::AwaitingTravel;
+	PhaseStartSeconds = Now;
+}
+
+void UOneBrahamSmokeTestSubsystem::TickAwaitingTravel()
+{
+	const double Now = FPlatformTime::Seconds();
+	UWorld* World = GetPlayerWorld();
+
+	// A new world that has begun play (the menu, or the map again), or the
+	// same world with a new match in it (a seamless restart of the same map).
+	const AOneBrahamGameState* GameState = World != nullptr ? World->GetGameState<AOneBrahamGameState>() : nullptr;
+	const bool bNewMatch = GameState != nullptr && (GameState != MatchGameState.Get()
+		|| GameState->MatchPhase == EOneBrahamMatchPhase::Warmup || GameState->MatchPhase == EOneBrahamMatchPhase::Active);
+	if (World != nullptr && (World != MatchWorld.Get() || bNewMatch))
+	{
+		const bool bSameMap = World->GetMapName() == MatchMapName;
+		OB_SMOKE_LOG("after: travelled to %s %.0fs after the end screen (%s)", *World->GetMapName(), Now - PhaseStartSeconds,
+			bSameMap ? TEXT("the map reloaded") : TEXT("a different map"));
+
+		// The menu is another lane's to check. The same map again is a next
+		// match, which must not be played behind the last one's results.
+		if (!bSameMap)
+		{
+			Finish();
+			return;
+		}
+
+		Phase = EPhase::NextMatch;
+		PhaseStartSeconds = Now;
+		return;
+	}
+
+	if (Now > TravelDeadlineSeconds)
+	{
+		Fail(TEXT("nobody left the end screen: no post-match travel"));
+		Finish();
+	}
+}
+
+void UOneBrahamSmokeTestSubsystem::TickNextMatch()
+{
+	const double Now = FPlatformTime::Seconds();
+	UWorld* World = GetPlayerWorld();
+	APlayerController* PC = World != nullptr && GetGameInstance() != nullptr ? GetGameInstance()->GetFirstLocalPlayerController(World) : nullptr;
+	const AOneBrahamGameState* GameState = World != nullptr ? World->GetGameState<AOneBrahamGameState>() : nullptr;
+	const UOneBrahamHUDComponent* HUD = PC != nullptr ? PC->FindComponentByClass<UOneBrahamHUDComponent>() : nullptr;
+	const bool bRunning = GameState != nullptr
+		&& (GameState->MatchPhase == EOneBrahamMatchPhase::Warmup || GameState->MatchPhase == EOneBrahamMatchPhase::Active);
+
+	// A frame or two for the HUD component to notice the new game state.
+	if (bRunning && HUD != nullptr && Now - PhaseStartSeconds > 2.0)
+	{
+		const UOneBrahamMatchEndWidget* EndScreen = HUD->GetMatchEndWidget();
+		const bool bEndScreenGone = EndScreen == nullptr || !EndScreen->IsInViewport();
+		UGameViewportClient* Viewport = World->GetGameViewport();
+		const bool bGameInput = Viewport != nullptr && !Viewport->IgnoreInput();
+
+		OB_SMOKE_LOG("next match: %s, end screen %s, game input %s, HUD %s",
+			*StaticEnum<EOneBrahamMatchPhase>()->GetNameStringByValue(static_cast<int64>(GameState->MatchPhase)),
+			bEndScreenGone ? TEXT("gone") : TEXT("STILL UP"), bGameInput ? TEXT("yes") : TEXT("NO"),
+			HUD->IsHUDVisible() ? TEXT("visible") : TEXT("hidden"));
+
+		if (!bEndScreenGone)
+		{
+			Fail(TEXT("the next match began behind the last one's end screen"));
+		}
+		if (!bGameInput)
+		{
+			Fail(TEXT("the next match began with the game's input still off"));
+		}
+		Finish();
+		return;
+	}
+
+	if (Now - PhaseStartSeconds > 90.0)
+	{
+		Fail(TEXT("the next match never began after the restart"));
+		Finish();
+	}
 }
 
 void UOneBrahamSmokeTestSubsystem::Finish()
@@ -1009,7 +1403,9 @@ bool UOneBrahamSmokeTestSubsystem::TickHolding()
 	const UWorld* World = GetPlayerWorld();
 	const UNetDriver* Driver = World ? World->GetNetDriver() : nullptr;
 	const bool bServing = Driver != nullptr && Driver->IsServer();
-	const bool bNobodyLeft = bServing && Driver->ClientConnections.Num() == 0 && Held > 2.0;
+	// A full match's host that went back to the menu serves nobody any more:
+	// its clients were sent home with it, and there is nothing to wait for.
+	const bool bNobodyLeft = (bServing ? Driver->ClientConnections.Num() == 0 : Options.bFullMatch) && Held > 2.0;
 
 	if (Held < Options.HoldSeconds && !bNobodyLeft)
 	{
@@ -1068,6 +1464,14 @@ bool FOneBrahamSmokeOptionsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("timeout clamps low"), Wild.TimeoutSeconds, FOneBrahamSmokeOptions::MinTimeoutSeconds);
 
 	TestFalse(TEXT("null command line"), FOneBrahamSmokeOptions::Parse(nullptr).bEnabled);
+
+	// A whole match: the longest budget unless one is given.
+	TestFalse(TEXT("no full match by default"), Off.bFullMatch);
+	const FOneBrahamSmokeOptions Full = FOneBrahamSmokeOptions::Parse(TEXT("-OBSmoke -OBSmokeFullMatch -OBSmokeShots=1"));
+	TestTrue(TEXT("full match: on"), Full.bFullMatch);
+	TestEqual(TEXT("full match: the longest budget"), Full.TimeoutSeconds, FOneBrahamSmokeOptions::MaxTimeoutSeconds);
+	const FOneBrahamSmokeOptions FullTimed = FOneBrahamSmokeOptions::Parse(TEXT("-OBSmoke -OBSmokeFullMatch -OBSmokeTimeout=600"));
+	TestEqual(TEXT("full match: a given budget is kept"), FullTimed.TimeoutSeconds, 600.f);
 
 	return true;
 }

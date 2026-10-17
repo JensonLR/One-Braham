@@ -12,6 +12,10 @@
 //     HUD that a 240 Hz player never notices.
 //   * Transient feedback (hit markers, damage flashes, banners) is event driven
 //     and driven by delegates, so nothing is missed between gather ticks.
+//   * The end of a match is the HUD's too: when the game state reaches Complete
+//     on this machine, the end screen (UOneBrahamMatchEndWidget) goes up over
+//     everything, the in-match menus close, the HUD is hidden and the screen
+//     takes the input until the server sends everybody on.
 
 #pragma once
 
@@ -30,6 +34,7 @@ class UOneBrahamInteractComponent;
 class UOneBrahamVoiceLineSet;
 class UOneBrahamPauseMenuWidget;
 class UOneBrahamScoreboardWidget;
+class UOneBrahamMatchEndWidget;
 
 /** Kill feed lines arrive from the game state; this is the HUD's own copy. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOneBrahamHUDKillFeedUpdated, const TArray<FOneBrahamHUDKillFeedEntry>&, Entries);
@@ -97,6 +102,10 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "One Braham|HUD")
 	UOneBrahamScoreboardWidget* GetScoreboardWidget() const { return ScoreboardWidget; }
+
+	/** The end screen, once the match has ended on this machine; null before. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|HUD")
+	UOneBrahamMatchEndWidget* GetMatchEndWidget() const { return MatchEndWidget; }
 
 	// -----------------------------------------------------------------------
 	//  Overlays the player asks for (the IA_ToggleHUD, IA_Map and
@@ -346,6 +355,25 @@ protected:
 
 	/** Creates the scoreboard and pause menu on demand. */
 	void EnsureMenuWidgets();
+
+	/** The end screen, above everything, from the frame the match is over here. */
+	UPROPERTY(Transient)
+	TObjectPtr<UOneBrahamMatchEndWidget> MatchEndWidget = nullptr;
+
+	static constexpr int32 MatchEndZOrder = 40;
+
+	/** The game state the end screen went up for: a different one is a new match. */
+	TWeakObjectPtr<const class AOneBrahamGameState> MatchEndGameState;
+
+	/** Puts the end screen up once the game state says the match is over, and
+	 *  takes it down when a new match begins under it (a seamless restart). */
+	void UpdateMatchEndScreen();
+
+	/** Takes the end screen down and gives the HUD and the game's input back. */
+	void CloseMatchEndScreen();
+
+	/** The end screen's UI-only input handed back to the game. */
+	void RestoreGameInput();
 
 	/** Forwarded from the wheel: the player chose a line. */
 	UFUNCTION()

@@ -32,6 +32,13 @@ namespace
 
 	/** Purge tick is fed in 5 Hz slices so the damage-over-time is smooth. */
 	constexpr float OBPurgeTickInterval = 0.2f;
+
+#if !UE_BUILD_SHIPPING
+	/** Dev only: every stage's length, to compress a full match into minutes
+	 *  (-1 = the match settings). Applies from the next stage clock started. */
+	TAutoConsoleVariable<float> CVarStageSeconds(TEXT("ob.Lockdown.StageSeconds"), -1.f,
+		TEXT("Dev: seconds per lockdown stage, the first escalation included (-1 = match settings)."), ECVF_Cheat);
+#endif
 }
 
 UOneBrahamLockdownComponent::UOneBrahamLockdownComponent()
@@ -200,6 +207,14 @@ float UOneBrahamLockdownComponent::GetSecondsToNextStage() const
 
 float UOneBrahamLockdownComponent::GetStageSeconds() const
 {
+#if !UE_BUILD_SHIPPING
+	const float Forced = CVarStageSeconds.GetValueOnGameThread();
+	if (Forced >= 0.f)
+	{
+		return FMath::Max(1.f, Forced);
+	}
+#endif
+
 	const AOneBrahamGameState* GS = CachedGameState.Get();
 	const UOneBrahamMatchSettingsAsset* Settings = GS ? GS->GetMatchSettings() : nullptr;
 	return Settings ? FMath::Max(5.f, Settings->LockdownStageSeconds) : OBFallbackStageSeconds;
@@ -236,6 +251,16 @@ void UOneBrahamLockdownComponent::StartDirector()
 		return;
 	}
 
+	// A match settings asset can switch the building's escalation off (a custom
+	// lobby, the tutorial); the flag was read by nothing.
+	const AOneBrahamGameState* GS = CachedGameState.Get();
+	const UOneBrahamMatchSettingsAsset* Settings = GS ? GS->GetMatchSettings() : nullptr;
+	if (Settings != nullptr && !Settings->bLockdownEnabled)
+	{
+		OB_MATCH_LOG("Lockdown director not started: the match settings disable the lockdown.");
+		return;
+	}
+
 	bDirectorRunning = true;
 	bWarningFiredForStage = false;
 	ServerRestartStageClock();
@@ -250,9 +275,21 @@ void UOneBrahamLockdownComponent::StopDirector()
 		return;
 	}
 
+	if (!bDirectorRunning)
+	{
+		return;
+	}
+
 	bDirectorRunning = false;
 	bWarningActive = false;
 	StageEndServerTime = 0.0;
+
+	if (AActor* OwnerActor = GetOwner())
+	{
+		OwnerActor->ForceNetUpdate();
+	}
+
+	OB_MATCH_LOG("Lockdown director stopped at %s (%d killed by the purge).", *UEnum::GetValueAsString(Stage), PurgeKillCount);
 
 	// Unseal everything: used when a match ends and the building resets.
 	ServerSealFloorsBelow(OneBrahamConstants::FloorSkydeck + 1, /*bClose*/ false);

@@ -25,6 +25,7 @@ can work in and a pipeline that gets bypassed by the first artist in a hurry.
 | `build_props.py` | 12 gameplay blueprints, 4 loot cards, the prop manifest, the dressing pass | yes | yes |
 | `build_weapons.py` | 10 weapon definitions, 10 blueprints, `DA_WeaponRegistry` | yes | yes |
 | `build_match_settings.py` | 3 match settings assets, one per mode: `DA_MatchSettings_Ascent`, `DA_MatchSettings_FireDrill`, `DA_MatchSettings_NightShift` (loot, spawn and control-point tables left to `EnsureDefaults()`) | yes | yes |
+| `build_frontend.py` | `L_MainMenu` (the tower at dusk from 150 m out, the district, a drifting camera, the front-end game mode) and `L_Loading` (the transition map); its `frontend_credits` step checks the credits carry every notice LICENCES.md requires | yes | yes |
 | `build_characters.py` | the cast payload + `ABP_OneBrahamCharacter` when the skeleton exists | yes | yes |
 | `apply_cast_payload.py` | writes the payload onto `DA_CharacterRegistry`, verifies 6 archetypes | yes | yes |
 | `build_audio.py` | 12 sound classes, 3 submixes, 4 mixes, 13 attenuations, 11 ambience, 8 music, `DA_AudioBank` | yes | yes |
@@ -86,15 +87,15 @@ Scripts\BuildContent.bat --only environment,props --dress    rebuild and dress t
 
 ```
 # ONE BRAHAM - content build report
-**30 steps succeeded, 0 failed.**
+**31 steps succeeded, 0 failed.**
 
 | Step | Result | Seconds | Detail |
 | --- | --- | --- | --- |
 | input_ini | OK | 0.0 | wrote 42 actions (41 with a default key) |
-| cpp_symbols | OK | 0.7 | 1028 declarations, all defined; compile hygiene clean |
-| uht_contracts | OK | 1.5 | 965 UE reflection contracts, all satisfied |
-| soft_paths | OK | 0.0 | 49 soft paths, all conventional |
-| calls | OK | 0.3 | 1801 call sites, all arities plausible |
+| cpp_symbols | OK | 0.7 | 1127 declarations, all defined; compile hygiene clean |
+| uht_contracts | OK | 1.5 | 995 UE reflection contracts, all satisfied |
+| soft_paths | OK | 0.0 | 54 soft paths, all conventional |
+| calls | OK | 0.3 | 2143 call sites, all arities plausible |
 | tags | OK | 0.4 | 6 resolvable tag requests and 147 documented tags, all declared |
 | layout | OK | 0.0 | 18 floors, map and layout agree |
 | voice_lines | OK | 0.0 | 42 line references, all declared and documented |
@@ -121,7 +122,7 @@ the machine rather than about the project, and a CI box with no engine install
 should not report a broken build - it should report that it did not run the
 content steps, with their names. On a fresh clone the full run is therefore
 "19 steps succeeded, 0 failed, 11 skipped" and the same run with an editor
-installed is "30 steps succeeded, 0 failed".
+installed is "31 steps succeeded, 0 failed".
 
 ---
 
