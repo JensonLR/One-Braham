@@ -93,13 +93,17 @@ struct FOneBrahamControlPointDef
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Fire Drill")
 	int32 FloorIndex = 1;
 
-	/** Seconds of uncontested presence needed to capture. */
+	/** Seconds of uncontested presence needed to capture (from neutral or from the other team). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Fire Drill")
-	float CaptureSeconds = 4.f;
+	float CaptureSeconds = 8.f;
 
-	/** Score per second while held. */
+	/**
+	 * Score per second while held: the holder has somebody on it and the other
+	 * team has nobody. Before the multi-point multiplier
+	 * (UOneBrahamMatchSettingsAsset::MultiPointHoldMultipliers).
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Fire Drill")
-	float ScorePerSecond = 1.f;
+	float ScorePerSecond = 0.165f;
 
 	/** Only the triggering actor picks this up; the volume itself lives in the level. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Fire Drill")
@@ -298,8 +302,26 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Fire Drill")
 	int32 ScorePerKill = 1;
 
+	/**
+	 * Once, to the team that takes a point (from neutral or from the other
+	 * team). Two kills' worth: the prize is the point's income, not touching it.
+	 * At 5, a close drill's ten-odd flips each way were a quarter of the
+	 * winner's 200 and ended it at 7.5 minutes; at 2, 8.5-9.2 (Docs/06
+	 * "FIRE DRILL scoring").
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Fire Drill")
-	int32 ScorePerCapture = 10;
+	int32 ScorePerCapture = 2;
+
+	/**
+	 * The hold income of every point a team is scoring on is multiplied by the
+	 * entry for the number of points that team owns: [0] none, [1] one, [2] two,
+	 * [3] all three (a count past the end uses the last entry). Owning more of
+	 * the building is worth more than the sum of its rooms, so a team that
+	 * locks the map out closes the drill early, and a split map runs long.
+	 * See AOneBrahamGameMode::ComputeHoldScoreRate and Docs/06.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Fire Drill")
+	TArray<float> MultiPointHoldMultipliers = { 1.f, 1.f, 1.5f, 2.f };
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Fire Drill")
 	bool bScoreByTimeLimit = true;

@@ -21,7 +21,10 @@
 //
 //   Colour-blind modes remap only the danger hue (Deuteranopia/Protanopia red
 //   -> #FF6B00) and, for Tritanopia, the warning hue (yellow -> white with
-//   hazard stripes, which the elements draw themselves). Shapes never change:
+//   hazard stripes, which the elements draw themselves). The stage tones that
+//   would then collide move too (UOneBrahamUIStyle::Colour: the PreLockdown
+//   amber to cream under Deuteranopia/Protanopia, the exit green to cyan
+//   there and to spring green under Tritanopia). Shapes never change:
 //   every state also has one (hatching, a cross, a strikethrough, a chevron).
 //
 // TYPE
@@ -71,7 +74,16 @@ namespace OneBrahamHUDStyle
 		return FLinearColor(Colour.R, Colour.G, Colour.B, Alpha);
 	}
 
-	/** Multiplies the alpha. */
+	/** Multiplies the alpha.
+	 *
+	 *  Measure() and Fade() share their names and signatures with the front
+	 *  end's OneBrahamPaint helpers, and the unity build can put a file that
+	 *  says "using namespace OneBrahamPaint" and one that says "using namespace
+	 *  OneBrahamHUDStyle" into the same translation unit. These two are
+	 *  templates so that, where both are in scope, the call is not ambiguous:
+	 *  the front end's plain function wins the tie, which is what a menu file
+	 *  means. The HUD's own files call them qualified (OneBrahamHUDStyle::). */
+	template <typename TTieBreak = void>
 	inline FLinearColor Fade(const FLinearColor& Colour, float Factor)
 	{
 		return FLinearColor(Colour.R, Colour.G, Colour.B, Colour.A * Factor);
@@ -105,15 +117,19 @@ namespace OneBrahamHUDStyle
 	/** True when the warning hue is remapped to white (Tritanopia). */
 	ONEBRAHAM_API bool IsWarningRemapped();
 
-	/** The stage's accent: blue in the calm, yellow in Lockdown, red in Purge. */
+	/** The stage's accent (UOneBrahamUIStyle::StageAccent: the one rule). */
 	ONEBRAHAM_API FLinearColor StageAccent(EOneBrahamLockdownStage Stage);
 
-	/** The neutral hairline for a stage: grey 20%, yellow 25%, red 30%. */
+	/** The neutral hairline for a stage (UOneBrahamUIStyle::StageHairline). */
 	ONEBRAHAM_API FLinearColor StageHairline(EOneBrahamLockdownStage Stage);
 
-	/** Spec stage for an engine stage: Normal is the calm ("PreLockdown" in the
-	 *  design), PreLockdown and Lockdown are both the yellow Lockdown, Purge is
-	 *  Purge. Returned as 0, 1, 2. */
+	/** A stage tone's colour (UOneBrahamUIStyle::ToneColour). */
+	ONEBRAHAM_API FLinearColor Tone(EOneBrahamStageTone StageTone, float Alpha = 1.f);
+
+	/** The stage's STRUCTURE, not its colour: 0 calm (the panel is a pill),
+	 *  1 the shutters are moving (PreLockdown and Lockdown: the panel opens,
+	 *  the beacon lights), 2 the Purge (heavy outlines, the vignette). Colour
+	 *  always comes from UOneBrahamUIStyle::StageTone. */
 	ONEBRAHAM_API int32 StageBand(EOneBrahamLockdownStage Stage);
 
 	/** Colour mix in linear space. */
@@ -148,8 +164,15 @@ namespace OneBrahamHUDStyle
 	 *  tracking is wide enough to swallow them. */
 	ONEBRAHAM_API FString Tracked(const FString& Text, const FSlateFontInfo& Font);
 
-	/** Measures a string in the font, in local units. */
-	ONEBRAHAM_API FVector2D Measure(const FString& Text, const FSlateFontInfo& Font);
+	/** Measures a string in the font, in local units (word spaces tracked). */
+	ONEBRAHAM_API FVector2D MeasureTracked(const FString& Text, const FSlateFontInfo& Font);
+
+	/** MeasureTracked, by its old name (a template: see Fade above). */
+	template <typename TTieBreak = void>
+	inline FVector2D Measure(const FString& Text, const FSlateFontInfo& Font)
+	{
+		return MeasureTracked(Text, Font);
+	}
 
 	// --- brushes ---------------------------------------------------------------
 	/** A rounded rectangle brush; the tint is applied at draw time. */

@@ -2310,7 +2310,11 @@ void UOneBrahamHUDComponent::SyncBuildingDisplays(const FText& Headline, const F
 	Slide.Eyebrow = FText::FromString(FString::Printf(TEXT("ONE BRAHAM  ·  ALL FLOORS  ·  %s"), *Frame.DuskClock));
 	Slide.Headline = Headline;
 	Slide.Subline = Subline;
-	UOneBrahamUIStyle::StageField(Stage, Slide.ColourA, Slide.ColourB);
+	// The screens take the HUD's colour rule: the same tone as the card.
+	const bool bEvacuating = Frame.ExtractionState == EOneBrahamExtractionState::Broadcast
+		|| Frame.ExtractionState == EOneBrahamExtractionState::Arriving
+		|| Frame.ExtractionState == EOneBrahamExtractionState::Holding;
+	UOneBrahamUIStyle::ToneField(UOneBrahamUIStyle::StageTone(Stage, bEvacuating), Slide.ColourA, Slide.ColourB);
 
 	int32 Count = 0;
 	for (TActorIterator<AOneBrahamDisplay> It(GetWorld()); It; ++It)
@@ -2484,7 +2488,16 @@ void UOneBrahamHUDComponent::ApplyDevDemo()
 	Frame.Phase = EOneBrahamMatchPhase::Active;
 	Frame.ExtractionState = EOneBrahamExtractionState::Inactive;
 
-	if (DemoState == TEXT("lockdown") || DemoState == TEXT("critical") || DemoState == TEXT("plan"))
+	if (DemoState == TEXT("prelockdown"))
+	{
+		// The building's warning: nothing sealed yet, the first shutters coming.
+		B.Stage = EOneBrahamLockdownStage::PreLockdown;
+		B.SealCeiling = INDEX_NONE;
+		B.NextSealCeiling = 3;
+		B.SecondsToNextStage = FMath::Max(0.f, 28.f - Age * 0.25f);
+		Local = 4;
+	}
+	else if (DemoState == TEXT("lockdown") || DemoState == TEXT("critical") || DemoState == TEXT("plan"))
 	{
 		B.Stage = EOneBrahamLockdownStage::Lockdown;
 		B.SealCeiling = 4;
@@ -2761,10 +2774,23 @@ void UOneBrahamHUDComponent::ApplyDevDemo()
 				FText::FromString(TEXT("The lifts are thinking about what they've done.")), EOneBrahamLockdownStage::Lockdown, 6.f);
 			HUDWidget->ShowSubtitle(FText::FromString(TEXT("Fire shutters are closing on all floors below 6. Lifts are out of service. Please use the stairwell nearest to you.")),
 				FString(), 7.f);
+			// The pile-up that made the centre's priority queue: a stage card,
+			// a PA card, a refused reader and the induction's step, all at
+			// once (UI/HUD/OneBrahamCentreMessages.h decides who is shown).
+			HUDWidget->ShowSubBanner(FText::FromString(TEXT("INDUCTION · Find the stairs - follow the exit signs")), 9.f);
 		}
 		else if (DemoState == TEXT("purge"))
 		{
 			HUDWidget->ShowStageCard(EOneBrahamStageCard::Purge);
+		}
+		else if (DemoState == TEXT("prelockdown"))
+		{
+			// The tannoy's paragraph and its card: the subtitle drops the
+			// sentence the card is already showing.
+			HUDWidget->PushAnnouncement(FText::FromString(TEXT("The building will enter lockdown shortly.")),
+				FText::FromString(TEXT("Please do not prop fire doors open.")), EOneBrahamLockdownStage::PreLockdown, 6.f);
+			HUDWidget->ShowSubtitle(FText::FromString(TEXT("Attention all staff. The building will enter lockdown shortly. Shutters will close on Levels 1 to 3.")),
+				FString(), 7.f);
 		}
 		else if (DemoState == TEXT("extraction"))
 		{
@@ -2814,7 +2840,7 @@ namespace OneBrahamHUDDev
 
 	FAutoConsoleCommandWithWorldAndArgs DemoCommand(
 		TEXT("ob.hud.demo"),
-		TEXT("Dev: puts the HUD in a demonstration state (calm, lockdown, purge, extraction, critical, downed, death, firedrill, scoreboard, pause, plan, matchend, off)."),
+		TEXT("Dev: puts the HUD in a demonstration state (calm, prelockdown, lockdown, purge, extraction, critical, downed, death, firedrill, scoreboard, pause, plan, matchend, off)."),
 		FConsoleCommandWithWorldAndArgsDelegate::CreateLambda([](const TArray<FString>& Args, UWorld* World)
 		{
 			if (UOneBrahamHUDComponent* HUD = FindHUD(World))

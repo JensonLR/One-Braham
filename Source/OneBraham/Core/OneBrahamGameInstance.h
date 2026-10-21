@@ -67,6 +67,32 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "One Braham|Profile")
 	void ApplyPlatformDisplayName(const FString& PlatformPlayerName);
 
+	/**
+	 * The name this player goes by on LAN and direct IP (the NULL subsystem),
+	 * chosen by the player and kept in the profile. Sanitised and capped as the
+	 * server will (AOneBrahamGameMode::SanitisePlayerName); false when nothing
+	 * usable is left. Under Steam the persona name replaces it at the next launch.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "One Braham|Profile")
+	bool SetPlayerDisplayName(const FString& NewName);
+
+	/** The name the HUD, scoreboard and travel URL use for this player. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|Profile")
+	FString GetPlayerDisplayName() const;
+
+	/** A friendly generated office name ("Priya from Payroll"); the same seed, the same name. */
+	static FString MakeOfficeDisplayName(uint32 Seed);
+
+	/** The OS account's full name ("Jenson Raper") where the platform keeps one; empty otherwise. */
+	static FString GetOSFullUserName();
+
+	/** The NULL default: the OS full name, else an office name stable for this machine. */
+	static FString MakeDefaultDisplayName();
+
+	/** True for a profile name an earlier build filled in by itself (the login
+	 *  name, the host name, the NULL nickname), which is not the player's choice. */
+	static bool IsAutomaticDisplayName(const FString& Name);
+
 	// ======================================================================
 	//  Match settings
 	// ======================================================================
@@ -217,6 +243,25 @@ protected:
 
 	/** Builds the option string the GameMode reads for mode/roster config. */
 	FString BuildTravelOptions() const;
+
+	/** Options + "?OBName=<display name>" (AOneBrahamGameMode::DisplayNameOption). */
+	FString AppendDisplayNameOption(const FString& Options) const;
+
+	/** Init: -PlayerName=, else the Steam persona, else the profile's chosen
+	 *  name, else MakeDefaultDisplayName. Saved to the profile. */
+	void ResolveDisplayName();
+
+	/** Empty, or the login name again. */
+	static bool IsAutomaticNameCandidate(const FString& Name);
+
+	/** On a client: asks the server once for the profile's name if the player
+	 *  state arrived with another one (a login without ?OBName=). */
+	void WatchClientPlayerName(UWorld* World);
+
+	/** The name this client asks the server for: its connect URL's ?OBName= /
+	 *  ?Name= (unless it is the NULL nickname), else the profile's. */
+	FString GetClientRequestedName() const;
+	FTimerHandle ClientNameHandle;
 
 	/** The bindings to the session subsystem's delegates, made once in Init. */
 	void BindSessionDelegates();

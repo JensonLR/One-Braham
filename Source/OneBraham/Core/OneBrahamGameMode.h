@@ -101,7 +101,13 @@ public:
 	virtual void Logout(AController* Exiting) override;
 	virtual void HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer) override;
 	virtual void HandleSeamlessTravelPlayer(AController*& C) override;
+	virtual FString InitNewPlayer(APlayerController* NewPlayerController, const FUniqueNetIdRepl& UniqueId,
+		const FString& Options, const FString& Portal = TEXT("")) override;
+	/** Every rename of a human (login, ServerChangeName) is sanitised and made unique here. */
+	virtual void ChangeName(AController* Controller, const FString& NewName, bool bNameChange) override;
 	virtual void GetSeamlessTravelActorList(bool bToTransition, TArray<AActor*>& ActorList) override;
+	/** Sends remote clients the travel URL without the host's ?OBName=/?Name= (StripPlayerNameOptions). */
+	virtual APlayerController* ProcessClientTravel(FString& URL, bool bSeamless, bool bAbsolute) override;
 	virtual bool ShouldSpawnAtStartSpot(AController* Player) override { return false; }
 	virtual bool PlayerCanRestart_Implementation(APlayerController* Player) override;
 	virtual void RestartPlayer(AController* NewPlayer) override;
@@ -180,6 +186,89 @@ public:
 
 	/** The Docs/06 section 7 outcome of a time-out, for this mode and these team scores. */
 	static FOneBrahamTimeOutOutcome DecideTimeOutOutcome(EOneBrahamMatchMode Mode, const TArray<int32>& TeamScores);
+
+	// ======================================================================
+	//  FIRE DRILL scoring (Docs/06 "FIRE DRILL scoring")
+	// ======================================================================
+
+	/**
+	 * One tick of one control point's capture. AloneTeam is the only team with
+	 * somebody on the point (INDEX_NONE for nobody, or for both: bContested).
+	 * A team alone on a point it does not own builds progress and takes it
+	 * after CaptureSeconds; a different team starting resets the progress;
+	 * contested, the progress holds; walked away from, it drains at the same
+	 * rate. Returns true on the tick the point changes hands.
+	 */
+	static bool StepControlPointCapture(int32& OwnerTeam, int32& CapturingTeam, float& ProgressSeconds,
+		int32 AloneTeam, bool bContested, float StepSeconds, float CaptureSeconds);
+
+	/**
+	 * A team's hold income per second: the sum of ScorePerSecond over the points
+	 * it is scoring on (owned, somebody of theirs on it, nobody else), times
+	 * Multipliers[PointsOwned] (the last entry past the end, 1 with none).
+	 */
+	static float ComputeHoldScoreRate(const TArray<float>& ScoringPointRates, int32 PointsOwned, const TArray<float>& Multipliers);
+
+	// ======================================================================
+	//  Player names
+	//
+	//  Every human's name is decided here, on the server, from what their
+	//  machine sent. The engine writes ?Name= into every login URL itself, from
+	//  the online subsystem's nickname, and overwrites any ?Name= the game put
+	//  there: under Steam that is the persona name, under NULL it is the
+	//  machine's host name and a login id ("Jensons-MacBook-Air.local-1A2B..."),
+	//  which every HUD and scoreboard showed cut to twenty characters. So the
+	//  name the player chose travels as ?OBName= as well (the game instance adds
+	//  it to every URL it builds), the NULL nickname is recognised for what it
+	//  is (it is the player's unique id), and the result is sanitised, capped
+	//  and made unique among the match's player states. Bots keep the names the
+	//  bot controller gives them.
+	// ======================================================================
+
+	/** The travel/login option carrying the player-chosen display name. */
+	static constexpr const TCHAR* DisplayNameOption = TEXT("OBName");
+
+	/** Longest name a player state carries (the engine's own login cap). */
+	static constexpr int32 MaxPlayerNameLength = 20;
+
+	/** Printable, single-spaced, trimmed, without URL delimiters, capped. Empty if nothing usable is left. */
+	static FString SanitisePlayerName(const FString& Raw);
+
+	/**
+	 * True for a name that is not a person's: empty, the NULL subsystem's
+	 * nickname (the unique id string, whole or cut to the cap), or the
+	 * engine's defaults ("Player", "NullUser").
+	 */
+	static bool IsPlaceholderPlayerName(const FString& Name, const FString& UniqueIdString);
+
+	/**
+	 * The name a login asks for, by precedence: ?OBName=, then ?Name= unless it
+	 * is a placeholder, then the fallback (the local player's profile on a
+	 * listen host). Sanitised; empty when none of them is usable.
+	 */
+	static FString ChooseLoginPlayerName(const FString& Options, const FString& UniqueIdString, const FString& Fallback);
+
+	/**
+	 * Desired, or Desired with " 2", " 3"... when another player already has it
+	 * (case-insensitive), shortened so the suffix still fits the cap.
+	 */
+	static FString MakeUniquePlayerName(const FString& Desired, const TArray<FString>& TakenNames);
+
+	/**
+	 * True when Current is Desired, or what MakeUniquePlayerName makes of
+	 * Desired on a clash ("Jenson Raper 2", a long name cut to fit its suffix).
+	 * A client uses it to tell "the server gave me my name" from "the server
+	 * never heard it" ("Tomas" is not "Tom"; "Tom 2" is).
+	 */
+	static bool IsUniqueVariantOfName(const FString& Current, const FString& Desired);
+
+	/**
+	 * URL without its ?OBName= and ?Name= options. A server's travel URL carries
+	 * its own player's name (the listen host's); a client travels relative to
+	 * it and FURL::AddOption replaces the client's own option with the host's,
+	 * so every client would rejoin as "<host> 2". Clients are sent this instead.
+	 */
+	static FString StripPlayerNameOptions(const FString& URL);
 
 	/** Called whenever a player state changes in a way that might end the match. */
 	void EvaluateMatchEndConditions();
@@ -517,7 +606,20 @@ protected:
 	/** Fractional per-second score carried between control point ticks, per team. */
 	TArray<float> ControlPointScoreCarry;
 
-	/** Parsed from the travel options. */
+	/** Every other player state's name, for MakeUniquePlayerName. */
+	TArray<FString> GatherTakenPlayerNames(const APlayerState* Except) const;
+
+	/** The name a local player (listen host, standalone) falls back to: this
+	 *  map's own ?OBName=/?Name=, then the profile. Empty for a remote one. */
+	FString GetLocalPlayerFallbackName(const AController* Controller) const;
+
+	/** Keeps a human's current name if it is a person's, else the fallback or a
+	 *  generated office name; always sanitised and unique. PostLogin and
+	 *  seamless travel, after InitNewPlayer has had its say. */
+	void EnsureHumanPlayerName(AController* Controller);
+
+	/** Parsed from the travel options. PendingPlayerName is the map URL's own
+	 *  ?OBName= (else ?Name=): the listen host's name, never anybody else's. */
 	FString PendingModeString;
 	FString PendingPlayerName;
 	FString PendingArchetype;

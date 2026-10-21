@@ -45,6 +45,7 @@
 #include "UI/OneBrahamHUDTypes.h"
 #include "UI/OneBrahamUIStyle.h"
 #include "UI/HUD/OneBrahamHUDFrame.h"
+#include "UI/HUD/OneBrahamCentreMessages.h"
 #include "UI/HUD/OneBrahamTween.h"
 #include "OneBrahamHUDWidget.generated.h"
 
@@ -144,7 +145,19 @@ public:
 	void SetBoardOpen(bool bOpen) { bBoardOpen = bOpen; }
 
 	/** True while a stage card holds the screen (announcements wait for it). */
-	bool IsStageCardUp(double Now) const { return StageCard != EOneBrahamStageCard::None && Now < StageCardAt + 0.35 + StageCardHold + 0.3; }
+	bool IsStageCardUp(double Now) const { return StageCard != EOneBrahamStageCard::None && Now < StageCardEnd(); }
+
+	/** When the stage card's exit finishes (its hold shortens under fire). */
+	double StageCardEnd() const { return StageCardAt + 0.35 + StageCardHold + 0.3; }
+
+	/**
+	 * Who holds the middle of the screen now (UI/HUD/OneBrahamCentreMessages.h):
+	 * one card, at most one ticker, the rest waiting. Public for the tests.
+	 */
+	FOneBrahamCentreLayout ResolveCentre(double Now) const;
+
+	/** The words every card on screen is showing, for the subtitle's dedupe. */
+	TArray<FString> CentreCardLines(const FOneBrahamCentreLayout& Centre) const;
 
 	/** True while the accident book (the death screen) is up. */
 	bool IsDeathScreenVisible() const { return bDeathScreenVisible; }
@@ -212,8 +225,12 @@ protected:
 		float SafeB = 1042.f;
 		float Scale = 1.f;
 		EOneBrahamLockdownStage Stage = EOneBrahamLockdownStage::Normal;
-		/** 0 calm, 1 lockdown, 2 purge. */
+		/** Structure: 0 calm, 1 the shutters are moving, 2 purge (StageBand). */
 		int32 Band = 0;
+		/** Colour: the one rule (UOneBrahamUIStyle::StageTone), evac included. */
+		EOneBrahamStageTone Tone = EOneBrahamStageTone::Calm;
+		/** Who holds the centre column this frame. */
+		FOneBrahamCentreLayout Centre;
 		/** The stage accent and hairline, cross-faded over 400 ms. */
 		FLinearColor Accent;
 		FLinearColor Hairline;
@@ -256,7 +273,15 @@ protected:
 	void PaintStageVignette(FOneBrahamPainter& P, const FPaintContext& C) const;
 	void PaintAccidentBook(FOneBrahamPainter& P, const FPaintContext& C) const;
 	void PaintSpectating(FOneBrahamPainter& P, const FPaintContext& C) const;
+	/** The one-line ticker for whatever shrank under a card. */
+	void PaintTicker(FOneBrahamPainter& P, const FPaintContext& C) const;
 
+	/** The tone the frame's building is in, the extraction included. */
+	EOneBrahamStageTone FrameTone() const;
+
+	/** The stage card's title and its serif line, for the card and the ticker. */
+	FString StageCardTitle() const;
+	FString StageCardLine() const;
 	/** The world clock the HUD animates against. */
 	double HUDNow() const;
 
@@ -403,11 +428,11 @@ protected:
 	FString OverriddenLine;
 	FString OverriddenDetail;
 	double OverrideAt = -100.0;
-	int32 OverrideBand = 0;
+	EOneBrahamStageTone OverrideTone = EOneBrahamStageTone::Calm;
 
 	/** Stage tint cross-fade. */
-	int32 TintBand = 0;
-	int32 TintFromBand = 0;
+	EOneBrahamStageTone TintTone = EOneBrahamStageTone::Calm;
+	EOneBrahamStageTone TintFromTone = EOneBrahamStageTone::Calm;
 	double TintChangedAt = -100.0;
 	EOneBrahamLockdownStage LastStage = EOneBrahamLockdownStage::Normal;
 	bool bStagePrimed = false;
@@ -464,11 +489,15 @@ protected:
 		FString Subline;
 		FString Eyebrow;
 		EOneBrahamLockdownStage Stage = EOneBrahamLockdownStage::Normal;
+		/** The colour of its stage when it was pushed (AnnouncementTone applies a live extraction). */
+		EOneBrahamStageTone Tone = EOneBrahamStageTone::Calm;
 		float Hold = 4.f;
 		double At = -1.0;
 	};
 	TArray<FAnnouncement> AnnouncementQueue;
 	mutable FAnnouncement CurrentAnnouncement;
+	/** A PA card's colour: its stage under the one rule, the extraction as it is now. */
+	EOneBrahamStageTone AnnouncementTone(const FAnnouncement& A) const;
 
 	/** The stage card. */
 	EOneBrahamStageCard StageCard = EOneBrahamStageCard::None;
@@ -489,6 +518,10 @@ protected:
 	FString SubBannerShown;
 	double SubBannerAt = -100.0;
 	float SubBannerSeconds = 0.f;
+
+	/** The centre's arbitration clock: waiting messages' clocks stop by the
+	 *  time between two frames (UI/HUD/OneBrahamCentreMessages.h). */
+	double LastCentreAt = -1.0;
 
 	/** Subtitles. */
 	FString SubtitleShown;

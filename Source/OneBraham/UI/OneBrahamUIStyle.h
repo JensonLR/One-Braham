@@ -102,7 +102,44 @@ enum class EOneBrahamColour : uint8
 	/** #8F1418: the fire panel's housing at rest. */
 	FireHousing,
 	/** #FFFFFF: text and one-frame flashes. */
-	White
+	White,
+	/** #FF9F1C: the PreLockdown warning - the building clearing its throat. */
+	WarningAmber,
+	/** #FF9F1C -> #A85400: the PreLockdown announcement field. */
+	WarningFieldA,
+	WarningFieldB,
+	/** #00A651: the way out - an exit sign's green. Extraction, the roof, EVAC. */
+	EvacGreen,
+	/** #00A651 -> #005C2D: the extraction's announcement field. */
+	EvacFieldA,
+	EvacFieldB
+};
+
+/**
+ * The building's state as one colour family (Docs/08, "THE BUILDING SPEAKS").
+ * Every surface that says "what is the building doing" - the HUD's fire
+ * panel, the floor plate's beacon, the PA cards, the stage cards, the
+ * objective OVERRIDE, the menu's stage card, the building's own OLED screens -
+ * takes its colour from StageTone()/ToneColour() and nowhere else.
+ *
+ *   Calm      Normal                 signal blue    #1485FF
+ *   Warning   PreLockdown            amber          #FF9F1C
+ *   Lockdown  Lockdown               safety yellow  #FFCD00
+ *   Purge     Purge                  emergency red  #DD1E1F
+ *   Evac      extraction under way   exit green     #00A651
+ *
+ * The order is escalation: a tone never reads calmer than the one before it,
+ * except Evac, which is the way out. The Purge outranks the way out - while
+ * the purge front is chasing you the screen stays red.
+ */
+UENUM(BlueprintType)
+enum class EOneBrahamStageTone : uint8
+{
+	Calm,
+	Warning,
+	Lockdown,
+	Purge,
+	Evac
 };
 
 /** The motion curves (Docs/08). One library, so every screen moves alike. */
@@ -266,15 +303,42 @@ public:
 	/** An ini brand float (sRGB intent stored linear) as a display colour. */
 	static FLinearColor FromBrandFloat(const FLinearColor& IniColour, float Alpha = 1.f);
 
-	/** The stage's accent: blue before the lockdown, yellow in it, red in the Purge. */
+	// --- the stage colour rule (see EOneBrahamStageTone) -------------------
+	/**
+	 * THE rule: which tone a stage is drawn in. bEvacuating is "an extraction
+	 * is under way" (called, arriving or holding); it turns everything but the
+	 * Purge to Evac.
+	 */
+	UFUNCTION(BlueprintPure, Category = "One Braham|UI|Style")
+	static EOneBrahamStageTone StageTone(EOneBrahamLockdownStage Stage, bool bEvacuating = false);
+
+	/** A tone's colour, display-correct, colour-blind remaps applied. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|UI|Style")
+	static FLinearColor ToneColour(EOneBrahamStageTone Tone, float Alpha = 1.f);
+
+	/** A tone's neutral hairline: grey 20% in the calm, the tone at 25-30% after. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|UI|Style")
+	static FLinearColor ToneHairline(EOneBrahamStageTone Tone);
+
+	/** Type set on a field (or a plate) of the tone: navy on a light tone (amber, yellow, and any colour-blind remap that lightens one), white on the rest. */
+	UFUNCTION(BlueprintPure, Category = "One Braham|UI|Style")
+	static FLinearColor ToneInk(EOneBrahamStageTone Tone);
+
+	/** A tone's announcement field, two colours (A at the left). The calm is the ribbon. */
+	static void ToneField(EOneBrahamStageTone Tone, FLinearColor& OutA, FLinearColor& OutB);
+
+	/** "NORMAL", "ALERT", "LOCKDOWN", "PURGE", "EVAC": the tone's word on a panel. */
+	static const TCHAR* ToneWord(EOneBrahamStageTone Tone);
+
+	/** The stage's accent: ToneColour(StageTone(Stage)). */
 	UFUNCTION(BlueprintPure, Category = "One Braham|UI|Style")
 	static FLinearColor StageAccent(EOneBrahamLockdownStage Stage);
 
-	/** Neutral hairlines per stage: #E0E5EB 20%, #FFCD00 25%, #DD1E1F 30%. */
+	/** The stage's hairline: ToneHairline(StageTone(Stage)). */
 	UFUNCTION(BlueprintPure, Category = "One Braham|UI|Style")
 	static FLinearColor StageHairline(EOneBrahamLockdownStage Stage);
 
-	/** The stage's announcement field, two colours (A at the left). */
+	/** The stage's announcement field: ToneField(StageTone(Stage)). */
 	static void StageField(EOneBrahamLockdownStage Stage, FLinearColor& OutA, FLinearColor& OutB);
 
 	/** Evaluates a motion curve at T in [0, 1] (clamped). */

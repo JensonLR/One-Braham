@@ -60,6 +60,8 @@ namespace OneBrahamMatchDev
 		TEXT("Dev: seconds of end screen before everybody leaves (-1 = match settings)."), ECVF_Cheat);
 	TAutoConsoleVariable<int32> CVarScoreToWin(TEXT("ob.Match.ScoreToWin"), -1,
 		TEXT("Dev: FIRE DRILL points to win (-1 = match settings)."), ECVF_Cheat);
+	TAutoConsoleVariable<int32> CVarLastSquadBotCap(TEXT("ob.Match.LastSquadBotCap"), -1,
+		TEXT("Dev: the last squad gets at most this many bots (-1 = a full squad). Set before the map loads (or -OBLastSquadBotCap=N)."), ECVF_Cheat);
 	TAutoConsoleVariable<int32> CVarFollowBots(TEXT("ob.Match.FollowBots"), 0,
 		TEXT("Dev: 1 = a local player with no pawn watches the highest living bot."), ECVF_Cheat);
 }
@@ -216,7 +218,11 @@ void AOneBrahamGameMode::InitGame(const FString& MapName, const FString& Options
 void AOneBrahamGameMode::ParseTravelOptions(const FString& Options)
 {
 	PendingModeString = UGameplayStatics::ParseOption(Options, TEXT("Mode"));
-	PendingPlayerName = UGameplayStatics::ParseOption(Options, TEXT("Name"));
+	PendingPlayerName = UGameplayStatics::ParseOption(Options, DisplayNameOption);
+	if (PendingPlayerName.IsEmpty())
+	{
+		PendingPlayerName = UGameplayStatics::ParseOption(Options, TEXT("Name"));
+	}
 	PendingArchetype = UGameplayStatics::ParseOption(Options, TEXT("Archetype"));
 
 	if (PendingModeString.IsEmpty())
@@ -2413,7 +2419,7 @@ void AOneBrahamGameMode::PostLogin(APlayerController* NewPlayer)
 		return;
 	}
 
-	// Apply the archetype + display name chosen in the lobby. The GameInstance
+	// Apply the archetype + cosmetics chosen in the lobby. The GameInstance
 	// profile on this machine is the host's own, so it only ever describes the
 	// local controller; remote players send theirs (cosmetics, clan tag,
 	// loadout) from their own machine, and on dedicated the travel option rules.
@@ -2422,16 +2428,17 @@ void AOneBrahamGameMode::PostLogin(APlayerController* NewPlayer)
 	{
 		if (const UOneBrahamSaveSettings* Profile = GameInstance->GetProfile())
 		{
-			if (State->GetPlayerName().IsEmpty() && !Profile->PlayerName.IsEmpty())
-			{
-				State->SetPlayerName(Profile->PlayerName);
-			}
 			State->EquippedCosmetics = Profile->EquippedCosmetics;
 			State->ClanTag = Profile->ClanTag;
 		}
 	}
 
-	State->SetPlayerName(State->GetPlayerName().IsEmpty() && !PendingPlayerName.IsEmpty() ? PendingPlayerName : State->GetPlayerName());
+	// InitNewPlayer named them from their login; this catches a login that
+	// carried nothing usable, and a clash with somebody who joined in between.
+	// (It used to give the map URL's ?Name= - the host's - to anybody whose
+	// name was empty, and nobody's ever was: the engine had already named
+	// every player after their machine.)
+	EnsureHumanPlayerName(NewPlayer);
 	State->SessionMode = MatchSettings ? MatchSettings->Mode : EOneBrahamMatchMode::Ascent;
 
 	// Archetype: prefer the travel option, then the GameInstance profile, then a
@@ -2472,6 +2479,312 @@ void AOneBrahamGameMode::PostLogin(APlayerController* NewPlayer)
 	OB_MATCH_LOG("PostLogin: '%s' (id=%d, team=%s, squad=%d). Players=%d",
 		*State->GetPlayerName(), State->GetPlayerId(), *UEnum::GetValueAsString(State->Team), State->SquadId,
 		GetNumPlayers());
+}
+
+// ==========================================================================
+//  Player names
+// ==========================================================================
+FString AOneBrahamGameMode::SanitisePlayerName(const FString& Raw)
+{
+	FString Clean;
+	Clean.Reserve(Raw.Len());
+
+	bool bPendingSpace = false;
+	for (const TCHAR Char : Raw)
+	{
+		if (FChar::IsWhitespace(Char))
+		{
+			bPendingSpace = !Clean.IsEmpty();
+			continue;
+		}
+
+		// '?' and '#' end a URL option, '=' splits one, '"' and '\' break the
+		// log and the console; control characters draw as nothing.
+		if (Char < 32 || Char == 127 || Char == TEXT('?') || Char == TEXT('#') || Char == TEXT('=')
+			|| Char == TEXT('"') || Char == TEXT('\\'))
+		{
+			continue;
+		}
+
+		if (bPendingSpace)
+		{
+			Clean.AppendChar(TEXT(' '));
+			bPendingSpace = false;
+		}
+		Clean.AppendChar(Char);
+	}
+
+	Clean.LeftInline(MaxPlayerNameLength);
+	Clean.TrimStartAndEndInline();
+	return Clean;
+}
+
+bool AOneBrahamGameMode::IsPlaceholderPlayerName(const FString& Name, const FString& UniqueIdString)
+{
+	const FString Clean = SanitisePlayerName(Name);
+	if (Clean.IsEmpty() || Clean.Equals(TEXT("Player"), ESearchCase::IgnoreCase)
+		|| Clean.Equals(TEXT("NullUser"), ESearchCase::IgnoreCase))
+	{
+		return true;
+	}
+
+	// The NULL subsystem's nickname is the unique id itself; the engine cuts it
+	// to the cap ("Jensons-MacBook-Air.") before it reaches a player state.
+	if (!UniqueIdString.IsEmpty())
+	{
+		const FString Id = SanitisePlayerName(UniqueIdString);
+		if (Clean.Equals(Id, ESearchCase::IgnoreCase)
+			|| (Clean.Len() >= 8 && UniqueIdString.StartsWith(Clean, ESearchCase::IgnoreCase)))
+		{
+			return true;
+		}
+	}
+
+	// "Player256", the engine's DefaultPlayerName with the player id.
+	if (Clean.StartsWith(TEXT("Player"), ESearchCase::IgnoreCase) && Clean.Len() > 6 && Clean.Mid(6).IsNumeric())
+	{
+		return true;
+	}
+
+	return false;
+}
+
+FString AOneBrahamGameMode::ChooseLoginPlayerName(const FString& Options, const FString& UniqueIdString, const FString& Fallback)
+{
+	const FString Candidates[] =
+	{
+		UGameplayStatics::ParseOption(Options, DisplayNameOption),
+		UGameplayStatics::ParseOption(Options, TEXT("Name")),
+		Fallback
+	};
+
+	for (const FString& Candidate : Candidates)
+	{
+		if (!IsPlaceholderPlayerName(Candidate, UniqueIdString))
+		{
+			return SanitisePlayerName(Candidate);
+		}
+	}
+
+	return FString();
+}
+
+FString AOneBrahamGameMode::MakeUniquePlayerName(const FString& Desired, const TArray<FString>& TakenNames)
+{
+	auto IsTaken = [&TakenNames](const FString& Name)
+	{
+		return TakenNames.ContainsByPredicate([&Name](const FString& Taken)
+		{
+			return Taken.Equals(Name, ESearchCase::IgnoreCase);
+		});
+	};
+
+	const FString Base = SanitisePlayerName(Desired);
+	if (Base.IsEmpty() || !IsTaken(Base))
+	{
+		return Base;
+	}
+
+	for (int32 Suffix = 2; Suffix < 1000; ++Suffix)
+	{
+		const FString Tail = FString::Printf(TEXT(" %d"), Suffix);
+		FString Stem = Base.Left(MaxPlayerNameLength - Tail.Len());
+		Stem.TrimEndInline();
+		const FString Candidate = Stem + Tail;
+		if (!IsTaken(Candidate))
+		{
+			return Candidate;
+		}
+	}
+
+	return Base;
+}
+
+bool AOneBrahamGameMode::IsUniqueVariantOfName(const FString& Current, const FString& Desired)
+{
+	const FString Base = SanitisePlayerName(Desired);
+	if (Base.IsEmpty() || Current.IsEmpty())
+	{
+		return false;
+	}
+	if (Current.Equals(Base, ESearchCase::IgnoreCase))
+	{
+		return true;
+	}
+
+	// "<stem> <n>", the stem being Base cut exactly as MakeUniquePlayerName cuts it.
+	int32 Space = INDEX_NONE;
+	if (!Current.FindLastChar(TEXT(' '), Space) || Space <= 0)
+	{
+		return false;
+	}
+	const FString Digits = Current.Mid(Space + 1);
+	if (Digits.IsEmpty() || !Digits.IsNumeric() || Digits.Contains(TEXT(".")) || Digits.Contains(TEXT("-")))
+	{
+		return false;
+	}
+	FString Stem = Base.Left(MaxPlayerNameLength - (Current.Len() - Space));
+	Stem.TrimEndInline();
+	return Current.Left(Space).Equals(Stem, ESearchCase::IgnoreCase);
+}
+
+FString AOneBrahamGameMode::StripPlayerNameOptions(const FString& URL)
+{
+	TArray<FString> Parts;
+	URL.ParseIntoArray(Parts, TEXT("?"), /*bCullEmpty*/ false);
+	if (Parts.Num() <= 1)
+	{
+		return URL;
+	}
+
+	FString Result = Parts[0];
+	for (int32 Index = 1; Index < Parts.Num(); ++Index)
+	{
+		FString Key = Parts[Index];
+		Key.Split(TEXT("="), &Key, nullptr);
+		if (Key.Equals(DisplayNameOption, ESearchCase::IgnoreCase) || Key.Equals(TEXT("Name"), ESearchCase::IgnoreCase))
+		{
+			continue;
+		}
+		Result += TEXT("?") + Parts[Index];
+	}
+	return Result;
+}
+
+APlayerController* AOneBrahamGameMode::ProcessClientTravel(FString& URL, bool bSeamless, bool bAbsolute)
+{
+	// The engine sends the same string to every remote client and keeps it (by
+	// this reference) as the server's own next URL, which the listen host's
+	// name still has to reach.
+	const FString ServerURL = URL;
+	URL = StripPlayerNameOptions(ServerURL);
+	APlayerController* LocalPlayerController = Super::ProcessClientTravel(URL, bSeamless, bAbsolute);
+	URL = ServerURL;
+	return LocalPlayerController;
+}
+
+TArray<FString> AOneBrahamGameMode::GatherTakenPlayerNames(const APlayerState* Except) const
+{
+	TArray<FString> Taken;
+	if (const AGameStateBase* GS = GetGameState<AGameStateBase>())
+	{
+		for (const APlayerState* Other : GS->PlayerArray)
+		{
+			if (Other != nullptr && Other != Except && !Other->IsInactive())
+			{
+				Taken.Add(Other->GetPlayerName());
+			}
+		}
+	}
+	return Taken;
+}
+
+FString AOneBrahamGameMode::GetLocalPlayerFallbackName(const AController* Controller) const
+{
+	if (Controller == nullptr || !Controller->IsLocalController() || Controller->IsA<AOneBrahamBotController>())
+	{
+		return FString();
+	}
+
+	// The map URL's own name first: the game instance put the profile's there,
+	// and a script that launched the host with ?Name=X meant X. Not when it is
+	// the engine's own ?Name= (the NULL nickname), which a standalone map's
+	// options carry as well.
+	const APlayerState* State = Controller->PlayerState.Get();
+	const FString IdString = State != nullptr && State->GetUniqueId().IsValid() ? State->GetUniqueId()->ToString() : FString();
+	if (!IsPlaceholderPlayerName(PendingPlayerName, IdString) && !UOneBrahamGameInstance::IsAutomaticDisplayName(PendingPlayerName))
+	{
+		return SanitisePlayerName(PendingPlayerName);
+	}
+
+	if (const UOneBrahamGameInstance* GameInstance = GetGameInstance<UOneBrahamGameInstance>())
+	{
+		if (const UOneBrahamSaveSettings* Profile = GameInstance->GetProfile())
+		{
+			return Profile->PlayerName;
+		}
+	}
+	return FString();
+}
+
+FString AOneBrahamGameMode::InitNewPlayer(APlayerController* NewPlayerController, const FUniqueNetIdRepl& UniqueId,
+	const FString& Options, const FString& Portal)
+{
+	// The engine names the player from ?Name= (the online nickname) here; the
+	// ChangeName below this class's override replaces that with the real one.
+	const FString Error = Super::InitNewPlayer(NewPlayerController, UniqueId, Options, Portal);
+	if (!Error.IsEmpty() || NewPlayerController == nullptr || NewPlayerController->PlayerState == nullptr)
+	{
+		return Error;
+	}
+
+	// Nothing usable leaves the engine's placeholder for PostLogin, which
+	// knows whether this is the machine's own player (its profile) and only
+	// then generates a name: the local player is not attached to its
+	// controller yet (UWorld::SpawnPlayActor sets it after Login), so here a
+	// standalone or listen host's own controller does not read as local.
+	const FString IdString = UniqueId.IsValid() ? UniqueId->ToString() : FString();
+	const FString Chosen = ChooseLoginPlayerName(Options, IdString, GetLocalPlayerFallbackName(NewPlayerController));
+	if (!Chosen.IsEmpty())
+	{
+		ChangeName(NewPlayerController, Chosen, false);
+	}
+
+	OB_MATCH_LOG("Login name: '%s' (asked ?%s='%s' ?Name='%s')", *NewPlayerController->PlayerState->GetPlayerName(),
+		DisplayNameOption, *UGameplayStatics::ParseOption(Options, DisplayNameOption),
+		*UGameplayStatics::ParseOption(Options, TEXT("Name")));
+	return Error;
+}
+
+void AOneBrahamGameMode::ChangeName(AController* Controller, const FString& NewName, bool bNameChange)
+{
+	APlayerState* State = Controller != nullptr ? Controller->PlayerState.Get() : nullptr;
+	if (State == nullptr || State->IsABot() || Controller->IsA<AOneBrahamBotController>())
+	{
+		// Bots are named by their controller ("BOT Hughes") and keep it.
+		Super::ChangeName(Controller, NewName, bNameChange);
+		return;
+	}
+
+	const FString Unique = MakeUniquePlayerName(NewName, GatherTakenPlayerNames(State));
+	if (Unique.IsEmpty() || Unique == State->GetPlayerName())
+	{
+		return;
+	}
+
+	Super::ChangeName(Controller, Unique, bNameChange);
+	State->ForceNetUpdate();
+
+	// The squad roster (HUD squad list, end screen) carries a copy of the name.
+	const AOneBrahamPlayerState* OBState = Cast<AOneBrahamPlayerState>(State);
+	if (OBState != nullptr && OBState->SquadId != INDEX_NONE)
+	{
+		RebuildSquadInfo();
+	}
+}
+
+void AOneBrahamGameMode::EnsureHumanPlayerName(AController* Controller)
+{
+	APlayerState* State = Controller != nullptr ? Controller->PlayerState.Get() : nullptr;
+	if (State == nullptr || State->IsABot() || Controller->IsA<AOneBrahamBotController>())
+	{
+		return;
+	}
+
+	const FUniqueNetIdRepl& UniqueId = State->GetUniqueId();
+	const FString IdString = UniqueId.IsValid() ? UniqueId->ToString() : FString();
+
+	FString Desired = State->GetPlayerName();
+	if (IsPlaceholderPlayerName(Desired, IdString))
+	{
+		Desired = GetLocalPlayerFallbackName(Controller);
+	}
+	if (IsPlaceholderPlayerName(Desired, IdString))
+	{
+		Desired = UOneBrahamGameInstance::MakeOfficeDisplayName(static_cast<uint32>(State->GetPlayerId()));
+	}
+
+	ChangeName(Controller, Desired, false);
 }
 
 void AOneBrahamGameMode::HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer)
@@ -2542,6 +2855,14 @@ void AOneBrahamGameMode::HandleSeamlessTravelPlayer(AController*& C)
 	// to copy, had none at all.
 	APlayerController* PlayerController = Cast<APlayerController>(C);
 	AOneBrahamPlayerState* State = PlayerController != nullptr ? PlayerController->GetPlayerState<AOneBrahamPlayerState>() : nullptr;
+
+	// The name came across with the player state; it is checked again against
+	// this match's roster (bots included), which the last map's was not.
+	if (State != nullptr)
+	{
+		EnsureHumanPlayerName(PlayerController);
+	}
+
 	if (State == nullptr || MatchSettings == nullptr || State->Team == EOneBrahamTeam::Spectator)
 	{
 		return;
@@ -2678,8 +2999,25 @@ void AOneBrahamGameMode::PopulateWithBots(int32 MaxBots)
 		return;
 	}
 
-	const TArray<int32> Plan = OneBrahamBotRules::ComputeBotsPerSquad(
+	TArray<int32> Plan = OneBrahamBotRules::ComputeBotsPerSquad(
 		SquadToTeamMap.Num(), MatchSettings->PlayersPerTeam, Occupied, Remaining);
+
+#if !UE_BUILD_SHIPPING
+	// Dev: a short-handed last squad, for a lopsided match on purpose (the
+	// FIRE DRILL pacing check of a dominant team, Docs/06).
+	// -OBLastSquadBotCap=N as well: a -DPCVars= value given before the module
+	// registers the variable does not reach it, and -ExecCmds is too late.
+	int32 LastSquadCap = OneBrahamMatchDev::CVarLastSquadBotCap.GetValueOnGameThread();
+	if (LastSquadCap < 0)
+	{
+		FParse::Value(FCommandLine::Get(), TEXT("OBLastSquadBotCap="), LastSquadCap);
+	}
+	if (LastSquadCap >= 0 && Plan.Num() > 1)
+	{
+		const int32 Last = Plan.Num() - 1;
+		Plan[Last] = FMath::Clamp(LastSquadCap - ExistingBots[Last], 0, Plan[Last]);
+	}
+#endif
 
 	int32 BotsSpawned = 0;
 	for (int32 Squad = 0; Squad < Plan.Num(); ++Squad)
@@ -3239,11 +3577,27 @@ void AOneBrahamGameMode::TickControlPoints(float DeltaSeconds)
 	ControlPointAccumulator = 0.f;
 
 	const TArray<FOneBrahamControlPointDef>& Points = MatchSettings->ControlPoints;
+	if (ControlPointStates.Num() != Points.Num())
+	{
+		// Once a match: the tuning it is played with, for the record a full-match run reads.
+		for (const FOneBrahamControlPointDef& Point : Points)
+		{
+			OB_MATCH_LOG("FIRE DRILL point '%s' floor %d: capture %.0fs, %.2f/s held.",
+				*Point.PointId.ToString(), Point.FloorIndex, Point.CaptureSeconds, Point.ScorePerSecond);
+		}
+		OB_MATCH_LOG("FIRE DRILL scoring: %d to win, %d a kill, %d a capture, multipliers [%s].",
+			OBResolveScoreToWin(MatchSettings), MatchSettings->ScorePerKill, MatchSettings->ScorePerCapture,
+			*FString::JoinBy(MatchSettings->MultiPointHoldMultipliers, TEXT(", "), [](float M) { return FString::SanitizeFloat(M); }));
+	}
 	ControlPointStates.SetNum(Points.Num());
 	if (ControlPointScoreCarry.Num() != 2)
 	{
 		ControlPointScoreCarry.Init(0.f, 2);
 	}
+
+	// Per team: the points it owns, and the rates of those it scores on now.
+	int32 Owned[2] = { 0, 0 };
+	TArray<float> ScoringRates[2];
 
 	for (int32 Index = 0; Index < Points.Num() && !bMatchFinished; ++Index)
 	{
@@ -3293,51 +3647,112 @@ void AOneBrahamGameMode::TickControlPoints(float DeltaSeconds)
 		const bool bContested = Present[0] > 0 && Present[1] > 0;
 		const int32 Alone = bContested ? INDEX_NONE : (Present[0] > 0 ? 0 : (Present[1] > 0 ? 1 : INDEX_NONE));
 
-		if (Alone != INDEX_NONE && Alone != State.OwnerTeam)
+		if (StepControlPointCapture(State.OwnerTeam, State.CapturingTeam, State.CaptureProgressSeconds,
+			Alone, bContested, Step, Point.CaptureSeconds))
 		{
-			if (State.CapturingTeam != Alone)
+			const FString TeamName = GetSquadDisplayName(State.OwnerTeam);
+			OB_MATCH_LOG("Control point '%s' taken by %s at %.0fs (scores %d-%d).", *Point.PointId.ToString(), *TeamName,
+				GS->PhaseElapsedSeconds, GS->TeamScores.IsValidIndex(0) ? GS->TeamScores[0] : 0,
+				GS->TeamScores.IsValidIndex(1) ? GS->TeamScores[1] : 0);
+			Announce(FText::Format(NSLOCTEXT("OneBraham", "FireDrill_PointTaken", "{0} is now held by {1}."),
+				Point.DisplayName, FText::FromString(TeamName)), /*bTannoy*/ false);
+
+			AddTeamScoreByIndex(State.OwnerTeam, MatchSettings->ScorePerCapture);
+			if (State.OwnerTeam >= 0 && State.OwnerTeam < 2)
 			{
-				State.CapturingTeam = Alone;
-				State.CaptureProgressSeconds = 0.f;
+				++Owned[State.OwnerTeam];
 			}
-
-			State.CaptureProgressSeconds += Step;
-			if (State.CaptureProgressSeconds >= Point.CaptureSeconds)
-			{
-				State.OwnerTeam = Alone;
-				State.CapturingTeam = INDEX_NONE;
-				State.CaptureProgressSeconds = 0.f;
-
-				const FString TeamName = GetSquadDisplayName(Alone);
-				OB_MATCH_LOG("Control point '%s' taken by %s.", *Point.PointId.ToString(), *TeamName);
-				Announce(FText::Format(NSLOCTEXT("OneBraham", "FireDrill_PointTaken", "{0} is now held by {1}."),
-					Point.DisplayName, FText::FromString(TeamName)), /*bTannoy*/ false);
-
-				AddTeamScoreByIndex(Alone, MatchSettings->ScorePerCapture);
-				continue;
-			}
+			// Earns from the next second: the capture bonus is this one's.
+			continue;
 		}
-		else if (Alone == INDEX_NONE && !bContested)
+
+		if (State.OwnerTeam < 0 || State.OwnerTeam >= 2)
 		{
-			// Walked away from: a half-taken point drifts back.
-			State.CaptureProgressSeconds = FMath::Max(0.f, State.CaptureProgressSeconds - Step);
+			continue;
 		}
+		++Owned[State.OwnerTeam];
 
 		// A held point earns for its holder every second somebody of theirs is
 		// standing on it and nobody else is: holding is presence. (Scoring a
 		// point nobody stood on made the 200-point drill a ninety-second one.)
-		if (State.OwnerTeam != INDEX_NONE && Alone == State.OwnerTeam)
+		if (Alone == State.OwnerTeam)
 		{
-			float& Carry = ControlPointScoreCarry[State.OwnerTeam];
-			Carry += Point.ScorePerSecond * Step;
-			const int32 Whole = FMath::FloorToInt(Carry);
-			if (Whole > 0)
-			{
-				Carry -= static_cast<float>(Whole);
-				AddTeamScoreByIndex(State.OwnerTeam, Whole);
-			}
+			ScoringRates[State.OwnerTeam].Add(Point.ScorePerSecond);
 		}
 	}
+
+	for (int32 Team = 0; Team < 2 && !bMatchFinished; ++Team)
+	{
+		const float Rate = ComputeHoldScoreRate(ScoringRates[Team], Owned[Team], MatchSettings->MultiPointHoldMultipliers);
+		if (Rate <= 0.f)
+		{
+			continue;
+		}
+
+		float& Carry = ControlPointScoreCarry[Team];
+		Carry += Rate * Step;
+		const int32 Whole = FMath::FloorToInt(Carry);
+		if (Whole > 0)
+		{
+			Carry -= static_cast<float>(Whole);
+			AddTeamScoreByIndex(Team, Whole);
+		}
+	}
+}
+
+bool AOneBrahamGameMode::StepControlPointCapture(int32& OwnerTeam, int32& CapturingTeam, float& ProgressSeconds,
+	int32 AloneTeam, bool bContested, float StepSeconds, float CaptureSeconds)
+{
+	if (bContested)
+	{
+		// Both teams on it: nobody takes it, and a half-taken point stays half taken.
+		return false;
+	}
+
+	if (AloneTeam == INDEX_NONE || AloneTeam == OwnerTeam)
+	{
+		// Walked away from (or the holder is back on it): progress drains.
+		ProgressSeconds = FMath::Max(0.f, ProgressSeconds - StepSeconds);
+		if (ProgressSeconds <= 0.f)
+		{
+			CapturingTeam = INDEX_NONE;
+		}
+		return false;
+	}
+
+	if (CapturingTeam != AloneTeam)
+	{
+		CapturingTeam = AloneTeam;
+		ProgressSeconds = 0.f;
+	}
+
+	ProgressSeconds += StepSeconds;
+	if (ProgressSeconds + KINDA_SMALL_NUMBER < FMath::Max(0.f, CaptureSeconds))
+	{
+		return false;
+	}
+
+	OwnerTeam = AloneTeam;
+	CapturingTeam = INDEX_NONE;
+	ProgressSeconds = 0.f;
+	return true;
+}
+
+float AOneBrahamGameMode::ComputeHoldScoreRate(const TArray<float>& ScoringPointRates, int32 PointsOwned, const TArray<float>& Multipliers)
+{
+	float Sum = 0.f;
+	for (const float Rate : ScoringPointRates)
+	{
+		Sum += FMath::Max(0.f, Rate);
+	}
+
+	float Multiplier = 1.f;
+	if (Multipliers.Num() > 0)
+	{
+		Multiplier = Multipliers[FMath::Clamp(PointsOwned, 0, Multipliers.Num() - 1)];
+	}
+
+	return Sum * FMath::Max(0.f, Multiplier);
 }
 
 // ==========================================================================

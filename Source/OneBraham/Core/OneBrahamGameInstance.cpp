@@ -8,6 +8,7 @@
 #include "Core/OneBrahamGameUserSettings.h"
 #include "Core/OneBrahamSaveSettings.h"
 #include "Core/OneBrahamGameState.h"
+#include "Core/OneBrahamGameMode.h"
 #include "Data/OneBrahamMatchSettingsAsset.h"
 #include "UI/OneBrahamUIStyle.h"
 #include "Kismet/GameplayStatics.h"
@@ -15,6 +16,7 @@
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerState.h"
 #include "Interfaces/OnlineIdentityInterface.h"
 #include "OnlineSubsystem.h"
 #include "OnlineSubsystemUtils.h"
@@ -30,6 +32,11 @@
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
+
+#if PLATFORM_MAC || PLATFORM_LINUX
+#include <pwd.h>
+#include <unistd.h>
+#endif
 
 const FName UOneBrahamGameInstance::SessionName(NAME_GameSession);
 
@@ -78,30 +85,7 @@ void UOneBrahamGameInstance::Init()
 			TravelFailureHandle = GEngine->OnTravelFailure().AddUObject(this, &UOneBrahamGameInstance::HandleTravelFailure);
 		}
 
-		// Steam persona name lands asynchronously; seed from the command line so
-		// a launch with -PlayerName=Alex still shows the right name immediately.
-		FString CommandLineName;
-		if (FParse::Value(FCommandLine::Get(), TEXT("PlayerName="), CommandLineName) && !CommandLineName.IsEmpty())
-		{
-			ApplyPlatformDisplayName(CommandLineName);
-		}
-		else
-		{
-			const IOnlineSubsystem* OnlineSubsystem = IOnlineSubsystem::Get();
-			const IOnlineIdentityPtr Identity = OnlineSubsystem ? OnlineSubsystem->GetIdentityInterface() : nullptr;
-			static const FName NullName(TEXT("NULL"));
-			if (OnlineSubsystem != nullptr && OnlineSubsystem->GetSubsystemName() == NullName)
-			{
-				// NULL's "nickname" is the machine's host name and a hash, which is
-				// what a LAN JOIN list would show as the host's floor. The account
-				// name reads as a person.
-				ApplyPlatformDisplayName(FPlatformProcess::UserName(false));
-			}
-			else if (Identity.IsValid())
-			{
-				ApplyPlatformDisplayName(Identity->GetPlayerNickname(0));
-			}
-		}
+		ResolveDisplayName();
 	}
 
 	// Match settings are resolved lazily by GetMatchSettings(), but pre-loading
@@ -207,6 +191,11 @@ void UOneBrahamGameInstance::HandleWorldBeginPlay(TWeakObjectPtr<UWorld> World)
 	if (BeganWorld->GetNetMode() == NM_ListenServer)
 	{
 		WatchMatchForSessionClose(BeganWorld);
+	}
+
+	if (BeganWorld->GetNetMode() == NM_Client)
+	{
+		WatchClientPlayerName(BeganWorld);
 	}
 }
 
@@ -357,11 +346,255 @@ void UOneBrahamGameInstance::ApplyPlatformDisplayName(const FString& PlatformPla
 		return;
 	}
 
-	if (!PlatformPlayerName.IsEmpty())
+	const FString Clean = AOneBrahamGameMode::SanitisePlayerName(PlatformPlayerName);
+	if (!Clean.IsEmpty() && Clean != Profile->PlayerName)
 	{
-		Profile->PlayerName = PlatformPlayerName;
+		Profile->PlayerName = Clean;
 		SaveProfile();
 	}
+}
+
+bool UOneBrahamGameInstance::SetPlayerDisplayName(const FString& NewName)
+{
+	const FString Clean = AOneBrahamGameMode::SanitisePlayerName(NewName);
+	if (Profile == nullptr || Clean.IsEmpty())
+	{
+		return false;
+	}
+
+	Profile->PlayerName = Clean;
+	SaveProfile();
+	OB_LOG("Display name set to '%s'.", *Clean);
+	return true;
+}
+
+FString UOneBrahamGameInstance::GetPlayerDisplayName() const
+{
+	return Profile != nullptr && !Profile->PlayerName.IsEmpty() ? Profile->PlayerName : MakeDefaultDisplayName();
+}
+
+void UOneBrahamGameInstance::ResolveDisplayName()
+{
+	if (Profile == nullptr)
+	{
+		return;
+	}
+
+	// A launch with -PlayerName=Alex is Alex, under any subsystem.
+	FString CommandLineName;
+	if (FParse::Value(FCommandLine::Get(), TEXT("PlayerName="), CommandLineName)
+		&& !AOneBrahamGameMode::SanitisePlayerName(CommandLineName).IsEmpty())
+	{
+		ApplyPlatformDisplayName(CommandLineName);
+		OB_LOG("Display name '%s' (from -PlayerName=).", *Profile->PlayerName);
+		return;
+	}
+
+	// Steam (any real platform): the persona name is who the player is to
+	// everybody they play with, and the subsystem's nickname is it.
+	const IOnlineSubsystem* OnlineSubsystem = IOnlineSubsystem::Get();
+	const IOnlineIdentityPtr Identity = OnlineSubsystem ? OnlineSubsystem->GetIdentityInterface() : nullptr;
+	static const FName NullName(TEXT("NULL"));
+	const bool bNullSubsystem = OnlineSubsystem == nullptr || OnlineSubsystem->GetSubsystemName() == NullName;
+	if (!bNullSubsystem && Identity.IsValid())
+	{
+		const FString Persona = AOneBrahamGameMode::SanitisePlayerName(Identity->GetPlayerNickname(0));
+		const FUniqueNetIdPtr Id = Identity->GetUniquePlayerId(0);
+		if (!AOneBrahamGameMode::IsPlaceholderPlayerName(Persona, Id.IsValid() ? Id->ToString() : FString()))
+		{
+			ApplyPlatformDisplayName(Persona);
+			OB_LOG("Display name '%s' (the %s nickname).", *Profile->PlayerName, *OnlineSubsystem->GetSubsystemName().ToString());
+			return;
+		}
+	}
+
+	// NULL (LAN, direct IP): the name the player chose, kept in the profile.
+	// What earlier builds wrote there by themselves - the account's login name,
+	// the machine's host name - is not a choice, and gives way to the default.
+	if (!IsAutomaticDisplayName(Profile->PlayerName))
+	{
+		OB_LOG("Display name '%s' (the profile's).", *Profile->PlayerName);
+		return;
+	}
+
+	const FString Previous = Profile->PlayerName;
+	Profile->PlayerName = MakeDefaultDisplayName();
+	SaveProfile();
+	OB_LOG("Display name '%s' (default; the profile had '%s').", *Profile->PlayerName, *Previous);
+}
+
+bool UOneBrahamGameInstance::IsAutomaticDisplayName(const FString& Name)
+{
+	const FString Clean = AOneBrahamGameMode::SanitisePlayerName(Name);
+	if (Clean.IsEmpty())
+	{
+		return true;
+	}
+
+	const FString Automatic[] =
+	{
+		FPlatformProcess::UserName(true),
+		FPlatformProcess::UserName(false),
+		FString(FPlatformProcess::ComputerName()),
+		FPlatformMisc::GetLoginId()
+	};
+	for (const FString& Candidate : Automatic)
+	{
+		const FString CleanCandidate = AOneBrahamGameMode::SanitisePlayerName(Candidate);
+		if (!CleanCandidate.IsEmpty() && Clean.Equals(CleanCandidate, ESearchCase::IgnoreCase))
+		{
+			return true;
+		}
+	}
+
+	// The NULL nickname: "<host name>-<login id>", whole or cut to the cap. A
+	// host name has no spaces; a chosen name that merely opens with the same
+	// eight letters ("Jenson R..." on "Jenson Raper's Mac") usually does.
+	const FString HostName = AOneBrahamGameMode::SanitisePlayerName(FPlatformProcess::ComputerName());
+	if (HostName.Len() >= 8 && !Clean.Contains(TEXT(" ")) && Clean.StartsWith(HostName.Left(8), ESearchCase::IgnoreCase))
+	{
+		return true;
+	}
+
+	return AOneBrahamGameMode::IsPlaceholderPlayerName(Clean, FString());
+}
+
+FString UOneBrahamGameInstance::GetOSFullUserName()
+{
+	FString FullName;
+#if PLATFORM_MAC || PLATFORM_LINUX
+	// The account's "real name" (System Settings > Users & Groups on a Mac).
+	if (const passwd* Entry = getpwuid(getuid()))
+	{
+		if (Entry->pw_gecos != nullptr)
+		{
+			FullName = UTF8_TO_TCHAR(Entry->pw_gecos);
+			FString Before;
+			if (FullName.Split(TEXT(","), &Before, nullptr))
+			{
+				FullName = Before;
+			}
+		}
+	}
+#endif
+	FullName = AOneBrahamGameMode::SanitisePlayerName(FullName);
+
+	// A real name and not the login name again (Linux often has no gecos, or the login in it).
+	return IsAutomaticNameCandidate(FullName) ? FString() : FullName;
+}
+
+bool UOneBrahamGameInstance::IsAutomaticNameCandidate(const FString& Name)
+{
+	return Name.IsEmpty() || Name.Equals(FPlatformProcess::UserName(true), ESearchCase::IgnoreCase)
+		|| Name.Equals(FPlatformProcess::UserName(false), ESearchCase::IgnoreCase);
+}
+
+FString UOneBrahamGameInstance::MakeDefaultDisplayName()
+{
+	const FString FullName = GetOSFullUserName();
+	if (!FullName.IsEmpty())
+	{
+		return FullName;
+	}
+
+	// Stable per machine and account, so the same desk gets the same name.
+	const uint32 Seed = GetTypeHash(FString(FPlatformProcess::ComputerName()) + FPlatformProcess::UserName(false));
+	return MakeOfficeDisplayName(Seed);
+}
+
+FString UOneBrahamGameInstance::MakeOfficeDisplayName(uint32 Seed)
+{
+	// Six letters at most and eight: "<name> from <department>" always fits
+	// the twenty-character cap, so it is never cut mid-word on the HUD.
+	static const TCHAR* FirstNames[] =
+	{
+		TEXT("Priya"), TEXT("Tom"), TEXT("Aisha"), TEXT("Owen"), TEXT("Mei"), TEXT("Femi"),
+		TEXT("Rosa"), TEXT("Dev"), TEXT("Hana"), TEXT("Callum"), TEXT("Nadia"), TEXT("Jonah"),
+		TEXT("Ruth"), TEXT("Kofi"), TEXT("Lena"), TEXT("Sami")
+	};
+	static const TCHAR* Departments[] =
+	{
+		TEXT("Payroll"), TEXT("Finance"), TEXT("Legal"), TEXT("IT"), TEXT("HR"), TEXT("Comms"),
+		TEXT("Audit"), TEXT("Sales"), TEXT("Estates"), TEXT("Security"), TEXT("Strategy")
+	};
+
+	const uint32 Mixed = Seed * 2654435761u;
+	const TCHAR* First = FirstNames[Mixed % UE_ARRAY_COUNT(FirstNames)];
+	const TCHAR* Department = Departments[(Mixed >> 8) % UE_ARRAY_COUNT(Departments)];
+	return FString::Printf(TEXT("%s from %s"), First, Department);
+}
+
+FString UOneBrahamGameInstance::AppendDisplayNameOption(const FString& Options) const
+{
+	const FString Name = AOneBrahamGameMode::SanitisePlayerName(GetPlayerDisplayName());
+	if (Name.IsEmpty())
+	{
+		return Options;
+	}
+
+	const FString NameOption = FString::Printf(TEXT("%s=%s"), AOneBrahamGameMode::DisplayNameOption, *Name);
+	return Options.IsEmpty() ? NameOption : FString::Printf(TEXT("%s?%s"), *Options, *NameOption);
+}
+
+FString UOneBrahamGameInstance::GetClientRequestedName() const
+{
+	// The URL this client connected with: ?OBName= when this class built it,
+	// ?Name= when a person or a script typed it ("127.0.0.1?Name=OBClient").
+	// The engine overwrote the latter in the copy it sent, not in this one.
+	if (const FWorldContext* Context = GetWorldContext())
+	{
+		const IOnlineSubsystem* OnlineSubsystem = IOnlineSubsystem::Get();
+		const IOnlineIdentityPtr Identity = OnlineSubsystem ? OnlineSubsystem->GetIdentityInterface() : nullptr;
+		const FUniqueNetIdPtr Id = Identity.IsValid() ? Identity->GetUniquePlayerId(0) : nullptr;
+		const FString IdString = Id.IsValid() ? Id->ToString() : FString();
+
+		const FString Options = FString::Join(Context->LastURL.Op, TEXT("?"));
+		const FString FromURL = AOneBrahamGameMode::ChooseLoginPlayerName(TEXT("?") + Options, IdString, FString());
+		if (!FromURL.IsEmpty())
+		{
+			return FromURL;
+		}
+	}
+
+	return AOneBrahamGameMode::SanitisePlayerName(GetPlayerDisplayName());
+}
+
+void UOneBrahamGameInstance::WatchClientPlayerName(UWorld* World)
+{
+	// A client that reached the server some way other than a URL this class
+	// built (a direct `open`, the LAN smoke script) logged in without ?OBName=,
+	// and the server only had its machine's nickname to go on. Once its player
+	// state arrives, it asks for its own name, once: the server sanitises it
+	// and makes it unique ("Jenson Raper 2"), and that answer stands.
+	TWeakObjectPtr<UWorld> WeakWorld(World);
+	TSharedRef<int32> Attempts = MakeShared<int32>(0);
+	World->GetTimerManager().SetTimer(ClientNameHandle, FTimerDelegate::CreateWeakLambda(this, [this, WeakWorld, Attempts]()
+	{
+		UWorld* ClientWorld = WeakWorld.Get();
+		APlayerController* PC = ClientWorld != nullptr ? GetFirstLocalPlayerController(ClientWorld) : nullptr;
+		const FString Desired = GetClientRequestedName();
+		if (ClientWorld == nullptr || Desired.IsEmpty() || ++(*Attempts) > 60)
+		{
+			if (ClientWorld != nullptr)
+			{
+				ClientWorld->GetTimerManager().ClearTimer(ClientNameHandle);
+			}
+			return;
+		}
+
+		if (PC == nullptr || PC->PlayerState == nullptr)
+		{
+			return;
+		}
+
+		const FString Current = PC->PlayerState->GetPlayerName();
+		if (!AOneBrahamGameMode::IsUniqueVariantOfName(Current, Desired))
+		{
+			OB_LOG("The server calls this player '%s'; asking for '%s'.", *Current, *Desired);
+			PC->SetName(Desired);
+		}
+		ClientWorld->GetTimerManager().ClearTimer(ClientNameHandle);
+	}), 1.f, true);
 }
 
 // ==========================================================================
@@ -675,7 +908,7 @@ void UOneBrahamGameInstance::JoinServerByIndex(int32 SearchResultIndex)
 	// from the URL the client arrives with.
 	FOneBrahamTravelRequest Request = BuildTravelRequest(false);
 	Request.ServerName.Reset();
-	const FString Options = OneBrahamSessionRules::MakeTravelOptions(Request);
+	const FString Options = AppendDisplayNameOption(OneBrahamSessionRules::MakeTravelOptions(Request));
 
 	// A refusal by the subsystem comes back through HandleSessionJoined like
 	// any other answer; only "no subsystem at all" is said here.
@@ -719,7 +952,7 @@ void UOneBrahamGameInstance::JoinServerByAddress(const FString& Address, int32 P
 	}
 
 	ShowLoadingScreen(NSLOCTEXT("OneBraham", "Joining", "Joining the match..."), 0.3f);
-	TravelToAddress(Address, Port, OneBrahamSessionRules::MakeTravelOptions(BuildTravelRequest(false)));
+	TravelToAddress(Address, Port, AppendDisplayNameOption(OneBrahamSessionRules::MakeTravelOptions(BuildTravelRequest(false))));
 }
 
 void UOneBrahamGameInstance::TravelToAddress(const FString& Address, int32 Port, const FString& Options)
@@ -846,7 +1079,7 @@ FOneBrahamTravelRequest UOneBrahamGameInstance::BuildTravelRequest(bool bListen)
 {
 	FOneBrahamTravelRequest Request;
 	Request.Mode = PendingMatchMode;
-	Request.PlayerName = Profile != nullptr ? Profile->PlayerName : FString();
+	Request.PlayerName = GetPlayerDisplayName();
 	Request.Archetype = (Profile != nullptr && Profile->Loadouts.IsValidIndex(Profile->SelectedLoadoutIndex))
 		? Profile->Loadouts[Profile->SelectedLoadoutIndex].ArchetypeId.ToString()
 		: FString(TEXT("BusinessAnalyst"));
@@ -858,7 +1091,9 @@ FOneBrahamTravelRequest UOneBrahamGameInstance::BuildTravelRequest(bool bListen)
 
 FString UOneBrahamGameInstance::BuildTravelOptions() const
 {
-	return OneBrahamSessionRules::MakeTravelOptions(BuildTravelRequest(false));
+	// ?Name= is the engine's to overwrite at login (with the online nickname),
+	// so the chosen name also travels as ?OBName=, which it leaves alone.
+	return AppendDisplayNameOption(OneBrahamSessionRules::MakeTravelOptions(BuildTravelRequest(false)));
 }
 
 void UOneBrahamGameInstance::ReturnToMainMenu()

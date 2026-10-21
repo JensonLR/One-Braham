@@ -113,7 +113,8 @@ static void PaintSpine(FOneBrahamPainter& P, const FOneBrahamSectionParams& Para
 	// where this whole column is pointing.
 	{
 		const FVector2D Centre(CellW * 0.5f, HelipadBand * 0.5f - 2.f);
-		const FLinearColor Pad = Params.ExtractionFloor != INDEX_NONE ? SafetyYellow() : WithAlpha(LightGrey(), 0.5f);
+		// The way out is the exit sign's colour (the stage rule's Evac tone).
+		const FLinearColor Pad = Params.ExtractionFloor != INDEX_NONE ? Tone(EOneBrahamStageTone::Evac) : WithAlpha(LightGrey(), 0.5f);
 		P.Ring(Centre, 6.5f, WithAlpha(Pad, 0.85f), 1.f);
 		P.Text(Centre - FVector2D(0.f, 6.5f), TEXT("H"), Font(EOneBrahamHUDType::Label, 9.f), WithAlpha(Pad, 0.95f), EOneBrahamTextAnchor::Centre);
 	}
@@ -150,7 +151,7 @@ static void PaintSpine(FOneBrahamPainter& P, const FOneBrahamSectionParams& Para
 		}
 		else if (bExit)
 		{
-			Row.Rect(Cell, Size, SafetyYellow());
+			Row.Rect(Cell, Size, Tone(EOneBrahamStageTone::Evac));
 		}
 		else
 		{
@@ -193,7 +194,7 @@ static void PaintSpine(FOneBrahamPainter& P, const FOneBrahamSectionParams& Para
 		if (bExit)
 		{
 			Row.Text(FVector2D(DotX + 2.f, Cell.Y - 1.f), TEXT("EXIT"), Font(EOneBrahamHUDType::Telemetry, 9.f, 60),
-				SafetyYellow());
+				Tone(EOneBrahamStageTone::Evac));
 		}
 	}
 }
@@ -326,7 +327,7 @@ static void PaintFull(FOneBrahamPainter& P, const FOneBrahamSectionParams& Param
 				: (Floor == Params.TargetFloor ? SafetyYellow() : WithAlpha(LightGrey(), bLit ? 0.5f : 0.22f));
 			const float Px = FMath::Clamp(FH * 0.42f, 9.f, 11.f);
 			const FSlateFontInfo LabelFont = Font(bHere ? EOneBrahamHUDType::Telemetry : EOneBrahamHUDType::TelemetryLight, Px, 40);
-			const float TextH = Measure(TEXT("0"), LabelFont).Y;
+			const float TextH = OneBrahamHUDStyle::Measure(TEXT("0"), LabelFont).Y;
 			Row.Text(FVector2D(0.f, Top + (FH - TextH) * 0.5f), FOneBrahamSectionPainter::FloorLabel(Params, Floor), LabelFont, LabelColour);
 		}
 	}
@@ -371,8 +372,8 @@ static void PaintFull(FOneBrahamPainter& P, const FOneBrahamSectionParams& Param
 		if (Params.bShowHelipad)
 		{
 			const FVector2D Pad(X1 - BW * 0.22f, Roof - 21.f);
-			const FLinearColor PadColour = Params.TargetFloor != INDEX_NONE || Params.ExtractionFloor != INDEX_NONE
-				? SafetyYellow() : WithAlpha(Line, LineA);
+			const FLinearColor PadColour = Params.ExtractionFloor != INDEX_NONE ? Tone(EOneBrahamStageTone::Evac)
+				: (Params.TargetFloor != INDEX_NONE ? SafetyYellow() : WithAlpha(Line, LineA));
 			P.Ring(Pad, 7.f, PadColour, 1.f);
 			P.Text(Pad - FVector2D(0.f, 7.f), TEXT("H"), Font(EOneBrahamHUDType::Label, 10.f), PadColour, EOneBrahamTextAnchor::Centre);
 			P.Segment(FVector2D(Pad.X - 12.f, Roof - 12.f), FVector2D(Pad.X + 12.f, Roof - 12.f), WithAlpha(PadColour, 0.6f), 1.f);
@@ -399,7 +400,7 @@ static void PaintFull(FOneBrahamPainter& P, const FOneBrahamSectionParams& Param
 		{
 			// The dash phase carries across corners so the line reads as one.
 			const float Length = (Route[Index + 1] - Route[Index]).Size();
-			P.DashedLine(Route[Index], Route[Index + 1], SafetyYellow(), 1.f, 6.f, 4.f, FMath::Fmod(10.f - Travel + Walked, 10.f) + 10.f);
+			P.DashedLine(Route[Index], Route[Index + 1], Tone(EOneBrahamStageTone::Evac), 1.f, 6.f, 4.f, FMath::Fmod(10.f - Travel + Walked, 10.f) + 10.f);
 			Walked += Length;
 		}
 		P.PopClip();
@@ -433,7 +434,7 @@ static void PaintFull(FOneBrahamPainter& P, const FOneBrahamSectionParams& Param
 			break;
 		}
 		const FSlateFontInfo PointFont = Font(EOneBrahamHUDType::Label, 12.f);
-		P.Text(Centre - FVector2D(0.f, Measure(Point.Letter, PointFont).Y * 0.5f), Point.Letter, PointFont, White(), EOneBrahamTextAnchor::Centre);
+		P.Text(Centre - FVector2D(0.f, OneBrahamHUDStyle::Measure(Point.Letter, PointFont).Y * 0.5f), Point.Letter, PointFont, White(), EOneBrahamTextAnchor::Centre);
 	}
 
 	// --- squad ----------------------------------------------------------------------------
@@ -513,7 +514,7 @@ static void PaintChart(FOneBrahamPainter& P, const FOneBrahamSectionParams& Para
 		if (Floor < Count && (FH >= 11.f || Floor % 2 == 0))
 		{
 			const FSlateFontInfo LabelFont = Font(EOneBrahamHUDType::TelemetryLight, FMath::Clamp(FH * 0.5f, 9.f, 11.f));
-			P.Text(FVector2D(LabelW - 8.f, Y - FH * 0.5f - Measure(TEXT("0"), LabelFont).Y * 0.5f),
+			P.Text(FVector2D(LabelW - 8.f, Y - FH * 0.5f - OneBrahamHUDStyle::Measure(TEXT("0"), LabelFont).Y * 0.5f),
 				FString::Printf(TEXT("L%02d"), Floor), LabelFont, WithAlpha(LightGrey(), 0.45f), EOneBrahamTextAnchor::Right);
 		}
 	}
@@ -582,7 +583,7 @@ static void PaintChart(FOneBrahamPainter& P, const FOneBrahamSectionParams& Para
 		{
 			const FLinearColor Colour = Route.bYours ? SignalBlue() : WithAlpha(LightGrey(), 0.7f);
 			const FSlateFontInfo LetterFont = Font(EOneBrahamHUDType::Label, 11.f);
-			P.Text(Head + FVector2D(6.f, -Measure(Route.Label, LetterFont).Y - 2.f), Route.Label, LetterFont, Colour);
+			P.Text(Head + FVector2D(6.f, -OneBrahamHUDStyle::Measure(Route.Label, LetterFont).Y - 2.f), Route.Label, LetterFont, Colour);
 		}
 	}
 

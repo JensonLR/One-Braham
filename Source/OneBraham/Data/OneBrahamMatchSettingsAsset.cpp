@@ -122,9 +122,27 @@ void UOneBrahamMatchSettingsAsset::EnsureDefaults()
 			ControlPoints.Add(Point);
 		};
 
-		AddPoint(TEXT("CP_Lobby"),	TEXT("Reception"),		1, 4.f, 1.0f);
-		AddPoint(TEXT("CP_Server"),	TEXT("Server Floor 9"),	9, 6.f, 1.5f);
-		AddPoint(TEXT("CP_Skydeck"),	TEXT("Skydeck"),		15, 7.f, 2.0f);
+		// Docs/06 "FIRE DRILL scoring". A point earns while its holder stands on
+		// it unopposed, so with both teams on the map a team scores on one or
+		// two points at a time: 0.11-0.22 a second from one room, the kills (1
+		// each) and captures (2) the rest of a 200-point drill that runs eight
+		// to ten minutes when the map is split. Measured (6v6 bots, real time):
+		// with 5 a capture, close drills ended at 7.4 and 7.9 minutes, the
+		// winner's flips a quarter of its 200; at 2 a capture they ended at
+		// 9.2 and 8.5, and a 6v3 at 6.2 (it flips three points, not twenty). The 1 : 1.5 : 2 ratio is
+		// the climb: the Skydeck is fourteen floors above the doors and worth
+		// twice the Reception beside them. Capture time grows with it, so the
+		// deep points are a fight to take and not a walk-on. (They were
+		// 1.0 / 1.5 / 2.0 a second with 4-7 s captures and a 10-point capture:
+		// a team on two points made 200 in 85 seconds.)
+		AddPoint(TEXT("CP_Lobby"),	TEXT("Reception"),		1, 6.f,  0.11f);
+		AddPoint(TEXT("CP_Server"),	TEXT("Server Floor 9"),	9, 8.f,  0.165f);
+		AddPoint(TEXT("CP_Skydeck"),	TEXT("Skydeck"),		15, 10.f, 0.22f);
+	}
+
+	if (Mode == EOneBrahamMatchMode::FireDrill && MultiPointHoldMultipliers.Num() == 0)
+	{
+		MultiPointHoldMultipliers = { 1.f, 1.f, 1.5f, 2.f };
 	}
 
 	if (FloorLootProfiles.Num() > 0 && FloorLootProfiles.Num() < ONE_BRAHAM_FLOORS + 1)

@@ -41,7 +41,9 @@ BOTS (OPTIONAL FIELDS)
     URL overrides both.
 
 WHAT IS LEFT TO THE CODE
-    WeaponSpawnTable, FloorLootProfiles and ControlPoints stay empty here.
+    WeaponSpawnTable, FloorLootProfiles and ControlPoints stay empty here
+    (FIRE DRILL's per-point rates and capture times included; the mode-wide
+    scoring - kill, capture, multi-point multipliers - is written here).
     The GameMode calls EnsureDefaults() on whatever asset it loads, and that
     fills each of them from the one table that check_weapon_ids.py holds
     against build_weapons.py and Docs/05. Writing them here as well would be a
@@ -74,6 +76,40 @@ if C.IN_EDITOR:
 #: has no player starts and no control point volumes yet, and the FIRE DRILL
 #: points EnsureDefaults() writes are floors 1, 9 and 15 of the tower.
 TOWER_MAP = C.MAP_PERSISTENT
+
+# ---------------------------------------------------------------------------
+#  FIRE DRILL scoring (Docs/06 "FIRE DRILL scoring").
+#
+#  The first to 200 or the most points at ten minutes. A point earns while its
+#  holder has somebody on it and the other team nobody; the three points earn
+#  0.11 / 0.165 / 0.22 a second (Reception, Server Floor 9, Skydeck - the
+#  per-point rates and capture times are in
+#  UOneBrahamMatchSettingsAsset::EnsureDefaults, the one place the points are
+#  defined), and the team's hold income is multiplied by the entry for the
+#  number of points it owns: one 1.0, two 1.5, all three 2.0.
+#
+#  What that makes of a drill (each team kills about one enemy every six to
+#  eight seconds in a 6v6 that is fighting over its points):
+#    split map, 1-2 points each, flipping   ~0.23/s holds + ~0.15/s kills
+#                                            + captures -> 200 at 8-10 min
+#    one team on the two deep points          0.58/s holds + the kills it wins
+#                                            -> 200 at about 5 min
+#    all three held and manned                0.99/s -> a lockout ends it in
+#                                            about three minutes, as it should
+#    one point all drill                      0.22/s x 600 s = 132: one room
+#                                            never wins it alone
+#  The previous tuning (1.0 / 1.5 / 2.0 a second, 10 a capture) made 200 in 85
+#  seconds with bots: a team on two points earned 3.5 a second. Measured runs
+#  are in Docs/06 "FIRE DRILL scoring".
+#  OneBraham.Match.FireDrillHold holds the shipped numbers to these bounds.
+# ---------------------------------------------------------------------------
+FIRE_DRILL_SCORING = dict(
+    kill=1,                     # Docs/06 "What a kill is worth": one point, to the team too
+    capture=2,                  # once, to the team that takes a point: two kills' worth
+                                # (at 5, a close drill's flips were a quarter of the
+                                # winner's 200 and it ended at 7.5 min)
+    multipliers=[1.0, 1.0, 1.5, 2.0],  # by points owned: none, one, two, all three
+)
 
 # ---------------------------------------------------------------------------
 #  The modes.
@@ -146,6 +182,10 @@ MODES = [
             score_to_win=200,                       # Docs/06 s1; ini FireDrillScoreToWin
             bScoreByTimeLimit=True,
             time_limit_seconds=600,                 # Docs/06 s1 "10 minutes"
+            # Docs/06 "FIRE DRILL scoring" - see FIRE_DRILL_SCORING below.
+            score_per_kill=FIRE_DRILL_SCORING["kill"],
+            score_per_capture=FIRE_DRILL_SCORING["capture"],
+            multi_point_hold_multipliers=FIRE_DRILL_SCORING["multipliers"],
         ),
         # Filled to 6v6 (Docs/06 s6 "BotsEnabled: filled").
         bots=dict(bFillWithBots=True, max_bots=-1),
@@ -225,6 +265,12 @@ def _mode_enum(mode_name):
 
 
 def _same(expected, actual):
+    if isinstance(expected, (list, tuple)):
+        try:
+            actual = list(actual)
+        except TypeError:
+            return False
+        return len(expected) == len(actual) and all(_same(e, a) for e, a in zip(expected, actual))
     if isinstance(expected, float):
         try:
             return abs(float(actual) - expected) < 0.001

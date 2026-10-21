@@ -145,7 +145,7 @@ int32 UOneBrahamCinemaOverlay::NativePaint(const FPaintArgs& Args, const FGeomet
 			const float Settle = UOneBrahamUIStyle::ReduceMotion() ? 1.f : UOneBrahamUIStyle::Ease(EOneBrahamEase::Ribbon, SuperT / 1.2f);
 			const int32 Tracking = FMath::RoundToInt(FMath::Lerp(200.f, 40.f, Settle));
 			TextOnBaseline(C, CX, Size.Y * 0.22f, SuperEyebrow.ToString(), Type(EOneBrahamType::TelemetryLight, 12.f, 240),
-				Tok(EOneBrahamColour::SafetyYellow, Alpha), 0.5f);
+				UOneBrahamUIStyle::ToneColour(SuperTone, Alpha), 0.5f);
 			TextOnBaseline(C, CX, Size.Y * 0.22f + 92.f, SuperLine.ToString(), Type(EOneBrahamType::Title, 88.f, Tracking),
 				Tok(EOneBrahamColour::White, Alpha), 0.5f);
 			TextOnBaseline(C, CX, Size.Y * 0.22f + 136.f, SuperAside.ToString(), Type(EOneBrahamType::Aside, 24.f),

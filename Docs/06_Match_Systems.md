@@ -38,6 +38,85 @@ it into two sides pushing a line.
 | Match length | 10 minutes, or first to 200 points |
 | Why it exists | it is how a player learns the map, the weapons and the callouts without losing a 25-minute run to it |
 
+#### FIRE DRILL scoring
+
+The drill is meant to run most of its ten minutes. A close match should reach
+200 at eight to ten minutes, a dominant team at about five, and a team that
+holds the whole building should close it out early but not in the first wave.
+(The first tuning - 1.0 / 1.5 / 2.0 points a second, 10 a capture - ended a
+bot-filled drill at 200 in about 85 seconds: a team on two points earned 3.5 a
+second.)
+
+**The rules** (`AOneBrahamGameMode::TickControlPoints`, tested by
+`OneBraham.Match.FireDrillCapture` and `OneBraham.Match.FireDrillHold`):
+
+- **Capture.** A team *alone* on a point it does not own builds progress and
+  takes it after the point's capture time - from neutral or from the other
+  team, the full time either way (`StepControlPointCapture`). Contested (both
+  teams on it), the progress holds. Walked away from, or the holder back on it
+  alone, it drains at the same rate. A different team starting resets it.
+- **Hold.** A held point earns only while somebody of the holder's is standing
+  on it and nobody of the other team is: holding is presence. A point owned and
+  left empty earns nothing, but still counts as owned.
+- **Several points.** A team's hold income is the sum of the rates of the
+  points it is scoring on, times a multiplier for how many points it *owns*
+  (`ComputeHoldScoreRate`, `MultiPointHoldMultipliers`): one 1.0, two 1.5, all
+  three 2.0. Owning more of the building is worth more than its rooms.
+- **Kills and captures.** A kill is 1 to the team (see *What a kill is
+  worth*), a capture 2 (two kills' worth), once, to the team that takes the point.
+
+| Point | Floor | Capture | Held, a second |
+| --- | --- | --- | --- |
+| Reception (`CP_Lobby`) | 1 | 6 s | 0.11 |
+| Server Floor 9 (`CP_Server`) | 9 | 8 s | 0.165 |
+| Skydeck (`CP_Skydeck`) | 15 | 10 s | 0.22 |
+
+The 1 : 1.5 : 2 ratio is the climb: the Skydeck is fourteen floors above the doors and worth twice the Reception beside them,
+and the deeper points take longer to take, so they are a fight and not a walk-on.
+
+**Why these numbers.** Each team in a 6v6 that is fighting over its points
+kills an enemy every six to eight seconds, about 0.15 a second.
+
+| Drill | Hold income | Kills + captures | 200 at |
+| --- | --- | --- | --- |
+| split map, one or two points each, flipping | ~0.23/s | ~0.15/s + a capture a minute | 8-10 min |
+| one team on the two deep points, manned | 0.58/s | the kills it wins | ~5 min |
+| all three held and manned | 0.99/s | - | 3.4 min from holds alone |
+| one point all drill, nothing else | 0.22/s | - | 132 at ten minutes: one room never wins it |
+
+**Measured** (full FIRE DRILL runs with bots, real time, no dev acceleration:
+`-OBSmoke -OBSmokeFullMatch` on `L_Persistent_OneBraham?Mode=FireDrill`; the
+dominant team made with `-OBLastSquadBotCap=N`, which leaves the second team
+short-handed):
+
+| Tuning | Match | Ended | Score |
+| --- | --- | --- | --- |
+| 0.10 / 0.15 / 0.20, x1.25 for two | 6v6 | time out, 10:00 | 199-154 |
+| 0.10 / 0.15 / 0.20, x1.25 for two | 6v6 | 9:38 | 200-166 |
+| 0.10 / 0.15 / 0.20, x1.25 for two | 6v3 | 7:24 | 200-55 |
+| 0.10 / 0.15 / 0.20, x1.25 for two | 6v2 | 7:21 | 200-68 |
+| 0.12 / 0.18 / 0.24, x1.5 for two | 6v6 | 8:00 | 175-200 |
+| 0.12 / 0.18 / 0.24, x1.5 for two | 6v6 | 7:18 | 200-161 |
+| 0.12 / 0.18 / 0.24, x1.5 for two | 6v3 | 4:57 | 200-40 |
+| **0.11 / 0.165 / 0.22, x1.5 for two (shipped)** | 6v6 | 7:56 | 193-200 |
+| **shipped** | 6v3 | 5:32 | 200-51 |
+| **as above, 2 a capture (shipped)** | 6v6 | 9:11 | 200-180 |
+| **as above, 2 a capture** | 6v6 | 8:30 | 200-171 |
+| **as above, 2 a capture** | 6v3 | 6:14 | 200-49 |
+
+The 0.10 tuning left even the 6v2 rout at seven minutes. A fifth more on
+every rate and x1.5 for two points brought the rout to five minutes but the
+close drills under eight, so the rates came back a tenth: a close drill now
+runs to eight minutes or more (to ten when neither side gets away) and a
+dominant one ends at five and a half. At 5 a capture the flips in a close drill were a quarter of the winner's 200 and ended it at 7.5 minutes (7:25 and 6:37 in real time); at 2 a capture close drills run 8.5-9 minutes and a rout a little over six.
+
+The per-point rates and capture times live in
+`UOneBrahamMatchSettingsAsset::EnsureDefaults` (the one place the points are
+defined); the mode-wide numbers - kill, capture, multipliers - are written to
+`DA_MatchSettings_FireDrill` by `build_match_settings.py` and default to the
+same values in the header. Every match logs the tuning it is played with
+("FIRE DRILL scoring: ...") and every capture with the clock and the score.
+
 ### NIGHT SHIFT — post-launch
 
 4-player co-op survival against the building's own systems: lockdowns, purge

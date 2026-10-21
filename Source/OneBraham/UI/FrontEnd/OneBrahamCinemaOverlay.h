@@ -23,6 +23,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "UI/OneBrahamUIStyle.h"
 #include "OneBrahamCinemaOverlay.generated.h"
 
 UENUM(BlueprintType)
@@ -65,6 +66,11 @@ public:
 	/** Which layout ShowSuper uses. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|UI|Cinema")
 	EOneBrahamSuperStyle SuperStyle = EOneBrahamSuperStyle::ColdOpen;
+
+	/** The stage card's tone: its eyebrow takes the design system's stage
+	 *  colour (UOneBrahamUIStyle::ToneColour), as the HUD's card does. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|UI|Cinema")
+	EOneBrahamStageTone SuperTone = EOneBrahamStageTone::Lockdown;
 
 	/** Bar colour's alpha (1 in the menu, 0.85 in a match). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "One Braham|UI|Cinema")

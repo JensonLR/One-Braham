@@ -67,24 +67,21 @@ int32 OneBrahamHUDStyle::StageBand(EOneBrahamLockdownStage Stage)
 	}
 }
 
+// The colours are the design system's one rule (UOneBrahamUIStyle::StageTone):
+// the HUD never decides a stage colour of its own.
 FLinearColor OneBrahamHUDStyle::StageAccent(EOneBrahamLockdownStage Stage)
 {
-	switch (StageBand(Stage))
-	{
-	case 1:		return SafetyYellow();
-	case 2:		return EmergencyRed();
-	default:	return SignalBlue();
-	}
+	return UOneBrahamUIStyle::StageAccent(Stage);
 }
 
 FLinearColor OneBrahamHUDStyle::StageHairline(EOneBrahamLockdownStage Stage)
 {
-	switch (StageBand(Stage))
-	{
-	case 1:		return WithAlpha(SafetyYellow(), 0.25f);
-	case 2:		return WithAlpha(EmergencyRed(), 0.30f);
-	default:	return WithAlpha(LightGrey(), 0.20f);
-	}
+	return UOneBrahamUIStyle::StageHairline(Stage);
+}
+
+FLinearColor OneBrahamHUDStyle::Tone(EOneBrahamStageTone StageTone, float Alpha)
+{
+	return UOneBrahamUIStyle::ToneColour(StageTone, Alpha);
 }
 
 // ==========================================================================
@@ -141,7 +138,7 @@ FString OneBrahamHUDStyle::Tracked(const FString& Text, const FSlateFontInfo& Fo
 	return Text.Replace(TEXT(" "), TEXT("  "));
 }
 
-FVector2D OneBrahamHUDStyle::Measure(const FString& Text, const FSlateFontInfo& Font)
+FVector2D OneBrahamHUDStyle::MeasureTracked(const FString& Text, const FSlateFontInfo& Font)
 {
 	if (Text.IsEmpty() || !FSlateApplication::IsInitialized())
 	{

@@ -31,6 +31,7 @@
 
 #include "Core/OneBrahamGameMode.h"
 #include "Core/OneBrahamGameState.h"
+#include "Core/OneBrahamGameInstance.h"
 #include "Extraction/OneBrahamMatchEnding.h"
 #include "UI/OneBrahamMatchEndWidget.h"
 #include "Data/OneBrahamMatchSettingsAsset.h"
@@ -450,6 +451,228 @@ bool FOneBrahamMatchEndScreenCopyTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("menu"), UOneBrahamMatchEndWidget::LeaveLine(12.f, EOneBrahamPostMatchAction::ReturnToMenu).ToString().Contains(TEXT("RECEPTION")));
 	TestTrue(TEXT("reload"), UOneBrahamMatchEndWidget::LeaveLine(12.f, EOneBrahamPostMatchAction::ReloadMap).ToString().Contains(TEXT("REOPENS")));
 	TestTrue(TEXT("dedicated"), UOneBrahamMatchEndWidget::LeaveLine(12.f, EOneBrahamPostMatchAction::RestartMatch).ToString().Contains(TEXT("NEXT SHIFT")));
+
+	return true;
+}
+
+// ===========================================================================
+//  FIRE DRILL scoring: the capture, the hold, the pace
+// ===========================================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamMatchFireDrillCaptureTest, "OneBraham.Match.FireDrillCapture",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamMatchFireDrillCaptureTest::RunTest(const FString& Parameters)
+{
+	int32 Owner = INDEX_NONE;
+	int32 Capturing = INDEX_NONE;
+	float Progress = 0.f;
+
+	auto CaptureTick = [&](int32 Alone, bool bContested, float Seconds, float CaptureSeconds)
+	{
+		return AOneBrahamGameMode::StepControlPointCapture(Owner, Capturing, Progress, Alone, bContested, Seconds, CaptureSeconds);
+	};
+
+	// A team alone on a neutral point takes it after its capture time, not before.
+	for (int32 Second = 0; Second < 7; ++Second)
+	{
+		TestFalse(TEXT("seven seconds is not eight"), CaptureTick(0, false, 1.f, 8.f));
+	}
+	TestEqual(TEXT("staff are taking it"), Capturing, 0);
+	TestTrue(TEXT("the eighth second takes it"), CaptureTick(0, false, 1.f, 8.f));
+	TestEqual(TEXT("staff hold it"), Owner, 0);
+	TestEqual(TEXT("nobody is taking it now"), Capturing, static_cast<int32>(INDEX_NONE));
+
+	// Standing on your own point takes nothing again.
+	TestFalse(TEXT("the holder does not re-take it"), CaptureTick(0, false, 30.f, 8.f));
+
+	// Contested: the attacker's progress holds, it does not grow or drain.
+	CaptureTick(1, false, 5.f, 8.f);
+	TestEqual(TEXT("contractors 5 s in"), Progress, 5.f);
+	TestFalse(TEXT("contested takes nothing"), CaptureTick(INDEX_NONE, true, 20.f, 8.f));
+	TestEqual(TEXT("contested holds the progress"), Progress, 5.f);
+	TestEqual(TEXT("still staff's"), Owner, 0);
+
+	// Walked away from (or the holder back on it alone): it drains at the same rate.
+	CaptureTick(INDEX_NONE, false, 2.f, 8.f);
+	TestEqual(TEXT("drains a second a second"), Progress, 3.f);
+	CaptureTick(0, false, 10.f, 8.f);
+	TestEqual(TEXT("drained to nothing"), Progress, 0.f);
+	TestEqual(TEXT("and nobody is taking it"), Capturing, static_cast<int32>(INDEX_NONE));
+
+	// A flip takes the full capture time from scratch, from the other team too.
+	CaptureTick(1, false, 4.f, 8.f);
+	TestTrue(TEXT("taken from the holder in the full time"), CaptureTick(1, false, 4.f, 8.f));
+	TestEqual(TEXT("contractors hold it"), Owner, 1);
+
+	// A different team starting resets the progress.
+	CaptureTick(0, false, 6.f, 8.f);
+	CaptureTick(INDEX_NONE, true, 1.f, 8.f);
+	TestEqual(TEXT("staff 6 s in"), Progress, 6.f);
+
+	// A zero capture time takes it on the first tick, never divides by it.
+	Owner = INDEX_NONE; Capturing = INDEX_NONE; Progress = 0.f;
+	TestTrue(TEXT("instant capture"), CaptureTick(1, false, 1.f, 0.f));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamMatchFireDrillHoldTest, "OneBraham.Match.FireDrillHold",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamMatchFireDrillHoldTest::RunTest(const FString& Parameters)
+{
+	const TArray<float> Multipliers = { 1.f, 1.f, 1.25f, 2.f };
+
+	TestEqual(TEXT("nothing held, nothing earned"), AOneBrahamGameMode::ComputeHoldScoreRate({}, 0, Multipliers), 0.f);
+	TestEqual(TEXT("owned but nobody on it earns nothing"), AOneBrahamGameMode::ComputeHoldScoreRate({}, 2, Multipliers), 0.f);
+	TestEqual(TEXT("one point, its own rate"), AOneBrahamGameMode::ComputeHoldScoreRate({ 0.2f }, 1, Multipliers), 0.2f);
+	TestEqual(TEXT("two owned, one manned"), AOneBrahamGameMode::ComputeHoldScoreRate({ 0.2f }, 2, Multipliers), 0.25f);
+	TestEqual(TEXT("two owned, both manned"), AOneBrahamGameMode::ComputeHoldScoreRate({ 0.15f, 0.2f }, 2, Multipliers), 0.4375f);
+	TestEqual(TEXT("all three"), AOneBrahamGameMode::ComputeHoldScoreRate({ 0.1f, 0.15f, 0.2f }, 3, Multipliers), 0.9f);
+	TestEqual(TEXT("a count past the table uses its last entry"), AOneBrahamGameMode::ComputeHoldScoreRate({ 0.1f }, 7, Multipliers), 0.2f);
+	TestEqual(TEXT("no table is x1"), AOneBrahamGameMode::ComputeHoldScoreRate({ 0.1f, 0.2f }, 2, {}), 0.3f);
+	TestEqual(TEXT("a negative rate earns nothing"), AOneBrahamGameMode::ComputeHoldScoreRate({ -1.f }, 1, Multipliers), 0.f);
+
+	// The shipped tuning, against the mode's rules (Docs/06 "FIRE DRILL scoring").
+	UOneBrahamMatchSettingsAsset* Settings = NewObject<UOneBrahamMatchSettingsAsset>(GetTransientPackage());
+	Settings->Mode = EOneBrahamMatchMode::FireDrill;
+	Settings->EnsureDefaults();
+	if (!TestEqual(TEXT("three points"), Settings->ControlPoints.Num(), 3))
+	{
+		return false;
+	}
+
+	TArray<float> Rates;
+	for (const FOneBrahamControlPointDef& Point : Settings->ControlPoints)
+	{
+		Rates.Add(Point.ScorePerSecond);
+		TestTrue(*FString::Printf(TEXT("%s is a fight to take (>= 6 s)"), *Point.PointId.ToString()), Point.CaptureSeconds >= 6.f);
+	}
+	Rates.Sort();
+	const float ToWin = static_cast<float>(Settings->ScoreToWin);
+	const float Limit = static_cast<float>(Settings->TimeLimitSeconds);
+
+	// Nothing reaches 200 in the old ninety seconds: not even all three points
+	// held and manned for the whole drill with nothing else scored.
+	const float Lockout = AOneBrahamGameMode::ComputeHoldScoreRate(Rates, 3, Settings->MultiPointHoldMultipliers);
+	TestTrue(TEXT("a lockout alone takes more than three minutes"), ToWin / Lockout > 180.f);
+	TestTrue(TEXT("a lockout alone ends it inside five minutes"), ToWin / Lockout < 300.f);
+
+	// One room is not the drill: the best single point held all ten minutes
+	// does not win it alone.
+	TestTrue(TEXT("one point alone cannot win in the time limit"),
+		AOneBrahamGameMode::ComputeHoldScoreRate({ Rates.Last() }, 1, Settings->MultiPointHoldMultipliers) * Limit < ToWin);
+
+	// Owning more of the building is worth more than the sum of its rooms.
+	const float TwoBest = AOneBrahamGameMode::ComputeHoldScoreRate({ Rates[1], Rates[2] }, 2, Settings->MultiPointHoldMultipliers);
+	TestTrue(TEXT("two points beat their sum"), TwoBest > Rates[1] + Rates[2]);
+	TestTrue(TEXT("all three beat their sum"), Lockout > Rates[0] + Rates[1] + Rates[2]);
+
+	// Kills and captures are a part of a drill, not the drill.
+	TestTrue(TEXT("a kill is a point"), Settings->ScorePerKill >= 1 && Settings->ScorePerKill <= 2);
+	TestTrue(TEXT("a capture is a few kills, not a tenth of the drill"),
+		Settings->ScorePerCapture > Settings->ScorePerKill && Settings->ScorePerCapture * 10 < Settings->ScoreToWin);
+	// A close drill flips its points ten-odd times a team: at more than two
+	// kills a capture the flips, not the holding, decided it (7.5 minutes).
+	TestTrue(TEXT("a capture is worth at most two kills"), Settings->ScorePerCapture <= 2 * Settings->ScorePerKill);
+
+	return true;
+}
+
+// ===========================================================================
+//  Player names
+// ===========================================================================
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FOneBrahamMatchPlayerNamesTest, "OneBraham.Match.PlayerNames",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FOneBrahamMatchPlayerNamesTest::RunTest(const FString& Parameters)
+{
+	// Sanitised: no URL delimiters, no control characters, single spaces, capped.
+	TestEqual(TEXT("plain"), AOneBrahamGameMode::SanitisePlayerName(TEXT("Jenson Raper")), FString(TEXT("Jenson Raper")));
+	TestEqual(TEXT("trimmed and single-spaced"), AOneBrahamGameMode::SanitisePlayerName(TEXT("  Jenson \t  Raper  ")), FString(TEXT("Jenson Raper")));
+	TestEqual(TEXT("URL delimiters gone"), AOneBrahamGameMode::SanitisePlayerName(TEXT("A?Mode=B#c")), FString(TEXT("AModeBc")));
+	TestEqual(TEXT("control characters gone"), AOneBrahamGameMode::SanitisePlayerName(FString(TEXT("Al\x01")) + TEXT("ex\x7F")), FString(TEXT("Alex")));
+	TestEqual(TEXT("a line break is a space"), AOneBrahamGameMode::SanitisePlayerName(TEXT("Al\nKim")), FString(TEXT("Al Kim")));
+	TestEqual(TEXT("capped"), AOneBrahamGameMode::SanitisePlayerName(TEXT("Bartholomew Fitzwilliam-Smythe")).Len(),
+		AOneBrahamGameMode::MaxPlayerNameLength);
+	TestEqual(TEXT("no trailing space after the cap"), AOneBrahamGameMode::SanitisePlayerName(TEXT("Nineteen characters x")),
+		FString(TEXT("Nineteen characters")));
+	TestTrue(TEXT("nothing usable is empty"), AOneBrahamGameMode::SanitisePlayerName(TEXT(" ?#= ")).IsEmpty());
+	TestEqual(TEXT("not ASCII is fine"), AOneBrahamGameMode::SanitisePlayerName(TEXT("Zo\u00EB \u00D3 Briain")), FString(TEXT("Zo\u00EB \u00D3 Briain")));
+
+	// The NULL nickname is the unique id, whole or cut to the cap: not a name.
+	const FString NullId = TEXT("Jensons-MacBook-Air.local-1A2B3C4D5E6F");
+	TestTrue(TEXT("NULL nickname"), AOneBrahamGameMode::IsPlaceholderPlayerName(NullId, NullId));
+	TestTrue(TEXT("NULL nickname, cut"), AOneBrahamGameMode::IsPlaceholderPlayerName(TEXT("Jensons-MacBook-Air."), NullId));
+	TestTrue(TEXT("engine default"), AOneBrahamGameMode::IsPlaceholderPlayerName(TEXT("Player256"), FString()));
+	TestTrue(TEXT("empty"), AOneBrahamGameMode::IsPlaceholderPlayerName(FString(), NullId));
+	TestFalse(TEXT("a Steam persona is a name"), AOneBrahamGameMode::IsPlaceholderPlayerName(TEXT("okonkwo"), TEXT("76561198000000000")));
+	TestFalse(TEXT("a person"), AOneBrahamGameMode::IsPlaceholderPlayerName(TEXT("Jenson Raper"), NullId));
+	TestFalse(TEXT("Players is a word"), AOneBrahamGameMode::IsPlaceholderPlayerName(TEXT("Playerone"), FString()));
+
+	// What a login asks for: ?OBName= over the engine's ?Name= (which is the
+	// nickname), ?Name= when it is a person's (Steam), then the fallback.
+	TestEqual(TEXT("OBName wins"), AOneBrahamGameMode::ChooseLoginPlayerName(
+		FString::Printf(TEXT("?Name=%s?OBName=Jenson Raper?Mode=FireDrill"), *NullId), NullId, TEXT("Host")), FString(TEXT("Jenson Raper")));
+	TestEqual(TEXT("a persona in ?Name="), AOneBrahamGameMode::ChooseLoginPlayerName(
+		TEXT("?Name=okonkwo"), TEXT("76561198000000000"), FString()), FString(TEXT("okonkwo")));
+	TestEqual(TEXT("the nickname gives way to the fallback"), AOneBrahamGameMode::ChooseLoginPlayerName(
+		FString::Printf(TEXT("?Name=%s"), *NullId.Left(20)), NullId, TEXT("OBHost")), FString(TEXT("OBHost")));
+	TestTrue(TEXT("nothing usable"), AOneBrahamGameMode::ChooseLoginPlayerName(
+		FString::Printf(TEXT("?Name=%s"), *NullId), NullId, FString()).IsEmpty());
+	TestEqual(TEXT("sanitised on the way"), AOneBrahamGameMode::ChooseLoginPlayerName(
+		TEXT("?OBName=  Alex   Kim "), FString(), FString()), FString(TEXT("Alex Kim")));
+
+	// Unique within the match, case-insensitively, the suffix inside the cap.
+	const TArray<FString> Taken = { TEXT("Jenson Raper"), TEXT("BOT Hughes"), TEXT("jenson raper 2") };
+	TestEqual(TEXT("free name kept"), AOneBrahamGameMode::MakeUniquePlayerName(TEXT("Alex"), Taken), FString(TEXT("Alex")));
+	TestEqual(TEXT("a clash takes the next digit"), AOneBrahamGameMode::MakeUniquePlayerName(TEXT("Jenson Raper"), Taken),
+		FString(TEXT("Jenson Raper 3")));
+	TestEqual(TEXT("a bot's name too"), AOneBrahamGameMode::MakeUniquePlayerName(TEXT("BOT Hughes"), Taken), FString(TEXT("BOT Hughes 2")));
+	const FString Long = TEXT("Abcdefghijklmnopqrst");
+	const FString LongUnique = AOneBrahamGameMode::MakeUniquePlayerName(Long, { Long });
+	TestEqual(TEXT("long name suffixed inside the cap"), LongUnique, FString(TEXT("Abcdefghijklmnopqr 2")));
+	TestTrue(TEXT("never past the cap"), LongUnique.Len() <= AOneBrahamGameMode::MaxPlayerNameLength);
+
+	// A client reads its name back: its own, or the server's unique variant of it.
+	TestTrue(TEXT("the same name"), AOneBrahamGameMode::IsUniqueVariantOfName(TEXT("jenson raper"), TEXT("Jenson Raper")));
+	TestTrue(TEXT("the suffixed name"), AOneBrahamGameMode::IsUniqueVariantOfName(TEXT("Jenson Raper 3"), TEXT("Jenson Raper")));
+	TestTrue(TEXT("the long name cut for its suffix"), AOneBrahamGameMode::IsUniqueVariantOfName(LongUnique, Long));
+	TestFalse(TEXT("Tomas is not Tom"), AOneBrahamGameMode::IsUniqueVariantOfName(TEXT("Tomas"), TEXT("Tom")));
+	TestFalse(TEXT("Tom 2 is not Tom Jones"), AOneBrahamGameMode::IsUniqueVariantOfName(TEXT("Tom 2"), TEXT("Tom Jones")));
+	TestFalse(TEXT("a generated name is not the asked one"), AOneBrahamGameMode::IsUniqueVariantOfName(TEXT("Tom from HR"), TEXT("OBClient")));
+	TestFalse(TEXT("nothing asked"), AOneBrahamGameMode::IsUniqueVariantOfName(TEXT("Alex"), FString()));
+
+	// A server's travel URL reaches its clients without the host's name in it.
+	TestEqual(TEXT("names stripped for clients"), AOneBrahamGameMode::StripPlayerNameOptions(
+		TEXT("/Game/OneBraham/Maps/L_Persistent_OneBraham?Mode=FireDrill?Name=Jenson Raper?OBName=Jenson Raper?listen")),
+		FString(TEXT("/Game/OneBraham/Maps/L_Persistent_OneBraham?Mode=FireDrill?listen")));
+	TestEqual(TEXT("a relative restart is left alone"), AOneBrahamGameMode::StripPlayerNameOptions(TEXT("?Restart?NoSeamlessTravel")),
+		FString(TEXT("?Restart?NoSeamlessTravel")));
+	TestEqual(TEXT("ServerName is not Name"), AOneBrahamGameMode::StripPlayerNameOptions(TEXT("Map?ServerName=Floor 9?obname=x")),
+		FString(TEXT("Map?ServerName=Floor 9")));
+
+	// The generated office name: stable, and always inside the cap.
+	TestEqual(TEXT("same seed, same name"), UOneBrahamGameInstance::MakeOfficeDisplayName(42), UOneBrahamGameInstance::MakeOfficeDisplayName(42));
+	for (uint32 Seed = 0; Seed < 500; ++Seed)
+	{
+		const FString Office = UOneBrahamGameInstance::MakeOfficeDisplayName(Seed);
+		if (!TestTrue(*FString::Printf(TEXT("'%s' fits"), *Office), Office.Len() <= AOneBrahamGameMode::MaxPlayerNameLength
+			&& AOneBrahamGameMode::SanitisePlayerName(Office) == Office && !AOneBrahamGameMode::IsPlaceholderPlayerName(Office, FString())))
+		{
+			break;
+		}
+	}
+
+	// What earlier builds wrote to the profile by themselves is not a choice.
+	TestTrue(TEXT("the login name is automatic"), UOneBrahamGameInstance::IsAutomaticDisplayName(FPlatformProcess::UserName(false)));
+	TestTrue(TEXT("the host name is automatic"), UOneBrahamGameInstance::IsAutomaticDisplayName(FPlatformProcess::ComputerName()));
+	TestTrue(TEXT("empty is automatic"), UOneBrahamGameInstance::IsAutomaticDisplayName(FString()));
+	TestFalse(TEXT("a chosen name is not"), UOneBrahamGameInstance::IsAutomaticDisplayName(TEXT("Night Porter")));
+	const FString HostStem = AOneBrahamGameMode::SanitisePlayerName(FPlatformProcess::ComputerName()).Left(8).TrimEnd();
+	TestFalse(TEXT("a chosen name with the host name's opening letters is not"),
+		UOneBrahamGameInstance::IsAutomaticDisplayName(HostStem + TEXT(" the Great")));
+	TestFalse(TEXT("the default is not"), UOneBrahamGameInstance::IsAutomaticDisplayName(UOneBrahamGameInstance::MakeDefaultDisplayName()));
 
 	return true;
 }

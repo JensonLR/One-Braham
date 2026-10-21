@@ -242,8 +242,10 @@ bool UOneBrahamHUDWidget::MakePaintContext(const FGeometry& Geometry, FPaintCont
 	C.bRestDimming = Frame.bRestDimming;
 	C.Stage = Frame.Building.Stage;
 	C.Band = OneBrahamHUDStyle::StageBand(C.Stage);
+	C.Tone = FrameTone();
 	C.bHeavyOutline = C.Band == 2;
 	C.bAlive = Data.LifeState == EOneBrahamLifeState::Alive || Data.LifeState == EOneBrahamLifeState::Downed;
+	C.Centre = ResolveCentre(C.Now);
 	UpdateStageTint(C.Now, C);
 	return true;
 }
@@ -281,7 +283,9 @@ void UOneBrahamHUDWidget::PaintUnderlay(FOneBrahamPainter& P, const FGeometry& G
 	// the compass must stay on top of is painted here, by the canvas's first
 	// child, instead.
 	FPaintContext C;
-	if (MakePaintContext(Geometry, C) && C.bAlive && !bDeathScreenVisible)
+	// The bars belong to the card: a stage card shrunk to the ticker (under
+	// the downed medallion) does not letterbox the screen.
+	if (MakePaintContext(Geometry, C) && C.bAlive && !bDeathScreenVisible && C.Centre.IsCard(EOneBrahamCentreSlot::StageCard))
 	{
 		PaintStageBars(P, C);
 	}
@@ -291,17 +295,12 @@ void UOneBrahamHUDWidget::UpdateStageTint(double Now, FPaintContext& C) const
 {
 	using namespace OneBrahamHUDStyle;
 
-	// One getter drives every hairline and accent; a stage change cross-fades
+	// One getter drives every hairline and accent - the design system's stage
+	// rule, never a colour of the HUD's own - and a change of tone cross-fades
 	// the lot together over 400 ms, linearly, so no element changes alone.
-	auto AccentFor = [](int32 Band) { return Band == 2 ? EmergencyRed() : (Band == 1 ? SafetyYellow() : SignalBlue()); };
-	auto HairlineFor = [](int32 Band)
-	{
-		return Band == 2 ? WithAlpha(EmergencyRed(), 0.30f) : (Band == 1 ? WithAlpha(SafetyYellow(), 0.25f) : WithAlpha(LightGrey(), 0.20f));
-	};
-
 	const float T = FMath::Clamp(static_cast<float>((Now - TintChangedAt) / OneBrahamEase::StageCrossFade), 0.f, 1.f);
-	C.Accent = FMath::Lerp(AccentFor(TintFromBand), AccentFor(TintBand), T);
-	C.Hairline = FMath::Lerp(HairlineFor(TintFromBand), HairlineFor(TintBand), T);
+	C.Accent = FMath::Lerp(UOneBrahamUIStyle::ToneColour(TintFromTone), UOneBrahamUIStyle::ToneColour(TintTone), T);
+	C.Hairline = FMath::Lerp(UOneBrahamUIStyle::ToneHairline(TintFromTone), UOneBrahamUIStyle::ToneHairline(TintTone), T);
 }
 
 // ==========================================================================
@@ -471,26 +470,48 @@ void UOneBrahamHUDWidget::ApplyHUDFrame(const FOneBrahamHUDFrame& NewFrame)
 
 	// --- the stage: tint, the fire panel's clock, the OVERRIDE -----------------------
 	const int32 Band = OneBrahamHUDStyle::StageBand(Building.Stage);
+	const bool bEvacuating = NewFrame.ExtractionState == EOneBrahamExtractionState::Broadcast
+		|| NewFrame.ExtractionState == EOneBrahamExtractionState::Arriving
+		|| NewFrame.ExtractionState == EOneBrahamExtractionState::Holding;
+	const EOneBrahamStageTone Tone = UOneBrahamUIStyle::StageTone(Building.Stage, bEvacuating);
 	if (!bStagePrimed)
 	{
 		bStagePrimed = true;
 		LastStage = Building.Stage;
-		TintBand = TintFromBand = Band;
+		TintTone = TintFromTone = Tone;
 		StageStartedAt = Band > 0 ? -100.0 : Now;
 		LastSealCeiling = Building.SealCeiling;
 	}
-	else if (Building.Stage != LastStage)
+	else if (Tone != TintTone)
 	{
+		// The extraction changes the colour without changing the stage: the
+		// tint follows the tone, the stage clocks below follow the stage.
+		// The colour the tint was showing, frozen, becomes the start of the fade.
+		TintFromTone = TintTone;
+		TintTone = Tone;
+		TintChangedAt = Now;
+	}
+
+	if (Building.Stage != LastStage)
+	{
+		// An escalation makes the calmer stages' PA cards stale: "the lift
+		// lobby is open" must not go up (or stay up) once the shutters move.
+		// The current card leaves now (its 300 ms exit), the queue loses them.
+		if (static_cast<uint8>(Building.Stage) > static_cast<uint8>(LastStage))
+		{
+			AnnouncementQueue.RemoveAll([&Building](const FAnnouncement& Entry)
+			{
+				return static_cast<uint8>(Entry.Stage) < static_cast<uint8>(Building.Stage);
+			});
+			if (CurrentAnnouncement.At >= 0.0 && static_cast<uint8>(CurrentAnnouncement.Stage) < static_cast<uint8>(Building.Stage)
+				&& Now < CurrentAnnouncement.At + CurrentAnnouncement.Hold)
+			{
+				CurrentAnnouncement.Hold = static_cast<float>(FMath::Max(0.0, Now - CurrentAnnouncement.At));
+			}
+		}
+
 		LastStage = Building.Stage;
 		StageStartedAt = Now;
-
-		if (Band != TintBand)
-		{
-			// The colour the tint was showing, frozen, becomes the start of the fade.
-			TintFromBand = TintBand;
-			TintBand = Band;
-			TintChangedAt = Now;
-		}
 
 		// The building overrides the objective: the old line stays, struck
 		// through in the stage colour, with the new instruction under it.
@@ -499,7 +520,7 @@ void UOneBrahamHUDWidget::ApplyHUDFrame(const FOneBrahamHUDFrame& NewFrame)
 			OverriddenLine = ObjectiveShown;
 			OverriddenDetail = ObjectiveDetailShown;
 			OverrideAt = Now;
-			OverrideBand = Band;
+			OverrideTone = Tone;
 		}
 
 		bStackRevealed = bStackRevealed || Band > 0;
@@ -545,6 +566,16 @@ void UOneBrahamHUDWidget::ApplyHUDFrame(const FOneBrahamHUDFrame& NewFrame)
 		ObjectiveDetailShown = NewFrame.ObjectiveDetail;
 	}
 
+	// A stage change that leaves the instruction as it was (PreLockdown to
+	// Lockdown both say "use the stairs") is not an OVERRIDE: striking a line
+	// through the very words written under it reads as a glitch.
+	if (OverrideAt == Now && OverriddenLine == ObjectiveShown)
+	{
+		OverriddenLine.Reset();
+		OverriddenDetail.Reset();
+		OverrideAt = -100.0;
+	}
+
 	// --- rest dimming: what changed, and when --------------------------------------------
 	FString Stack;
 	for (const FOneBrahamFloorStatus& Floor : Building.Floors)
@@ -574,13 +605,34 @@ void UOneBrahamHUDWidget::ApplyHUDFrame(const FOneBrahamHUDFrame& NewFrame)
 	Frame = NewFrame;
 
 	// --- the PA card queue: one at a time, the next when the last has gone -------------
+	// Nothing new goes up while a stage card or the downed medallion holds
+	// the centre: the queue is how the PA card waits.
 	const bool bCurrentDone = CurrentAnnouncement.At < 0.0
 		|| Now > CurrentAnnouncement.At + CurrentAnnouncement.Hold + 0.3;
-	if (bCurrentDone && AnnouncementQueue.Num() > 0 && !IsStageCardUp(Now))
+	const bool bCentreHeld = IsStageCardUp(Now) || Data.LifeState == EOneBrahamLifeState::Downed;
+	if (bCurrentDone && AnnouncementQueue.Num() > 0 && !bCentreHeld)
 	{
 		CurrentAnnouncement = AnnouncementQueue[0];
 		CurrentAnnouncement.At = Now;
 		AnnouncementQueue.RemoveAt(0);
+	}
+
+	// --- the centre: what waits keeps its place -------------------------------------------
+	// A message held back by a louder one has its clock stopped, so the
+	// induction's step or a notice is shown in full once the card has gone,
+	// rather than expiring unseen behind it.
+	{
+		const FOneBrahamCentreLayout Centre = ResolveCentre(Now);
+		const double Step = LastCentreAt >= 0.0 ? FMath::Clamp(Now - LastCentreAt, 0.0, 0.5) : 0.0;
+		if (Centre.IsWaiting(EOneBrahamCentreSlot::Banner))
+		{
+			BannerAt += Step;
+		}
+		if (Centre.IsWaiting(EOneBrahamCentreSlot::Induction))
+		{
+			SubBannerAt += Step;
+		}
+		LastCentreAt = Now;
 	}
 
 	// --- the compass's markers and the stage it draws its tags in ------------------------
@@ -595,6 +647,97 @@ void UOneBrahamHUDWidget::ApplyHUDFrame(const FOneBrahamHUDFrame& NewFrame)
 	}
 }
 
+EOneBrahamStageTone UOneBrahamHUDWidget::FrameTone() const
+{
+	const bool bEvacuating = Frame.ExtractionState == EOneBrahamExtractionState::Broadcast
+		|| Frame.ExtractionState == EOneBrahamExtractionState::Arriving
+		|| Frame.ExtractionState == EOneBrahamExtractionState::Holding;
+	return UOneBrahamUIStyle::StageTone(Frame.Building.Stage, bEvacuating);
+}
+
+EOneBrahamStageTone UOneBrahamHUDWidget::AnnouncementTone(const FAnnouncement& A) const
+{
+	// The Purge is red whatever the card was pushed in; otherwise a live
+	// extraction turns every card the exit's colour; otherwise the card keeps
+	// the stage it was announced in.
+	const EOneBrahamStageTone Now = FrameTone();
+	if (Now == EOneBrahamStageTone::Evac && A.Stage != EOneBrahamLockdownStage::Purge)
+	{
+		return EOneBrahamStageTone::Evac;
+	}
+	return A.Tone;
+}
+
+FOneBrahamCentreLayout UOneBrahamHUDWidget::ResolveCentre(double Now) const
+{
+	using namespace OneBrahamCentre;
+
+	// Out of the match (the accident book, spectating) the centre is not
+	// arbitrated: the book is the screen.
+	const bool bAlive = Data.LifeState == EOneBrahamLifeState::Alive || Data.LifeState == EOneBrahamLifeState::Downed;
+	if (!bAlive || bDeathScreenVisible)
+	{
+		return FOneBrahamCentreLayout();
+	}
+
+	uint32 Mask = 0;
+	if (Data.LifeState == EOneBrahamLifeState::Downed)
+	{
+		Mask |= Bit(EOneBrahamCentreSlot::Downed);
+	}
+	if (StageCard != EOneBrahamStageCard::None && Now >= StageCardAt && Now <= StageCardEnd())
+	{
+		Mask |= Bit(EOneBrahamCentreSlot::StageCard);
+	}
+	if (!bBoardOpen && CurrentAnnouncement.At >= 0.0 && Now >= CurrentAnnouncement.At
+		&& Now <= CurrentAnnouncement.At + CurrentAnnouncement.Hold + 0.3)
+	{
+		Mask |= Bit(EOneBrahamCentreSlot::Announcement);
+	}
+	if (!BannerShown.IsEmpty() && Now >= BannerAt && Now <= BannerAt + BannerSeconds)
+	{
+		Mask |= Bit(EOneBrahamCentreSlot::Banner);
+	}
+	if (!bBoardOpen && Data.bShowInteractionPrompt && Data.bHasInteractionTarget && Data.bInteractionBlocked)
+	{
+		Mask |= Bit(EOneBrahamCentreSlot::BlockedPrompt);
+	}
+	if (!bBoardOpen && !SubBannerShown.IsEmpty() && Now >= SubBannerAt && Now < SubBannerAt + SubBannerSeconds)
+	{
+		Mask |= Bit(EOneBrahamCentreSlot::Induction);
+	}
+	return Resolve(Mask);
+}
+
+TArray<FString> UOneBrahamHUDWidget::CentreCardLines(const FOneBrahamCentreLayout& Centre) const
+{
+	TArray<FString> Lines;
+	if (Centre.IsShown(EOneBrahamCentreSlot::StageCard))
+	{
+		Lines.Add(StageCardTitle());
+		Lines.Add(StageCardLine());
+	}
+	// A spectator's centre is not arbitrated, but the PA card still goes up
+	// over the match they are watching: its words count as shown there too.
+	const double Now = HUDNow();
+	const bool bSpectatorCard = Data.LifeState != EOneBrahamLifeState::Alive && Data.LifeState != EOneBrahamLifeState::Downed
+		&& !bDeathScreenVisible && CurrentAnnouncement.At >= 0.0 && Now >= CurrentAnnouncement.At
+		&& Now <= CurrentAnnouncement.At + CurrentAnnouncement.Hold + 0.3;
+	if (Centre.IsCard(EOneBrahamCentreSlot::Announcement) || bSpectatorCard)
+	{
+		Lines.Add(CurrentAnnouncement.Headline);
+		Lines.Add(CurrentAnnouncement.Subline);
+	}
+	if (Centre.IsShown(EOneBrahamCentreSlot::Banner))
+	{
+		Lines.Add(BannerShown);
+	}
+	// The objective line is always on screen: a subtitle that is only the
+	// building's new instruction would be the same words twice.
+	Lines.Add(ObjectiveShown);
+	return Lines;
+}
+
 void UOneBrahamHUDWidget::PushAnnouncement(const FText& Headline, const FText& Subline, EOneBrahamLockdownStage Stage, float HoldSeconds)
 {
 	if (Headline.IsEmpty())
@@ -606,6 +749,8 @@ void UOneBrahamHUDWidget::PushAnnouncement(const FText& Headline, const FText& S
 	Entry.Headline = Headline.ToString();
 	Entry.Subline = Subline.ToString();
 	Entry.Stage = Stage;
+	Entry.Tone = UOneBrahamUIStyle::StageTone(Stage, Frame.ExtractionState == EOneBrahamExtractionState::Broadcast
+		|| Frame.ExtractionState == EOneBrahamExtractionState::Arriving || Frame.ExtractionState == EOneBrahamExtractionState::Holding);
 	Entry.Hold = FMath::Clamp(HoldSeconds, 2.f, 14.f) + OneBrahamHUDLayout::AnnouncementTail;
 	Entry.Eyebrow = FString::Printf(TEXT("ONE BRAHAM  ·  ALL FLOORS  ·  %s"),
 		Frame.DuskClock.IsEmpty() ? *OneBrahamDuskClock::Now(GetWorld()).ToString() : *Frame.DuskClock);
@@ -625,7 +770,8 @@ void UOneBrahamHUDWidget::PushAnnouncement(const FText& Headline, const FText& S
 		AnnouncementQueue.RemoveAt(0);
 	}
 
-	if ((CurrentAnnouncement.At < 0.0 || HUDNow() > CurrentAnnouncement.At + CurrentAnnouncement.Hold + 0.3) && !IsStageCardUp(HUDNow()))
+	if ((CurrentAnnouncement.At < 0.0 || HUDNow() > CurrentAnnouncement.At + CurrentAnnouncement.Hold + 0.3) && !IsStageCardUp(HUDNow())
+		&& Data.LifeState != EOneBrahamLifeState::Downed)
 	{
 		CurrentAnnouncement = AnnouncementQueue[0];
 		CurrentAnnouncement.At = HUDNow();

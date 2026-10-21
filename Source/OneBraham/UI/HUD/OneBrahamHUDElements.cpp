@@ -80,7 +80,7 @@ namespace OneBrahamHUDDraw
 	float KeyCap(FOneBrahamPainter& P, const FVector2D& Pos, const FString& Key, const FLinearColor& Colour, float Height = 18.f)
 	{
 		const FSlateFontInfo Font = OneBrahamHUDStyle::Font(EOneBrahamHUDType::Telemetry, 12.f);
-		const FVector2D Size = Measure(Key, Font);
+		const FVector2D Size = OneBrahamHUDStyle::Measure(Key, Font);
 		const float W = FMath::Max(Height, Size.X + 10.f);
 		P.RoundRect(Pos, FVector2D(W, Height), WithAlpha(Navy(), 0.6f), 2.f);
 		P.Outline(Pos, FVector2D(W, Height), WithAlpha(Colour, 0.7f), 1.f, 2.f);
@@ -124,7 +124,7 @@ namespace OneBrahamHUDDraw
 		for (const FString& Word : Words)
 		{
 			const FString Trial = Current.IsEmpty() ? Word : Current + TEXT(" ") + Word;
-			if (!Current.IsEmpty() && Measure(Trial, Font).X > Width)
+			if (!Current.IsEmpty() && OneBrahamHUDStyle::Measure(Trial, Font).X > Width)
 			{
 				Lines.Add(Current);
 				Current = Word;
@@ -149,12 +149,12 @@ namespace OneBrahamHUDDraw
 	/** A string cut to a width with an ellipsis, so a long name ends rather than vanishes. */
 	FString Fit(const FString& Text, const FSlateFontInfo& Font, float Width)
 	{
-		if (Measure(Text, Font).X <= Width)
+		if (OneBrahamHUDStyle::Measure(Text, Font).X <= Width)
 		{
 			return Text;
 		}
 		FString Cut = Text;
-		while (Cut.Len() > 1 && Measure(Cut + TEXT("…"), Font).X > Width)
+		while (Cut.Len() > 1 && OneBrahamHUDStyle::Measure(Cut + TEXT("…"), Font).X > Width)
 		{
 			Cut.LeftChopInline(1);
 		}
@@ -185,8 +185,9 @@ void UOneBrahamHUDWidget::PaintHUD(FOneBrahamPainter& P, const FPaintContext& In
 	FPaintContext C = InContext;
 
 	// A stage card takes the secondary panels down to a quarter while it
-	// speaks; the things a player fights with are never touched.
-	if (StageCard != EOneBrahamStageCard::None)
+	// speaks; the things a player fights with are never touched. A card
+	// shrunk to the ticker (under the downed medallion) takes nothing down.
+	if (StageCard != EOneBrahamStageCard::None && C.Centre.IsCard(EOneBrahamCentreSlot::StageCard))
 	{
 		const float T = Since(C.Now, StageCardAt);
 		const float End = 0.35f + StageCardHold + 0.3f;
@@ -239,7 +240,10 @@ void UOneBrahamHUDWidget::PaintHUD(FOneBrahamPainter& P, const FPaintContext& In
 
 	float ObjectiveBottom = C.Screen.Y * 0.11f;
 	PaintObjective(P, C, ObjectiveBottom);
-	PaintBanner(P, C);
+	if (C.Centre.IsCard(EOneBrahamCentreSlot::Banner))
+	{
+		PaintBanner(P, C);
+	}
 
 	float ModuleBottom = C.SafeT;
 	PaintLockdownModule(P, C, ModuleBottom);
@@ -248,9 +252,12 @@ void UOneBrahamHUDWidget::PaintHUD(FOneBrahamPainter& P, const FPaintContext& In
 		PaintKillFeed(Secondary, C, ModuleBottom + 8.f * C.Scale);
 	}
 
-	if (!bBoardOpen)
+	// The PA card: one card at a time (OneBrahamCentreMessages.h). It slides
+	// down under a tall objective, but never into the crosshair's band.
+	if (!bBoardOpen && C.Centre.IsCard(EOneBrahamCentreSlot::Announcement))
 	{
-		PaintAnnouncement(P, C, FMath::Max(C.Screen.Y * 0.13f, ObjectiveBottom + 14.f));
+		const float Floor = C.Screen.Y * OneBrahamCentre::CrosshairBandTop - (OneBrahamCentre::AnnouncementHeightPx + 8.f) * C.Scale;
+		PaintAnnouncement(P, C, FMath::Min(FMath::Max(C.Screen.Y * OneBrahamCentre::AnnouncementTop, ObjectiveBottom + 14.f), Floor));
 	}
 
 	PaintHealthCard(P, C);
@@ -263,10 +270,14 @@ void UOneBrahamHUDWidget::PaintHUD(FOneBrahamPainter& P, const FPaintContext& In
 	{
 		PaintPrompt(P, C);
 	}
+	PaintTicker(P, C);
 	PaintSubtitles(P, C);
 	PaintCrosshair(P, C);
 	PaintDowned(P, C);
-	PaintStageCard(P, C);
+	if (C.Centre.IsCard(EOneBrahamCentreSlot::StageCard))
+	{
+		PaintStageCard(P, C);
+	}
 }
 
 // ==========================================================================
@@ -319,11 +330,11 @@ void UOneBrahamHUDWidget::PaintFloorPlate(FOneBrahamPainter& Root, const FPaintC
 	// plate. A stair-core sign keeps a margin round its numerals, so the size
 	// steps down until the pair sits inside 9 px either side.
 	FSlateFontInfo NumberFont = Font(EOneBrahamHUDType::Title, 46.f, -30);
-	FVector2D NumberSize = Measure(Numerals, NumberFont);
+	FVector2D NumberSize = OneBrahamHUDStyle::Measure(Numerals, NumberFont);
 	for (int32 Step = 0; Step < 6 && NumberSize.X > PlateSize - 18.f; ++Step)
 	{
 		NumberFont = Font(EOneBrahamHUDType::Title, 44.f - Step * 3.f, -30);
-		NumberSize = Measure(Numerals, NumberFont);
+		NumberSize = OneBrahamHUDStyle::Measure(Numerals, NumberFont);
 	}
 	{
 		const FGeometry Squashed = P.Geometry.MakeChild(FVector2D(PlateSize, PlateSize),
@@ -339,8 +350,10 @@ void UOneBrahamHUDWidget::PaintFloorPlate(FOneBrahamPainter& Root, const FPaintC
 	// --- the lockdown beacon: a slow yellow lamp beside the sign -----------------------
 	if (C.Band == 1)
 	{
+		// The lamp is the stage's colour: amber while the building warns,
+		// yellow once it is locked down, green while the roof is the way out.
 		const float Beacon = OneBrahamPulse::Breath(C.Now, OneBrahamPulse::BeaconHz, 0.25f, 1.f);
-		P.Circle(FVector2D(PlateSize + 8.f, 6.f), 3.f, WithAlpha(SafetyYellow(), Beacon));
+		P.Circle(FVector2D(PlateSize + 8.f, 6.f), 3.f, Tone(C.Tone, Beacon));
 	}
 
 	// --- the words beside it --------------------------------------------------------------
@@ -356,7 +369,7 @@ void UOneBrahamHUDWidget::PaintFloorPlate(FOneBrahamPainter& Root, const FPaintC
 		// White on a red tag: red type straight onto a lit wall was the one line
 		// on the HUD that vanished against concrete.
 		const FSlateFontInfo WhyFont = Font(EOneBrahamHUDType::Telemetry, 13.f, 40);
-		const FVector2D WhySize = Measure(Why, WhyFont);
+		const FVector2D WhySize = OneBrahamHUDStyle::Measure(Why, WhyFont);
 		P.RoundRect(FVector2D(TextX, 34.f), FVector2D(WhySize.X + 12.f, WhySize.Y + 4.f), EmergencyRed(), 2.f);
 		P.Outline(FVector2D(TextX, 34.f), FVector2D(WhySize.X + 12.f, WhySize.Y + 4.f), WithAlpha(OLEDBlack(), 0.35f), 1.f, 2.f);
 		P.Text(FVector2D(TextX + 6.f, 36.f), Why, WhyFont, White());
@@ -374,9 +387,9 @@ void UOneBrahamHUDWidget::PaintFloorPlate(FOneBrahamPainter& Root, const FPaintC
 		// wall is a colour the eye cannot find.
 		const FString Sealing = FString::Printf(TEXT("SEALING IN %s"), *Clock(Building.SecondsToNextStage, false));
 		const FSlateFontInfo SealFont = Font(EOneBrahamHUDType::Telemetry, 14.f, 20);
-		const FVector2D SealSize = Measure(Sealing, SealFont);
+		const FVector2D SealSize = OneBrahamHUDStyle::Measure(Sealing, SealFont);
 		Plate(P, FVector2D(TextX - 6.f, 32.f), FVector2D(SealSize.X + 12.f, SealSize.Y + 4.f), 0.86f, 2.f);
-		P.Text(FVector2D(TextX, 34.f), Sealing, SealFont, SafetyYellow());
+		P.Text(FVector2D(TextX, 34.f), Sealing, SealFont, Tone(EOneBrahamStageTone::Lockdown));
 	}
 	else
 	{
@@ -472,13 +485,22 @@ void UOneBrahamHUDWidget::PaintObjective(FOneBrahamPainter& P, const FPaintConte
 	const float LineY = 15.f;
 
 	// --- the override: struck line, then the building's instruction --------------------
-	const float OverrideT = Since(C.Now, OverrideAt);
+	// A stage card that arrived with the override is saying the same thing at
+	// eighty-eight pixels: the stamp waits for it to leave, and until then the
+	// old line stands, untouched.
+	double OverrideStart = OverrideAt;
+	if (StageCard != EOneBrahamStageCard::None && FMath::Abs(StageCardAt - OverrideAt) < 1.5 && C.Now < StageCardEnd())
+	{
+		OverrideStart = FMath::Max(OverrideAt, StageCardEnd() - 0.3);
+	}
+	const bool bOverridePending = !OverriddenLine.IsEmpty() && C.Now < OverrideStart;
+	const float OverrideT = Since(C.Now, OverrideStart);
 	const bool bOverriding = OverrideT >= 0.f && OverrideT < 6.4f && !OverriddenLine.IsEmpty();
 
 	auto MeasureLine = [&](const FString& Line, const FString& Detail)
 	{
-		const float W = Measure(Line, LineFont).X;
-		const float D = Detail.IsEmpty() ? 0.f : Measure(TEXT("  ") + Detail, DetailFont).X;
+		const float W = OneBrahamHUDStyle::Measure(Line, LineFont).X;
+		const float D = Detail.IsEmpty() ? 0.f : OneBrahamHUDStyle::Measure(TEXT("  ") + Detail, DetailFont).X;
 		return FVector2D(W, D);
 	};
 
@@ -497,8 +519,8 @@ void UOneBrahamHUDWidget::PaintObjective(FOneBrahamPainter& P, const FPaintConte
 		Q.TextWipe(FVector2D(Left, AtY), Line, LFont, Ink, Reveal);
 		if (!Detail.IsEmpty())
 		{
-			const float DetailH = Measure(Detail, DFont).Y;
-			const float LineH = Measure(Line, LFont).Y;
+			const float DetailH = OneBrahamHUDStyle::Measure(Detail, DFont).Y;
+			const float LineH = OneBrahamHUDStyle::Measure(Line, LFont).Y;
 			Q.TextWipe(FVector2D(Left + Widths.X, AtY + (LineH - DetailH) * 0.75f), TEXT("  ") + Detail, DFont, DetailInk, Reveal);
 		}
 		return FVector2D(Left, Widths.X + Widths.Y);
@@ -506,11 +528,12 @@ void UOneBrahamHUDWidget::PaintObjective(FOneBrahamPainter& P, const FPaintConte
 
 	if (bOverriding)
 	{
-		const FLinearColor Stamp = OverrideBand == 2 ? EmergencyRed() : SafetyYellow();
+		const FLinearColor Stamp = Tone(OverrideTone);
+		const FLinearColor StampInk = UOneBrahamUIStyle::ToneInk(OverrideTone);
 		const FVector2D Old = MeasureLine(OverriddenLine, OverriddenDetail);
 		const float OldW = Old.X + Old.Y;
 		const float OldLeft = -OldW * 0.5f;
-		const float LineH = Measure(OverriddenLine, LineFont).Y;
+		const float LineH = OneBrahamHUDStyle::Measure(OverriddenLine, LineFont).Y;
 
 		// The struck line collapses after six seconds.
 		const float Collapse = FMath::Clamp((OverrideT - 6.f) / 0.2f, 0.f, 1.f);
@@ -526,7 +549,7 @@ void UOneBrahamHUDWidget::PaintObjective(FOneBrahamPainter& P, const FPaintConte
 		}
 		else
 		{
-			const float Retract = Ramp(C.Now, OverrideAt + 0.26, 0.14f, EOneBrahamEase::Ribbon);
+			const float Retract = Ramp(C.Now, OverrideStart + 0.26, 0.14f, EOneBrahamEase::Ribbon);
 			const float BarH = FMath::Lerp(LineH + 4.f, 2.f, Retract) * (1.f - Collapse);
 			Q.Rect(FVector2D(OldLeft - 6.f, LineY + LineH * 0.55f - BarH * 0.5f), FVector2D(OldW + 12.f, BarH), WithAlpha(Stamp, 1.f - Collapse));
 		}
@@ -537,13 +560,13 @@ void UOneBrahamHUDWidget::PaintObjective(FOneBrahamPainter& P, const FPaintConte
 		{
 			const float Rise = FMath::Lerp(LineH + 12.f, 0.f, OneBrahamEase::Evaluate(EOneBrahamEase::Lift, Collapse));
 			const float NewY = LineY + Rise;
-			const float Reveal = Ramp(C.Now, OverrideAt + 0.26, 0.26f, EOneBrahamEase::Ribbon);
+			const float Reveal = Ramp(C.Now, OverrideStart + 0.26, 0.26f, EOneBrahamEase::Ribbon);
 			const FVector2D New = MeasureLine(ObjectiveShown, ObjectiveDetailShown);
 			const float NewW = New.X + New.Y;
 			const float PlateFade = 1.f - Collapse;
 			Q.RoundRect(FVector2D(-NewW * 0.5f - 10.f, NewY - 3.f), FVector2D((NewW + 20.f) * Reveal, LineH + 6.f), WithAlpha(Stamp, PlateFade), 2.f);
-			const FLinearColor Ink = FMath::Lerp(OverrideBand == 2 ? White() : Navy(), White(), Collapse);
-			const FLinearColor DetailInk = FMath::Lerp(OverrideBand == 2 ? White() : Navy(), SafetyYellow(), Collapse);
+			const FLinearColor Ink = FMath::Lerp(StampInk, White(), Collapse);
+			const FLinearColor DetailInk = FMath::Lerp(StampInk, SafetyYellow(), Collapse);
 			DrawLine(NewY, ObjectiveShown, ObjectiveDetailShown, Ink, DetailInk, Reveal, PlateFade > 0.5f);
 			OutBottom = Y + (NewY + LineH + 8.f) * C.Scale;
 		}
@@ -552,12 +575,18 @@ void UOneBrahamHUDWidget::PaintObjective(FOneBrahamPainter& P, const FPaintConte
 			OutBottom = Y + (LineY + LineH + 8.f) * C.Scale;
 		}
 	}
+	else if (bOverridePending)
+	{
+		// The old line, as it was, while the stage card speaks.
+		DrawLine(LineY, OverriddenLine, OverriddenDetail, White(), SafetyYellow(), 1.f);
+		OutBottom = Y + (LineY + OneBrahamHUDStyle::Measure(OverriddenLine, LineFont).Y + 8.f) * C.Scale;
+	}
 	else
 	{
 		// --- the standard line: an 80 ms wipe and a ribbon underline on change -----------
 		const float Reveal = C.bReduceMotion ? 1.f : FMath::Clamp(Since(C.Now, ObjectiveChangedAt) / 0.08f, 0.f, 1.f);
 		const FVector2D Span = DrawLine(LineY, ObjectiveShown, ObjectiveDetailShown, White(), SafetyYellow(), Reveal);
-		const float LineH = Measure(ObjectiveShown, LineFont).Y;
+		const float LineH = OneBrahamHUDStyle::Measure(ObjectiveShown, LineFont).Y;
 
 		const float Ribbon = Ramp(C.Now, ObjectiveChangedAt, OneBrahamEase::RibbonDraw, EOneBrahamEase::Ribbon);
 		const float RibbonFade = 1.f - FMath::Clamp((Since(C.Now, ObjectiveChangedAt) - 3.f) / 0.8f, 0.f, 1.f);
@@ -611,7 +640,7 @@ void UOneBrahamHUDWidget::PaintFireDrillPoints(FOneBrahamPainter& P, const FPain
 		// points are drawn neutral (outline only), and lit in your colour while
 		// you stand on one, because that much this machine does know.
 		const FLinearColor Ink = Point.bYoursPresent ? SignalBlue() : WithAlpha(LightGrey(), 0.9f);
-		const FVector2D LetterSize = Measure(Point.Letter, LetterFont);
+		const FVector2D LetterSize = OneBrahamHUDStyle::Measure(Point.Letter, LetterFont);
 		Q.Text(FVector2D(X, Y), Point.Letter, LetterFont, Ink, EOneBrahamTextAnchor::Centre);
 
 		const FVector2D BarPos(X - 18.f, Y + LetterSize.Y + 1.f);
@@ -646,17 +675,18 @@ void UOneBrahamHUDWidget::PaintExtraction(FOneBrahamPainter& P, const FPaintCont
 
 	const FSlateFontInfo LED = HUDFont(EOneBrahamHUDType::LED, 48.f, 0, false);
 	const FString Digits = Clock(Frame.ExtractionSeconds, false);
-	const FLinearColor DigitInk = bContested ? EmergencyRed() : SafetyYellow();
+	// The way out is the exit sign's colour; contested, it is the danger's.
+	const FLinearColor DigitInk = bContested ? Tone(EOneBrahamStageTone::Purge) : Tone(EOneBrahamStageTone::Evac);
 
 	// The LED face is dots: it needs a dark panel behind it, as a real dot-matrix
 	// sign has, or its digits break up against a lit ceiling.
-	const FVector2D DigitMeasure = Measure(Digits, LED);
+	const FVector2D DigitMeasure = OneBrahamHUDStyle::Measure(Digits, LED);
 	const float PanelW = FMath::Max(260.f, DigitMeasure.X + (bContested ? 260.f : 60.f));
 	const float PanelH = 12.f + DigitMeasure.Y + 4.f + 6.f + 12.f;
 	Plate(Q, FVector2D(-PanelW * 0.5f, -6.f), FVector2D(PanelW, PanelH), 0.86f, 4.f);
 	Q.Rect(FVector2D(-PanelW * 0.5f, -6.f), FVector2D(PanelW, 2.f), WithAlpha(DigitInk, 0.9f));
 
-	Q.Text(FVector2D(0.f, 0.f), Eyebrow, HUDFont(EOneBrahamHUDType::Eyebrow, 11.f, 200, false), SafetyYellow(), EOneBrahamTextAnchor::Centre);
+	Q.Text(FVector2D(0.f, 0.f), Eyebrow, HUDFont(EOneBrahamHUDType::Eyebrow, 11.f, 200, false), Tone(EOneBrahamStageTone::Evac), EOneBrahamTextAnchor::Centre);
 	const FVector2D DigitSize = Q.Text(FVector2D(0.f, 12.f), Digits, LED, DigitInk, EOneBrahamTextAnchor::Centre);
 
 	if (bContested)
@@ -664,7 +694,7 @@ void UOneBrahamHUDWidget::PaintExtraction(FOneBrahamPainter& P, const FPaintCont
 		// The word is the cue, not the colour; the blink says "now".
 		const float Blink = OneBrahamPulse::Blink(C.Now, OneBrahamPulse::ImminentHz, C.bReduceMotion);
 		Q.Text(FVector2D(DigitSize.X * 0.5f + 12.f, 12.f + DigitSize.Y * 0.5f - 10.f), TEXT("CONTESTED"),
-			HUDFont(EOneBrahamHUDType::Label, 14.f, 80, C.bHeavyOutline), WithAlpha(EmergencyRed(), 0.3f + 0.7f * Blink));
+			HUDFont(EOneBrahamHUDType::Label, 14.f, 80, C.bHeavyOutline), Tone(EOneBrahamStageTone::Purge, 0.3f + 0.7f * Blink));
 	}
 
 	// Thirty cells, one a second of the hold.
@@ -692,13 +722,15 @@ void UOneBrahamHUDWidget::PaintLockdownModule(FOneBrahamPainter& Root, const FPa
 	const FOneBrahamBuildingStatus& Building = Frame.Building;
 	const bool bAscent = Frame.Mode == EOneBrahamMatchMode::Ascent;
 
-	// Open in the Lockdown and the Purge: 28 to 96 px over 280 ms, the Lift curve.
-	const bool bOpen = bAscent && C.Band > 0;
+	// Open from the first warning to the Purge, and for the extraction: 28 to
+	// 96 px over 280 ms, the Lift curve.
+	const bool bOpen = bAscent && (C.Band > 0 || C.Tone == EOneBrahamStageTone::Evac);
 	const float OpenT = bOpen ? Ramp(C.Now, StageStartedAt, OneBrahamEase::Panel, EOneBrahamEase::Lift) : 0.f;
 	const float Height = FMath::Lerp(28.f, 96.f, OpenT);
 	OutBottom = C.SafeT + Height * C.Scale;
 
-	const FLinearColor Housing = C.Band == 2 ? EmergencyRed() : (C.Band == 1 ? SafetyYellow() : FireHousing());
+	// The housing is the stage's colour (the one rule); at rest, the fire red.
+	const FLinearColor Housing = C.Tone == EOneBrahamStageTone::Calm ? FireHousing() : Tone(C.Tone);
 
 	if (OpenT < 0.02f)
 	{
@@ -727,12 +759,12 @@ void UOneBrahamHUDWidget::PaintLockdownModule(FOneBrahamPainter& Root, const FPa
 		}
 
 		const FSlateFontInfo StatusFont = HUDFont(EOneBrahamHUDType::Label, 10.f, 140, C.bHeavyOutline);
-		P.Text(FVector2D(28.f, 14.f - Measure(Status, StatusFont).Y * 0.5f), Status, StatusFont, LightGrey());
+		P.Text(FVector2D(28.f, 14.f - OneBrahamHUDStyle::Measure(Status, StatusFont).Y * 0.5f), Status, StatusFont, LightGrey());
 
 		const FSlateFontInfo ClockFont = HUDFont(EOneBrahamHUDType::Telemetry, 13.f, 20, C.bHeavyOutline);
 		// The warning: in the last fifteen seconds the clock takes the warning colour.
 		const bool bWarning = bAscent && Building.bWarningActive;
-		P.Text(FVector2D(Width - 14.f, 14.f - Measure(Right, ClockFont).Y * 0.5f), Right, ClockFont,
+		P.Text(FVector2D(Width - 14.f, 14.f - OneBrahamHUDStyle::Measure(Right, ClockFont).Y * 0.5f), Right, ClockFont,
 			bWarning ? SafetyYellow() : WithAlpha(LightGrey(), 0.7f), EOneBrahamTextAnchor::Right);
 		return;
 	}
@@ -745,7 +777,17 @@ void UOneBrahamHUDWidget::PaintLockdownModule(FOneBrahamPainter& Root, const FPa
 	// Row 1: four LEDs. The lit one's position is the stage - readable with no
 	// colour vision at all.
 	static const TCHAR* LEDs[4] = { TEXT("NORMAL"), TEXT("LOCKDOWN"), TEXT("PURGE"), TEXT("EVAC") };
-	const int32 Active = C.Band == 2 ? 2 : (C.Band == 1 ? 1 : 0);
+	// The warning lights the LOCKDOWN lamp in its own amber: the lamp's place
+	// is the stage, its colour how far in.
+	int32 Active = 0;
+	switch (C.Tone)
+	{
+	case EOneBrahamStageTone::Warning:
+	case EOneBrahamStageTone::Lockdown:	Active = 1; break;
+	case EOneBrahamStageTone::Purge:	Active = 2; break;
+	case EOneBrahamStageTone::Evac:		Active = 3; break;
+	default:							Active = 0; break;
+	}
 	const float StageAge = Since(C.Now, StageStartedAt);
 	const float LEDBlink = StageAge < 6.f ? OneBrahamPulse::Blink(C.Now, OneBrahamPulse::ImminentHz, C.bReduceMotion) : 1.f;
 	const FSlateFontInfo LEDFont = HUDFont(EOneBrahamHUDType::Label, 10.f, 100, false);
@@ -759,7 +801,7 @@ void UOneBrahamHUDWidget::PaintLockdownModule(FOneBrahamPainter& Root, const FPa
 		{
 			P.Circle(FVector2D(LX + 4.f, 15.f), 8.f, WithAlpha(Housing, 0.18f * LEDBlink));
 		}
-		const FVector2D LabelSize = P.Text(FVector2D(LX + 12.f, 15.f - Measure(LEDs[Index], LEDFont).Y * 0.5f), LEDs[Index], LEDFont,
+		const FVector2D LabelSize = P.Text(FVector2D(LX + 12.f, 15.f - OneBrahamHUDStyle::Measure(LEDs[Index], LEDFont).Y * 0.5f), LEDs[Index], LEDFont,
 			WithAlpha(LightGrey(), bLit ? 1.f : 0.4f));
 		LX += 12.f + LabelSize.X + 12.f;
 	}
@@ -787,8 +829,8 @@ void UOneBrahamHUDWidget::PaintLockdownModule(FOneBrahamPainter& Root, const FPa
 	const FSlateFontInfo WhatFont = HUDFont(EOneBrahamHUDType::Label, 13.f, 60, false);
 	const FSlateFontInfo TimerFont = HUDFont(EOneBrahamHUDType::TelemetryStrong, 30.f, 0, false);
 	const bool bFinal = Building.SecondsToNextStage > 0.f && Building.SecondsToNextStage < 10.f;
-	const FVector2D TimerSize = Measure(When, TimerFont);
-	P.Text(FVector2D(12.f, 46.f - Measure(What, WhatFont).Y * 0.5f), What, WhatFont, White());
+	const FVector2D TimerSize = OneBrahamHUDStyle::Measure(When, TimerFont);
+	P.Text(FVector2D(12.f, 46.f - OneBrahamHUDStyle::Measure(What, WhatFont).Y * 0.5f), What, WhatFont, White());
 	P.Text(FVector2D(Width - 12.f, 46.f - TimerSize.Y * 0.5f), When, TimerFont, bFinal ? Housing : White(), EOneBrahamTextAnchor::Right);
 
 	// Row 3: the LCD strip. A new line scrolls the last one up in 120 ms.
@@ -798,7 +840,7 @@ void UOneBrahamHUDWidget::PaintLockdownModule(FOneBrahamPainter& Root, const FPa
 	P.PushClip(LCDPos, LCDSize);
 	const FSlateFontInfo LCDFont = Font(EOneBrahamHUDType::TelemetryLight, 12.f, 40);
 	const float Scroll = C.bReduceMotion ? 1.f : FMath::Clamp(Since(C.Now, LCDScrolledAt) / 0.12f, 0.f, 1.f);
-	const float LineY = LCDPos.Y + (LCDSize.Y - Measure(TEXT("0"), LCDFont).Y) * 0.5f;
+	const float LineY = LCDPos.Y + (LCDSize.Y - OneBrahamHUDStyle::Measure(TEXT("0"), LCDFont).Y) * 0.5f;
 	if (LCDLines.Num() > 0)
 	{
 		P.Text(FVector2D(LCDPos.X + 8.f, LineY + (1.f - Scroll) * LCDSize.Y), LCDLines.Last(), LCDFont, LCDInk());
@@ -860,8 +902,7 @@ void UOneBrahamHUDWidget::PaintKillFeed(FOneBrahamPainter& Root, const FPaintCon
 		Runs.Add({ Row.Time, TimeFont, WithAlpha(LightGrey(), 0.5f), false, 10.f });
 		if (Row.bBuilding)
 		{
-			const FLinearColor BuildingInk = Row.Stage == EOneBrahamLockdownStage::Purge ? EmergencyRed()
-				: (OneBrahamHUDStyle::StageBand(Row.Stage) == 1 ? SafetyYellow() : White());
+			const FLinearColor BuildingInk = Row.Stage == EOneBrahamLockdownStage::Normal ? White() : OneBrahamHUDStyle::StageAccent(Row.Stage);
 			Runs.Add({ TEXT("THE BUILDING"), NameFont, BuildingInk, false, 6.f });
 			Runs.Add({ TEXT("signed out"), SignedOut, WithAlpha(LightGrey(), 0.85f), false, 6.f });
 		}
@@ -882,7 +923,7 @@ void UOneBrahamHUDWidget::PaintKillFeed(FOneBrahamPainter& Root, const FPaintCon
 		float RowH = 0.f;
 		for (const FRun& Run : Runs)
 		{
-			const FVector2D Size = Measure(Run.Text, Run.Font);
+			const FVector2D Size = OneBrahamHUDStyle::Measure(Run.Text, Run.Font);
 			Total += Size.X + Run.Gap;
 			RowH = FMath::Max(RowH, Size.Y);
 		}
@@ -895,7 +936,7 @@ void UOneBrahamHUDWidget::PaintKillFeed(FOneBrahamPainter& Root, const FPaintCon
 		float X = X0 + 10.f;
 		for (const FRun& Run : Runs)
 		{
-			const FVector2D Size = Measure(Run.Text, Run.Font);
+			const FVector2D Size = OneBrahamHUDStyle::Measure(Run.Text, Run.Font);
 			const float TY = Y + (PlateH - Size.Y) * 0.5f;
 			if (Run.bHeadshotMark)
 			{
@@ -1036,7 +1077,7 @@ void UOneBrahamHUDWidget::PaintSquadBoard(FOneBrahamPainter& Root, const FPaintC
 		else if (bExtracted){ Tag = TEXT("EXTRACTED"); }
 
 		const FSlateFontInfo& TFont = bDown ? FloorFont : TagFont;
-		const FVector2D TagSize = Measure(Tag, TFont) + FVector2D(10.f, 2.f);
+		const FVector2D TagSize = OneBrahamHUDStyle::Measure(Tag, TFont) + FVector2D(10.f, 2.f);
 		const FVector2D TagPos(BoardW - TagSize.X, Y + (RowH - TagSize.Y) * 0.5f - 1.f);
 		if (bDown)
 		{
@@ -1068,7 +1109,7 @@ void UOneBrahamHUDWidget::PaintMicPill(FOneBrahamPainter& Root, const FPaintCont
 	const FString Range = Frame.VoiceRangeMetres > 0 ? FString::Printf(TEXT("  ·  %d m"), Frame.VoiceRangeMetres) : FString();
 	const FString ChannelText = (Frame.VoiceChannelWord.IsEmpty() ? FString(TEXT("PROXIMITY")) : Frame.VoiceChannelWord) + Range;
 
-	const float W = 34.f + Measure(TEXT("MIC LIVE"), Word).X + 12.f + Measure(ChannelText, Channel).X + 14.f;
+	const float W = 34.f + OneBrahamHUDStyle::Measure(TEXT("MIC LIVE"), Word).X + 12.f + OneBrahamHUDStyle::Measure(ChannelText, Channel).X + 14.f;
 	P.RoundRect(FVector2D::ZeroVector, FVector2D(W, 24.f), WithAlpha(Navy(), 0.86f), 12.f);
 	P.Outline(FVector2D::ZeroVector, FVector2D(W, 24.f), WithAlpha(SignalBlue(), 0.6f), 1.f, 12.f);
 
@@ -1077,8 +1118,8 @@ void UOneBrahamHUDWidget::PaintMicPill(FOneBrahamPainter& Root, const FPaintCont
 	const float Level = 0.5f + 0.5f * FMath::Abs(FMath::Sin(static_cast<float>(C.Now) * 9.f));
 	P.Circle(FVector2D(16.f, 12.f), 4.f, SignalBlue());
 	P.Ring(FVector2D(16.f, 12.f), 6.f + 2.f * Level, WithAlpha(SignalBlue(), 0.6f * Level), 1.f);
-	const FVector2D Mic = P.Text(FVector2D(30.f, 12.f - Measure(TEXT("M"), Word).Y * 0.5f), TEXT("MIC LIVE"), Word, White());
-	P.Text(FVector2D(30.f + Mic.X + 12.f, 12.f - Measure(TEXT("M"), Channel).Y * 0.5f), ChannelText, Channel, WithAlpha(LightGrey(), 0.8f));
+	const FVector2D Mic = P.Text(FVector2D(30.f, 12.f - OneBrahamHUDStyle::Measure(TEXT("M"), Word).Y * 0.5f), TEXT("MIC LIVE"), Word, White());
+	P.Text(FVector2D(30.f + Mic.X + 12.f, 12.f - OneBrahamHUDStyle::Measure(TEXT("M"), Channel).Y * 0.5f), ChannelText, Channel, WithAlpha(LightGrey(), 0.8f));
 }
 
 // ==========================================================================
@@ -1123,7 +1164,7 @@ void UOneBrahamHUDWidget::PaintHealthCard(FOneBrahamPainter& Root, const FPaintC
 	P.Rect(FVector2D(30.f, 0.f), FVector2D(30.f, Card.Y), Photo);
 	const FString Initial = Initials(Frame.PlayerName.IsEmpty() ? FString(TEXT("You")) : Frame.PlayerName);
 	const FSlateFontInfo InitialFont = Font(EOneBrahamHUDType::Verb, 22.f);
-	P.Text(FVector2D(30.f, Card.Y * 0.5f - Measure(Initial, InitialFont).Y * 0.5f - 6.f), Initial, InitialFont, Navy(), EOneBrahamTextAnchor::Centre);
+	P.Text(FVector2D(30.f, Card.Y * 0.5f - OneBrahamHUDStyle::Measure(Initial, InitialFont).Y * 0.5f - 6.f), Initial, InitialFont, Navy(), EOneBrahamTextAnchor::Centre);
 	// The lanyard slot, cut through the top of the pass.
 	P.RoundRect(FVector2D(20.f, 6.f), FVector2D(20.f, 4.f), WithAlpha(Navy(), 0.55f), 2.f);
 
@@ -1132,7 +1173,7 @@ void UOneBrahamHUDWidget::PaintHealthCard(FOneBrahamPainter& Root, const FPaintC
 	const float Shown = FMath::Lerp(CountFrom, Health, CountT);
 	const FString Number = FString::FromInt(FMath::CeilToInt(Shown));
 	const FSlateFontInfo NumberFont = HUDFont(EOneBrahamHUDType::TelemetryStrong, 44.f, -20, false);
-	const FVector2D NumberSize = Measure(Number, NumberFont);
+	const FVector2D NumberSize = OneBrahamHUDStyle::Measure(Number, NumberFont);
 	P.Text(FVector2D(Card.X - 14.f, 0.f), Number, NumberFont, bCritical ? EmergencyRed() : White(), EOneBrahamTextAnchor::Right);
 
 	// The top line: who, and what they do, in whatever the number leaves. The
@@ -1140,10 +1181,10 @@ void UOneBrahamHUDWidget::PaintHealthCard(FOneBrahamPainter& Root, const FPaintC
 	// changes; when name and role do not both fit, the role goes first, and a
 	// long name ends in an ellipsis rather than in the numerals.
 	const FSlateFontInfo WhoFont = HUDFont(EOneBrahamHUDType::Label, 12.f, 60, false);
-	const float WhoW = Card.X - 14.f - FMath::Max(NumberSize.X, Measure(TEXT("100"), NumberFont).X) - 16.f - 72.f - (bCritical ? 18.f : 0.f);
+	const float WhoW = Card.X - 14.f - FMath::Max(NumberSize.X, OneBrahamHUDStyle::Measure(TEXT("100"), NumberFont).X) - 16.f - 72.f - (bCritical ? 18.f : 0.f);
 	const FString Name = Frame.PlayerName.ToUpper();
 	const FString WithRole = Frame.RoleLabel.IsEmpty() ? Name : FString::Printf(TEXT("%s  ·  %s"), *Name, *Frame.RoleLabel.ToUpper());
-	const FString Who = Measure(WithRole, WhoFont).X <= WhoW ? WithRole : Fit(Name, WhoFont, WhoW);
+	const FString Who = OneBrahamHUDStyle::Measure(WithRole, WhoFont).X <= WhoW ? WithRole : Fit(Name, WhoFont, WhoW);
 	P.Text(FVector2D(72.f, 9.f), Who, WhoFont, WithAlpha(White(), 0.8f));
 	if (Who != WithRole && !Frame.RoleLabel.IsEmpty())
 	{
@@ -1253,7 +1294,7 @@ void UOneBrahamHUDWidget::PaintAmmo(FOneBrahamPainter& Root, const FPaintContext
 	for (int32 Index = Modes.Num() - 1; Index >= 0; --Index)
 	{
 		const FString Word = FireModeWord(Modes[Index]);
-		const FVector2D Size = Measure(Word, ModeFont);
+		const FVector2D Size = OneBrahamHUDStyle::Measure(Word, ModeFont);
 		X -= Size.X;
 		const bool bActive = Modes[Index] == Data.FireMode;
 		P.Text(FVector2D(X, RowY), Word, ModeFont, WithAlpha(White(), bActive ? 1.f : 0.35f));
@@ -1270,15 +1311,15 @@ void UOneBrahamHUDWidget::PaintAmmo(FOneBrahamPainter& Root, const FPaintContext
 	const float Slide = Ramp(C.Now, FireModeAt, 0.12f, EOneBrahamEase::Ribbon);
 	const float UX = PrevW > 0.f ? FMath::Lerp(PrevX, ActiveX, Slide) : ActiveX;
 	const float UW = PrevW > 0.f ? FMath::Lerp(PrevW, ActiveW, Slide) : ActiveW;
-	P.Rect(FVector2D(UX, RowY + Measure(TEXT("A"), ModeFont).Y + 1.f), FVector2D(UW, 2.f), White());
+	P.Rect(FVector2D(UX, RowY + OneBrahamHUDStyle::Measure(TEXT("A"), ModeFont).Y + 1.f), FVector2D(UW, 2.f), White());
 
 	// --- the number and the reserve ---------------------------------------------------------
 	const FSlateFontInfo MagFont = HUDFont(EOneBrahamHUDType::TelemetryStrong, 56.f, -30, false);
 	const FSlateFontInfo ReserveFont = HUDFont(EOneBrahamHUDType::TelemetryLight, 20.f, 0, false);
 	const FString Reserve = FString::Printf(TEXT("/ %d"), FMath::Max(0, Data.AmmoReserve));
-	const FVector2D ReserveSize = Measure(Reserve, ReserveFont);
+	const FVector2D ReserveSize = OneBrahamHUDStyle::Measure(Reserve, ReserveFont);
 	const FString MagText = FString::FromInt(Mag);
-	const FVector2D MagSizePx = Measure(MagText, MagFont);
+	const FVector2D MagSizePx = OneBrahamHUDStyle::Measure(MagText, MagFont);
 	const float NumberTop = RowY - 4.f - MagSizePx.Y + 8.f;
 	const float ReserveX = -ReserveSize.X;
 	P.Text(FVector2D(ReserveX, NumberTop + MagSizePx.Y - ReserveSize.Y - 10.f), Reserve, ReserveFont, WithAlpha(White(), 0.6f));
@@ -1533,11 +1574,12 @@ void UOneBrahamHUDWidget::PaintAnnouncement(FOneBrahamPainter& Root, const FPain
 
 	// The field: the stage's two colours, with a slow light passing across it -
 	// the same aurora the OLED screens in the building run.
-	FLinearColor FieldA = RibbonPurple();
-	FLinearColor FieldB = RibbonBlue();
-	const int32 Band = OneBrahamHUDStyle::StageBand(A.Stage);
-	if (Band == 1)		{ FieldA = HazardYellow(); FieldB = LockdownFieldDark(); }
-	else if (Band == 2)	{ FieldA = EmergencyRed(); FieldB = PurgeFieldDark(); }
+	FLinearColor FieldA;
+	FLinearColor FieldB;
+	// The tone is the building's now (the one rule): a card pushed a tick
+	// before the extraction's broadcast still turns the exit green with it.
+	const EOneBrahamStageTone CardTone = AnnouncementTone(A);
+	UOneBrahamUIStyle::ToneField(CardTone, FieldA, FieldB);
 
 	Card.PushClip(FVector2D::ZeroVector, FVector2D(Width * Wipe, Height));
 	Card.Gradient(FVector2D::ZeroVector, FVector2D(Width, Height), FieldA, FieldB, true, 4.f);
@@ -1552,7 +1594,7 @@ void UOneBrahamHUDWidget::PaintAnnouncement(FOneBrahamPainter& Root, const FPain
 	const float CopyT = C.bReduceMotion ? 1.f : FMath::Clamp((T - 0.12f) / 0.28f, 0.f, 1.f);
 	const float Rise = (1.f - OneBrahamEase::Evaluate(EOneBrahamEase::Ribbon, CopyT)) * 6.f;
 	FOneBrahamPainter Copy = Card.Faded(CopyT);
-	const FLinearColor Ink = Band == 1 ? Navy() : White();
+	const FLinearColor Ink = UOneBrahamUIStyle::ToneInk(CardTone);
 
 	Copy.Text(FVector2D(18.f, 10.f + Rise), A.Eyebrow, Font(EOneBrahamHUDType::Eyebrow, 11.f, 220), WithAlpha(Ink, 0.8f));
 	const FSlateFontInfo HeadlineFont = Font(EOneBrahamHUDType::Verb, A.Headline.Len() > 44 ? 22.f : 28.f, -10);
@@ -1610,31 +1652,15 @@ void UOneBrahamHUDWidget::PaintStageCard(FOneBrahamPainter& P, const FPaintConte
 	}
 	const float Out = FMath::Clamp((T - HoldEnd) / 0.3f, 0.f, 1.f);
 
-	FString Title;
-	FString Line;
-	FLinearColor StageInk = SafetyYellow();
-	switch (StageCard)
-	{
-	case EOneBrahamStageCard::Lockdown:
-		Title = TEXT("LOCKDOWN");
-		Line = TEXT("The lift lobby is closed. Please use the stairs.");
-		break;
-	case EOneBrahamStageCard::Purge:
-		Title = TEXT("PURGE");
-		Line = TEXT("Floors are being cleared. Thank you for your patience.");
-		StageInk = EmergencyRed();
-		break;
-	case EOneBrahamStageCard::Roof:
-	default:
-		Title = TEXT("THE ROOF");
-		Line = TEXT("Your lift is here. Please mind the gap.");
-		break;
-	}
+	const FString Title = StageCardTitle();
+	const FString Line = StageCardLine();
+	const FLinearColor StageInk = Tone(StageCard == EOneBrahamStageCard::Purge ? EOneBrahamStageTone::Purge
+		: (StageCard == EOneBrahamStageCard::Roof ? EOneBrahamStageTone::Evac : EOneBrahamStageTone::Lockdown));
 
 	// The stack sits between 22% and 32% of the height: never in the band the
 	// crosshair works in.
 	const float Copy = FMath::Clamp((T - 0.08f) / 0.25f, 0.f, 1.f) * (1.f - Out);
-	FOneBrahamPainter Q = P.Child(FVector2D(C.Screen.X * 0.5f, C.Screen.Y * 0.22f), C.Scale).Faded(Copy);
+	FOneBrahamPainter Q = P.Child(FVector2D(C.Screen.X * 0.5f, C.Screen.Y * OneBrahamCentre::StageCardTop), C.Scale).Faded(Copy);
 
 	Q.Text(FVector2D(0.f, 0.f), StageCardEyebrow, Font(EOneBrahamHUDType::TelemetryLight, 12.f, 240), StageInk, EOneBrahamTextAnchor::Centre);
 
@@ -1657,9 +1683,14 @@ void UOneBrahamHUDWidget::PaintPrompt(FOneBrahamPainter& Root, const FPaintConte
 	const bool bAccepting = AcceptT >= 0.f && AcceptT < 0.25f;
 	const bool bTarget = Data.bShowInteractionPrompt && Data.bHasInteractionTarget;
 
-	FOneBrahamPainter P = Root.Child(FVector2D(C.Screen.X * 0.5f, C.Screen.Y * 0.58f), C.Scale);
+	FOneBrahamPainter P = Root.Child(FVector2D(C.Screen.X * 0.5f, C.Screen.Y * OneBrahamCentre::PromptY), C.Scale);
 
-	if (bTarget || bAccepting)
+	// A reader that refuses is a message, and takes its turn in the centre
+	// (OneBrahamCentreMessages.h): the full card only when it holds it. A
+	// reader that can be used is an instrument, like the crosshair, and is
+	// always drawn.
+	const bool bRefusing = bTarget && Data.bInteractionBlocked;
+	if ((bTarget || bAccepting) && (!bRefusing || C.Centre.IsCard(EOneBrahamCentreSlot::BlockedPrompt)))
 	{
 		const bool bLocked = bTarget && Data.bInteractionBlocked;
 		const FString Prompt = bTarget ? LastPromptText : FString();
@@ -1672,8 +1703,8 @@ void UOneBrahamHUDWidget::PaintPrompt(FOneBrahamPainter& Root, const FPaintConte
 		const bool bVerbRepeated = !Verb.IsEmpty() && Action.StartsWith(Verb + TEXT(" "), ESearchCase::IgnoreCase);
 		const FString Shown = bLocked ? Prompt.ToUpper()
 			: (Verb.IsEmpty() ? Prompt : (bVerbRepeated ? Action : FString::Printf(TEXT("%s  ·  %s"), *Verb, *Action)));
-		const FVector2D TextSize = Measure(Shown, ActionFont);
-		const float CapW = Key.IsEmpty() || bLocked ? 0.f : FMath::Max(18.f, Measure(Key, Font(EOneBrahamHUDType::Telemetry, 12.f)).X + 10.f) + 8.f;
+		const FVector2D TextSize = OneBrahamHUDStyle::Measure(Shown, ActionFont);
+		const float CapW = Key.IsEmpty() || bLocked ? 0.f : FMath::Max(18.f, OneBrahamHUDStyle::Measure(Key, Font(EOneBrahamHUDType::Telemetry, 12.f)).X + 10.f) + 8.f;
 		const float Ring = 36.f;
 		const float Total = Ring + 12.f + CapW + TextSize.X;
 		const float X0 = -Total * 0.5f;
@@ -1722,10 +1753,10 @@ void UOneBrahamHUDWidget::PaintPrompt(FOneBrahamPainter& Root, const FPaintConte
 
 	// --- the sub-banner: the induction's steps, and the building's asides ------------------
 	const float SubT = Since(C.Now, SubBannerAt);
-	if (!SubBannerShown.IsEmpty() && SubT >= 0.f && SubT < SubBannerSeconds)
+	if (!SubBannerShown.IsEmpty() && SubT >= 0.f && SubT < SubBannerSeconds && C.Centre.IsCard(EOneBrahamCentreSlot::Induction))
 	{
 		const float Fade = FMath::Clamp(SubT / 0.15f, 0.f, 1.f) * (1.f - FMath::Clamp((SubT - SubBannerSeconds + 0.3f) / 0.3f, 0.f, 1.f));
-		FOneBrahamPainter S = Root.Child(FVector2D(C.Screen.X * 0.5f, C.Screen.Y * 0.665f), C.Scale).Faded(Fade);
+		FOneBrahamPainter S = Root.Child(FVector2D(C.Screen.X * 0.5f, C.Screen.Y * OneBrahamCentre::InductionY), C.Scale).Faded(Fade);
 
 		// "INDUCTION  ·  Walk in from the street  -  W A S D": an eyebrow, the
 		// instruction, and the keys as caps.
@@ -1755,7 +1786,7 @@ void UOneBrahamHUDWidget::PaintPrompt(FOneBrahamPainter& Root, const FPaintConte
 		const FSlateFontInfo BodyFont = HUDFont(EOneBrahamHUDType::Label, 16.f, 20, C.bHeavyOutline);
 		const FSlateFontInfo HowFont = HUDFont(EOneBrahamHUDType::Hint, 14.f, 0, C.bHeavyOutline);
 		const FSlateFontInfo CapFont = Font(EOneBrahamHUDType::Telemetry, 12.f);
-		const FVector2D BodySize = Measure(Body, BodyFont);
+		const FVector2D BodySize = OneBrahamHUDStyle::Measure(Body, BodyFont);
 
 		struct FToken { FString Text; bool bKey = false; };
 		TArray<FToken> Tokens;
@@ -1778,7 +1809,7 @@ void UOneBrahamHUDWidget::PaintPrompt(FOneBrahamPainter& Root, const FPaintConte
 		float HowW = 0.f;
 		for (const FToken& Token : Tokens)
 		{
-			HowW += (Token.bKey ? FMath::Max(18.f, Measure(Token.Text, CapFont).X + 10.f) : Measure(Token.Text, HowFont).X) + 6.f;
+			HowW += (Token.bKey ? FMath::Max(18.f, OneBrahamHUDStyle::Measure(Token.Text, CapFont).X + 10.f) : OneBrahamHUDStyle::Measure(Token.Text, HowFont).X) + 6.f;
 		}
 		// 16 px between the instruction and its keys: at 720p the drawn words
 		// run a pixel or two past their measure, and 10 put the last letter
@@ -1802,7 +1833,7 @@ void UOneBrahamHUDWidget::PaintPrompt(FOneBrahamPainter& Root, const FPaintConte
 			}
 			else
 			{
-				const FVector2D Size = Measure(Token.Text, HowFont);
+				const FVector2D Size = OneBrahamHUDStyle::Measure(Token.Text, HowFont);
 				S.Text(FVector2D(KX, (BodySize.Y - Size.Y) * 0.5f), Token.Text, HowFont, WithAlpha(LightGrey(), 0.8f));
 				KX += Size.X + 6.f;
 			}
@@ -1835,8 +1866,8 @@ void UOneBrahamHUDWidget::PaintDowned(FOneBrahamPainter& P, const FPaintContext&
 	// A medallion above the crosshair band: the bleed-out in the LED face
 	// inside a ring, YOU'RE DOWN over it, the call for help under it. The ring
 	// fills blue while a colleague's hands are on you.
-	FOneBrahamPainter Q = D.Child(FVector2D(C.Screen.X * 0.5f, C.Screen.Y * 0.33f), C.Scale);
-	const float R = 92.f;
+	FOneBrahamPainter Q = D.Child(FVector2D(C.Screen.X * 0.5f, C.Screen.Y * OneBrahamCentre::DownedY), C.Scale);
+	const float R = OneBrahamCentre::DownedRadiusPx;
 
 	// Dense enough to read on sunlit concrete as well as in the dark stairs.
 	// An LED panel is black, not navy: red dots on navy were 3:1, on black they
@@ -1857,24 +1888,27 @@ void UOneBrahamHUDWidget::PaintDowned(FOneBrahamPainter& P, const FPaintContext&
 	const FString Bleed = Clock(Data.BleedOutRemaining, false);
 	// No outline on the dot face: a black ring round every dot turns the digits to gravel.
 	const FSlateFontInfo LED = Font(EOneBrahamHUDType::LED, 60.f, 0);
-	const FVector2D BleedSize = Measure(Bleed, LED);
+	const FVector2D BleedSize = OneBrahamHUDStyle::Measure(Bleed, LED);
 	Q.Text(FVector2D(0.f, -BleedSize.Y * 0.5f - 4.f), Bleed, LED, EmergencyRed(), EOneBrahamTextAnchor::Centre);
 	Q.Text(FVector2D(0.f, BleedSize.Y * 0.5f - 2.f), Data.ReviveProgress01 > 0.f ? TEXT("BEING REVIVED") : TEXT("BLEEDING OUT"),
 		Font(EOneBrahamHUDType::Telemetry, 11.f, 200), Data.ReviveProgress01 > 0.f ? White() : WithAlpha(LightGrey(), 0.8f), EOneBrahamTextAnchor::Centre);
 
 	const FSlateFontInfo TitleFont = OutlinedFont(EOneBrahamHUDType::Title, 44.f, 40, 2.f, FLinearColor(0.f, 0.f, 0.f, 0.5f));
-	const FVector2D Title = Measure(TEXT("YOU'RE DOWN"), TitleFont);
+	const FVector2D Title = OneBrahamHUDStyle::Measure(TEXT("YOU'RE DOWN"), TitleFont);
 	Q.Text(FVector2D(0.f, -R - 18.f - Title.Y), TEXT("YOU'RE DOWN"), TitleFont, White(), EOneBrahamTextAnchor::Centre);
 
 	if (Data.ReviveProgress01 <= 0.f)
 	{
-		const float PromptY = R + 22.f;
+		// The call for help is the reader's prompt, in the reader's place below
+		// the crosshair band: under the medallion it sat across the band.
+		FOneBrahamPainter R2 = D.Child(FVector2D(C.Screen.X * 0.5f, C.Screen.Y * OneBrahamCentre::PromptY), C.Scale);
 		const FSlateFontInfo PromptFont = HUDFont(EOneBrahamHUDType::Label, 16.f, 20, false);
 		const FString Words = TEXT("Hold  ·  Call for help");
-		const float W = 26.f + Measure(Words, PromptFont).X;
-		Plate(Q, FVector2D(-W * 0.5f - 12.f, PromptY - 6.f), FVector2D(W + 24.f, 30.f), 0.6f, 4.f);
-		KeyCap(Q, FVector2D(-W * 0.5f, PromptY), TEXT("F"), White());
-		Q.Text(FVector2D(-W * 0.5f + 26.f, PromptY), Words, PromptFont, White());
+		const FVector2D WordsSize = OneBrahamHUDStyle::Measure(Words, PromptFont);
+		const float W = 26.f + WordsSize.X;
+		Plate(R2, FVector2D(-W * 0.5f - 12.f, -15.f), FVector2D(W + 24.f, 30.f), 0.6f, 4.f);
+		KeyCap(R2, FVector2D(-W * 0.5f, -9.f), TEXT("F"), White());
+		R2.Text(FVector2D(-W * 0.5f + 26.f, -WordsSize.Y * 0.5f), Words, PromptFont, White());
 	}
 }
 
@@ -1885,6 +1919,14 @@ void UOneBrahamHUDWidget::PaintSubtitles(FOneBrahamPainter& Root, const FPaintCo
 {
 	const float T = Since(C.Now, SubtitleAt);
 	if (!Data.bShowSubtitles || SubtitleShown.IsEmpty() || T < 0.f || T > SubtitleSeconds)
+	{
+		return;
+	}
+
+	// The subtitle never repeats a card: what a card on screen is already
+	// saying is dropped, and a line with nothing left is not drawn.
+	const FString Said = OneBrahamCentre::SubtitleRemainder(SubtitleShown, CentreCardLines(C.Centre));
+	if (Said.IsEmpty())
 	{
 		return;
 	}
@@ -1905,19 +1947,19 @@ void UOneBrahamHUDWidget::PaintSubtitles(FOneBrahamPainter& Root, const FPaintCo
 	const FSlateFontInfo SpeakerFont = Font(EOneBrahamHUDType::Label, 15.f, 120);
 	const FSlateFontInfo BodyFont = Font(EOneBrahamHUDType::Body, 20.f);
 	const float MaxW = C.Screen.X * 0.6f / Scale;
-	const float SpeakerW = Measure(Speaker, SpeakerFont).X + 12.f;
-	const TArray<FString> Lines = Wrap(SubtitleShown, BodyFont, MaxW - SpeakerW, 2);
-	const float LineH = Measure(TEXT("Ag"), BodyFont).Y;
+	const float SpeakerW = OneBrahamHUDStyle::Measure(Speaker, SpeakerFont).X + 12.f;
+	const TArray<FString> Lines = Wrap(Said, BodyFont, MaxW - SpeakerW, 2);
+	const float LineH = OneBrahamHUDStyle::Measure(TEXT("Ag"), BodyFont).Y;
 
 	float Widest = 0.f;
 	for (const FString& Line : Lines)
 	{
-		Widest = FMath::Max(Widest, Measure(Line, BodyFont).X);
+		Widest = FMath::Max(Widest, OneBrahamHUDStyle::Measure(Line, BodyFont).X);
 	}
 	const float Total = SpeakerW + Widest;
 	const float X0 = -Total * 0.5f;
 	P.RoundRect(FVector2D(X0 - 14.f, -8.f), FVector2D(Total + 28.f, Lines.Num() * LineH + 16.f), FLinearColor(0.f, 0.f, 0.f, 0.55f), 4.f);
-	P.Text(FVector2D(X0, (LineH - Measure(Speaker, SpeakerFont).Y) * 0.5f), Speaker, SpeakerFont, SpeakerInk);
+	P.Text(FVector2D(X0, (LineH - OneBrahamHUDStyle::Measure(Speaker, SpeakerFont).Y) * 0.5f), Speaker, SpeakerFont, SpeakerInk);
 	for (int32 Index = 0; Index < Lines.Num(); ++Index)
 	{
 		P.Text(FVector2D(X0 + SpeakerW, Index * LineH), Lines[Index], BodyFont, White());
@@ -1938,15 +1980,141 @@ void UOneBrahamHUDWidget::PaintBanner(FOneBrahamPainter& Root, const FPaintConte
 	// A notice, not a headline: the stage cards and the PA line do the shouting.
 	// It sits under the crosshair band, centred, as a labelled tag.
 	const float Fade = FMath::Clamp(T / 0.14f, 0.f, 1.f) * (1.f - FMath::Clamp((T - BannerSeconds + 0.3f) / 0.3f, 0.f, 1.f));
-	FOneBrahamPainter P = Root.Child(FVector2D(C.Screen.X * 0.5f, C.Screen.Y * 0.36f), C.Scale).Faded(Fade);
+	FOneBrahamPainter P = Root.Child(FVector2D(C.Screen.X * 0.5f, C.Screen.Y * OneBrahamCentre::BannerY), C.Scale).Faded(Fade);
 	const FSlateFontInfo BannerFont = HUDFont(EOneBrahamHUDType::Label, 18.f, 120, C.bHeavyOutline);
 	const FString Text = BannerShown.ToUpper();
-	const FVector2D Size = Measure(Text, BannerFont);
+	const FVector2D Size = OneBrahamHUDStyle::Measure(Text, BannerFont);
 	const FLinearColor Ink = BannerColour.A > 0.f ? FLinearColor(BannerColour.R, BannerColour.G, BannerColour.B, 1.f) : White();
 
 	Plate(P, FVector2D(-Size.X * 0.5f - 16.f, -6.f), FVector2D(Size.X + 32.f, Size.Y + 12.f), 0.72f, 3.f);
 	P.Rect(FVector2D(-Size.X * 0.5f - 16.f, -6.f), FVector2D(4.f, Size.Y + 12.f), Ink);
 	P.Text(FVector2D(0.f, 0.f), Text, BannerFont, Ink, EOneBrahamTextAnchor::Centre);
+}
+
+// ==========================================================================
+//  The centre's ticker: one line for what a louder card has shrunk
+// ==========================================================================
+FString UOneBrahamHUDWidget::StageCardTitle() const
+{
+	switch (StageCard)
+	{
+	case EOneBrahamStageCard::Lockdown:	return TEXT("LOCKDOWN");
+	case EOneBrahamStageCard::Purge:	return TEXT("PURGE");
+	case EOneBrahamStageCard::Roof:		return TEXT("THE ROOF");
+	default:							return FString();
+	}
+}
+
+FString UOneBrahamHUDWidget::StageCardLine() const
+{
+	switch (StageCard)
+	{
+	case EOneBrahamStageCard::Lockdown:	return TEXT("The lift lobby is closed. Please use the stairs.");
+	case EOneBrahamStageCard::Purge:	return TEXT("Floors are being cleared. Thank you for your patience.");
+	case EOneBrahamStageCard::Roof:		return TEXT("Your lift is here. Please mind the gap.");
+	default:							return FString();
+	}
+}
+
+void UOneBrahamHUDWidget::PaintTicker(FOneBrahamPainter& Root, const FPaintContext& C) const
+{
+	// Which occupant shrank (there is at most one).
+	EOneBrahamCentreSlot Slot = EOneBrahamCentreSlot::Count;
+	for (int32 Index = 0; Index < static_cast<int32>(EOneBrahamCentreSlot::Count); ++Index)
+	{
+		if (C.Centre.IsTicker(static_cast<EOneBrahamCentreSlot>(Index)))
+		{
+			Slot = static_cast<EOneBrahamCentreSlot>(Index);
+		}
+	}
+	if (Slot == EOneBrahamCentreSlot::Count)
+	{
+		return;
+	}
+
+	// The tag (an eyebrow word in its colour) and the line, on a slim plate:
+	// one line, 24 px, never a second card.
+	FString Tag;
+	FString Line;
+	FLinearColor TagInk = SignalBlue();
+	float Y = C.Screen.Y * OneBrahamCentre::TickerY;
+	float Fade = 1.f;
+	bool bRefused = false;
+	switch (Slot)
+	{
+	case EOneBrahamCentreSlot::StageCard:
+	{
+		Tag = StageCardTitle();
+		Line = StageCardLine();
+		TagInk = Tone(StageCard == EOneBrahamStageCard::Purge ? EOneBrahamStageTone::Purge
+			: (StageCard == EOneBrahamStageCard::Roof ? EOneBrahamStageTone::Evac : EOneBrahamStageTone::Lockdown));
+		const float T = Since(C.Now, StageCardAt);
+		Fade = FMath::Clamp(T / 0.2f, 0.f, 1.f) * (1.f - FMath::Clamp((T - (StageCardEnd() - StageCardAt - 0.3f)) / 0.3f, 0.f, 1.f));
+		break;
+	}
+	case EOneBrahamCentreSlot::Banner:
+	{
+		Line = BannerShown.ToUpper();
+		TagInk = BannerColour.A > 0.f ? FLinearColor(BannerColour.R, BannerColour.G, BannerColour.B, 1.f) : White();
+		const float T = Since(C.Now, BannerAt);
+		Fade = FMath::Clamp(T / 0.14f, 0.f, 1.f) * (1.f - FMath::Clamp((T - BannerSeconds + 0.3f) / 0.3f, 0.f, 1.f));
+		break;
+	}
+	case EOneBrahamCentreSlot::BlockedPrompt:
+		// The refusal keeps its own place, under the crosshair band, where the
+		// reader would be: the eye already looks there for the card reader.
+		Line = LastPromptText.ToUpper();
+		Y = C.Screen.Y * OneBrahamCentre::PromptY;
+		bRefused = true;
+		break;
+	case EOneBrahamCentreSlot::Induction:
+	{
+		Tag = TEXT("INDUCTION");
+		Line = SubBannerShown;
+		if (Line.StartsWith(TEXT("INDUCTION")))
+		{
+			Line = Line.Mid(9).TrimStart();
+			if (Line.StartsWith(TEXT("·"))) { Line = Line.Mid(1).TrimStart(); }
+		}
+		const float T = Since(C.Now, SubBannerAt);
+		Fade = FMath::Clamp(T / 0.15f, 0.f, 1.f) * (1.f - FMath::Clamp((T - SubBannerSeconds + 0.3f) / 0.3f, 0.f, 1.f));
+		break;
+	}
+	default:
+		return;
+	}
+	if (Line.IsEmpty() || Fade <= 0.f)
+	{
+		return;
+	}
+
+	FOneBrahamPainter P = Root.Child(FVector2D(C.Screen.X * 0.5f, Y), C.Scale).Faded(Fade);
+	const FSlateFontInfo TagFont = Font(EOneBrahamHUDType::Eyebrow, 11.f, 200);
+	const FSlateFontInfo LineFont = Font(EOneBrahamHUDType::Hint, 14.f, 20);
+	const FString TagText = Tracked(Tag, TagFont);
+	const float TagW = Tag.IsEmpty() ? (bRefused ? 18.f : 0.f) : OneBrahamHUDStyle::Measure(TagText, TagFont).X + 10.f;
+	const float MaxLineW = C.Screen.X * 0.42f / C.Scale - TagW;
+	const FString Shown = Fit(Line, LineFont, MaxLineW);
+	const FVector2D LineSize = OneBrahamHUDStyle::Measure(Shown, LineFont);
+	const float Total = TagW + LineSize.X;
+	const float X0 = -Total * 0.5f;
+	const float H = 24.f;
+
+	Plate(P, FVector2D(X0 - 10.f, -H * 0.5f), FVector2D(Total + 20.f, H), 0.72f, 3.f);
+	if (bRefused)
+	{
+		P.Cross(FVector2D(X0 + 6.f, 0.f), 8.f, Tone(EOneBrahamStageTone::Purge), 2.f);
+	}
+	else if (!Tag.IsEmpty())
+	{
+		P.Text(FVector2D(X0, -OneBrahamHUDStyle::Measure(TagText, TagFont).Y * 0.5f), TagText, TagFont, TagInk);
+	}
+	else
+	{
+		// A notice without a tag keeps the banner's colour bar.
+		P.Rect(FVector2D(X0 - 10.f, -H * 0.5f), FVector2D(3.f, H), TagInk);
+	}
+	P.Text(FVector2D(X0 + TagW, -LineSize.Y * 0.5f), Shown, LineFont, White());
 }
 
 // ==========================================================================
@@ -1960,8 +2128,8 @@ void UOneBrahamHUDWidget::PaintStageVignette(FOneBrahamPainter& P, const FPaintC
 	}
 
 	const float Edge = C.Screen.Y * 0.18f;
-	const FLinearColor Red = WithAlpha(EmergencyRed(), 0.06f);
-	const FLinearColor None = WithAlpha(EmergencyRed(), 0.f);
+	const FLinearColor Red = Tone(EOneBrahamStageTone::Purge, 0.06f);
+	const FLinearColor None = Tone(EOneBrahamStageTone::Purge, 0.f);
 	P.Gradient(FVector2D::ZeroVector, FVector2D(C.Screen.X, Edge), Red, None, false);
 	P.Gradient(FVector2D(0.f, C.Screen.Y - Edge), FVector2D(C.Screen.X, Edge), None, Red, false);
 	P.Gradient(FVector2D::ZeroVector, FVector2D(Edge, C.Screen.Y), Red, None, true);
@@ -2090,7 +2258,7 @@ void UOneBrahamHUDWidget::PaintAccidentBook(FOneBrahamPainter& P, const FPaintCo
 		const float StampScale = FMath::Lerp(1.4f, 1.f, Land);
 		const float Shake = !C.bReduceMotion && StampT < 0.15f && Land >= 1.f ? FMath::Sin(StampT * 120.f) * 2.f : 0.f;
 		const FSlateFontInfo StampFont = Font(EOneBrahamHUDType::Title, 40.f, 60);
-		const FVector2D TextSize = Measure(TEXT("SIGNED OUT"), StampFont);
+		const FVector2D TextSize = OneBrahamHUDStyle::Measure(TEXT("SIGNED OUT"), StampFont);
 		const FVector2D Box = TextSize + FVector2D(28.f, 10.f);
 		const FVector2D StampCentre(W * 0.62f + Shake, Y + 70.f);
 
@@ -2154,7 +2322,7 @@ void UOneBrahamHUDWidget::PaintSpectating(FOneBrahamPainter& Root, const FPaintC
 		? FString::Printf(TEXT("WATCHING  —  %s  ·  L%02d"), *Frame.SpectatingName.ToUpper(), Frame.SpectatingFloor)
 		: FString::Printf(TEXT("WATCHING  —  %s"), *Frame.SpectatingName.ToUpper());
 	const FSlateFontInfo LineFont = HUDFont(EOneBrahamHUDType::Telemetry, 12.f, 120, false);
-	const FVector2D Size = Measure(Line, LineFont);
+	const FVector2D Size = OneBrahamHUDStyle::Measure(Line, LineFont);
 	Plate(P, FVector2D(-12.f, -6.f), FVector2D(Size.X + 24.f, Size.Y + 12.f), 0.72f, 3.f);
 	P.Rect(FVector2D(-12.f, -6.f), FVector2D(3.f, Size.Y + 12.f), SignalBlue());
 	P.Text(FVector2D::ZeroVector, Line, LineFont, White());

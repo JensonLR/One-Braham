@@ -420,47 +420,170 @@ FLinearColor UOneBrahamUIStyle::Colour(EOneBrahamColour Token, float Alpha)
 	case EOneBrahamColour::LCDField:		return Hex(TEXT("12160F"), Alpha);
 	case EOneBrahamColour::LCDInk:			return Hex(TEXT("D8F27A"), Alpha);
 	case EOneBrahamColour::FireHousing:		return Hex(TEXT("8F1418"), Alpha);
+	case EOneBrahamColour::WarningAmber:
+	case EOneBrahamColour::WarningFieldA:
+	{
+		// Red-green colour blindness moves the danger hue to #FF6B00, and to
+		// those eyes that orange and this amber are one colour: the warning
+		// would read as the Purge. There the warning is a pale cream, which
+		// they separate from the yellow, the orange and the cyan way out.
+		const UOneBrahamGameUserSettings* User = UOneBrahamGameUserSettings::GetOneBrahamSettings();
+		if (User != nullptr && (User->ColourBlindMode == EOneBrahamColourBlindMode::Deuteranopia
+			|| User->ColourBlindMode == EOneBrahamColourBlindMode::Protanopia))
+		{
+			return Hex(TEXT("FFF2B3"), Alpha);
+		}
+		return Hex(TEXT("FF9F1C"), Alpha);
+	}
+	case EOneBrahamColour::WarningFieldB:	return Hex(TEXT("A85400"), Alpha);
+	case EOneBrahamColour::EvacGreen:
+	case EOneBrahamColour::EvacFieldA:
+	{
+		// Red-green colour blindness takes the exit green into the amber and
+		// the yellow: there the way out is a cyan, which every one of those
+		// eyes still separates from the warm stage colours.
+		const UOneBrahamGameUserSettings* User = UOneBrahamGameUserSettings::GetOneBrahamSettings();
+		if (User != nullptr && (User->ColourBlindMode == EOneBrahamColourBlindMode::Deuteranopia
+			|| User->ColourBlindMode == EOneBrahamColourBlindMode::Protanopia))
+		{
+			return Hex(TEXT("00C8D7"), Alpha);
+		}
+		// Tritanopia sees the exit green and the calm's signal blue as one
+		// teal: there the way out is a brighter spring green, apart from both.
+		if (User != nullptr && User->ColourBlindMode == EOneBrahamColourBlindMode::Tritanopia)
+		{
+			return Hex(TEXT("00FF7F"), Alpha);
+		}
+		return Hex(TEXT("00A651"), Alpha);
+	}
+	case EOneBrahamColour::EvacFieldB:		return Hex(TEXT("005C2D"), Alpha);
 	default:								return Hex(TEXT("FFFFFF"), Alpha);
 	}
 }
 
-FLinearColor UOneBrahamUIStyle::StageAccent(EOneBrahamLockdownStage Stage)
+// ==========================================================================
+//  The stage colour rule: one function, every surface
+// ==========================================================================
+EOneBrahamStageTone UOneBrahamUIStyle::StageTone(EOneBrahamLockdownStage Stage, bool bEvacuating)
 {
+	// The Purge outranks the way out: while the front is chasing you the
+	// screen stays red, extraction or not.
+	if (Stage == EOneBrahamLockdownStage::Purge)
+	{
+		return EOneBrahamStageTone::Purge;
+	}
+	if (bEvacuating)
+	{
+		return EOneBrahamStageTone::Evac;
+	}
 	switch (Stage)
 	{
-	case EOneBrahamLockdownStage::Lockdown:	return Colour(EOneBrahamColour::SafetyYellow);
-	case EOneBrahamLockdownStage::Purge:	return Colour(EOneBrahamColour::EmergencyRed);
-	default:								return Colour(EOneBrahamColour::SignalBlue);
+	case EOneBrahamLockdownStage::PreLockdown:	return EOneBrahamStageTone::Warning;
+	case EOneBrahamLockdownStage::Lockdown:		return EOneBrahamStageTone::Lockdown;
+	case EOneBrahamLockdownStage::Normal:
+	default:									return EOneBrahamStageTone::Calm;
 	}
 }
 
-FLinearColor UOneBrahamUIStyle::StageHairline(EOneBrahamLockdownStage Stage)
+FLinearColor UOneBrahamUIStyle::ToneColour(EOneBrahamStageTone Tone, float Alpha)
 {
-	switch (Stage)
+	switch (Tone)
 	{
-	case EOneBrahamLockdownStage::Lockdown:	return Colour(EOneBrahamColour::SafetyYellow, 0.25f);
-	case EOneBrahamLockdownStage::Purge:	return Colour(EOneBrahamColour::EmergencyRed, 0.30f);
-	default:								return Colour(EOneBrahamColour::LightGrey, 0.20f);
+	case EOneBrahamStageTone::Warning:	return Colour(EOneBrahamColour::WarningAmber, Alpha);
+	case EOneBrahamStageTone::Lockdown:	return Colour(EOneBrahamColour::SafetyYellow, Alpha);
+	case EOneBrahamStageTone::Purge:	return Colour(EOneBrahamColour::EmergencyRed, Alpha);
+	case EOneBrahamStageTone::Evac:		return Colour(EOneBrahamColour::EvacGreen, Alpha);
+	case EOneBrahamStageTone::Calm:
+	default:							return Colour(EOneBrahamColour::SignalBlue, Alpha);
 	}
 }
 
-void UOneBrahamUIStyle::StageField(EOneBrahamLockdownStage Stage, FLinearColor& OutA, FLinearColor& OutB)
+FLinearColor UOneBrahamUIStyle::ToneHairline(EOneBrahamStageTone Tone)
 {
-	switch (Stage)
+	switch (Tone)
 	{
-	case EOneBrahamLockdownStage::Lockdown:
+	case EOneBrahamStageTone::Warning:	return ToneColour(Tone, 0.25f);
+	case EOneBrahamStageTone::Lockdown:	return ToneColour(Tone, 0.25f);
+	case EOneBrahamStageTone::Purge:	return ToneColour(Tone, 0.30f);
+	case EOneBrahamStageTone::Evac:		return ToneColour(Tone, 0.30f);
+	case EOneBrahamStageTone::Calm:
+	default:							return Colour(EOneBrahamColour::LightGrey, 0.20f);
+	}
+}
+
+FLinearColor UOneBrahamUIStyle::ToneInk(EOneBrahamStageTone Tone)
+{
+	// Amber and yellow are light: navy type, as on a hazard sign. Red, green
+	// and the ribbon are dark enough for white, as on an exit sign. Decided by
+	// the tone's own lightness rather than by name, so a colour-blind remap
+	// that lightens a tone (the hot-orange danger, the cyan or spring-green
+	// way out, the cream warning) takes navy type with it instead of white on
+	// a pale field. Exit green (0.28) stays under the line: white, as designed.
+	if (Tone == EOneBrahamStageTone::Calm)
+	{
+		return Colour(EOneBrahamColour::White);	// the field is the dark ribbon
+	}
+	const FLinearColor Lead = ToneColour(Tone);
+	const float Luminance = 0.2126f * Lead.R + 0.7152f * Lead.G + 0.0722f * Lead.B;
+	return Luminance > 0.30f ? Colour(EOneBrahamColour::Navy) : Colour(EOneBrahamColour::White);
+}
+
+void UOneBrahamUIStyle::ToneField(EOneBrahamStageTone Tone, FLinearColor& OutA, FLinearColor& OutB)
+{
+	switch (Tone)
+	{
+	case EOneBrahamStageTone::Warning:
+		OutA = Colour(EOneBrahamColour::WarningFieldA);
+		OutB = Colour(EOneBrahamColour::WarningFieldB);
+		break;
+	case EOneBrahamStageTone::Lockdown:
 		OutA = Colour(EOneBrahamColour::LockdownFieldA);
 		OutB = Colour(EOneBrahamColour::LockdownFieldB);
 		break;
-	case EOneBrahamLockdownStage::Purge:
-		OutA = Colour(EOneBrahamColour::PurgeFieldA);
+	case EOneBrahamStageTone::Purge:
+		// The field's lead colour is the tone itself, so the colour-blind
+		// remap of the danger hue reaches the cards as well as the type.
+		OutA = ToneColour(Tone);
 		OutB = Colour(EOneBrahamColour::PurgeFieldB);
 		break;
+	case EOneBrahamStageTone::Evac:
+		OutA = ToneColour(Tone);
+		OutB = Colour(EOneBrahamColour::EvacFieldB);
+		break;
+	case EOneBrahamStageTone::Calm:
 	default:
 		OutA = Colour(EOneBrahamColour::RibbonA);
 		OutB = Colour(EOneBrahamColour::RibbonB);
 		break;
 	}
+}
+
+const TCHAR* UOneBrahamUIStyle::ToneWord(EOneBrahamStageTone Tone)
+{
+	switch (Tone)
+	{
+	case EOneBrahamStageTone::Warning:	return TEXT("ALERT");
+	case EOneBrahamStageTone::Lockdown:	return TEXT("LOCKDOWN");
+	case EOneBrahamStageTone::Purge:	return TEXT("PURGE");
+	case EOneBrahamStageTone::Evac:		return TEXT("EVAC");
+	case EOneBrahamStageTone::Calm:
+	default:							return TEXT("NORMAL");
+	}
+}
+
+FLinearColor UOneBrahamUIStyle::StageAccent(EOneBrahamLockdownStage Stage)
+{
+	return ToneColour(StageTone(Stage));
+}
+
+FLinearColor UOneBrahamUIStyle::StageHairline(EOneBrahamLockdownStage Stage)
+{
+	return ToneHairline(StageTone(Stage));
+}
+
+void UOneBrahamUIStyle::StageField(EOneBrahamLockdownStage Stage, FLinearColor& OutA, FLinearColor& OutB)
+{
+	ToneField(StageTone(Stage), OutA, OutB);
 }
 
 float UOneBrahamUIStyle::Ease(EOneBrahamEase Curve, float T)

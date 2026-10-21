@@ -55,6 +55,20 @@ THE TYPE (editor)
     composites are built in code (UOneBrahamUIStyle::Font), one typeface per
     token, so no UFont asset is needed. /Game/OneBraham/UI is always cooked.
 
+    import_display_fonts() bakes the in-world OLED screens' type. Their copy is
+    UTextRenderComponent, which draws offline-cached UFonts only (a glyph
+    atlas, no runtime rasteriser), so three faces are baked from the same
+    files into /Game/OneBraham/UI/Fonts as F_OLED_*:
+      F_OLED_Eyebrow    ArchivoSemiCondensed-SemiBold   the HUD's Eyebrow face
+      F_OLED_Headline   ArchivoSemiCondensed-Bold       the headline
+      F_OLED_Aside      InstrumentSerif-Italic          the building's aside
+    UTrueTypeFontFactory finds a face by PostScript name through CoreText on
+    a Mac, so each file is registered with CoreText for this process only
+    (nothing is installed). Printable ASCII, Latin-1 and the typographic
+    punctuation the copy uses; the atlas pages are mipmapped (World group)
+    so a nine-metre wall seen from across the atrium does not shimmer.
+    Runs in the commandlet: no Slate is involved.
+
 CREDITS (text only, no editor)
     check_credits() reads Docs/LICENCES.md and fails when a credit it asks for
     is missing from UOneBrahamMainMenuWidget::Credits(): the OpenStreetMap
@@ -180,6 +194,23 @@ FONT_FACES = (
     ("Doto", "Doto-Medium.ttf"),
     ("InstrumentSerif", "InstrumentSerif-Italic.ttf"),
 )
+
+
+# The OLED screens' offline fonts: (asset, family folder, file, PostScript
+# name, atlas height in px). AOneBrahamDisplay's EyebrowFont / HeadlineFont /
+# SublineFont default to these paths.
+DISPLAY_FONTS = (
+    ("F_OLED_Eyebrow", "Archivo", "ArchivoSemiCondensed-SemiBold.ttf", "ArchivoSemiCondensed-SemiBold", 72),
+    ("F_OLED_Headline", "Archivo", "ArchivoSemiCondensed-Bold.ttf", "ArchivoSemiCondensed-Bold", 128),
+    ("F_OLED_Aside", "InstrumentSerif", "InstrumentSerif-Italic.ttf", "InstrumentSerif-Italic", 96),
+)
+
+# Every printable ASCII character (the importer skips any ASCII character not
+# listed once a list is given), Latin-1's (the middle dot, the pound, the
+# accents), and the punctuation copy is set with.
+DISPLAY_FONT_CHARS = (u"".join(chr(c) for c in range(32, 127))
+                      + u"".join(chr(c) for c in range(0xA0, 0x100))
+                      + u"\u2013\u2014\u2018\u2019\u201C\u201D\u2026\u2022\u2192\u00D7")
 
 
 def font_asset_name(filename):
@@ -380,6 +411,91 @@ def import_fonts(report):
         imported += 1
     C.log(u"  fonts: {0} of {1} faces imported into {2}".format(imported, len(FONT_FACES), FONT_FOLDER))
     return imported
+
+
+def _register_font_file(path):
+    """Registers a font file with CoreText for this process, so the TrueType
+    factory can find it by PostScript name. True when registered (or already)."""
+    import ctypes
+    import ctypes.util
+    core_foundation = ctypes.cdll.LoadLibrary(ctypes.util.find_library("CoreFoundation"))
+    core_text = ctypes.cdll.LoadLibrary(ctypes.util.find_library("CoreText"))
+    core_foundation.CFURLCreateFromFileSystemRepresentation.restype = ctypes.c_void_p
+    core_foundation.CFURLCreateFromFileSystemRepresentation.argtypes = [
+        ctypes.c_void_p, ctypes.c_char_p, ctypes.c_long, ctypes.c_bool]
+    core_foundation.CFRelease.argtypes = [ctypes.c_void_p]
+    core_text.CTFontManagerRegisterFontsForURL.restype = ctypes.c_bool
+    core_text.CTFontManagerRegisterFontsForURL.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p]
+    encoded = path.encode("utf-8")
+    url = core_foundation.CFURLCreateFromFileSystemRepresentation(None, encoded, len(encoded), False)
+    if not url:
+        return False
+    try:
+        # kCTFontManagerScopeProcess. A second registration of the same file
+        # fails as "already registered", which is as good.
+        core_text.CTFontManagerRegisterFontsForURL(url, 1, None)
+    finally:
+        core_foundation.CFRelease(url)
+    return True
+
+
+def import_display_fonts(report):
+    """The OLED screens' type, as offline-cached UFonts in /Game/OneBraham/UI/Fonts."""
+    import platform
+    if platform.system() != "Darwin":
+        # Windows finds the face by name among installed fonts, Linux by path.
+        report.skipped_asset(FONT_FOLDER + "/F_OLED_*", "baked on a Mac (CoreText registration); "
+                                                        "the screens use the engine font until then")
+        return 0
+    if not unreal.EditorAssetLibrary.does_directory_exist(FONT_FOLDER):
+        unreal.EditorAssetLibrary.make_directory(FONT_FOLDER)
+    tools = unreal.AssetToolsHelpers.get_asset_tools()
+    baked = 0
+    for name, family, filename, postscript, height in DISPLAY_FONTS:
+        source = os.path.join(FONT_SOURCE, family, filename)
+        path = "{0}/{1}".format(FONT_FOLDER, name)
+        if not os.path.isfile(source):
+            report.failed(source, "missing - see SourceArt/Fonts")
+            continue
+        if not _register_font_file(source):
+            report.failed(source, "CoreText could not register it")
+            continue
+        factory = unreal.TrueTypeFontFactory()
+        options = factory.get_editor_property("import_options")
+        data = options.get_editor_property("data")
+        for prop, value in (("font_name", postscript), ("height", float(height)),
+                            ("chars", DISPLAY_FONT_CHARS), ("include_ascii_range", True),
+                            ("enable_antialiasing", True), ("use_distance_field_alpha", False),
+                            ("alpha_only", True), ("enable_drop_shadow", False),
+                            ("texture_page_width", 1024), ("texture_page_max_height", 1024),
+                            # Room round each glyph for the mips to fall into.
+                            ("x_padding", 8), ("y_padding", 8)):
+            data.set_editor_property(prop, value)
+        options.set_editor_property("data", data)
+        factory.set_editor_property("import_options", options)
+        factory.set_editor_property("lod_group", unreal.TextureGroup.TEXTUREGROUP_WORLD)
+        if unreal.EditorAssetLibrary.does_asset_exist(path):
+            unreal.EditorAssetLibrary.delete_asset(path)
+        font = tools.create_asset(name, FONT_FOLDER, unreal.Font, factory)
+        if font is None or font.get_editor_property("font_cache_type") != unreal.FontCacheType.OFFLINE:
+            report.failed(path, "the TrueType factory made no offline font from {0}".format(postscript))
+            continue
+        pages = 0
+        for page in "ABCDEFGH":
+            texture = unreal.find_object(None, "{0}.{1}:{1}_Page{2}".format(path, name, page))
+            if texture is None:
+                break
+            pages += 1
+            # Coverage is in the alpha channel (alpha_only keeps it in a G8
+            # page, TC_DistanceFieldFont, which the font sampler reads as
+            # alpha - a TC_Grayscale page would drop it and draw blocks).
+            # The importer makes no mips; the far wall wants them.
+            texture.set_editor_property("mip_gen_settings", unreal.TextureMipGenSettings.TMGS_SIMPLE_AVERAGE)
+        unreal.EditorAssetLibrary.save_asset(path, only_if_is_dirty=False)
+        report.created_asset(path)
+        C.log(u"  {0}: {1} at {2}px, {3} atlas page(s)".format(name, postscript, height, pages))
+        baked += 1
+    return baked
 
 
 def build_loading_level(report):
@@ -613,11 +729,13 @@ def build_all():
     if not unreal.EditorAssetLibrary.does_directory_exist(C.MAPS):
         unreal.EditorAssetLibrary.make_directory(C.MAPS)
 
-    C.step(1, 3, "Fonts")
+    C.step(1, 4, "Fonts")
     C.guard(report, FONT_FOLDER, import_fonts, report)
-    C.step(2, 3, "L_Loading")
+    C.step(2, 4, "Display fonts")
+    C.guard(report, FONT_FOLDER + "/F_OLED_*", import_display_fonts, report)
+    C.step(3, 4, "L_Loading")
     C.guard(report, C.MAP_LOADING, build_loading_level, report)
-    C.step(3, 3, "L_MainMenu")
+    C.step(4, 4, "L_MainMenu")
     C.guard(report, MAP_MAIN_MENU, build_main_menu_level, report)
 
     C.log(report.summary())
